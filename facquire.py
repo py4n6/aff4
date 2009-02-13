@@ -39,4 +39,4 @@ while 1:
     
     stream.write_chunk(data)
     
-stream.finish()
+stream.close()

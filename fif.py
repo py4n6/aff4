@@ -68,8 +68,13 @@ class FIFWriter(FIFFD):
     size = 0
     
     def __init__(self, filename, mode='w', stream_name='data',
-                 chunksize=32*1024, attributes=None, threading=False):
-        self.fd = zipfile.ZipFile(filename, mode, zipfile.ZIP_DEFLATED, True)
+                 chunksize=32*1024, attributes=None, threading=False, fd=None):
+        
+        if fd:
+            self.fd = fd
+        else:
+            self.fd = zipfile.ZipFile(filename, mode, zipfile.ZIP_DEFLATED, True)
+            
         self.stream_name = stream_name
         self.map = []
         self.chunk_id = 0
@@ -163,7 +168,7 @@ class FIFWriter(FIFFD):
 
         self.size += self.chunksize
         
-    def finish(self):
+    def close(self):
         """ Finalise the archive """
         if self.threading:
             ## Kill off the threads
@@ -215,6 +220,7 @@ class FIFReader(FIFFD):
             
     def read(self, length):
         result = ''
+        length = min(self.size - self.readptr, length)
         while length>0:
             data= self.partial_read(length)
             length -= len(data)
@@ -276,26 +282,55 @@ class MapDriver(FIFFD):
     This means that when the current stream is accessed in the range
     0-1000 we fetch bytes 1000-2000 from the target stream, and after
     that we fetch bytes from offset 4000.
+
+    Required properties:
+    
+    - target%d starts with 0 the number of target (may be specified as
+      a URL). e.g. target0, target1, target2
+
+    Optional properties:
+
+    - file_period - number of bytes in the file offset which this map
+      repreats on. (Useful for RAID)
+
+    - image_period - number of bytes in the image each period will
+      advance by. (Useful for RAID)
+    
     """
     type = "Map"
     
     def __init__(self, zipfile, properties, stream_name):
+        ## Build up the list of targets
+        self.targets = {}
         try:
-            target = properties['target']
+            count = 0
+            while 1:
+                self.targets[count] = open_stream(None, properties['target%d' % count],
+                                                  fd = zipfile)
+                count +=1
         except KeyError:
-            raise RuntimeError("You must set the target of a mapping stream")
+            pass
+
+        if count==0:
+            raise RuntimeError("You must set some targets of the mapping stream")
 
         ## Get the underlying target
-        self.fd = open_stream(None, target, fd=zipfile)
         self.zipfile = zipfile
+        
+        ## This holds all the file offsets on the map in sorted order
         self.points = []
+
+        ## This holds the image offsets corresponding to each file offset.
         self.mapping = {}
-        self.comments = {}
+
+        ## This holds the target index for each file offset
+        self.target_index = {}
+        
         self.properties = properties
         self.stream_name = stream_name
         self.readptr = 0
         self.size = int(properties.get('size',0))
-        
+
         ## Check if there is a map to load:
         try:
             self.load_map()
@@ -307,11 +342,12 @@ class MapDriver(FIFFD):
         idx = self.points.index(file_pos)
         try:
             del self.mapping[file_pos]
+            del self.target_index[file_pos]
             self.points.pop(idx)
         except:
             pass
 
-    def add_point(self, file_pos, image_pos, comment=None):
+    def add_point(self, file_pos, image_pos, target_index):
         """ Adds a new point to the mapping function. Points may be
         added in any order.
         """
@@ -320,7 +356,7 @@ class MapDriver(FIFFD):
         ## be expected - this assists in compressing the mapping
         ## function because we never store points unnecessarily.
         self.mapping[file_pos] = image_pos
-        self.comments[file_pos] = comment
+        self.target_index[file_pos] = target_index
 
     def pack(self):
         """ Rewrites the points array to represent the current map
@@ -354,6 +390,15 @@ class MapDriver(FIFFD):
         file_offset provided. The valid length is the number of bytes
         until the next discontinuity.
         """
+        try:
+            file_period = int(self.properties['file_period'])
+            image_period = int(self.properties['image_period'])
+            period_number = file_offset / file_period
+            file_offset = file_offset % file_period
+        except KeyError:
+            period_number = 0
+            image_period = 0
+            file_period = self.size
         ## We can't interpolate forward before the first point - must
         ## interpolate backwards.
         if file_offset < self.points[0]:
@@ -369,13 +414,19 @@ class MapDriver(FIFFD):
             try:
                 left = self.points[l+1] - file_offset
             except:
-                left = self.size - file_offset
-                
-            return self.mapping[self.points[l]]+file_offset - self.points[l], left
+                left = file_period - file_offset
+
+            point = self.points[l]
+            image_offset = self.mapping[point]+file_offset - point
         else:
             r = bisect.bisect_right(self.points, file_offset)
 
-            return self.mapping[self.points[r]] - (self.points[r] - file_offset), self.points[r] - file_offset
+            point = self.points[r]
+            
+            image_offset =self.mapping[point] - (point - file_offset)
+            left = point - file_offset
+            
+        return (image_offset + image_period * period_number, left, self.target_index[point])
 
     def tell(self):
         return self.readptr
@@ -386,11 +437,14 @@ class MapDriver(FIFFD):
         length = min(self.size - self.readptr, length)
         
         while length>0:
-            m, left = self.interpolate(self.readptr)
-            self.fd.seek(m,0)
+            m, left, target_index = self.interpolate(self.readptr)
+            ## Which target to read from?
+            fd = self.targets[target_index]
+
+            fd.seek(m,0)
             want_to_read = min(left, length)
             
-            data = self.fd.read(want_to_read)
+            data = fd.read(want_to_read)
             if len(data)==0: break
 
             self.readptr += len(data)
@@ -407,7 +461,7 @@ class MapDriver(FIFFD):
 
         result = ''
         for x in self.points:
-            result += "%s %s %s\n" % (x, self.mapping[x], self.comments[x])
+            result += "%s %s %s\n" % (x, self.mapping[x], self.target_index[x])
 
         self.write_properties(z)
         filename = "%s/map" % self.stream_name
@@ -426,18 +480,16 @@ class MapDriver(FIFFD):
                 temp = re.split("[\t ]+", line, 2)
                 off = temp[0]
                 image_off = temp[1]
-                try:
-                    id = temp[2]
-                except: id=''
-                
-                self.add_point(int(off), int(image_off), comment=id)
+                target_index = temp[2]
+
+                self.add_point(int(off), int(image_off), int(target_index))
             except (ValueError,IndexError),e:
                 pass
 
     def plot(self, title='', filename=None, type='png'):
+        """ A utility to plot the mapping function """
         max_size = self.size
-        #p = os.popen("gnuplot", "w")
-        p = open("/tmp/gnuplot", "w")
+        p = os.popen("gnuplot", "w")
         if filename:
             p.write("set term %s\n" % type)
             p.write("set output \"%s\"\n" % filename)
@@ -452,8 +504,7 @@ class MapDriver(FIFFD):
         p.write("e\n")
 
         for i in self.points:
-            if self.comments[i] != "Forced":
-                p.write("%s %s\n" % (i,self.mapping[i]))
+            p.write("%s %s\n" % (i,self.mapping[i]))
 
         p.write("e\n")
         if not filename:
@@ -463,13 +514,11 @@ class MapDriver(FIFFD):
 
         return p
 
-    def get_point(self, name):
-        for p in self.points:
-            if self.comments[p] == name:
-                return p
-
+## The following are the supported segment types
 types = dict(Image=FIFReader, Map=MapDriver)
 
+## This is a factory function for accessing streams within the fif
+## file.
 def open_stream(filename, stream_name='data', fd=None):
     """ This is the main entrypoint to the FIF library. Use this
     function to open a named stream for reading from the file.
