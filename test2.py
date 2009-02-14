@@ -29,7 +29,6 @@ def add_map():
     new_stream.close()
 
 add_map()
-fiffile.close()
 
 test_fd = fiffile.open_stream("logfile1.txt")
 fd = fiffile.open_stream("data")

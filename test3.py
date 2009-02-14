@@ -45,7 +45,9 @@ def make_raid_map():
     
 build_file()
 make_raid_map()
-fiffile.close()
+
+## This makes the newly added files available for reading
+fiffile.flush()
 
 fd = fiffile.open_stream("RAID")
 fs = sk.skfs(fd)

@@ -62,34 +62,44 @@ class FIFFile(zipfile.ZipFile):
     ## Each FIF file has a unique UUID
     UUID = None
 
-    ## This is the zip file we are currently writing to - it must
-    ## either be created by create_new_volume, or set to an existing
-    ## volume with append_volume
-    written_to_volume = None
-    
-    ## The index into the zipfiles array for the currently written
-    ## file
-    written_index = 0
-    
+    ## This is the file object which is currently being written to.
+    fp = None
+
     ## This is an estimate of our current size
     size = 0
-    
+
     def __init__(self, filenames=[]):
         ## This is an index of all files in the archive set (tuples of
         ## ZipInfo and ZipFile index)
         self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
+
+        ## Initialise our baseclass for writing - writing is mainly
+        ## handled by our base class, while reading is done directly
+        ## using the file_offsets index.
+        zipfile.ZipFile.__init__(self, None, mode='w',
+                                 compression=zipfile.ZIP_DEFLATED,
+                                 allowZip64=True)
         
-        for filename in filenames:
-            zf = zipfile.ZipFile(filename,
+        try:
+            for f in filenames:
+                f.seek
+                f.read
+                f.write
+                self.zipfiles.append(f)
+        except AttributeError:
+            ## Its a string
+            self.zipfiles.append(open(f,'r+b'))
+
+        for fileobj in self.zipfiles:
+            ## We parse out the CD of each file and build an index
+            zf = zipfile.ZipFile(fileobj,
                                  mode='r', allowZip64=True)
-            self.zipfiles.append(zf)
-            zipindex = len(self.zipfiles) - 1
             
             for zinfo in zf.infolist():
                 filename = zinfo.filename
-                self.update_index(filename, zinfo, zipindex)
+                self.update_index(fileobj, zinfo)
                 
                 ## Check the UUID:
                 if filename=='properties':
@@ -100,7 +110,7 @@ class FIFFile(zipfile.ZipFile):
                     else:
                         self.UUID = props['UUID']
 
-    def update_index(self, filename, zinfo, zipindex):
+    def update_index(self, fileobj, zinfo):
         """ Updates the offset index to point within the zip file we
         need to read from. This is done so we dont need to reparse the
         zip headers all the time (probably wont be needed in the C
@@ -108,7 +118,7 @@ class FIFFile(zipfile.ZipFile):
         """
         try:
             ## Update the index with the more recent zinfo
-            row = self.file_offsets[filename]
+            row = self.file_offsets[fileobj.name]
             if row[4] > zinfo.date_time:
                 return
         except KeyError:
@@ -117,43 +127,47 @@ class FIFFile(zipfile.ZipFile):
         ## Work out where the compressed file should start
         offset = zinfo.header_offset + len(zinfo.FileHeader())
 
-        self.file_offsets[filename] = ( zipindex, offset,
-                                        zinfo.compress_size, zinfo.compress_type,
-                                        zinfo.date_time)            
+        self.file_offsets[zinfo.filename] = ( fileobj, offset,
+                                              zinfo.compress_size, zinfo.compress_type,
+                                              zinfo.date_time)            
 
     def writestr(self, member_name, data):
         """ This method write a component to the archive. """
-        if not self.written_to_volume:
-            raise RuntimeError("Trying to write to archive but no archive was set")
+        if not self.fp:
+            raise RuntimeError("Trying to write to archive but no archive was set - did you need to call create_new_volume() or append_volume() first?")
 
         ## FIXME - implement digital signatures here
-        self.written_to_volume.writestr(member_name, data)
+        ## Call our base class to actually do the writing
+        zipfile.ZipFile.writestr(self, member_name, data)
 
-        ## Make sure to update the offset cache with the new details.
-        zinfo = self.written_to_volume.getinfo(member_name)
-        self.update_index(member_name, zinfo, self.written_index)
-        
-        ## A bit extra for the headers etc
-        self.size = self.written_to_volume.fp.tell()
+        ## We can actually update the index here so the member can be
+        ## available for reading immediately:
+        zinfo  = self.getinfo(member_name)
+        self.update_index(self.fp, zinfo)
 
-    def read(self, filename):
-        try:
+        ## How big are we?
+        self.size = self.fp.tell()
+
+    def read_member(self, filename):
+        """ Read a file from the archive. We do memory caching for
+        speed, and read the file directly from the fileobj.
+
+        Note that we read the whole file here at once. This is only
+        suitable for small files as large files will cause us to run
+        out of memory. For larger files you should just call
+        open_member() and then read().
+        """
+        try: 
             return self.Store.get(filename)
         except KeyError:
-            zipindex, offset, length, compress_type, date_time = \
-                      self.file_offsets[filename]
+            ## Lookup the index for speed:
+            zf, offset, length, compress_type, date_time = \
+                     self.file_offsets[filename]
 
-            zf = self.zipfiles[zipindex].fp
-            try:
-                zf.seek(offset)
-                bytes = zf.read(length)
-            except IOError:
-                ## Try to open the file in read mode
-                zf = open(zf.name,'r')
-                zf.seek(offset)
-                bytes = zf.read(length)
-                zf.close()
-                
+            zf.seek(offset)
+            bytes = zf.read(length)
+
+            ## Decompress if needed
             if compress_type == zipfile.ZIP_DEFLATED:
                 dc = zlib.decompressobj(-15)
                 bytes = dc.decompress(bytes)
@@ -175,36 +189,46 @@ class FIFFile(zipfile.ZipFile):
 
     def append_volume(self, filename):
         """ Append to this volume """
-        if not self.UUID:
-            self.UUID = uuid.uuid4().__str__()
-
-        ## Close off any outstanding volumes
+        ## Close the current file if needed:
         self.close()
-        for i in range(len(self.zipfiles)):
-            if self.zipfiles[i].filename == filename:
-                self.zipfiles[i] = self.written_to_volume = \
-                                   zipfile.ZipFile(filename, mode='a',
-                                                   compression=zipfile.ZIP_DEFLATED,
-                                                   allowZip64 = True)
-                self.written_index = i
-                return
 
+        ## We want to set this filename as the current file to write
+        ## on. Therefore, we need to reload the CD from that file so
+        ## we can re-write the modified CD upon a flush() or close().
+        for z in self.zipfiles:
+            if z.name == filename:
+                ## There it is:
+                self.fp = z
+                ## Rescan the CD
+                self._RealGetContents()
+                return
+            
         raise RuntimeError("Cant append to file %s - its not part of the FIF set" % filename)
 
     def create_new_volume(self, filename):
         """ Creates a new volume called filename. """
-        if not self.UUID:
-            self.UUID = uuid.uuid4().__str__()
-
-        ## Close off any outstanding volumes
+        ## Close the current file if needed:
         self.close()
-        self.written_to_volume = zipfile.ZipFile(filename, mode='w',
-                                                 compression=zipfile.ZIP_DEFLATED,
-                                                 allowZip64 = True)
 
-        ## The new zip file automatically becomes part of the archive:
-        self.zipfiles.append(self.written_to_volume)
-        self.written_index = len(self.zipfiles) - 1
+        ## Were we given a filename or a file like object?
+        try:
+            filename.seek
+            filename.read
+            filename.write
+        except AttributeError:
+            try:
+                filename = open(filename,'r+b')
+                raise RuntimeError("The file %s already exists... I dont want to over write it so you need to remove it first!!!" % filename)
+            except IOError:
+                filename = open(filename,'w+b')
+
+        ## Remember it
+        self.zipfiles.append(filename)
+
+        ## We now will be operating on this - reinitialise ourselves
+        ## for writing on it (this will clear out of CD list):
+        zipfile.ZipFile.__init__(self, filename, mode='w', compression=zipfile.ZIP_DEFLATED,
+                                 allowZip64 = True)
 
     def format_properties(self, properties):
         result = ''
@@ -215,22 +239,19 @@ class FIFFile(zipfile.ZipFile):
 
     def close(self):
         """ Finalise any created volume """
-        if self.written_to_volume:
-            self.written_to_volume.writestr("properties",
-                                            self.format_properties(dict(
+        if self._didModify:
+            if not self.UUID:
+                self.UUID = uuid.uuid4().__str__()
+                
+            self.writestr("properties",
+                          self.format_properties(dict(
                 UUID = self.UUID,
                 )))
 
-            filename = self.written_to_volume.filename
-            print "Closing %s" % filename
-            self.written_to_volume.close()
-                
-            ## Reopen the zip file in r mode:
-            self.zipfiles[self.written_index] = zipfile.ZipFile(filename,
-                                                                mode='r',
-                                                                allowZip64 = True)
-            self.written_to_volume = None
-            self.size = 0
+            print "Closing %s" % self.fp.name
+            ## Call our base class to close us - this will dump out
+            ## the CD
+            zipfile.ZipFile.close(self)
 
     def create_stream_for_writing(self, stream_name, stream_type='Image', **properties):
         """ This method creates a new stream for writing in the
@@ -248,7 +269,7 @@ class FIFFile(zipfile.ZipFile):
         We basically instantiate the right driver and return it.
         """
         properties = self.parse_properties_from_string(
-            self.read("%s/properties" % stream_name))
+            self.read_member("%s/properties" % stream_name))
 
         stream = types[properties['type']]
         return stream(fd=self, stream_name=stream_name, mode='r', **properties)
@@ -346,7 +367,7 @@ class Image(FIFFD):
         chunk_offset = self.readptr % self.chunksize
         available_to_read = min(self.chunksize - chunk_offset, length)
 
-        chunk = self.fd.read(self.make_chunk_name(chunk_id))
+        chunk = self.fd.read_member(self.make_chunk_name(chunk_id))
         self.readptr += available_to_read
         return chunk[chunk_offset:chunk_offset+available_to_read]
 
@@ -647,7 +668,7 @@ class MapDriver(FIFFD):
     def load_map(self):
         """ Opens the mapfile and loads the points from it """
         filename = "%s/map" % self.stream_name
-        result =self.fd.read(filename)
+        result =self.fd.read_member(filename)
 
         for line in result.splitlines():
             line = line.strip()
