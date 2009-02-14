@@ -12,7 +12,8 @@ NUMBER_OF_THREAD = 2
 
 class Store:
     """ A limited cache implementation """
-    def __init__(self, limit=50):
+    def __init__(self, limit=5000000):
+        ## This is the maximum amount of memory we can use up:
         self.limit = limit
         self.cache = {}
         self.seq = []
@@ -24,7 +25,8 @@ class Store:
         self.size += len(obj)
         
         self.seq.append(key)
-        if len(self.seq) >= self.limit:
+
+        while self.size >= self.limit:
             key = self.seq.pop(0)
             self.size -= len(self.cache[key])
             self.expired += 1
@@ -62,41 +64,62 @@ class FIFFile(zipfile.ZipFile):
 
     ## This is the zip file we are currently writing to - it must
     ## either be created by create_new_volume, or set to an existing
-    ## volume with append_to_volume
+    ## volume with append_volume
     written_to_volume = None
-
+    
+    ## The index into the zipfiles array for the currently written
+    ## file
+    written_index = 0
+    
     ## This is an estimate of our current size
     size = 0
     
     def __init__(self, filenames=[]):
-        ## These are references for all the zipfiles in the set
-        self.zipfiles = []
         ## This is an index of all files in the archive set (tuples of
         ## ZipInfo and ZipFile index)
         self.file_offsets = {}
+        self.Store = Store()
+        self.zipfiles = []
         
         for filename in filenames:
-            zf = zipfile.ZipFile(filename)
-            self.zipfile.append(zf)
-            zfindex = len(self.zipfile)
-
+            zf = zipfile.ZipFile(filename,
+                                 mode='r', allowZip64=True)
+            self.zipfiles.append(zf)
+            zipindex = len(self.zipfiles) - 1
+            
             for zinfo in zf.infolist():
-                try:
-                    ## Update the index with the more recent zinfo
-                    old_ZipInfo, old_index = self.file_offsets[zinfo.filename]
-                    if old_ZipInfo.date_time < zinfo.date_time:
-                        self.file_offsets[zinfo.filename] = zinfo
-                except KeyError:
-                    self.file_offsets[zinfo.filename] = zinfo
-
+                filename = zinfo.filename
+                self.update_index(filename, zinfo, zipindex)
+                
                 ## Check the UUID:
-                if zinfo.filename=='properties':
+                if filename=='properties':
                     props = self.parse_properties_from_string(zf.read("properties"))
                     if self.UUID:
                         assert(self.UUID == props['UUID'],
                                "File %s does not have the right UUID" % filename)
                     else:
                         self.UUID = props['UUID']
+
+    def update_index(self, filename, zinfo, zipindex):
+        """ Updates the offset index to point within the zip file we
+        need to read from. This is done so we dont need to reparse the
+        zip headers all the time (probably wont be needed in the C
+        implementation - just that python is abit slow)
+        """
+        try:
+            ## Update the index with the more recent zinfo
+            row = self.file_offsets[filename]
+            if row[4] > zinfo.date_time:
+                return
+        except KeyError:
+            pass
+
+        ## Work out where the compressed file should start
+        offset = zinfo.header_offset + len(zinfo.FileHeader())
+
+        self.file_offsets[filename] = ( zipindex, offset,
+                                        zinfo.compress_size, zinfo.compress_type,
+                                        zinfo.date_time)            
 
     def writestr(self, member_name, data):
         """ This method write a component to the archive. """
@@ -105,9 +128,42 @@ class FIFFile(zipfile.ZipFile):
 
         ## FIXME - implement digital signatures here
         self.written_to_volume.writestr(member_name, data)
+
+        ## Make sure to update the offset cache with the new details.
+        zinfo = self.written_to_volume.getinfo(member_name)
+        self.update_index(member_name, zinfo, self.written_index)
         
         ## A bit extra for the headers etc
         self.size = self.written_to_volume.fp.tell()
+
+    def read(self, filename):
+        try:
+            return self.Store.get(filename)
+        except KeyError:
+            zipindex, offset, length, compress_type, date_time = \
+                      self.file_offsets[filename]
+
+            zf = self.zipfiles[zipindex].fp
+            try:
+                zf.seek(offset)
+                bytes = zf.read(length)
+            except IOError:
+                ## Try to open the file in read mode
+                zf = open(zf.name,'r')
+                zf.seek(offset)
+                bytes = zf.read(length)
+                zf.close()
+                
+            if compress_type == zipfile.ZIP_DEFLATED:
+                dc = zlib.decompressobj(-15)
+                bytes = dc.decompress(bytes)
+                # need to feed in unused pad byte so that zlib won't choke
+                ex = dc.decompress('Z') + dc.flush()
+                if ex:
+                    bytes = bytes + ex
+                    
+            self.Store.put(filename, bytes)
+            return bytes
 
     def parse_properties_from_string(self, string):
         properties = {}
@@ -116,6 +172,24 @@ class FIFFile(zipfile.ZipFile):
             properties[k] = v
 
         return properties
+
+    def append_volume(self, filename):
+        """ Append to this volume """
+        if not self.UUID:
+            self.UUID = uuid.uuid4().__str__()
+
+        ## Close off any outstanding volumes
+        self.close()
+        for i in range(len(self.zipfiles)):
+            if self.zipfiles[i].filename == filename:
+                self.zipfiles[i] = self.written_to_volume = \
+                                   zipfile.ZipFile(filename, mode='a',
+                                                   compression=zipfile.ZIP_DEFLATED,
+                                                   allowZip64 = True)
+                self.written_index = i
+                return
+
+        raise RuntimeError("Cant append to file %s - its not part of the FIF set" % filename)
 
     def create_new_volume(self, filename):
         """ Creates a new volume called filename. """
@@ -126,7 +200,11 @@ class FIFFile(zipfile.ZipFile):
         self.close()
         self.written_to_volume = zipfile.ZipFile(filename, mode='w',
                                                  compression=zipfile.ZIP_DEFLATED,
-                                                 allowZip64=True)
+                                                 allowZip64 = True)
+
+        ## The new zip file automatically becomes part of the archive:
+        self.zipfiles.append(self.written_to_volume)
+        self.written_index = len(self.zipfiles) - 1
 
     def format_properties(self, properties):
         result = ''
@@ -143,9 +221,17 @@ class FIFFile(zipfile.ZipFile):
                 UUID = self.UUID,
                 )))
 
+            filename = self.written_to_volume.filename
+            print "Closing %s" % filename
+            self.written_to_volume.close()
+                
+            ## Reopen the zip file in r mode:
+            self.zipfiles[self.written_index] = zipfile.ZipFile(filename,
+                                                                mode='r',
+                                                                allowZip64 = True)
             self.written_to_volume = None
             self.size = 0
-            
+
     def create_stream_for_writing(self, stream_name, stream_type='Image', **properties):
         """ This method creates a new stream for writing in the
         current FIF archive.
@@ -166,6 +252,16 @@ class FIFFile(zipfile.ZipFile):
 
         stream = types[properties['type']]
         return stream(fd=self, stream_name=stream_name, mode='r', **properties)
+
+    def stats(self):
+        print "Store load %s chunks total %s (expired %s)" % (
+            len(self.Store.seq),
+            self.Store.size,
+            self.Store.expired,
+            )
+
+    def __del__(self):
+        self.close()
 
 class FIFFD:
     """ A baseclass to facilitate access to FIF Files"""
@@ -195,25 +291,31 @@ class FIFFD:
     def tell(self):
         return self.readptr
 
+    def close(self):
+        if self.mode == 'w':
+            self.write_properties(self.fd)        
+            #self.fd.close()
+
 class Image(FIFFD):
     """ A stream writer for creating a new FIF archive """
-    ## The type of a stream is used to find the right driver for it.
     type = "Image"
     size = 0
     
     def __init__(self, mode='w', stream_name='data',
-                 chunksize=32*1024, attributes=None, threading=False, fd=None):
+                 attributes=None, threading=False, fd=None, **properties):
         self.fd = fd
+        self.mode = mode
         self.stream_name = stream_name
         self.chunk_id = 0
-        self.chunksize = chunksize
+        self.chunksize = int(properties.get('chunksize', 32*1024))
+        self.size = int(properties.get('size',0))
         self.threading = threading
         self.readptr = 0
         self.Store = Store()
         self.stream_re = re.compile(r"%s/(\d+)+.dd" % self.stream_name)
         
         ## The following are mandatory properties:
-        self.properties = dict(chunksize = self.chunksize,)        
+        self.properties = properties
         if threading:
         ## New compression jobs get pushed here
             self.IN_QUEUE = Queue.Queue(NUMBER_OF_THREAD+1)
@@ -327,54 +429,10 @@ class Image(FIFFD):
                 self.IN_QUEUE.put((None, None))
 
             self.check_queues()
-                
-        self.write_properties(self.fd)        
-        self.fd.close()
 
-class FIFReader(FIFFD):
-    """ A File like object which reads a FIF file """
-    def __init__(self, fd, properties, stream_name='data'):
-        self.fd = fd
-        self.fp = fd.fp
-        self.stream_name = stream_name
-        self.readptr = 0
-        self.properties = properties
-        
-        ## retrieve the mandatory properties
-        self.chunksize = int(self.properties['chunksize'])
-        self.size = int(self.properties['size'])
-        self.Store = Store()
-        self.stream_re = re.compile(r"%s/(\d+)+.dd" % self.stream_name)
-        self.build_index()
-
-    def build_index(self):
-        """ This function parses all the chunks in the stream and
-        builds an index directly into the file - this saves time.
-        """
-        self.index = {}
-        for zinfo in self.fd.infolist():
-            m = self.stream_re.match(zinfo.filename)
-            if not m: continue
-            
-            self.fp.seek(zinfo.header_offset, 0)
-
-            # Skip the file header:
-            fheader = self.fp.read(30)
-            if fheader[0:4] != zipfile.stringFileHeader:
-                raise zipfile.BadZipfile, "Bad magic number for file header"
-
-            fheader = struct.unpack(zipfile.structFileHeader, fheader)
-            self.index[int(m.group(1))] = ( self.fp.tell() + \
-                                            fheader[zipfile._FH_FILENAME_LENGTH] + \
-                                            fheader[zipfile._FH_EXTRA_FIELD_LENGTH],
-                                            zinfo.compress_size )            
-
-    def stats(self):
-        print "Store load %s chunks total %s (expired %s)" % (
-            len(self.Store.seq),
-            self.Store.size,
-            self.Store.expired,
-            )
+        if self.mode=='w':
+            self.write_properties(self.fd)        
+            #self.fd.close()
 
 class MapDriver(FIFFD):
     """ A Map driver is a read through mapping transformation of the
@@ -418,14 +476,21 @@ class MapDriver(FIFFD):
     """
     type = "Map"
     
-    def __init__(self, zipfile, properties, stream_name):
+    def __init__(self, fd=None, mode='r', stream_name='data',
+                 **properties):
         ## Build up the list of targets
+        self.mode = mode
         self.targets = {}
         try:
             count = 0
             while 1:
-                self.targets[count] = open_stream(None, properties['target%d' % count],
-                                                  fd = zipfile)
+                target = properties['target%d' % count]
+                ## We can not open the target for reading at the same
+                ## time as we are trying to write it - this is
+                ## danegerous and may lead to file corruption.
+                if mode!='w':
+                    self.targets[count] = fd.open_stream(target)
+                    
                 count +=1
         except KeyError:
             pass
@@ -433,8 +498,8 @@ class MapDriver(FIFFD):
         if count==0:
             raise RuntimeError("You must set some targets of the mapping stream")
 
-        ## Get the underlying target
-        self.zipfile = zipfile
+        ## Get the underlying FIFFile
+        self.fd = fd
         
         ## This holds all the file offsets on the map in sorted order
         self.points = []
@@ -449,12 +514,9 @@ class MapDriver(FIFFD):
         self.stream_name = stream_name
         self.readptr = 0
         self.size = int(properties.get('size',0))
-
         ## Check if there is a map to load:
-        try:
+        if mode=='r':
             self.load_map()
-        except KeyError:
-            pass
         
     def del_point(self, file_pos):
         """ Remove the point at file_pos if it exists """
@@ -575,22 +637,17 @@ class MapDriver(FIFFD):
     def save_map(self):
         """ Saves the map onto the fif file.
         """
-        ## reopen the zip file in write mode
-        z = zipfile.ZipFile(self.zipfile.filename, 'a', zipfile.ZIP_DEFLATED, True)
-
         result = ''
         for x in self.points:
             result += "%s %s %s\n" % (x, self.mapping[x], self.target_index[x])
 
-        self.write_properties(z)
         filename = "%s/map" % self.stream_name
-        z.writestr(filename, result)
-        z.close()
+        self.fd.writestr(filename, result)
 
     def load_map(self):
         """ Opens the mapfile and loads the points from it """
         filename = "%s/map" % self.stream_name
-        result =self.zipfile.read(filename)
+        result =self.fd.read(filename)
 
         for line in result.splitlines():
             line = line.strip()
@@ -635,31 +692,3 @@ class MapDriver(FIFFD):
 
 ## The following are the supported segment types
 types = dict(Image=Image, Map=MapDriver)
-
-## This is a factory function for accessing streams within the fif
-## file.
-def open_stream(filename, stream_name='data', fd=None):
-    """ This is the main entrypoint to the FIF library. Use this
-    function to open a named stream for reading from the file.
-    """
-    if not fd:
-        fd = zipfile.ZipFile(filename, 'r', zipfile.ZIP_DEFLATED, True)
-        ## Read the version:
-        version = fd.read("version")
-        print "File version %s" % version
-
-    ## Parse the properties
-    properties = {}
-    filename = "%s/properties" % stream_name
-    for line in fd.read(filename).splitlines():
-        k,v = line.split("=",1)
-        properties[k] = v
-
-    ## Return the correct driver
-    try:
-        driver = types[properties.get('type', 'Image')]
-    except KeyError:
-        raise RuntimeError("No driver found for stream type %s" % \
-                           properties.get('type','Image'))
-
-    return driver(fd, properties, stream_name)

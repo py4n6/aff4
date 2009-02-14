@@ -1,11 +1,20 @@
-import sk,fif,sys
+import sk,fif,sys, glob
+
+files = glob.glob("test*.zip")
+fiffile = fif.FIFFile(files)
 
 def add_map():
-    fd = fif.open_stream("test.zip")
+    fd = fiffile.open_stream("data")
     fs = sk.skfs(fd)
     f = fs.open('/RAW/logfile1.txt')
 
-    new_stream = fif.MapDriver(fd.fd, dict(target0 = 'data'), "logfile1.txt")
+    ## We want to append to the last volume:
+    fiffile.append_volume(files[-1])
+    
+    ## Create a new Map stream
+    new_stream = fiffile.create_stream_for_writing("logfile1.txt",
+                                                   stream_type = 'Map',
+                                                   target0 = 'data')
 
     count = 0
     block_size = fs.block_size
@@ -17,12 +26,13 @@ def add_map():
     f.seek(0,2)
     new_stream.size = f.tell()
     new_stream.save_map()
+    new_stream.close()
 
 add_map()
-#sys.exit(0)
+fiffile.close()
 
-test_fd = fif.open_stream("test.zip", "logfile1.txt")
-fd = fif.open_stream("test.zip")
+test_fd = fiffile.open_stream("logfile1.txt")
+fd = fiffile.open_stream("data")
 fs = sk.skfs(fd)
 f = fs.open('/RAW/logfile1.txt')
 

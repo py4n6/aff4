@@ -25,11 +25,11 @@ def main():
     if 1:
         t = time.time()
         ## Open all the volumes at once:
-        fiffile = fif.FIFFile(glob.glob("test.zip*"))
+        fiffile = fif.FIFFile(glob.glob("test*.zip"))
         
-        fd = fiffile.open_stream("test.fif")
+        fd = fiffile.open_stream("data")
         count = test_time(fd)
-        fd.stats()
+        fiffile.stats()
         print "FIF Read %s in %s" % (count, time.time()-t)
 
     if 1:

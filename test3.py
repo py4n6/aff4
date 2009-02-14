@@ -1,16 +1,18 @@
-import fif,os,md5,sk
+import fif,os,md5,sk, sys
 
-os.unlink("test3.zip")
+try:
+    os.unlink("test3.zip")
+except: pass
+
+fiffile = fif.FIFFile()
+fiffile.create_new_volume("test3.zip")
 
 def build_file():
     BASEDIR = "/var/tmp/uploads/testimages/raid/linux/d%d.dd"
 
     for i in range(1,4):
         filename = BASEDIR % i
-        try:
-            fd = fif.FIFWriter("test3.zip", mode='a', stream_name=os.path.basename(filename))
-        except:
-            fd = fif.FIFWriter("test3.zip", mode='w', stream_name=os.path.basename(filename))
+        fd = fiffile.create_stream_for_writing(stream_name=os.path.basename(filename))
         infd = open(filename)
         while 1:
             data = infd.read(fd.chunksize)
@@ -21,14 +23,15 @@ def build_file():
         fd.close()
 
 def make_raid_map():
-    fd = fif.open_stream("test3.zip",'d1.dd')
     blocksize = 64 * 1024
-    new_stream = fif.MapDriver(fd.fd, dict(target0='d1.dd',
-                                           target1='d2.dd',
-                                           target2='d3.dd',
-                                           image_period=blocksize * 3,
-                                           file_period =blocksize * 6),
-                               "RAID")
+    new_stream = fiffile.create_stream_for_writing(stream_name="RAID",
+                                                   stream_type='Map',
+                                                   target0='d1.dd',
+                                                   target1='d2.dd',
+                                                   target2='d3.dd',
+                                                   image_period=blocksize * 3,
+                                                   file_period =blocksize * 6)
+    
     new_stream.add_point(0,            0,              1)
     new_stream.add_point(1 * blocksize,0 ,             0)
     new_stream.add_point(2 * blocksize,1 * blocksize , 2)
@@ -38,11 +41,13 @@ def make_raid_map():
 
     new_stream.size = 5242880 * 2
     new_stream.save_map()
-
+    new_stream.close()
+    
 build_file()
 make_raid_map()
+fiffile.close()
 
-fd = fif.open_stream("test3.zip","RAID")
+fd = fiffile.open_stream("RAID")
 fs = sk.skfs(fd)
 f = fs.open(inode='13')
 outfd = open("test3.jpg","w")
