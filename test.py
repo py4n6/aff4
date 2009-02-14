@@ -1,5 +1,5 @@
 import sk, fif, pyewf, pyaff
-import time, sys
+import time, sys, glob
 
 def test_time(fd):
     fs = sk.skfs(fd)
@@ -24,7 +24,10 @@ def main():
 
     if 1:
         t = time.time()
-        fd = fif.open_stream("test.fif")
+        ## Open all the volumes at once:
+        fiffile = fif.FIFFile(glob.glob("test.zip*"))
+        
+        fd = fiffile.open_stream("test.fif")
         count = test_time(fd)
         fd.stats()
         print "FIF Read %s in %s" % (count, time.time()-t)

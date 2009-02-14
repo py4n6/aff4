@@ -16,6 +16,10 @@ parser.add_option("-b", "--blocksize", default=32,
                   type='int',
                   help="Block size in kb")
 
+parser.add_option("-S", "--volume_size", default=650,
+                  type='int',
+                  help='Maximum volume size in MB')
+
 (options, args) = parser.parse_args()
 
 if len(args)!=2:
@@ -30,9 +34,26 @@ infd = open(args[0],'r')
 mode = 'w'
 if options.append: mode='a'
 
-stream = fif.FIFWriter(args[1], mode, stream_name=options.stream)
+## Get a handle to the FIF file
+fiffile = fif.FIFFile()
 
+## Create a new volume
+count = 0
+new_name = "%s.%02d.zip" % (args[1], count)
+fiffile.create_new_volume(new_name)
+
+## Make a new stream on the new volume
+stream = fiffile.create_stream_for_writing(stream_name=options.stream)
+
+max_size = options.volume_size * 1024 * 1024
 while 1:
+    if fiffile.size > max_size:
+        count += 1
+        new_name = "%s.%02d.zip" % (args[1], count)
+        print "Creating new volume %s" % new_name
+        stream.write_properties(fiffile)
+        fiffile.create_new_volume(new_name)
+        
     data = infd.read(options.blocksize * 1024)
     if len(data)==0:
         break
