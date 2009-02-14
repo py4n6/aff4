@@ -35,6 +35,11 @@ class Store:
     def get(self, key):
         return self.cache[key]
 
+    def expire(self, key):
+        try:
+            del self.cache[key]
+        except KeyError:
+            pass
 
 class FIFFile(zipfile.ZipFile):
     """ A FIF file is just a Zip file which follows some rules.
@@ -144,6 +149,9 @@ class FIFFile(zipfile.ZipFile):
         ## available for reading immediately:
         zinfo  = self.getinfo(member_name)
         self.update_index(self.fp, zinfo)
+
+        ## invalidate the cache if its in there
+        self.Store.expire(member_name)
 
         ## How big are we?
         self.size = self.fp.tell()

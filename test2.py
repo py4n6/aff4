@@ -7,7 +7,8 @@ def add_map():
     fd = fiffile.open_stream("data")
     fs = sk.skfs(fd)
     f = fs.open('/RAW/logfile1.txt')
-
+    sys.exit(0)
+    
     ## We want to append to the last volume:
     fiffile.append_volume(files[-1])
     

@@ -21,5 +21,10 @@ fiffile.writestr("testfile2", "This is another test")
 ## And access that right away
 print fiffile.read_member("testfile2")
 
+## We can update a new member
+fiffile.writestr("testfile", "This is a test - new version")
+
+print fiffile.read_member("testfile")
+
 ## File will be automatically closed and properties added (including
 ## UUID) when GC'ed. We do not need to call fiffile.close()
