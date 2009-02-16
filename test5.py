@@ -35,5 +35,8 @@ fiffile.close()
 fiffile = fif.FIFFile([TESTFILE,])
 enc = fiffile.open_stream("data")
 
+open('output.bin','w').write(enc.read())
+enc = fiffile.open_stream("data")
+
 enc_fiffile = fif.FIFFile([enc])
 print enc_fiffile.read_member("foobar")

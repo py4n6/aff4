@@ -44,3 +44,6 @@ while 1:
     if data!=test_data:
         print len(data), len(test_data)
     assert(data == test_data)
+
+fiffile.close()
+
