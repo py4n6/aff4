@@ -3,7 +3,7 @@ import Queue, threading, time, binascii
 import bisect, os, uuid, sys
 
 ## The version of this implementation of FIF
-VERSION = "FIF 1.0"
+VERSION = "FIF1.0"
 
 ## Alas python zlib grabs the GIL so threads dont give much. This
 ## should be fixed soon: http://bugs.python.org/issue4738
@@ -22,8 +22,7 @@ class Store:
 
     def put(self, key, obj):
         self.cache[key] = obj
-        self.size += len(obj)
-        
+        self.size += len(obj)        
         self.seq.append(key)
 
         while self.size >= self.limit:
@@ -41,6 +40,58 @@ class Store:
         except KeyError:
             pass
 
+class properties:
+    """ A class to manage the properties file """
+    def __init__(self, init_string=None):
+        self.properties = {}
+        if init_string:
+            self.from_string(init_string)
+
+    def __getitem__(self, key):
+        result = self.properties[key]
+        return result[0]
+
+    def getarray(self, key):
+        return self.properties[key]
+
+    def __setitem__(self, key, value):
+        try:
+            if value not in self.getarray(key):
+                self.properties[key].append(value)
+        except (KeyError, ValueError):
+            self.properties[key] = [ value ]
+
+    def from_string(self, string):
+        for line in string.splitlines():
+            k,v = line.split("=",1)
+            self[k] = v
+
+    def __str__(self):
+        result = ''
+        for k,v in self.items():
+            result+="%s=%s\n" % (k,v)
+
+        return result
+
+    def items(self):
+        for k,v in self.properties.items():
+            for value in v:
+                yield (k,value)
+                
+    def update(self, p):
+        for k,v in p.items():
+            try:
+                if self[k] != v:
+                    self[k] = v
+            except KeyError:
+                self[k] = v
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+                
 class FIFFile(zipfile.ZipFile):
     """ A FIF file is just a Zip file which follows some rules.
 
@@ -64,9 +115,6 @@ class FIFFile(zipfile.ZipFile):
     volumes into a single volume and repack the volume to remove old
     files.
     """
-    ## Each FIF file has a unique UUID
-    UUID = None
-
     ## This is the file object which is currently being written to.
     fp = None
 
@@ -76,13 +124,21 @@ class FIFFile(zipfile.ZipFile):
     ## This is a write lock for the current FIF file
     wlock = None
 
+    _didModify = False
+    start_dir = 0
+
+
     def __init__(self, filenames=[]):
         ## This is an index of all files in the archive set (tuples of
         ## ZipInfo and ZipFile index)
         self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
-        self.properties = dict(version = VERSION)
+        self.properties = properties()
+        self.properties['version'] = VERSION
+        
+        ## These are the volumes that we process
+        self.volumes = set()
 
         ## Initialise our baseclass for writing - writing is mainly
         ## handled by our base class, while reading is done directly
@@ -90,36 +146,88 @@ class FIFFile(zipfile.ZipFile):
         zipfile.ZipFile.__init__(self, None, mode='w',
                                  compression=zipfile.ZIP_DEFLATED,
                                  allowZip64=True)
-        
-        ## Its a file like object
-        for f in filenames:
-            try:
-                f.seek
-                f.read
-                f.write
-                self.zipfiles.append(f)
-            except AttributeError:
-                ## Its a string
-                self.zipfiles.append(open(f,'r+b'))
 
-        for fileobj in self.zipfiles:
-            ## We parse out the CD of each file and build an index
-            zf = zipfile.ZipFile(fileobj,
-                                 mode='r', allowZip64=True)
+        ## Load in any files given
+        for f in filenames:
+            self.merge_fif_volumes(f)
+
+        ## Now recursively load in any other volumes:
+        print self.properties, self.volumes
+
+        again = True
+
+        while 1:
+            volume = self.volume_loaded()
+            if not volume: break
             
-            for zinfo in zf.infolist():
-                filename = zinfo.filename
-                self.update_index(fileobj, zinfo)
+            self.merge_fif_volumes(volume)
+
+    def volume_loaded(self):
+        """ Returns another volume to be loaded from the current FIF
+        set
+        """
+        try:
+            for volume in self.properties.getarray('volume'):
+                if volume not in self.volumes:
+                    return volume
+        except KeyError:
+            pass
+
+    def resolve_url(self, fileobj):
+        ## Its a file like object
+        try:
+            fileobj.seek
+            fileobj.read
+            fileobj.write
+        except AttributeError:
+            try:
+                ## Could be a plain filename
+                fileobj = open(fileobj,'r+b')
+            except IOError:
+                ## it refers to an external file
+                if fileobj.startswith("file:///"):
+                    return open(fileobj[len("file:///"):],'r+b')
+
+        return fileobj
+
+    def merge_fif_volumes(self, url):
+        """ Load and merge the FIF volumes specified. """
+        fileobj = self.resolve_url(url)
+        print "Loading %s %s" % (url, fileobj)
                 
-                ## Check the UUID:
-                if filename=='properties':
-                    self.properties.update(
-                        self.parse_properties_from_string(zf.read("properties")))
-                    if self.UUID:
-                        assert(self.UUID == self.properties['UUID'],
-                               "File %s does not have the right UUID" % filename)
-                    else:
-                        self.UUID = self.properties['UUID']
+        if fileobj not in self.zipfiles:
+            self.zipfiles.append(fileobj)
+
+        ## We parse out the CD of each file and build an index
+        zf = zipfile.ZipFile(fileobj,
+                             mode='r', allowZip64=True)
+
+        for zinfo in zf.infolist():
+            filename = zinfo.filename
+            self.update_index(fileobj, zinfo)
+
+            ## Check the UUID:
+            if filename=='properties':
+                p = properties(zf.read("properties"))
+                print p
+                try:
+                    UUID = self.properties['UUID']
+                    if p['UUID'] != self.properties['UUID']:
+                        raise RuntimeError("File %s does not have the right UUID" % filename)
+                except KeyError:
+                    self.properties['UUID'] = p['UUID']
+                    
+                ## Ok we add it to our volume set
+                if type(fileobj)==file:
+                    name = "file:///%s" % os.path.basename(fileobj.name)
+                else:
+                    name = fileobj.name
+
+                if name not in self.volumes:
+                    self.volumes.add(name)
+                    self.properties['volume'] = name
+                    
+                self.properties.update(p)
 
     def update_index(self, fileobj, zinfo):
         """ Updates the offset index to point within the zip file we
@@ -146,7 +254,7 @@ class FIFFile(zipfile.ZipFile):
                     compression=zipfile.ZIP_STORED):
         """ This opens an archive member for random access.
 
-        We can either open the member is read mode or write mode. In
+        We can either open the member in read mode or write mode. In
         write mode we receive a stream directly into the archive. You
         must call close() explicitely on the returned stream - this
         will cause the fileheaders to be finalised. Note that you can
@@ -168,7 +276,10 @@ class FIFFile(zipfile.ZipFile):
             zinfo.compress_size = zinfo.file_size = zinfo.CRC = 0
             zinfo.flag_bits = 0x08
             zinfo.compress_type = compression
-            zinfo.header_offset = self.fp.tell()
+            ##zinfo.header_offset = self.fp.tell()
+            ## We begin by overwriting the CD
+            zinfo.header_offset = self.start_dir
+            self.fp.seek(self.start_dir,0)
             ## Write the zinfo header like that
             self.fp.write(zinfo.FileHeader())
             self._didModify = True
@@ -193,10 +304,12 @@ class FIFFile(zipfile.ZipFile):
         ## Call our base class to actually do the writing
         if compression==zipfile.ZIP_STORED:
             m = self.open_member(member_name, 'w', compression = compression)
-            m.write(data)
+            m.write(data.__str__())
             m.close()
         else:
+            self.fp.seek(self.start_dir,0)
             zipfile.ZipFile.writestr(self, member_name, data)
+            self.start_dir = self.fp.tell()
             
         ## We can actually update the index here so the member can be
         ## available for reading immediately:
@@ -208,6 +321,7 @@ class FIFFile(zipfile.ZipFile):
 
         ## How big are we?
         self.size = self.fp.tell()
+        self._didModify = True
 
     def read_member(self, filename):
         """ Read a file from the archive. We do memory caching for
@@ -240,14 +354,6 @@ class FIFFile(zipfile.ZipFile):
             self.Store.put(filename, bytes)
             return bytes
 
-    def parse_properties_from_string(self, string):
-        properties = {}
-        for line in string.splitlines():
-            k,v = line.split("=",1)
-            properties[k] = v
-
-        return properties
-
     def append_volume(self, filename):
         """ Append to this volume """
         ## Close the current file if needed:
@@ -262,6 +368,7 @@ class FIFFile(zipfile.ZipFile):
                 self.fp = z
                 ## Rescan the CD
                 self._RealGetContents()
+                self.start_dir = self.fp.tell()
                 return
             
         raise RuntimeError("Cant append to file %s - its not part of the FIF set" % filename)
@@ -286,35 +393,30 @@ class FIFFile(zipfile.ZipFile):
         ## Remember it
         self.zipfiles.append(filename)
         self.size = 0
-
+        self.start_dir = 0
+        
         ## We now will be operating on this - reinitialise ourselves
         ## for writing on it (this will clear out of CD list):
         zipfile.ZipFile.__init__(self, filename, mode='w', compression=zipfile.ZIP_DEFLATED,
                                  allowZip64 = True)
 
-    def format_properties(self, properties):
-        result = ''
-        for k,v in properties.items():
-            result+="%s=%s\n" % (k,v)
-
-        return result
-
     def close(self):
         """ Finalise any created volume """
         if self._didModify and self.fp:
-            if not self.UUID:
-                self.UUID = uuid.uuid4().__str__()
-
-            self.writestr("properties",
-                          self.format_properties(dict(
-                UUID = self.UUID,
-                )))
+            try:
+                self.properties['UUID']
+            except KeyError:
+                self.properties['UUID'] = uuid.uuid4().__str__()
+                
+            self.writestr("properties", self.properties)
 
             ## Call our base class to close us - this will dump out
             ## the CD
+            self.fp.seek(self.start_dir)
             zipfile.ZipFile.close(self)
 
-    def create_stream_for_writing(self, stream_name, stream_type='Image', **properties):
+    def create_stream_for_writing(self, stream_name, stream_type='Image',
+                                  **args):
         """ This method creates a new stream for writing in the
         current FIF archive.
 
@@ -322,18 +424,19 @@ class FIFFile(zipfile.ZipFile):
         writing and return it.
         """
         stream = types[stream_type]
-        return stream(fd=self, stream_name=stream_name, mode='w', **properties)
+        return stream(fd=self, stream_name=stream_name, mode='w',
+                      properties=properties(), **args)
 
     def open_stream(self, stream_name):
         """ Opens the specified stream from out FIF set.
 
         We basically instantiate the right driver and return it.
         """
-        properties = self.parse_properties_from_string(
-            self.read_member("%s/properties" % stream_name))
+        props = properties(self.read_member("%s/properties" % stream_name))
 
-        stream = types[properties['type']]
-        return stream(fd=self, stream_name=stream_name, mode='r', **properties)
+        stream = types[props['type']]
+        return stream(fd=self, stream_name=stream_name, mode='r',
+                      properties=props)
 
     def stats(self):
         print "Store load %s chunks total %s (expired %s)" % (
@@ -351,16 +454,13 @@ class FIFFD:
         """ This returns a formatted properties string. Properties are
         related to the stream. target is a zipfile.
         """
-        self.properties.update(dict(size = self.size,
-                                    type = self.type,
-                                    name = self.stream_name,))
-        result = ''
-        for k,v in self.properties.items():
-            result+="%s=%s\n" % (k,v)
-
+        self.properties['size'] = self.size
+        self.properties['type'] = self.type
+        self.properties['name'] = self.stream_name
+        
         ## Make the properties file
         filename = "%s/properties" % self.stream_name
-        self.fd.writestr(filename, result)
+        self.fd.writestr(filename, self.properties)
 
     def seek(self, pos, whence=0):
         if whence==0:
@@ -379,6 +479,7 @@ class FIFFD:
     def close(self):
         if self.mode == 'w':
             self.write_properties()        
+
             #self.fd.close()
 
 class ZipFileStream(FIFFD):
@@ -420,11 +521,14 @@ class ZipFileStream(FIFFD):
         
     def close(self):
         if self.mode == 'r': return
+        self.fp.seek(self.readptr + self.file_offset)
         ## Write the data descriptor
         self.fp.write(struct.pack("<lLL", self.zinfo.CRC,
                                   self.size,
                                   self.size,))
-        
+
+        ## Update the location of the CD
+        self.parent.start_dir = self.fp.tell()
         self.zinfo.file_size = self.size
         self.zinfo.compress_size = self.size
 
@@ -456,7 +560,9 @@ class Image(FIFFD):
     size = 0
     
     def __init__(self, mode='w', stream_name='data',
-                 attributes=None, threading=False, fd=None, **properties):
+                 attributes=None, threading=False, fd=None,
+                 properties = None, **args):
+        properties.update(args)
         self.fd = fd
         self.mode = mode
         self.stream_name = stream_name
@@ -602,7 +708,7 @@ class Image(FIFFD):
 
         if self.mode=='w':
             self.write_properties()        
-            self.fd.close()
+            #self.fd.close()
 
 class MapDriver(FIFFD):
     """ A Map driver is a read through mapping transformation of the
@@ -647,14 +753,14 @@ class MapDriver(FIFFD):
     type = "Map"
     
     def __init__(self, fd=None, mode='r', stream_name='data',
-                 **properties):
+                 properties=None, **args):
+        properties.update(args)
         ## Build up the list of targets
         self.mode = mode
         self.targets = {}
         try:
             count = 0
-            while 1:
-                target = properties['target%d' % count]
+            for target in properties.getarray('target'):
                 ## We can not open the target for reading at the same
                 ## time as we are trying to write it - this is
                 ## danegerous and may lead to file corruption.
@@ -813,7 +919,7 @@ class MapDriver(FIFFD):
             result += "%s %s %s\n" % (x, self.mapping[x], self.target_index[x])
 
         filename = "%s/map" % self.stream_name
-        self.fd.writestr(filename, result)
+        self.fd.writestr(filename, result, zipfile.ZIP_DEFLATED)
 
     def load_map(self):
         """ Opens the mapfile and loads the points from it """
@@ -888,7 +994,9 @@ class EncryptedXX(FIFFD):
     """
     type = "Encrypted"
 
-    def __init__(self, mode='w', fd=None, stream_name='data', **properties):
+    def __init__(self, mode='w', fd=None, stream_name='data', properties=None,
+                 **args):
+        properties.update(args)
         self.outer_fif_file = fd
         self.name = self.stream_name = stream_name
         self.mode = mode

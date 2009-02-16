@@ -73,6 +73,9 @@ while 1:
         print "Creating new volume %s" % new_name
         count += 1
         new_name = "%s.%02d.zip" % (args[1], count)
+        ## Make sure that the old volume knows about the new one:
+        basefif.properties['volume'] = "file:///" + new_name
+
         ## Note that we leave the inner FIF file intact, we just break
         ## the basefif file into a new volume.
         basefif.close()
