@@ -91,6 +91,10 @@ class properties:
             return self[key]
         except KeyError:
             return default
+
+    def set(self, key, value):
+        del self.properties[key]
+        self[key] = value
                 
 class FIFFile(zipfile.ZipFile):
     """ A FIF file is just a Zip file which follows some rules.
@@ -159,8 +163,11 @@ class FIFFile(zipfile.ZipFile):
         while 1:
             volume = self.volume_loaded()
             if not volume: break
-            
+
             self.merge_fif_volumes(volume)
+
+        ## Now get a UUID
+        self.properties['UUID'] = uuid.uuid4().__str__()
 
     def volume_loaded(self):
         """ Returns another volume to be loaded from the current FIF
@@ -187,7 +194,11 @@ class FIFFile(zipfile.ZipFile):
                 ## it refers to an external file
                 if fileobj.startswith("file:///"):
                     return open(fileobj[len("file:///"):],'r+b')
-
+                else:
+                    ## Maybe its a stream within this current FIF
+                    ## fileset
+                    fileobj = self.open_stream(fileobj)
+                    
         return fileobj
 
     def merge_fif_volumes(self, url):
@@ -565,7 +576,7 @@ class Image(FIFFD):
         properties.update(args)
         self.fd = fd
         self.mode = mode
-        self.stream_name = stream_name
+        self.name = self.stream_name = stream_name
         self.chunk_id = 0
         self.chunksize = int(properties.get('chunksize', 32*1024))
         self.size = int(properties.get('size',0))
@@ -980,6 +991,13 @@ except ImportError:
 class Encrypted(Image):
     type = "Encrypted"
 
+    def __init__(self, stream_name='crypt', properties = None, **args):
+        Image.__init__(self, stream_name=stream_name,
+                       properties = properties, **args)
+        
+        ## Default chunksize for encrypted is 16MB
+        #self.chunksize = int(properties.get('chunksize', 16*1024*1024))
+        
     def write_chunk(self, data):
         name = self.make_chunk_name(self.chunk_id)
         ## No compression for encrypted segments

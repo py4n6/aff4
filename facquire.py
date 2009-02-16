@@ -51,13 +51,17 @@ basefif.create_new_volume(new_name)
 ## tell it to make a new volume on the encrypted stream.
 if options.encrypt:
     fiffile = fif.FIFFile()
-    enc = basefif.create_stream_for_writing(stream_name=options.stream,
+    enc = basefif.create_stream_for_writing(stream_name='crypted',
                                             stream_type='Encrypted',
                                             crypto_scheme = "PSK",
                                             passphrase = "Hello world",
                                             )
     ## Create a new FIF Volume inside the stream
     fiffile.create_new_volume(enc)
+
+    ## Make a reference from the basefif to the encrypted fif
+    basefif.properties['volume'] = 'crypted'
+    fiffile.properties.set('UUID', basefif.properties['UUID'])
 
 ## Now we create a new Image stream on the fiffile to store the image
 ## in:
@@ -78,6 +82,9 @@ while 1:
 
         ## Note that we leave the inner FIF file intact, we just break
         ## the basefif file into a new volume.
+        if options.encrypt:
+            enc.write_properties()
+            
         basefif.close()
         basefif.create_new_volume(new_name)
         
