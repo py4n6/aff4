@@ -14,8 +14,8 @@ fiffile.create_new_volume(TESTFILE)
 
 ## We create an encrypted stream within the container
 enc = fiffile.create_stream_for_writing("data", stream_type='Encrypted',
-                                        crypto_scheme = "PSK",
-                                        passphrase = "Hello world",
+                                        scheme = "aes-sha-psk",
+                                        PSK = "a",
                                         )
 
 ## Create a new FIF Volume inside the stream

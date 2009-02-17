@@ -8,12 +8,18 @@ CONTENT_TYPE = 'application/x-fif-file'
 
 ## Alas python zlib grabs the GIL so threads dont give much. This
 ## should be fixed soon: http://bugs.python.org/issue4738
-## For now we disable threads
-NUMBER_OF_THREAD = 2
+## For now we dont use threads
+## NUMBER_OF_THREADS = 2
 
 class Store:
     """ A limited cache implementation """
     def __init__(self, limit=5000000):
+        """ limit is the maximum size of the cache.
+
+        When exceeded we start to expire objects. We estimate the size
+        of each object by calling a len() method on it - this is ok
+        for strings but might not be good for large objects.
+        """
         ## This is the maximum amount of memory we can use up:
         self.limit = limit
         self.cache = {}
@@ -155,8 +161,14 @@ class FIFFile(zipfile.ZipFile):
     start_dir = 0
 
     def __init__(self, filenames=[], parent=None):
-        ## This is an index of all files in the archive set (tuples of
-        ## ZipInfo and ZipFile index)
+        """ Build a new FIFFile object.
+
+        filenames specify a list of file names or file like object
+        which will be opened as volumes. parent is another fif file
+        which this file will be created as a child of (therefore we
+        will share its UUID).
+        """
+        ## This is an index of all files in the archive set
         self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
@@ -172,9 +184,15 @@ class FIFFile(zipfile.ZipFile):
         self.readptr = 0
         
         ## This keeps track of the currently outstanding
-        ## writers. Writers get notified when the FIF file needs to do
-        ## something, e.g. change volume. This gives them a chance to
-        ## dump out critical information (e.g. key material).
+        ## writers. Writers get notified with a flush() when the FIF
+        ## file needs to do something, e.g. change volume. This gives
+        ## them a chance to dump out critical information (e.g. key
+        ## material). Note that writers are not expected to finalise
+        ## their stream when we call flush() because we might switch
+        ## to another volume and they can keep going, flushing
+        ## typically only involves dumping enough information to be
+        ## able to use the portion of the stream in this volume all by
+        ## itself - in case other volumes get lost.
         self.writers = []
         
         ## These are the volumes that we currently process
@@ -200,7 +218,9 @@ class FIFFile(zipfile.ZipFile):
 
             self.merge_fif_volumes(volume)
 
-        ## Now get a UUID
+        ## Now get a UUID if needed. We could have been provided a
+        ## UUID from our parent or from any of the volume we loaded -
+        ## but if not we need to come up with a new one:
         try:
             self.properties['UUID']
         except KeyError:
@@ -218,7 +238,10 @@ class FIFFile(zipfile.ZipFile):
             pass
 
     def resolve_url(self, fileobj):
-        ## Its a file like object
+        """ Given a url, or stream name or file like object returns a
+        file like object.
+        """
+        ## Its already file like object
         try:
             fileobj.seek
             fileobj.read
@@ -686,8 +709,11 @@ class Image(FIFFD):
         chunk_offset = self.readptr % self.chunksize
         available_to_read = min(self.chunksize - chunk_offset, length)
 
-        chunk = self.fd.read_member(self.make_chunk_name(chunk_id))
+        chunk = self.read_chunk(chunk_id)
         return chunk[chunk_offset:chunk_offset+available_to_read]
+
+    def read_chunk(self, chunk_id):
+        return self.fd.read_member(self.make_chunk_name(chunk_id))
 
     def write_properties(self):
         self.properties.set('count', self.chunk_id)
@@ -978,13 +1004,88 @@ class MapDriver(FIFFD):
 
         return p
 
-try:
-    import Crypto.Hash.MD5 as MD5
-    import Crypto.Hash.SHA as SHA
 
-    import Crypto.Cipher.AES as AES
+class NULLScheme:
+    """ This is the NULL encryption Scheme """
+    def __init__(self, fiffile, stream_name, properties):
+        self.master_key = None
+
+    def encrypt_block(self, count, block):
+        return block
+
+    def decrypt_block(self, count, block):
+        return block
+
+crypto_schemes = {"null-null-null": NULLScheme,}
+
+try:
+    import Crypto.Hash.MD5
+    import Crypto.Hash.SHA
+
+    import Crypto.Cipher.AES
     import Crypto
-    
+    import Crypto.Util.randpool
+
+    ## This is a crypto pool for key material
+    POOL = Crypto.Util.randpool.RandomPool()
+
+    class AES_SHA_PSK(NULLScheme):
+        hash_class = Crypto.Hash.SHA.new
+        crypt_class = Crypto.Cipher.AES.new
+        mode = Crypto.Cipher.AES.MODE_CBC
+        ## This is the cipher's block size
+        block_size = 16
+        key_size = 16
+        
+        def __init__(self, fiffile, stream_name, properties):
+            ## We derive the master key from PSK here
+            self.properties = properties
+            self.get_master_key()
+
+        def get_master_key(self):
+            try:
+                salt = self.properties['salt'].decode("base64")
+            except KeyError:
+                salt = POOL.get_bytes(8)
+                self.properties['salt'] = salt.encode("base64").strip()
+                
+            try:
+                PSK = os.environ['FIF_PSK']
+                print "Read PSK from environment"
+            except KeyError:
+                try:
+                    PSK = self.properties['PSK']
+                    ## Clear the PSK from the properties so it doesnt
+                    ## get written to file
+                    del self.properties['PSK']
+                except KeyError:
+                    PSK = raw_input("Type in a password:")
+
+            self.master_key = self.hash_class(PSK+salt).digest()[:self.key_size]
+
+        def encrypt_block(self, count, block):
+            ## Pad block
+            block += '\x00' * (self.block_size - (len(block) % self.block_size))
+
+            IV = self.hash_class(struct.pack("<L",count) + \
+                                 self.master_key).digest()[:self.key_size]
+
+            aes = self.crypt_class(self.master_key, self.mode,
+                                   IV)
+
+            return aes.encrypt(block)
+
+        def decrypt_block(self, count, block):
+            IV = self.hash_class(struct.pack("<L",count) + \
+                                 self.master_key).digest()[:self.key_size]
+
+            aes = self.crypt_class(self.master_key, self.mode,
+                                   IV)
+
+            return aes.decrypt(block)
+
+    crypto_schemes['aes-sha-psk'] = AES_SHA_PSK
+
 except ImportError:
     Crypto = None
 
@@ -992,18 +1093,36 @@ class Encrypted(Image):
     type = "Encrypted"
     fiffile = None
 
-    def __init__(self, stream_name='crypt', properties = None, **args):
+    def __init__(self, stream_name='crypt', properties = None, blocksize=4096,
+                 **args):
         Image.__init__(self, stream_name=stream_name,
                        properties = properties, **args)
+
+        try:
+            scheme = properties['scheme']
+        except KeyError:
+            scheme = 'null-null-null'
+            print "No scheme specified, defaulting to %s" % scheme
+            properties['scheme'] = scheme
+
+        try:
+            self.crypto = crypto_schemes[scheme]
+        except KeyError:
+            raise RuntimeError("Crypto scheme %s not implemented" % scheme)
         
         ## Default chunksize for encrypted is 16MB
-        #self.chunksize = int(properties.get('chunksize', 16*1024*1024))
-        
+        self.blocksize = int(blocksize)
+        self.crypto = self.crypto(self.fd, self.stream_name, self.properties)
+            
     def write_chunk(self, data):
-        name = self.make_chunk_name(self.chunk_id)
-        ## No compression for encrypted segments
-        self.fd.writestr(name, data, compression = zipfile.ZIP_STORED)
-        self.chunk_id +=1
+        block_id = self.readptr / self.blocksize
+        data = self.crypto.encrypt_block(block_id, data)
+        Image.write_chunk(self, data)
+
+    def read_chunk(self, chunk_id):
+        block_id = self.readptr / self.blocksize
+        data = Image.read_chunk(self, chunk_id)
+        return self.crypto.decrypt_block(block_id, data)
 
     def create_new_volume(self):
         """ This is a convenience method for creating a fif file
