@@ -28,14 +28,14 @@ fiffile.writestr("testfile", "This is a test - new version")
 print fiffile.read_member("testfile")
 
 ## We can get a filelike object for writing on
-fd = fiffile.open_stream_for_writing("test stream")
+fd = fiffile.open_member("test stream",'w')
 
 ## Write some data
 fd.write("hello world")
 
 ## This should raise - can no open the same file for writing twice:
 try:
-    fiffile.open_stream_for_writing("another stream")
+    fiffile.open_member("another stream",'w')
     print "Hmm should have raised here"
 except IOError: pass
 

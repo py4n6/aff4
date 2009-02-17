@@ -1,11 +1,6 @@
 import fif,os,md5,sk, sys
 
-try:
-    os.unlink("test3.zip")
-except: pass
-
-fiffile = fif.FIFFile()
-fiffile.create_new_volume("test3.zip")
+FILENAME = "test3.zip"
 
 def build_file():
     BASEDIR = "/var/tmp/uploads/testimages/raid/linux/d%d.dd"
@@ -18,19 +13,22 @@ def build_file():
             data = infd.read(fd.chunksize)
             if len(data)==0: break
 
-            fd.write_chunk(data)
+            fd.write(data)
 
         fd.close()
 
 def make_raid_map():
     blocksize = 64 * 1024
+    properties = fif.properties()
+    properties['target'] = 'd1.dd'
+    properties['target'] = 'd2.dd'
+    properties['target'] = 'd3.dd'
+    properties['image_period'] = blocksize * 3
+    properties['file_period'] = blocksize * 6
+    
     new_stream = fiffile.create_stream_for_writing(stream_name="RAID",
                                                    stream_type='Map',
-                                                   target0='d1.dd',
-                                                   target1='d2.dd',
-                                                   target2='d3.dd',
-                                                   image_period=blocksize * 3,
-                                                   file_period =blocksize * 6)
+                                                   properties = properties)
     
     new_stream.add_point(0,            0,              1)
     new_stream.add_point(1 * blocksize,0 ,             0)
@@ -42,12 +40,20 @@ def make_raid_map():
     new_stream.size = 5242880 * 2
     new_stream.save_map()
     new_stream.close()
-    
-build_file()
-make_raid_map()
 
-## This makes the newly added files available for reading
-fiffile.flush()
+if 1:
+    try:
+        os.unlink(FILENAME)
+    except: pass
+
+    fiffile = fif.FIFFile()
+    fiffile.create_new_volume(FILENAME)
+    build_file()
+    make_raid_map()
+    
+    fiffile.close()
+else:
+    fiffile = fif.FIFFile([FILENAME])
 
 fd = fiffile.open_stream("RAID")
 fs = sk.skfs(fd)

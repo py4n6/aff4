@@ -44,6 +44,7 @@ basefif = fiffile = fif.FIFFile()
 ## Create a new volume
 count = 0
 new_name = "%s.%02d.zip" % (args[1], count)
+print "Creating new volume %s" % new_name
 basefif.create_new_volume(new_name)
 
 ## Make a new stream on the new volume if needed. Encryption means to
@@ -74,17 +75,12 @@ stream = fiffile.create_stream_for_writing(stream_name=options.stream,
 max_size = options.volume_size * 1024 * 1024
 while 1:
     if basefif.size > max_size:
-        print "Creating new volume %s" % new_name
         count += 1
         new_name = "%s.%02d.zip" % (args[1], count)
+        print "Creating new volume %s" % new_name
         ## Make sure that the old volume knows about the new one:
         basefif.properties['volume'] = "file:///" + new_name
 
-        ## Note that we leave the inner FIF file intact, we just break
-        ## the basefif file into a new volume.
-        if options.encrypt:
-            enc.write_properties()
-            
         basefif.close()
         basefif.create_new_volume(new_name)
         

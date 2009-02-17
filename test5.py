@@ -19,24 +19,18 @@ enc = fiffile.create_stream_for_writing("data", stream_type='Encrypted',
                                         )
 
 ## Create a new FIF Volume inside the stream
-enc_fiffile = fif.FIFFile()
-enc_fiffile.create_new_volume(enc)
+enc_fiffile = enc.create_new_volume()
 
-## Encrypt a member in the FIF File
+print "Encrypt a member in the FIF File"
 enc_fiffile.writestr("foobar","hello world")
-
-## Must call close here explicitly to guarantee closing occurs in this
-## order (innermost to outermost)
-enc_fiffile.close()
 enc.close()
+
 fiffile.close()
 
-## Now to read the file
+## Now to read the file - Note that this will automatically decrypt
+## and merge the encrypted file
 fiffile = fif.FIFFile([TESTFILE,])
-enc = fiffile.open_stream("data")
 
-open('output.bin','w').write(enc.read())
-enc = fiffile.open_stream("data")
-
-enc_fiffile = fif.FIFFile([enc])
-print enc_fiffile.read_member("foobar")
+## We can now access the members in the encrypted file the same as if
+## they were in the container file:
+print fiffile.read_member("foobar")
