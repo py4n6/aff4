@@ -1,3 +1,11 @@
+"""
+This test tests the Map stream type - we use SK to extract a block
+allocation list for the file and make a map stream.. We then read the
+streams directly and compare to what it should be.
+
+You should have an image set created as in test.py
+"""
+
 import sk,fif,sys
 
 FILENAME = 'test.00.zip'
@@ -18,6 +26,7 @@ def add_map():
 
     count = 0
     block_size = fs.block_size
+    ## Build up the mapping function
     for block in f.blocks():
         new_stream.add_point(count * block_size, block * block_size, 0)
         count += 1
@@ -30,12 +39,14 @@ def add_map():
 
 add_map()
 
+## Now we compare the mapped stream with the stream produced by SK:
 test_fd = fiffile.open_stream("logfile1.txt")
 fd = fiffile.open_stream("data")
 
 fs = sk.skfs(fd)
 f = fs.open('/RAW/logfile1.txt')
 
+## Do big reads - sk is very slow with compressed ntfs files
 BLOCKSIZE = 1024*1024
 while 1:
     test_data = test_fd.read(BLOCKSIZE)
@@ -47,4 +58,3 @@ while 1:
     assert(data == test_data)
 
 fiffile.close()
-

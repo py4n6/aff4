@@ -1,3 +1,15 @@
+"""
+This test tests the Map stream type's ability to reference more than
+one target stream and repeat. This can be used to create a map for
+RAID components.
+
+We use the raid5 test set from PyFlag's testimages corpus.
+
+We first create a FIF archive with 3 streams one for each image. Then
+we build a mapping function. Finally to test the reassembly we use SK
+to copy a file out of the logical disk, and check its hash.
+"""
+
 import fif,os,md5,sk, sys
 
 FILENAME = "test3.zip"

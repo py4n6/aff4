@@ -160,15 +160,21 @@ class FIFFile(zipfile.ZipFile):
     _didModify = False
     start_dir = 0
 
-    def __init__(self, filenames=[], parent=None):
+    def __init__(self, filenames=[], parent=None, autoload = True):
         """ Build a new FIFFile object.
 
         filenames specify a list of file names or file like object
         which will be opened as volumes. parent is another fif file
         which this file will be created as a child of (therefore we
         will share its UUID).
+
+        autoload specifies if we should attempt to automatically load
+        all volumes referenced by this volume.
         """
         ## This is an index of all files in the archive set
+        if type(filenames)==str:
+            filenames = [filenames]
+            
         self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
@@ -210,10 +216,9 @@ class FIFFile(zipfile.ZipFile):
             self.merge_fif_volumes(f)
 
         ## Now recursively load in any other volumes:
-        again = True
-
-        while 1:
+        while autoload:
             volume = self.volume_loaded()
+            ## No unresolved volumes left
             if not volume: break
 
             self.merge_fif_volumes(volume)
@@ -231,6 +236,12 @@ class FIFFile(zipfile.ZipFile):
         set
         """
         try:
+            ## First do the file:// volumes
+            for volume in self.properties.getarray('volume'):
+                if "file://" in volume and volume not in self.volumes:
+                    return volume
+
+            ## Now do everything else
             for volume in self.properties.getarray('volume'):
                 if volume not in self.volumes:
                     return volume
@@ -1122,6 +1133,7 @@ class Encrypted(Image):
         ## Default chunksize for encrypted is 16MB
         self.blocksize = int(blocksize)
         self.crypto = self.crypto(self.fd, self.stream_name, self.properties)
+        self.Store = Store()
             
     def write_chunk(self, data):
         #print "Writing encrypted chunk %s %s" % (self.chunk_id, self.size)
@@ -1131,8 +1143,14 @@ class Encrypted(Image):
         self.chunk_id += 1
 
     def read_chunk(self, chunk_id):
-        data = self.fd.read_member(self.make_chunk_name(chunk_id))
-        data = self.crypto.decrypt_block(chunk_id, data)
+        name = self.make_chunk_name(chunk_id)
+        try:
+            data = self.Store.get(name)
+        except KeyError:
+            data = self.fd.read_member(name)
+            data = self.crypto.decrypt_block(chunk_id, data)
+            self.Store.put(name, data)
+            
         return data
 
     def create_new_volume(self):

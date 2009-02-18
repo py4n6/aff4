@@ -1,3 +1,13 @@
+""" This is a test of the ability to read an image.
+
+You should have a image created beforehand using for example:
+
+python facquire.py -S10 -e ntfs1-gen2.dd test
+
+This test requires the sk python bindings and pyewf bindings because
+we test access speed to each other.
+"""
+
 import sk, fif, pyewf, pyaff
 import time, sys, glob
 
@@ -25,7 +35,7 @@ def main():
     if 1:
         t = time.time()
         ## Open all the volumes at once:
-        fiffile = fif.FIFFile(glob.glob("test*.zip"))
+        fiffile = fif.FIFFile("test.00.zip")
         
         fd = fiffile.open_stream("data")
         count = test_time(fd)
