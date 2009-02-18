@@ -554,6 +554,7 @@ class FIFFD:
         self.fd.writestr(filename, self.properties)
 
     def seek(self, pos, whence=0):
+        #print "Seeking %s, %s %s" % (pos, whence, self.size)
         if whence==0:
             self.readptr = pos
         elif whence==1:
@@ -690,6 +691,7 @@ class Image(FIFFD):
         self.properties = properties
 
     def read(self, length=None):
+        #print "length ",self.readptr, length, 
         if length==None: length=sys.maxint
         result = ''
         length = min(self.size - self.readptr, length)
@@ -701,6 +703,7 @@ class Image(FIFFD):
             result += data
             self.readptr += len(data)
 
+        #print len(result), self.readptr, "%r" % result[-50:], self.size
         return result
     
     def partial_read(self, length):
@@ -710,6 +713,7 @@ class Image(FIFFD):
         available_to_read = min(self.chunksize - chunk_offset, length)
 
         chunk = self.read_chunk(chunk_id)
+        #print "chunk_id", chunk_id, len(chunk), chunk_offset, 
         return chunk[chunk_offset:chunk_offset+available_to_read]
 
     def read_chunk(self, chunk_id):
@@ -724,7 +728,8 @@ class Image(FIFFD):
 
     def write(self, data):
         self.readptr += len(data)
-
+        self.size = max(self.size, self.readptr)
+        #print "%s Writing %s, %s %r" % (self, self.readptr, len(data), data[-50:])
         data = self.outstanding + data
         while len(data)>self.chunksize:
             chunk = data[:self.chunksize]
@@ -732,7 +737,7 @@ class Image(FIFFD):
             data = data[self.chunksize:]
 
         self.outstanding = data
-        self.size = max(self.size, self.readptr)
+        #print "Outstanding %s" % len(self.outstanding)
         
     def write_chunk(self, data):
         """ Adds the chunk to the archive """
@@ -742,10 +747,11 @@ class Image(FIFFD):
 
     def close(self):
         """ Finalise the archive """
+        #print "Closing archive with %s %s %s" % (len(self.outstanding),self.size, self.readptr)
         ## Write the last chunk
         if len(self.outstanding)>0:
             self.write_chunk(self.outstanding)
-
+            
         FIFFD.close(self)
 
 class MapDriver(FIFFD):
@@ -1036,6 +1042,7 @@ try:
         ## This is the cipher's block size
         block_size = 16
         key_size = 16
+        pad = 0
         
         def __init__(self, fiffile, stream_name, properties):
             ## We derive the master key from PSK here
@@ -1064,9 +1071,11 @@ try:
             self.master_key = self.hash_class(PSK+salt).digest()[:self.key_size]
 
         def encrypt_block(self, count, block):
-            ## Pad block
-            block += '\x00' * (self.block_size - (len(block) % self.block_size))
-
+            self.pad = len(block) % self.block_size
+            if self.pad:
+                #print "Padding from %s to %s" % (len(block),self.pad)
+                block += "\xFF" * (self.block_size -self.pad)
+                
             IV = self.hash_class(struct.pack("<L",count) + \
                                  self.master_key).digest()[:self.key_size]
 
@@ -1097,7 +1106,7 @@ class Encrypted(Image):
                  **args):
         Image.__init__(self, stream_name=stream_name,
                        properties = properties, **args)
-
+        print properties
         try:
             scheme = properties['scheme']
         except KeyError:
@@ -1115,14 +1124,16 @@ class Encrypted(Image):
         self.crypto = self.crypto(self.fd, self.stream_name, self.properties)
             
     def write_chunk(self, data):
-        block_id = self.readptr / self.blocksize
-        data = self.crypto.encrypt_block(block_id, data)
-        Image.write_chunk(self, data)
+        #print "Writing encrypted chunk %s %s" % (self.chunk_id, self.size)
+        name = self.make_chunk_name(self.chunk_id)
+        data = self.crypto.encrypt_block(self.chunk_id, data)
+        self.fd.writestr(name, data, zipfile.ZIP_STORED)
+        self.chunk_id += 1
 
     def read_chunk(self, chunk_id):
-        block_id = self.readptr / self.blocksize
-        data = Image.read_chunk(self, chunk_id)
-        return self.crypto.decrypt_block(block_id, data)
+        data = self.fd.read_member(self.make_chunk_name(chunk_id))
+        data = self.crypto.decrypt_block(chunk_id, data)
+        return data
 
     def create_new_volume(self):
         """ This is a convenience method for creating a fif file

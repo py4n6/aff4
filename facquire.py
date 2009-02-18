@@ -24,6 +24,9 @@ parser.add_option("-e", "--encrypt", default=False,
                   action='store_true',
                   help='Should we encrypt the output file')
 
+parser.add_option("-E", "--scheme", default='aes-sha-psk',
+                  help='Default encryption scheme')
+
 (options, args) = parser.parse_args()
 
 if len(args)!=2:
@@ -51,18 +54,12 @@ basefif.create_new_volume(new_name)
 ## create a Encrypted stream on basefif. We create a new FIFFile and
 ## tell it to make a new volume on the encrypted stream.
 if options.encrypt:
-    fiffile = fif.FIFFile()
     enc = basefif.create_stream_for_writing(stream_name='crypted',
                                             stream_type='Encrypted',
-                                            crypto_scheme = "PSK",
-                                            passphrase = "Hello world",
+                                            scheme = options.scheme,
                                             )
-    ## Create a new FIF Volume inside the stream
-    fiffile.create_new_volume(enc)
 
-    ## Make a reference from the basefif to the encrypted fif
-    basefif.properties['volume'] = 'crypted'
-    fiffile.properties.set('UUID', basefif.properties['UUID'])
+    fiffile = enc.create_new_volume()
 
 ## Now we create a new Image stream on the fiffile to store the image
 ## in:
@@ -93,7 +90,6 @@ while 1:
 ## Close off all the streams in this order
 stream.close()
 fiffile.close()
-
 if options.encrypt:
     enc.close()
     
