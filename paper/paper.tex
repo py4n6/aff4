@@ -1,0 +1,447 @@
+%\documentclass[10pt,twocolumn]{article}
+\documentclass[12pt, conference]{IEEEtran}
+%\IEEEoverridecommandlockouts
+%\documentclass{article}
+%\documentclass[12pt]{IEEEtran}
+%\documentclass{elsart5p}
+
+% Make sure we know its a draft for now
+%\usepackage{draftwatermark}
+\usepackage{verbatim}
+%\documentclass[12pt]{article}
+\usepackage{epsfig}
+\usepackage[hypertexnames=false,bookmarksopenlevel=1,bookmarksopen,bookmarksnumbered,colorlinks,plainpages=false,linktocpage]{hyperref}
+%\usepackage{natbib}
+%\pagestyle{empty}
+%\psdraft
+%\baselineskip=20pt %Sets line spacing to 1 unit
+%\bibliographystyle{elsart-num-names}
+\bibliographystyle{IEEEtran}
+\usepackage{cite}
+\newenvironment{definition}[1][Definition]{\begin{trivlist}
+\item[\hskip \labelsep {\bfseries #1:}]}{\end{trivlist}}
+
+%\begin{frontmatter}
+\begin{document}
+\title{The Forensic Interchange Format - a file format for digital evidence}
+\author{M. I. Cohen\footnote{scudette@gmail.com} and Bradley Schatz}
+%\author{M. I. Cohen}
+%\address{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}
+%\baselineskip=20pt %Sets line spacing to 1 unit
+%\end{frontmatter}
+%\thanks{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}%
+\maketitle
+
+\begin{abstract}
+Forensics analysis requires the acquisition of management of many
+different types of evidence material. Often the same evidence is
+reviewed by several different tools. We propose an open, extensible
+file format for storing of evidence and interchanging analysis results
+among different tools. The Forensic Interchange Format (FIF) was
+designed to be simple to implement, relying on the well supported Zip
+specifications for bit level file access.
+\end{abstract}
+
+\section{Introduction}
+
+\section{FIF Specifications}
+The FIF specifications distinct between bit level specifications and
+a high level schema. The bit level specifications refer to how the
+files are to be actually represented on disk. The schema specifies a
+stream based abstraction which is implemented using the bit level
+specification. 
+
+\subsection{FIF bit level specification}
+The FIF specifications only require the underlying storage mechanism
+be capable of storing multiple named segments of data. The current
+specification uses the Zip file format as the underlying storage
+mechanism, however in future versions of the specifications other
+storage layers may be also be defined.
+
+The Zip file specifications are publicly available and widely
+implemented. The Zip64 extensions are provided to enable Zip archives
+to grow beyond a two gigabyte limit by using 64 bit
+references. Although Zip64 also defines encryption and authentication
+extensions, we do not use these in this specification due to the
+restrictions imposed on their use. Rather, we specify stream based
+encryption scheme for use in FIF files.
+
+The basic structure of a Zip archive is shown in Figure
+\ref{zip_structure}. For bit level details see the Zip file
+Application notes \cite{zipspecs}.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
+  \caption{The basic structure of a Zip archive}
+  \label{zip_structure}
+  \end{center}
+\end{figure}
+
+As can be seen, the archive consists of a {\em Central Directory (CD)}
+located at the end of the archive. The CD is a list of pointers to
+individual {\em File header} structures located within the body of the
+archive. Headers are then followed by the file data, after it has been
+compressed by the appropriate compression method (as specified in the
+header). Each archived file is optionally followed by a {\em Data
+Descriptor} describing the length and CRC of the archived file. Using
+the data descriptor field allows implementations to write archives
+without needing to seek in the output file. This allows Zip files to
+be written to pipes for example, sending an image over the network
+using netcat or ssh.
+
+\subsection{FIF Definitions}
+The FIF specification defines a number of basic terms:
+\begin{itemize}
+\item {\em A FIF Volume} is a single ZIP archive containing {\em
+segments}.
+
+\item {\em A segment} is a single unit of data written to the Zip
+archive as an archive file. The only properties of segments of
+interest to the FIF specification are the segment name and the
+timestamp.
+
+\item {\em The segment name} is the name under which a segment is
+stored within the archive. This consists of a directory part named
+{\em a stream} and an {\em chunk name}. For example the segment named
+``default/000001'' refers to the stream called ``default'' and has a
+chunk name of ``000001''. Although the ZIP specification does not
+specify the encoding of segment names, the FIF specification requires
+all segment names to be encoded using UTF8. If stream name is
+unspecified, implementations should open the stream named ``default''.
+
+\item {\em Attributes} are a list of key/value pairs stored at each
+stream's ``properties'' segment (e.g. ``stream/properties''). The
+``properties'' file is a text file which stores attributes one on each
+line. Attribute lines consist of the key, immediately followed by
+``='' for text values or ``:'' for binary values. This is immediately
+followed by the encoded value. Values containing text MUST be encoded
+using UTF8, while values containing binary data MAY be encoded using
+Base64. If keys are repeated, their relative order MUST be preserved
+by implementations, but different keys may be presented in any order.
+
+Attributes MUST be specified at the top level of each volume
+(i.e. must have a segment named ``properties'')
+
+%about the stream. A properties file also exists at the top
+%level of the ZIP hierarchy to store global information such as the
+%volumes UUID, the FIF version and other volumes which make up the 
+
+\item {\em A FIF file} is a collection of volumes with the same
+UUID. The UUID is generated according to RFC4122 for each new FIF
+file. As new volumes are created for the same file, the UUID is copied
+to all related volumes. When a FIF file is opened, all its volumes are
+loaded and merged in such a way that all the segments from all the
+volumes are visible as if they were all found in the same volume.
+
+\end{itemize}
+
+\subsection{FIF Volumes and segment merging}
+There are a number of aspects in the Zip file format specifications
+which we do not utilize. For example, the Zip64 specification allows
+for a multitude of encryption and hashing algorithms. Some of these
+features however, seem to be patent encumbered. Since the FIF
+specification aims to separate high level information such as hashes,
+cryptography and signatures from the low level bit level
+representation we implement those features at a higher level.
+
+In many forensic applications, individual segments within the volume
+need to be updated \cite{AFF}. These updates can cause the volume to
+become fragmented as holes appear within the middle of the volume, and
+updated segments get added to the end.
+
+When we wish to add a new segment to an existing volume, the new
+segment header SHOULD overwrite the volume central directory, and the
+central directory should be rewritten including the new entry
+immediately after the last file in the archive. If it is not possible
+to overwrite the file, the new segment can be written at the end,
+followed by an updated copy of the central directory (in that case the
+old central directory remains in the file). This is illustrated in
+Figure \ref{zip_structure}.
+
+A segment within the archive is considered to be updated when a new
+segment is added to the archive with the same name and a later
+timestamp. Implementations MUST satisfy read requests for duplicate
+segment names with those segments with the later timestamp, or if the
+two timestamps are the same, the segment which appears at a later
+offset in the volume. This effectively allows for a segment to be
+updated without leading to internal volume fragmentation.
+
+The fact that the older version of all updated segments remains intact
+within each volume can be used for auditing, or to allow a rollback to
+previous versions of the segment. The {\em frepack} tool is provided
+to repack, split and manage FIF volumes by creating new volumes and
+redistributing segments among them.
+
+Note that we do not rely on Zip64's built-in support for splitting
+archives at all (although implementations should be able to read such
+files). Each volume is a complete and stand alone ZIP file. It is the
+FIF implementation which considers the segments contained within it to
+belong to a larger collection. The reason behind this decision is that
+often it is needed to add new volumes to an existing set without
+modifying the existing set at all.
+
+Consider the typical usage scenario depicted in Figure \ref{usage}, of
+a FIF file which contains a disk image. This volume is distributed to
+two independent analysts, which wish to add new streams to the FIF
+file (for example the result of their analysis). In this case they can
+each create a new volume which extends to original volume and save
+their analysis on this new volume. Now they only need to share this
+new volume with other analysts who also have a copy of the old volume
+to interchange their findings. 
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{usage1.eps}}
+  \caption{A typical usage scenario. Both Alice and Bob receive a FIF
+volume 1 but work independently. Rather than modifying Volume 1, they
+each create another volume and save their results to the new
+volume. They can now exchange the new volume and effectively merge
+their results into the same FIF set.}
+  \label{usage}
+  \end{center}
+\end{figure}
+
+This is made possible because each volume is independent of one
+another, and can be loosely collated into a bigger FIF file
+set. However, considering the above scenario, is it clear that
+although volume 1 can be used by itself, both volume 2 and 3 might
+refer to data in volume 1 and require it loaded too. We specify a
+volume attribute named ``volume'' which links to the location of other
+volumes.
+
+\subsection{FIF Streams}
+The above section explained how FIF file sets can be split into
+volumes, each containing segments. When the entire FIF file set is
+loaded, segments may be fetched from any volume. The present section
+describes how these individual segments are used to form {\em stream
+abstractions}.
+
+A stream is a high level abstraction of a single source of data. For
+example, a stream may contain a disk image or a network
+capture. Although we do not specify the exact API, implementations
+MUST make a stream opened for reading have at a minimum a read, seek
+and tell methods. Seeking MUST support the whence argument as
+described in the standard C implementation.
+
+Streams opened for writing MAY only support the write method as
+seeking in compressed streams may not be possible. Applications should
+avoid needing to seek in output streams, and try to structure writes
+serially. It is usually possible to reorder a sequence of non
+overlapping random writes into a linear stream and a map which is
+described below.
+
+All streams within the FIF file MUST have a properties segment. The
+properties segment describes the stream attributes as specified
+previously. Streams must have the following mandatory attributes:
+
+\begin{itemize}
+\item {\em type} is the kind of stream.
+
+\item {\em size} is the size of the stream in bytes.
+\end{itemize}
+
+The type attribute is used to interpret the other segments within the
+stream in a stream specific way.
+
+\section{Standard FIF segments}
+The FIF specification defines a number of basic types, but extensions
+are encouraged. Future versions of the specification might standardize
+further types. Implementations MUST implement the basic types.
+
+\subsection{The Image Stream}
+The {\em Image} stream contains a single read only forensic data
+source. For example, this Stream might contains a hard disk image, a
+memory image or a network capture (in PCAP format). The Image stream
+provides random read access into the stream (i.e. allows for randomly
+seeking the stream to any point).
+
+The image itself is stored in chunks within the FIF file. Chunks are
+segments named as an 8 digit, zero padded decimal integer
+representation of their chunk id (e.g. ``default/00000032''). Image
+streams must specify the {\em chunk\_size} attribute, as the number of
+image bytes each chunk contains. Chunks may be compressed at the
+underlying Zip container level, using any of the compression
+algorithms specified by the zip specifications.
+
+%% Talk about signing and hashing here....
+
+\subsection{The Map Stream}
+Linear transformations of data are commonplace in forensic
+analysis. For example, a file is often simply a collection of bytes
+drawn from an image. A TCP/IP stream is simply a collection of
+payloads from selected network packets. Sometimes the same data may be
+viewed in a number of ways - for example a Virtual Address Space is a
+mapping of the Physical Address Space through a page table
+transformation. It is, therefore, beneficial to define a way in which
+the underlying storage system can apply transformations to existing
+data to produce transformed data.
+
+For example, Zero Storage Carving \cite{Meijer2006}, is a way of
+specifying carved files in terms of a sequence of blocks taken from
+the image. \cite{Cohen2007} extended this concept to an arbitrary
+mapping function. This is the approach chosen in this specification
+due to its flexibility. 
+
+The Map stream defines a mapping function, as a piecewise continuous
+linear transform of one or more {\em target} streams to produce a new
+{\em stream}. Target streams are specified by using ``target''
+attribute, which may be used many times to provide a list of targets.
+
+The mapping function file consists of a series of lines, each
+containing three 64 bit integers separated by comma, and encoded using
+decimal notation. The integers represent stream offset, target offset
+and target number. Target numbers are an index to the list of targets
+given in the attribute section (list index starts at zero for the
+first entry).
+
+Denoting the stream offset by $x$, and the target offset by $y$, the
+map specifies a set of points $(X_i,Y_i,T_i)$. Read requests for a
+byte at a mapped stream offset $x$ can then be satisfied by reading a
+byte from target $T_i$ at offset $y$ given by:
+\begin{eqnarray}
+y = (x - X_i) + Y_i & &
+\forall x \in \left [X_i, X_i+1 \right )
+\end{eqnarray}
+
+For example, consider the following map:
+\begin{verbatim*}
+0,0,0
+4096,10000,0
+8192,5000,0
+\end{verbatim*}
+
+To read this stream we satisfy read requests of offsets between 0 and
+4095 in the stream from offset 0 in target 0. Requests for bytes
+between 4096 and 8191 are fetched from target 0 at offset
+10000. Finally bytes after 8192 (until the specified size of the
+stream) are fetched from offset 5000 in target 0.
+
+In order to efficiently express periodic maps such as those found in
+RAID arrays, the Map stream may be provided with two optional
+parameters a {\em target\_period} ($T_p$), and {\em stream\_period}
+($S_p$). If specified, the above relation becomes:
+\begin{eqnarray*}
+p &:=& floor\left (\frac{x}{S_p} \right) \\
+x' &:=& mod(x ,S_p)  \\   \label{eq:no1}
+y &:=& (x'-X_i) + Y_i + p \times T_p
+\end{eqnarray*}
+
+Where $mod$ is the modulus function, while $floor$ signifies integer
+division. For example consider the following, which corresponds to a 3
+disk RAID-5 array:
+\begin{verbatim*}
+stream_period=393216
+target_period=196608
+
+0,0,1
+65536,0,0
+131072,65536,2
+196608,65536,1
+262144,131072,0
+327680,131072,2
+\end{verbatim*}
+
+\subsection{The Overlay stream}
+The Overlay stream is a variant of the {\em Image} stream in that it
+allows for images to be stored in (possibly compressed) chunks. The
+main utility of the Overlay stream is in providing transparent access
+to other forensic formats, such as EWF, AFF. These formats also use
+chunk based compression to provide the ability to randomly seek while
+reading. To access these file formats we only need to have an index of
+each chunk offset, and then directly use the overlayed files. The {\em
+ewf2fif} tool provides such an overlay feature for EWF volumes by
+employing libewf to scan the internal data structures.
+
+Therefore, the {\em chunk\_size} attribute must be specified. In
+addition the {\em compression\_type} attribute MAY be specified. The
+attribute should contain an integer corresponding to a suitable Zip
+compression scheme (e.g. ZIP\_DEFLATE). If not specified it is assumed
+that no compression is used.
+
+The ``target'' stream attribute may be specified multiple times and
+refer to external files using the {\em file://} scheme. There can be a
+number of overlay segments named ``stream name/overlay.00'' which are
+all merged to a single overlay. If more than one overlay is present,
+the attribute {\em overlays} MUST be specify how many.
+
+The overlay segment contains a series of lines with comma delimited,
+decimal encoded, 64 bit integers representing chunk number, target
+offset, target length and target number. Target number is an index
+into the targets defined in the attributes (count starts witn zero).
+Chunks are then fetched from the specified target and decompressed if
+necessary.
+
+A target number of -1 signifies the current file (the zip archive
+itself). This can be useful for modifying an existing EWF file to be a
+FIF file. Since Zip files are normally read from the end of the file,
+but EWF and AFF are both read from the front of the file it may be
+possible to append a FIF file to the end of an EWF file without
+interfering with the overlayed file. In this case the converted file
+can still be used as an EWF file without change, but it can also be
+used as a FIF file.
+
+In image streams some chunks may compress very well. In that case, the
+overheads introduced by the Zip File Header for each chunk in the
+Image stream may become unacceptably high. In that case its possible
+to use an {\em Overlay stream} to coalesce chunks into larger
+segments. This approach is illustrated in Figure \ref{overlay}.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.8\columnwidth \epsffile{overlay.eps}}
+  \caption{The use of an Overlay Stream to overlay an image with
+coalesced chunks.}
+  \label{overlay}
+  \end{center}
+\end{figure}
+
+In the above figure a segment is written to the FIF volume which
+contains a number of chunks back to back. An overlay stream then uses
+direct references to each compressed chunk within the coalesced
+segment. Although this technique is valid, it is generally
+discouraged since a reorganization of the Zip file might break the
+references within the overlay file. This representation also breaks
+the appealing simplicity of the standard Image Stream, since it is no
+longer possible to simply unzip all the chunks and concatenate them
+together to recover the original image.
+
+
+\subsection{The Private stream}
+
+\subsection{Encrypted Streams}
+
+
+\section{Implementation Recommendations}
+Since the individual chunks are simply files in a Zip archive, any zip
+library can be utilized for reading these chunks. However, this may
+not be efficient since simple Zip implementations might rescan the
+Central Directory for each segment request. Since in practice there
+can be a large number of chunks in each volume, it is recommended that
+implementations build an index of offsets and length of each chunk
+into the file. This kind of index is very similar to the strategy
+other file formats use \cite{EWF}. The index may then be saved to the
+file by use of a Private stream.
+
+Zip64 specifies duplicate data in the Central Directory entry for each
+segment and its File Header (such as filename, size, CRC etc). Many
+implementations only populate this information in one of these
+places. In the interest of robustness, it is recommended that FIF
+implementations populate both places at the slight expense of higher
+overheads, because this can be used to recover and correct damaged
+files. If the central directory is lost, it is possible to scan
+through the zip file and repair the central directory from the File
+headers.
+
+The underlying Zip implementation should support multiple writers
+simultaneously by interleaving their writes to the file. For example,
+for two streams being written concurrently, the new segments can be
+added to the same archive in any order. In addition, the volume may be
+closed and a new volume opened without writers being aware of
+this. Since all segments from all volumes are merged, streams can be
+split arbitrarily across volumes in any way. It is recommended that
+stream properties be written to each volume to ensure at least some of
+the stream can be used even if some volumes are lost.
+
+\bibliography{IEEEabrv,paper}
+\end{document}
