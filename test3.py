@@ -68,6 +68,7 @@ else:
     fiffile = fif.FIFFile([FILENAME])
 
 fd = fiffile.open_stream("RAID")
+
 fs = sk.skfs(fd)
 f = fs.open(inode='13')
 outfd = open("test3.jpg","w")

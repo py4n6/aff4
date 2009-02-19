@@ -380,19 +380,10 @@ class FIFFile(zipfile.ZipFile):
             raise RuntimeError("Trying to write to archive but no archive was set - did you need to call create_new_volume() or append_volume() first?")
 
         ## FIXME - implement digital signatures here
-        ## Call our base class to actually do the writing
         data = data.__str__()
         m = self.open_member(member_name, 'w', compression = compression)
         m.write(data)
         m.close()
-
-        ## We can actually update the index here so the member can be
-        ## available for reading immediately:
-        zinfo  = self.getinfo(member_name)
-        self.update_index(self.fp, zinfo)
-
-        ## invalidate the cache if its in there
-        self.Store.expire(member_name)
 
     def write(self, data):
         self.fp.seek(self.readptr)
@@ -650,6 +641,9 @@ class ZipFileStream(FIFFD):
             data = self.compr.flush()
             self.zinfo.compress_size += len(data)    
             self.parent.write(data)
+            chunk_size = self.zinfo.compress_size
+        else:
+            chunk_size = self.zinfo.file_size
             
         ## Write the data descriptor
         self.parent.write(struct.pack("<lLL", self.zinfo.CRC,
@@ -668,8 +662,8 @@ class ZipFileStream(FIFFD):
             self.parent.fp,
             ## Offset to the start of the file (after the header)
             self.file_offset,
-            self.zinfo.file_size,
-            zipfile.ZIP_STORED,
+            chunk_size,
+            self.zinfo.compress_type,
             self.zinfo.date_time )
         
         ## Remove the write lock from the parent
