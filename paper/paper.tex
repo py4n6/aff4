@@ -150,7 +150,8 @@ specified with the following conventions:
 \begin{itemize}
 \item A reference starting with {\em file://} refers to an external
 file. The external file reference must be sanitised (to remove
-.. directory traversal) and rooted at the current directory.
+.. directory traversal) and rooted at the current directory. A
+filename of ``.'' refers to the current FIF volume.
 
 \item A reference starting with {\em http://} refers to a HTTP
 object which will be fetched. Support for this is optional.
@@ -433,27 +434,27 @@ employing libewf to scan the internal data structures.
 Therefore, the {\em chunk\_size} attribute must be specified. In
 addition the {\em compression\_type} attribute MAY be specified. The
 attribute should contain an integer corresponding to a suitable Zip
-compression scheme (e.g. ZIP\_DEFLATE). If not specified it is assumed
+compression scheme (e.g. DEFLATE). If not specified it is assumed
 that no compression is used.
 
 The ``target'' stream attribute may be specified multiple times and
-refer to external files using the {\em file://} scheme. There can be a
-number of overlay segments named ``stream name/overlay.00'' which are
-all merged to a single overlay. If more than one overlay is present,
-the attribute {\em overlays} MUST be specify how many.
+refer to external files (See section \ref{target_reference}). There
+can be a number of overlay segments named ``stream name/overlay.00''
+which are all merged to a single overlay. If more than one overlay is
+present, the attribute {\em overlays} MUST be specify how many.
 
 The overlay segment contains a series of lines with comma delimited,
 decimal encoded, 64 bit integers representing chunk number, target
 offset, target length and target number. Target number is an index
-into the targets defined in the attributes (count starts witn zero).
+into the targets defined in the attributes (count starts with zero).
 Chunks are then fetched from the specified target and decompressed if
 necessary.
 
-A target number of -1 signifies the current file (the zip archive
-itself). This can be useful for modifying an existing EWF file to be a
-FIF file. Since Zip files are normally read from the end of the file,
-but EWF and AFF are both read from the front of the file it may be
-possible to append a FIF file to the end of an EWF file without
+It is possible to refer to the current file by providing a target of
+``file://.''. This can be useful for modifying an existing EWF file to
+be a FIF file. Since Zip files are normally read from the end of the
+file, but EWF and AFF are both read from the front of the file it may
+be possible to append a FIF file to the end of an EWF file without
 interfering with the overlayed file. In this case the converted file
 can still be used as an EWF file without change, but it can also be
 used as a FIF file.
@@ -476,10 +477,9 @@ coalesced chunks.}
 In the above figure a segment is written to the FIF volume which
 contains a number of chunks back to back. An overlay stream then uses
 direct references to each compressed chunk within the coalesced
-segment. Although this technique is valid, it is generally
-discouraged since a reorganization of the Zip file might break the
-references within the overlay file. This representation also breaks
-the appealing simplicity of the standard Image Stream, since it is no
+segment. The target is then specified as the segment name. Although
+this technique is valid, it is generally discouraged since it breaks
+the appealing simplicity of the standard Image Stream.  It is no
 longer possible to simply unzip all the chunks and concatenate them
 together to recover the original image.
 

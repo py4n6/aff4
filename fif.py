@@ -263,8 +263,8 @@ class FIFFile(zipfile.ZipFile):
                 fileobj = open(fileobj,'r+b')
             except IOError:
                 ## it refers to an external file
-                if fileobj.startswith("file:///"):
-                    return open(fileobj[len("file:///"):],'r+b')
+                if fileobj.startswith("file://"):
+                    return open(fileobj[len("file://"):],'r+b')
                 else:
                     ## Maybe its a stream within this current FIF
                     ## fileset
@@ -498,7 +498,8 @@ class FIFFile(zipfile.ZipFile):
             self.fp.seek(self.readptr)
             zipfile.ZipFile.close(self)
 
-    def create_stream_for_writing(self, stream_name, stream_type='Image',
+    def create_stream_for_writing(self, stream_name='default',
+                                  stream_type='Image',
                                   **args):
         """ This method creates a new stream for writing in the
         current FIF archive.
@@ -685,7 +686,7 @@ class Image(FIFFD):
         self.mode = mode
         self.name = self.stream_name = stream_name
         self.chunk_id = 0
-        self.chunksize = int(properties.get('chunksize', 32*1024))
+        self.chunksize = int(properties.get('chunk_size', 32*1024))
         self.size = int(properties.get('size',0))
         self.readptr = 0
         self.Store = Store()
@@ -700,7 +701,7 @@ class Image(FIFFD):
         if length==None: length=sys.maxint
         result = ''
         length = min(self.size - self.readptr, length)
-        while length>=0:
+        while length>0:
             data= self.partial_read(length)
             if len(data)==0: break
             
@@ -759,6 +760,90 @@ class Image(FIFFD):
             
         FIFFD.close(self)
 
+class Overlay(Image):
+    """ The overlay stream allows for external chunk references so we
+    can just piggy back on top of files like EWF.
+    """
+    type = 'Overlay'
+    def __init__(self, mode='w', *args, **kwargs):
+        self.chunks = {}
+        self.filenames = {}
+        self.inverted_filenames = {}
+        self.overlay_count = 0
+        Image.__init__(self, mode=mode, *args, **kwargs)
+        if mode=='r':
+            self.open_overlay()
+
+    def open_overlay(self):
+        self.targets = []
+        for t in self.properties.getarray('target'):
+            self.targets.append(self.fd.resolve_url(t))
+        
+        for segment in self.properties.getarray('overlay'):
+            data = self.fd.read_member("%s/%s" % (self.stream_name, segment))
+            for line in data.splitlines():
+                id, offset, size, compression, filename_id = line.split(",",5)
+                id = int(id)
+                offset = long(offset)
+                size = long(size)
+                filename_id = int(filename_id)
+                compression = int(compression)
+                self.chunks[id] = (offset, size, compression, filename_id)
+
+    def set_chunk(self, chunk_id, offset, size, compression, filename):
+        try:
+            filename_id = self.filenames[filename]
+        except KeyError:
+            ## Set a new filename
+            filename_id = len(self.filenames.keys())
+            self.filenames[filename] = filename_id
+            self.inverted_filenames[filename_id] = filename
+
+        self.chunks[chunk_id] = (offset, size, compression, filename_id)
+        self.chunk_id = max(self.chunk_id, chunk_id)
+
+    def close(self):
+        ## We add the attributes
+        for i in range(len(self.inverted_filenames.keys())):
+            self.properties['target'] = 'file://%s' % self.inverted_filenames[i].strip()
+
+        name = "overlay.%02d" % (self.overlay_count)
+        self.overlay_count += 1
+        fd = self.fd.open_member("%s/%s" % (self.stream_name, name),
+                                 mode="w",
+                                 compression=zipfile.ZIP_DEFLATED)
+
+        for i in range(self.chunk_id+1):
+            try:
+                row = self.chunks[i]
+                fd.write("%s,%s\n" % (i,",".join(["%d" % x for x in row])))
+            except Exception,e:
+                print e
+                pass
+
+        fd.close()
+        self.properties['overlay'] = name
+        Image.close(self)
+        
+    def read_chunk(self, chunk_id):
+        (offset, size, compression, filename_id) = self.chunks[chunk_id]
+
+        target = self.targets[filename_id]
+        target.seek(offset)
+        data = target.read(size)
+        
+        if compression:
+            data = zlib.decompress(data)
+            ## Decompress it now:
+            #dc = zlib.decompressobj(-15)
+            #data = dc.decompress(data)
+            # need to feed in unused pad byte so that zlib won't choke
+            #ex = dc.decompress('Z') + dc.flush()
+            #if ex:
+            #    data = data + ex
+                
+        return data
+    
 class MapDriver(FIFFD):
     """ A Map driver is a read through mapping transformation of the
     target stream to create a new stream.
@@ -1027,7 +1112,7 @@ class NULLScheme:
     def decrypt_block(self, count, block):
         return block
 
-crypto_schemes = {"null-null-null": NULLScheme,}
+crypto_schemes = {"null": NULLScheme,}
 
 try:
     import Crypto.Hash.MD5
@@ -1115,7 +1200,7 @@ class Encrypted(Image):
         try:
             scheme = properties['scheme']
         except KeyError:
-            scheme = 'null-null-null'
+            scheme = 'null'
             print "No scheme specified, defaulting to %s" % scheme
             properties['scheme'] = scheme
 
@@ -1168,4 +1253,5 @@ class Encrypted(Image):
         Image.close(self)
 
 ## The following are the supported segment types
-types = dict(Image=Image, Map=MapDriver, Encrypted=Encrypted)
+types = dict(Image=Image, Map=MapDriver, Encrypted=Encrypted,
+             Overlay=Overlay)
