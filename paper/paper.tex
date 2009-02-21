@@ -1,12 +1,12 @@
 %\documentclass[10pt,twocolumn]{article}
-\documentclass[12pt, conference]{IEEEtran}
+\documentclass[10pt, conference]{IEEEtran}
 %\IEEEoverridecommandlockouts
 %\documentclass{article}
 %\documentclass[12pt]{IEEEtran}
 %\documentclass{elsart5p}
 
 % Make sure we know its a draft for now
-%\usepackage{draftwatermark}
+\usepackage{draftwatermark}
 \usepackage{verbatim}
 %\documentclass[12pt]{article}
 \usepackage{epsfig}
@@ -33,7 +33,7 @@
 \maketitle
 
 \begin{abstract}
-Forensics analysis requires the acquisition of management of many
+Forensics analysis requires the acquisition and management of many
 different types of evidence material. Often the same evidence is
 reviewed by several different tools. We propose an open, extensible
 file format for storing of evidence and interchanging analysis results
@@ -64,7 +64,8 @@ to grow beyond a two gigabyte limit by using 64 bit
 references. Although Zip64 also defines encryption and authentication
 extensions, we do not use these in this specification due to the
 restrictions imposed on their use. Rather, we specify stream based
-encryption scheme for use in FIF files.
+encryption scheme for use in FIF files (See section
+\ref{crypted_stream}).
 
 The basic structure of a Zip archive is shown in Figure
 \ref{zip_structure}. For bit level details see the Zip file
@@ -121,7 +122,8 @@ Base64. If keys are repeated, their relative order MUST be preserved
 by implementations, but different keys may be presented in any order.
 
 Attributes MUST be specified at the top level of each volume
-(i.e. must have a segment named ``properties'')
+(i.e. must have a segment named ``properties''). The volume attributes
+are used to specify the volume UUID.
 
 %about the stream. A properties file also exists at the top
 %level of the ZIP hierarchy to store global information such as the
@@ -136,19 +138,50 @@ volumes are visible as if they were all found in the same volume.
 
 \end{itemize}
 
+\label{target_reference}
+{\em A target reference} is a way of referencing objects. This is used
+in a number of places which will be highlighted below. Using
+references it is possible for the FIF file to refer to objects
+embedded within itself, or within other FIF files. Its is also
+possible to refer to external flat files. A number of usage scenarios
+are described in Section \ref{usage_scenarios}. The reference is
+specified with the following conventions:
+
+\begin{itemize}
+\item A reference starting with {\em file://} refers to an external
+file. The external file reference must be sanitised (to remove
+.. directory traversal) and rooted at the current directory.
+
+\item A reference starting with {\em http://} refers to a HTTP
+object which will be fetched. Support for this is optional.
+
+\item A reference in the format {\em fif://UUID/stream/segment} refers
+to an external FIF file set (identified by its UUID). If the segment
+is missing (i.e. the reference ends with a ``/''), the reference is
+for the entire stream. We do not specify a way of actually resolving
+the UUID into a physical locations. This can achieved by
+implementations using many methods, such as Active Directory, LDAP,
+DNS, flat files or SQL databases.
+
+\item A references ending with a ``/'' signify a reference to a
+stream in the current FIF file. The stream will be opened in its
+entirety. If the reference does not end with a ``/'', the reference is
+for a single segment.
+\end{itemize}
+
 \subsection{FIF Volumes and segment merging}
 There are a number of aspects in the Zip file format specifications
 which we do not utilize. For example, the Zip64 specification allows
 for a multitude of encryption and hashing algorithms. Some of these
 features however, seem to be patent encumbered. Since the FIF
 specification aims to separate high level information such as hashes,
-cryptography and signatures from the low level bit level
-representation we implement those features at a higher level.
+cryptography and signatures from the low bit level representation, we
+implement those features at a higher level.
 
 In many forensic applications, individual segments within the volume
 need to be updated \cite{AFF}. These updates can cause the volume to
 become fragmented as holes appear within the middle of the volume, and
-updated segments get added to the end.
+updated segments are added at the end.
 
 When we wish to add a new segment to an existing volume, the new
 segment header SHOULD overwrite the volume central directory, and the
@@ -157,7 +190,8 @@ immediately after the last file in the archive. If it is not possible
 to overwrite the file, the new segment can be written at the end,
 followed by an updated copy of the central directory (in that case the
 old central directory remains in the file). This is illustrated in
-Figure \ref{zip_structure}.
+Figure \ref{zip_structure}. Implementations may choose to delay
+writing the central directory until the file is closed.
 
 A segment within the archive is considered to be updated when a new
 segment is added to the archive with the same name and a later
@@ -193,22 +227,20 @@ to interchange their findings.
 \begin{figure}[tb]
   \begin{center}
   \mbox{\epsfxsize=0.6\columnwidth \epsffile{usage1.eps}}
+
   \caption{A typical usage scenario. Both Alice and Bob receive a FIF
-volume 1 but work independently. Rather than modifying Volume 1, they
-each create another volume and save their results to the new
-volume. They can now exchange the new volume and effectively merge
-their results into the same FIF set.}
+  volume but work independently. Rather than modifying the volume,
+  they each create another volume and save their results to the new
+  volume. They can now exchange the smaller new volumes and
+  effectively merge their results into the same FIF set.}
+
   \label{usage}
   \end{center}
 \end{figure}
 
 This is made possible because each volume is independent of one
 another, and can be loosely collated into a bigger FIF file
-set. However, considering the above scenario, is it clear that
-although volume 1 can be used by itself, both volume 2 and 3 might
-refer to data in volume 1 and require it loaded too. We specify a
-volume attribute named ``volume'' which links to the location of other
-volumes.
+set.
 
 \subsection{FIF Streams}
 The above section explained how FIF file sets can be split into
@@ -222,27 +254,23 @@ example, a stream may contain a disk image or a network
 capture. Although we do not specify the exact API, implementations
 MUST make a stream opened for reading have at a minimum a read, seek
 and tell methods. Seeking MUST support the whence argument as
-described in the standard C implementation.
+described in the standard C implementation (i.e. allow seeking to the
+end of the stream).
 
-Streams opened for writing MAY only support the write method as
+Streams opened for writing MAY limit support for seeking, as efficient
 seeking in compressed streams may not be possible. Applications should
 avoid needing to seek in output streams, and try to structure writes
 serially. It is usually possible to reorder a sequence of non
-overlapping random writes into a linear stream and a map which is
-described below.
+overlapping random writes into an Image stream and a Map Stream (These
+are discussed in Sections \ref{image_stream} and
+\ref{map_stream}). Implementations are free to hide the inability to
+seek in writing streams by automatically implementing such a scheme,
+but this is not mandated by the specification.
 
 All streams within the FIF file MUST have a properties segment. The
 properties segment describes the stream attributes as specified
-previously. Streams must have the following mandatory attributes:
-
-\begin{itemize}
-\item {\em type} is the kind of stream.
-
-\item {\em size} is the size of the stream in bytes.
-\end{itemize}
-
-The type attribute is used to interpret the other segments within the
-stream in a stream specific way.
+previously. Streams must have the {\em type} attribute which allows
+implementations to determine how they should be processed. 
 
 \section{Standard FIF segments}
 The FIF specification defines a number of basic types, but extensions
@@ -250,11 +278,13 @@ are encouraged. Future versions of the specification might standardize
 further types. Implementations MUST implement the basic types.
 
 \subsection{The Image Stream}
-The {\em Image} stream contains a single read only forensic data
-source. For example, this Stream might contains a hard disk image, a
-memory image or a network capture (in PCAP format). The Image stream
-provides random read access into the stream (i.e. allows for randomly
-seeking the stream to any point).
+\label{image_stream}
+The {\em Image} stream ({\em type=image}) contains a single read only
+forensic data source. For example, this Stream might contains a hard
+disk image, a memory image or a network capture (in PCAP format). The
+Image stream provides random read access into the stream (i.e. allows
+for randomly seeking the stream to any point). The {\em size}
+attribute MUST be specified to determine how large the stream is.
 
 The image itself is stored in chunks within the FIF file. Chunks are
 segments named as an 8 digit, zero padded decimal integer
@@ -264,9 +294,56 @@ image bytes each chunk contains. Chunks may be compressed at the
 underlying Zip container level, using any of the compression
 algorithms specified by the zip specifications.
 
-%% Talk about signing and hashing here....
+Chunks can optionally be individually hashed, allowing for detection
+of modifications. The attribute {\em hash\_type} specifies the type of
+hash used (implementations SHOULD support md5,sha1 and sha256, but can
+define others). The hashes are stored in any number of segments within
+the stream, of arbitrary name. The hash segment names is provided by
+using the {\em hash} stream attribute.
+
+Each hash segment MUST be a list of a chunk id encoded in 32 bit
+little endian integer format followed by the hash (the length of which
+depends on the hash itself). This approach is illustrated in Figure
+\ref{hash_index}. 
+
+Hash segments can contain any number of chunk hashes in them. It is
+recommended that a hash segment be created when a volume is closed to
+cover all the chunks within that volume. This allows for hashes to be
+verified even if some volumes are missing. It is permitted for a hash
+segment to update a hash of a chunk previously set by an earlier hash
+segment - this may be required when a chunk is updated. The hash
+segment can then be signed to assure the integrity of the updated
+segment.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{hash.eps}}
+
+  \caption{The structure of a hashing segment. The attributes {\em
+  hash} and {\em hash\_type} declare the hash segment. The segment
+  contains a list of integer encoded chunk id followed by an unencoded
+  hash for each chunk.}
+
+  \label{hash_index}
+  \end{center}
+\end{figure}
+
+This design differs from AFF, which creates a separate segment for
+each hash. The Zip headers are more verbose than the AFF segment
+headers, and typically FIF chunks are much smaller (default 32kb, vs
+16Mb for AFF). Therefore, creating a new segment for each hash value
+results in more overheads in the FIF format. By packing the hashes
+into a few segments it is possible to reduce this overhead to a
+minimum.
+
+Hashes are calculated in an identical way to that defined by AFF,
+thats is the full name of the segment (including stream component) is
+followed by a single NULL byte, followed by the (uncompressed) content
+of the chunk. The inclusion of the segment name ensure that even
+identical chunks in content will have a different hash.
 
 \subsection{The Map Stream}
+\label{map_stream}
 Linear transformations of data are commonplace in forensic
 analysis. For example, a file is often simply a collection of bytes
 drawn from an image. A TCP/IP stream is simply a collection of
@@ -346,7 +423,7 @@ target_period=196608
 The Overlay stream is a variant of the {\em Image} stream in that it
 allows for images to be stored in (possibly compressed) chunks. The
 main utility of the Overlay stream is in providing transparent access
-to other forensic formats, such as EWF, AFF. These formats also use
+to other forensic formats, such as EWF or AFF. These formats also use
 chunk based compression to provide the ability to randomly seek while
 reading. To access these file formats we only need to have an index of
 each chunk offset, and then directly use the overlayed files. The {\em
@@ -389,7 +466,7 @@ segments. This approach is illustrated in Figure \ref{overlay}.
 
 \begin{figure}[tb]
   \begin{center}
-  \mbox{\epsfxsize=0.8\columnwidth \epsffile{overlay.eps}}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{overlay.eps}}
   \caption{The use of an Overlay Stream to overlay an image with
 coalesced chunks.}
   \label{overlay}
@@ -408,8 +485,141 @@ together to recover the original image.
 
 
 \subsection{The Private stream}
+Often forensic software needs to store internal state, such as the
+current state of the GUI, or internal data structures which may be
+required for caching. Usually, software create additional cache files
+to maintain this information. It is advantageous to be able to store
+these in the evidence file itself. The evidence file can then be
+re-opened by the software at a later stage and private data can be
+retrieved and used directly. Such private application data can be
+stored in a Private stream. There is no specification of what can be
+stored in the private stream, and applications with private streams
+should be able to store arbitrary segments in any format at all.
+
+It is recommended that applications name their private segment
+sufficiently accurately so as not to be confused with other
+applications, or different versions of the same application
+(e.g. ``pyflag/0.87/cache/'').
 
 \subsection{Encrypted Streams}
+Encryption is an important property in an evidence file format
+\cite{AFF}. In particular with the FIF format, multiple streams may be
+present in the file set, and often different access levels are
+desired. For example, for evidence set containing both network
+captures and disk images it may be desirable to limit access to
+streams based on legal authorizations.
+
+Although the Zip64 standard specifies encryption, it is not suitable
+for our purposes since it encrypts each segment separately, and does
+not specify a sufficiently flexible scheme (e.g. support for PKI, PGP
+keys). Segment based encryption may lead to information leakage when
+segments are compressed, as the uncompressed size of the segment may
+be deduced.
+
+The Encrypted Stream ({\em type=encrypted}) SHOULD be implemented by
+FIF implementations, but may be omitted with an obvious loss of
+functionality (Encryption may be prohibited or restricted in some
+jurisdictions).
+
+The Encrypted Stream is similar to the Image Stream above in that data
+is written out in chunks (although its probably not effective to
+compress these chunks at all). Each chunk is to be encrypted upon
+writing and transparently decrypted using a scheme declared in the
+{\em scheme} attribute. 
+
+The Encrypted Stream may contain any data at all. It is useful
+however, to store an actual FIF volume within the Encrypted
+stream. This provides block level encryption for the contained FIF
+volume. It is recommended that Encrypted Streams containing a FIF
+volume set an attribute ({\em content-type=application/x-fif-volume})
+to allow implementations to automatically recognize volumes. This
+approach is illustrated in Figure \ref{crypted_fif}.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.8\columnwidth \epsffile{crypted.eps}}
+  \caption{Embedding an encrypted FIF volume within an Encrypted Stream.}
+  \label{crypted_fif}
+  \end{center}
+\end{figure}
+
+The result is that a number of FIF volume are used as {\em Container
+Volumes} to provide storage for Encrypted Streams. The main {\em
+Embedded Volume}, which actually contains data is stored within the
+Encrypted Stream, effectively distributed throughout the container
+volumes. Note that the Container Volume may contain several Encrypted
+Streams and therefore contain multiple Encrypted FIF
+Volumes. Container Volumes may contain non encrypted streams as well,
+and may implement different encryption schemes and keys for each
+Encrypted scheme. This effectively allows arbitrary access policies to
+be implemented as only volumes which can be accessed can be merged.
+
+Implementations should create embedded FIF volumes as extensions to
+the container volumes (i.e. with the same UUID). Thus when embedded
+volumes are opened, their streams become automatically viewable as
+part of the evidence set.
+
+\subsection{Encryption Schemes}
+We specify a number of encryption schemes, but extra schemes may be
+defined by the implementation.
+
+\subsubsection{Null Encryption}
+This scheme ({\em scheme=null}) specifies no encryption at all. This
+may be useful for testing an implementation, but obviously provides
+no real security.
+
+\subsubsection{AES-SHA-PSK}
+This scheme ({\em scheme=aes-sha-psk}) uses AES for block level
+encryption, with the following SHA based ESSIV scheme, and Pre-Shared
+Key (passphrase).
+
+When creating a new volume, a master key is generated using the first
+128 bits of a SHA1 hash of the Pre-Shared-Key appended to a 64 bit
+random salt:
+\begin{eqnarray}
+Key_{Master} = \left | SHA1(salt + PSK) \right | _{128}
+\end{eqnarray}
+
+For each chunk, the chunk IV is obtained by taking the first 128 bits
+of the SHA1 hash of the chunk id encoded as a 32 bit little endian
+integer, followed by the master key:
+\begin{eqnarray}
+IV = \left | SHA1(chunk\_id + Key_{Master}) \right | _{128}
+\end{eqnarray}
+
+The block is then encrypted or decrypted using AES with this IV.
+
+Implementations MUST specify the salt as a stream attribute named {\em
+salt} in base 64 encoding. Implementations are free to specify any API
+for passing the Pre-Shared Key, for example the PSK can be specified
+in a configuration file, typed in at the terminal, passed in using
+process environment variables, or encoded within the FIF filename
+itself.
+
+\subsection{Optional features}
+Implementations may implement the following features to simplify the
+interfaces.
+
+\subsubsection{Automated volume loading}
+FIF volumes are effectively independent, as each volume does not need
+to know anything about other volumes. This makes it necessary to
+specify in advance all volumes for the implementation to merge them
+all. In particular it may be necessary to specify encrypted volumes
+(which may not be read if the user has no authorization for the
+Encrypted Stream).
+
+As an optional enhancement FIF specifies a volume attribute named {\em
+volume} (i.e. an attribute present in the top level ``properties''
+segment). This is a target reference (see section
+\ref{target_reference}) for other volumes. 
+Implementations should attempt to open external references (e.g. using
+the {\em file://} convention) before internal references. As new
+volumes are merged their volume attributes must be scanned for
+additional references. Each volume must list all other known volumes
+as volume attributes.
+
+In this way, encrypted volumes, and external volumes can be located
+and found automatically.
 
 
 \section{Implementation Recommendations}
@@ -442,6 +652,82 @@ this. Since all segments from all volumes are merged, streams can be
 split arbitrarily across volumes in any way. It is recommended that
 stream properties be written to each volume to ensure at least some of
 the stream can be used even if some volumes are lost.
+
+\section{Usage Scenarios}
+In this section we describe how a FIF file format may be used in
+various situations. Many of those can be solved using other forensic
+file formats, but often in a more awkward way.
+
+\subsubsection{Rapidly converting a set of DD images}
+Many hardware devices are available to acquire hard disks in the
+fields. These often produce a set of uncompressed images split at a
+certain size. If the images are split at exactly the same size its
+possible to create a FIF archive consisting of a single Overlay
+Stream, with a chunk\_size set to the size of each of the images. The
+images can then be listed in order as external targets (e.g. {\em
+target=file://disk1.dd}). This overlay can be created instantly
+without needing to re-compress any of the images. In addition, digital
+signatures can be generated for the whole stream or for each segment.
+
+\subsubsection{Rapid conversion of EWF file sets}
+Much existing evidence has been acquired using the EWF file
+format. This format, similarly, consists of a series of chunks which
+may be compressed, with interdispersed indexes. A tool such as
+``ewf2fif'' is able to utilize the libewf library to create an Overlay
+stream of the original image without the need to re-compress it. This
+conversion is very quick and the resulting FIF file is very small -
+each volume in the EWF file set is referenced through an external
+target reference, and the Overlay Stream is built as an index of each
+chunk location.
+
+\subsubsection{Acquisition of RAID disks}
+Often disks in a system are grouped into RAID devices, commonly RAID-5
+or RAID-0. Previously, if disks were acquired independently, they
+would need to be analysed using a tool which was able to reassemble
+RAID devices.
+
+With the FIF format, each of the disks can be acquired as a separate
+Image Stream. Finally a tool such as PyFlag may be used to deduce the
+RAID map, which can be appended to the FIF file as a Map Stream. This
+Map Stream can then be opened by any tool without the tool needing to
+have explicit support for RAID reassembling.
+
+\subsubsection{Cryptographic management of evidence}
+A FIF archive may hold multiple encrypted volumes, each in its own
+Encrypted Stream. Each of those streams is encrypted using a different
+master key, and therefore can have different passphrases, and can be
+assigned to different users by encrypting the master key with
+different X509 certificates. Its is also possible for users to create
+non-encrypted volumes within the FIF file.
+
+This can be used to enforce access controls in line with current
+legislative requirements. For example, within the same investigation
+different material is often obtained under different warrants
+(e.g. wiretap authorizations are different from search
+warrants). Therefore, different investigators and analysts need
+different access to the different streams. However, the analysts may
+still store the results of their analysis in an unencrypted form, or
+assign others permissions to decrypt their analysis results, without
+providing access to the underlying data. 
+
+This can be used in sharing meta data (e.g. Map Streams of files of
+interest) between analysts, without needing to provide access to the
+underlying data.
+
+\subsubsection{Forensic Application State}
+Often forensic applications need to store files other than the
+evidence itself - for example, they might need to store internal data,
+annotations, keyword hits etc. Currently these applications store the
+data in a proprietary external file or database. This makes it
+difficult to archive because the evidence itself may become separated
+from the case file.
+
+It is advantageous for these applications to store their state within
+the evidence file itself using a Private Stream. Then when opening the
+evidence file again, the results of their analysis will become
+available.
+
+
 
 \bibliography{IEEEabrv,paper}
 \end{document}
