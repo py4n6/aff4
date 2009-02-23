@@ -318,12 +318,25 @@ super.add as well.
 				   (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
 
+/** This variant is useful when all we have is a class reference
+    (GETCLASS(Foo)) or &__Foo
+*/
+#define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
+  ( class->constructor(							\
+		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
+		      ## __VA_ARGS__) )
+
 #else
 #define CONSTRUCT(class, virt_class, constructor, context, ... )		\
   (class)( class ## _init(), virt_class ## _init(),			\
 	   __ ## class.constructor(					\
 				   (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class)), \
 				   ## __VA_ARGS__) )
+
+#define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
+  ( class->constructor(							\
+		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
+		      ## __VA_ARGS__) )
 
 #endif
 

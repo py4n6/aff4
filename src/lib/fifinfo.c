@@ -42,12 +42,12 @@ void test1() {
     CALL(zip, close);
   };
 
-  PrintError();
   talloc_free(zip);
 };
 
 #define TIMES 1000
 
+/** This tests the cache for reading zip members */
 void test2() {
   // Open the file for reading
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
@@ -73,13 +73,30 @@ void test2() {
   printf("Decompressed foobar %d times in %d mseconds (%f)\n", 
 	 TIMES,  diff,
 	 ((float)diff)/TIMES);
-  PrintError();
+
   talloc_free(fd);
+};
+
+/** We we try to create a new stream */
+void test3() {
+  // Open the file for reading
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
+  // Open the zip file
+  FIFFile fif = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
+  AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image");
+  
 };
 
 int main() {
   ClearError();
   test1();
+  PrintError();
+
   ClearError();
   test2();
+  PrintError();
+
+  ClearError();
+  test3();
+  PrintError();
 };
