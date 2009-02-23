@@ -29,9 +29,12 @@ int main() {
       CALL(out_fd, write, buffer, length);
     };
 
+    // Close the member (finalises the member)
     CALL(out_fd, close);
+    // Close the archive
     CALL(zip, close);
   };
 
   PrintError();
+  talloc_free(zip);
 };

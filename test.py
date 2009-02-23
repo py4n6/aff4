@@ -8,7 +8,7 @@ This test requires the sk python bindings and pyewf bindings because
 we test access speed to each other.
 """
 
-import sk, fif, pyewf, pyaff
+import sk, fif, pyewf
 import time, sys, glob
 
 def test_time(fd):

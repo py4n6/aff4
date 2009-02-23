@@ -13,13 +13,17 @@
 #include <zlib.h>
 #include <time.h>
 
+/** Implementation of FileBackedObject.
+
+FileBackedObject is a FileLikeObject which uses a read file to back
+itself.
+*/
 int close_fd(void *self) {
   FileBackedObject this = (FileBackedObject)self;
   close(this->fd);
   return 0;
 };
 
-/** Implementation of FileBackedObject */
 FileBackedObject FileBackedObject_con(FileBackedObject self, 
 				      char *filename, char mode) {
   int flags;
@@ -270,6 +274,7 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
  error_reason:
     RaiseError(EInvalidParameter, "%s is not a zip file", self->fd->name);
  error:
+    talloc_free(self);
     return NULL;
 };
 
@@ -494,6 +499,8 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
     struct tm *now = localtime(&epoch_time);
     
     cd->magic = 0x2014b50;
+    cd->version_made_by = 0x317;
+    cd->version_needed = 0x14;
     cd->compression_method = compression;
     cd->crc32 = crc32(0L, Z_NULL, 0);
     cd->dosdate = (now->tm_year + 1900 - 1980) << 9 | (now->tm_mon + 1) << 5 | now->tm_mday;
@@ -506,6 +513,7 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
   };
 
   return self;
+
  error:
   talloc_free(self);
   return NULL;
@@ -523,14 +531,16 @@ int ZipFileStream_write(FileLikeObject self, char *buffer, int length) {
 				       (unsigned char*)buffer,
 				       length);
 
+  /** Position our write pointer */
   CALL(this->zinfo->fd, seek, this->zip_offset + self->readptr, SEEK_SET);
   if(this->zinfo->cd_header.compression_method == ZIP_DEFLATE) {
     unsigned char compressed[BUFF_SIZE];
 
-    // Rotate the data through the stream
+    /** Give the buffer to zlib */
     this->strm.next_in = buffer;
     this->strm.avail_in = length;
 
+    /** We spin here until zlib consumed all the data */
     do {
       int ret;
 
@@ -538,16 +548,23 @@ int ZipFileStream_write(FileLikeObject self, char *buffer, int length) {
       this->strm.next_out = compressed;
       
       ret = deflate(&this->strm, Z_NO_FLUSH);
-      result += CALL(this->zinfo->fd, write, (char *)compressed, 
-		     BUFF_SIZE - this->strm.avail_out);
+      ret = CALL(this->zinfo->fd, write, (char *)compressed, 
+		 BUFF_SIZE - this->strm.avail_out);
+      if(ret<0) return ret;
+      result += ret;
     } while(this->strm.avail_out == 0);
 
   } else {
+    /** Without compression, we just write the buffer right away */
     result = CALL(this->zinfo->fd, write, buffer, length);
-  };
-  if(result<0) return result;
+    if(result<0) return result;
+  }; 
 
+  /** Update our compressed size here */
   this->zinfo->cd_header.compress_size += result;
+
+  /** The readptr and the size are advanced by the uncompressed amount
+   */
   self->readptr += length;
   self->size = max(self->size, self->readptr);
   
