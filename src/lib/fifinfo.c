@@ -8,7 +8,7 @@
 int main() {
   ZipFile zip = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, zip, "new_test.zip", 'w');
-  FileBackedObject out_fd;
+  FileLikeObject out_fd;
 
   // Create a new Zip volume for writing
   CALL(zip, create_new_volume, (FileLikeObject)fd);
