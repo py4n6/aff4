@@ -727,6 +727,14 @@ the evidence file itself using a Private Stream. Then when opening the
 evidence file again, the results of their analysis will become
 available.
 
+\subsubsection{Merging of evidence set}
+In this common usage case, Bob, goes on site to image one hard disk,
+while Alice independently images a second hard disk. After returning
+to the office they both realise their images belong to the same
+set. They merge their images, by updating the UUIDs on one of the
+volume set to now belong to the other volume set - the merge is almost
+instantaneous as they only need to write an extra ``properties'' file
+on the merged volumes.
 
 
 \bibliography{IEEEabrv,paper}

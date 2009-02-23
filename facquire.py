@@ -76,7 +76,7 @@ while 1:
         new_name = "%s.%02d.zip" % (args[1], count)
         print "Creating new volume %s" % new_name
         ## Make sure that the old volume knows about the new one:
-        basefif.properties['volume'] = "file:///" + new_name
+        basefif.properties['volume'] = "file://" + new_name
 
         basefif.close()
         basefif.create_new_volume(new_name)

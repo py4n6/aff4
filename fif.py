@@ -1,6 +1,6 @@
 import zipfile, struct, zlib, re
 import time, binascii
-import bisect, os, uuid, sys
+import bisect, os, uuid, sys, sha
 
 ## The version of this implementation of FIF
 VERSION = "FIF1.0"
@@ -175,7 +175,7 @@ class FIFFile(zipfile.ZipFile):
         if type(filenames)==str:
             filenames = [filenames]
             
-        self.file_offsets = {}
+        self.file_offsets = {}        
         self.Store = Store()
         self.zipfiles = []
         self.properties = properties()
@@ -301,7 +301,7 @@ class FIFFile(zipfile.ZipFile):
                     
                 ## Ok we add it to our volume set
                 if type(fileobj)==file:
-                    name = "file:///%s" % os.path.basename(fileobj.name)
+                    name = "file://%s" % os.path.basename(fileobj.name)
                 else:
                     name = fileobj.name
 
@@ -492,7 +492,7 @@ class FIFFile(zipfile.ZipFile):
                 
             self.writestr("properties", self.properties)
             self.flush()
-            
+
             ## Call our base class to close us - this will dump out
             ## the CD
             self.fp.seek(self.readptr)
