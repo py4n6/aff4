@@ -87,6 +87,11 @@ CLASS(ZipInfo, Object)
      // Each ZipInfo object remembers which file it came from:
      FileLikeObject fd;
 
+     // ZipInfo items may hold a cache of the decompressed data - they
+     // belong to the cache list and may hold the data
+     struct list_head cache_list;
+     char *cached_data;
+
      ZipInfo METHOD(ZipInfo, Con, FileLikeObject fd);
 END_CLASS
 
@@ -107,12 +112,19 @@ CLASS(ZipFile, Object)
      */
      ZipInfo *hash_table;
 
+     /** This is a chunk cache. Its a sorted list in order of usage
+	 (newer pages to the front) 
+     */
+     int cache_size;
+     int max_cache_size;
+     ZipInfo cache_head;
+
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, FileLikeObject file);
 
 // Fetch a member as a string - this is suitable for small memebrs
 // only as we allocate memory for it.
-     char * METHOD(ZipFile, read_member, char *filename);
+     int METHOD(ZipFile, read_member, char *filename, char **buffer, int *len);
 
 // This method is called to create a new volume on the FileLikeObject
      void METHOD(ZipFile, create_new_volume, FileLikeObject file);

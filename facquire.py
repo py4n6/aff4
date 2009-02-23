@@ -37,9 +37,9 @@ if os.access(args[1], os.F_OK) and not options.append:
     print "%s already exists - you must specify -a to append to an existing file" % args[1]
     sys.exit(1)
 
-infd = open(args[0],'r')
-mode = 'w'
-if options.append: mode='a'
+infd = open(args[0],'rb')
+mode = 'wb'
+if options.append: mode='ab'
 
 ## Get a handle to the FIF file
 basefif = fiffile = fif.FIFFile()

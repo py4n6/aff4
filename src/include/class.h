@@ -394,6 +394,7 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 extern char _traceback[];
 
 #define ZSTRING_NO_NULL(str) str , (strlen(str))
+#define ZSTRING(str) str , (strlen(str)+1)
 #define RaiseError(t, ...)			\
   do {						\
     snprintf(_traceback, ERROR_BUFFER_SIZE, "%s:%d - %s", __FILE__,	\
