@@ -77,17 +77,79 @@ void test2() {
   talloc_free(fd);
 };
 
-/** We we try to create a new stream */
+#if 0
+/** We try to create a new stream */
 void test3() {
   // Open the file for reading
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
   // Open the zip file
   FIFFile fif = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
-  AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image");
+  AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image", NULL);
   
 };
+#endif
+
+/** This tests the properties classes */
+void test4() {
+  Properties test = CONSTRUCT(Properties, Properties, Con, NULL);
+  Properties i=NULL;
+
+  CALL(test, add, "key", "value", 0);
+  CALL(test, add, "key", "value", 0);
+  CALL(test, add, "key", "something else", 0);
+  CALL(test, add, "key2", "value", 0);
+  CALL(test, parse, "key=foobar\nhello=world\n",100);
+
+  while(1) {
+    char *value=CALL(test, iter_next, &i, "key");
+    if(!value) break;
+    printf("Got value %s\n", value);
+  };
+
+  // Now dump the whole thing:
+  printf("'%s'", CALL(test, str));	 
+
+  talloc_free(test);
+};
+
+/** Test the Image class */
+void test5() {
+  // Make a new zip file
+  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+
+  // Make a new file
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+				  fiffile, "new_test.zip", 'w');
+
+  // Create a new properties object
+  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+
+  FileLikeObject stream;
+  int out_fd = open("/bin/ls", O_RDONLY);
+  char buffer[BUFF_SIZE * 10];
+  int length;
+
+  // Create a new Zip volume for writing
+  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+
+  // Make a new Image stream
+  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
+  while(stream) {
+    length = read(out_fd, buffer, BUFF_SIZE * 10);
+    if(length == 0) break;
+    
+    CALL(stream, write, buffer, length);
+  };
+
+  stream->close(stream);
+  fiffile->super.close((ZipFile)fiffile);
+
+  talloc_free(fiffile);
+};
+
 
 int main() {
+  /*
   ClearError();
   test1();
   PrintError();
@@ -99,4 +161,14 @@ int main() {
   ClearError();
   test3();
   PrintError();
+
+  ClearError();
+  test4();
+  PrintError();
+  */
+  ClearError();
+  test5();
+  PrintError();
+
+  return 0;
 };

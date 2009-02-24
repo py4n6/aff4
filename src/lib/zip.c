@@ -500,12 +500,23 @@ void ZipFile_close(ZipFile self) {
   };
 };
 
+
+/** This is just a convenience function - real simple now */
+void ZipFile_writestr(ZipFile self, char *filename, 
+		      char *data, int len, int compression) {
+  FileLikeObject fd = CALL(self, open_member, filename, 'w', compression);
+
+  CALL(fd, write, data, len);
+  CALL(fd, close);
+};
+
 VIRTUAL(ZipFile, Object)
      VMETHOD(Con) = ZipFile_Con;
      VMETHOD(read_member) = ZipFile_read_member;
      VMETHOD(create_new_volume) = ZipFile_create_new_volume;
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
+     VMETHOD(writestr) = ZipFile_writestr;
 END_VIRTUAL
 
 

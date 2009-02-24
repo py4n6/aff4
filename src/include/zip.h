@@ -4,9 +4,6 @@
 #include "list.h"
 #include <zlib.h>
 
-#define BUFF_SIZE 4096
-
-
 /** These are ZipFile structures */
 struct EndCentralDirectory {
   uint32_t magic;
@@ -140,6 +137,10 @@ CLASS(ZipFile, Object)
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
      void METHOD(ZipFile, close);
+
+// A convenience function for storing a string as a new file
+     void METHOD(ZipFile, writestr, char *filename, char *data, int len, int compression);
+
 END_CLASS
 
 #define ZIP_STORED 0
