@@ -1,83 +1,63 @@
 """
-This test tests the Map stream type's ability to reference more than
-one target stream and repeat. This can be used to create a map for
-RAID components.
+This test creates a Map stream in its own container, which references
+the original image. As per test 2, We use SK to extract a block
+allocation list for the file and make a map stream. However teh map stream
+is stored in testmap.oo.zip
+. We then read the
 
-We use the raid5 test set from PyFlag's testimages corpus.
-
-We first create a FIF archive with 3 streams one for each image. Then
-we build a mapping function. Finally to test the reassembly we use SK
-to copy a file out of the logical disk, and check its hash.
+You should have an image set created as in test2.py
 """
 
-import fif,os,md5,sk, sys
+import sk,fif,sys
 
-FILENAME = "test3.zip"
+FILENAME = '.\\samples\\ntfs1-gen2.00.zip'
+fiffile = fif.FIFFile([FILENAME])
+mapfile = fif.FIFFile()
 
-def build_file():
-    BASEDIR = "/var/tmp/uploads/testimages/raid/linux/d%d.dd"
+def add_map():
 
-    for i in range(1,4):
-        filename = BASEDIR % i
-        fd = fiffile.create_stream_for_writing(stream_name=os.path.basename(filename))
-        infd = open(filename)
-        while 1:
-            data = infd.read(fd.chunksize)
-            if len(data)==0: break
-
-            fd.write(data)
-
-        fd.close()
-
-def make_raid_map():
-    blocksize = 64 * 1024
-    properties = fif.properties()
-    properties['target'] = 'd1.dd'
-    properties['target'] = 'd2.dd'
-    properties['target'] = 'd3.dd'
-    properties['image_period'] = blocksize * 3
-    properties['file_period'] = blocksize * 6
+    images = fiffile.get_images()
+    print images
+    global originalImage
+    originalImage = images[0]
+    fd = fiffile.open_stream(originalImage)
     
-    new_stream = fiffile.create_stream_for_writing(stream_name="RAID",
-                                                   stream_type='Map',
-                                                   properties = properties)
+    fs = sk.skfs(fd)
+    f = fs.open('/RAW/logfile1.txt')
     
-    new_stream.add_point(0,            0,              1)
-    new_stream.add_point(1 * blocksize,0 ,             0)
-    new_stream.add_point(2 * blocksize,1 * blocksize , 2)
-    new_stream.add_point(3 * blocksize,1 * blocksize , 1)
-    new_stream.add_point(4 * blocksize,2 * blocksize , 0)
-    new_stream.add_point(5 * blocksize,2 * blocksize , 2)
+    ## We want to append to the last volume:
+    fiffile.append_volume(FILENAME)
+    count = 0
+    new_name = "%s.%02d.zip" % (".\\samples\\testmap", count)
+    
+    mapfile.create_new_volume(new_name)
+    ## Create a new Map stream
+    new_stream = mapfile.create_stream_for_writing(stream_type = 'aff2:Map',
+                                                   target = originalImage)
+    new_stream.properties["aff2:name"] = "logfile1.txt"
+    mapfile.properties["aff2:containsImage"] = new_stream.getId()
+    global mappedStreamID
+    mappedStreamID = new_stream.getId()
+    print "Mapped ID = %s" % mappedStreamID
+    count = 0
+    block_size = fs.block_size
+    ## Build up the mapping function
+    for block in f.blocks():
+        new_stream.add_point(count * block_size, block * block_size, 0)
+        count += 1
 
-    new_stream.size = 5242880 * 2
+    new_stream.pack()
+    f.seek(0,2)
+    new_stream.size = f.tell()
     new_stream.save_map()
     new_stream.close()
 
-if 1:
-    try:
-        os.unlink(FILENAME)
-    except: pass
+add_map()
 
-    fiffile = fif.FIFFile()
-    fiffile.create_new_volume(FILENAME)
-    build_file()
-    make_raid_map()
-    
-    fiffile.close()
-else:
-    fiffile = fif.FIFFile([FILENAME])
+fiffile.close()
 
-fd = fiffile.open_stream("RAID")
+mapfile.close()
+                                
 
-fs = sk.skfs(fd)
-f = fs.open(inode='13')
-outfd = open("test3.jpg","w")
-m = md5.new()
-while 1:
-    data = f.read(1024*1024)
-    if len(data)==0: break
-    outfd.write(data)
-    m.update(data)
 
-print m.hexdigest()
-assert(m.hexdigest() == 'a4b4ea6e28ce5d6cce3bcff7d132f162')
+

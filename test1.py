@@ -8,7 +8,7 @@ This test requires the sk python bindings and pyewf bindings because
 we test access speed to each other.
 """
 
-import sk, fif, pyewf, pyaff
+import sk, fif, pyewf
 import time, sys, glob
 
 def test_time(fd):
@@ -27,7 +27,7 @@ def test_time(fd):
 def main():
     if 0:
         t=time.time()
-        fd = open("/var/tmp/uploads/testimages/ntfs/ntfs1-gen2.dd")
+        fd = open("./images/ntfs1-gen2.dd", "rb")
         count=test_time(fd)
         print "RAW Read %s in %s" % (count, time.time()-t)
 
@@ -35,14 +35,15 @@ def main():
     if 1:
         t = time.time()
         ## Open all the volumes at once:
-        fiffile = fif.FIFFile("test.00.zip")
-        
-        fd = fiffile.open_stream("data")
+        fiffile = fif.FIFFile(".\\samples\\ntfs1-gen2.00.zip", readwrite=True)
+
+        fd = fiffile.open_stream_by_name("..\\images\\ntfs1-gen2.dd")
+
         count = test_time(fd)
         fiffile.stats()
         print "FIF Read %s in %s" % (count, time.time()-t)
 
-    if 1:
+    if 0:
         t = time.time()
         fd = pyewf.open(["test.E01",])
         count = test_time(fd)

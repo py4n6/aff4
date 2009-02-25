@@ -3,16 +3,23 @@ This test tests the Map stream type - we use SK to extract a block
 allocation list for the file and make a map stream.. We then read the
 streams directly and compare to what it should be.
 
-You should have an image set created as in test.py
+You should have an image of ntfs1-gen2.dd created as per test1 in samples. The
+name should be ntfs1-gen2-mapinside.00.zip
 """
 
 import sk,fif,sys
 
-FILENAME = 'test.00.zip'
-fiffile = fif.FIFFile([FILENAME])
+FILENAME = '.\\samples\\ntfs1-gen2-mapinside.00.zip'
+fiffile = fif.FIFFile([FILENAME], None, False)
+
 
 def add_map():
-    fd = fiffile.open_stream("data")
+
+    images = fiffile.get_images()
+    global originalImage
+    originalImage = images[0]
+    fd = fiffile.open_stream(originalImage)
+    
     fs = sk.skfs(fd)
     f = fs.open('/RAW/logfile1.txt')
     
@@ -20,10 +27,14 @@ def add_map():
     fiffile.append_volume(FILENAME)
 
     ## Create a new Map stream
-    new_stream = fiffile.create_stream_for_writing("logfile1.txt",
-                                                   stream_type = 'Map',
-                                                   target = 'data')
-
+    new_stream = fiffile.create_stream_for_writing(
+                                                   stream_type = 'aff2:Map',
+                                                   target = originalImage)
+    new_stream.properties["aff2:name"] = "logfile1.txt"
+    fiffile.properties["aff2:containsImage"] = new_stream.getId()
+    global mappedStreamID
+    mappedStreamID = new_stream.getId()
+    print "Mapped ID = %s" % mappedStreamID
     count = 0
     block_size = fs.block_size
     ## Build up the mapping function
@@ -40,8 +51,9 @@ def add_map():
 add_map()
 
 ## Now we compare the mapped stream with the stream produced by SK:
-test_fd = fiffile.open_stream("logfile1.txt")
-fd = fiffile.open_stream("data")
+print "Mapped ID = %s" % mappedStreamID
+test_fd = fiffile.open_stream(mappedStreamID)
+fd = fiffile.open_stream(originalImage)
 
 fs = sk.skfs(fd)
 f = fs.open('/RAW/logfile1.txt')

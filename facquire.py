@@ -5,7 +5,7 @@ forensic acquisition and interchange.
 import fif, optparse, sys, os
 
 parser = optparse.OptionParser()
-parser.add_option("-s", "--stream", default="data",
+parser.add_option("-s", "--stream", default="default",
                   help = "Stream name to add to FIF file")
 
 parser.add_option("-a", "--append", default=False,
@@ -37,35 +37,58 @@ if os.access(args[1], os.F_OK) and not options.append:
     print "%s already exists - you must specify -a to append to an existing file" % args[1]
     sys.exit(1)
 
-infd = open(args[0],'rb')
-mode = 'wb'
-if options.append: mode='ab'
+infd = open(args[0],'r')
+mode = 'w'
+if options.append: mode='a'
 
-## Get a handle to the FIF file
-basefif = fiffile = fif.FIFFile()
+stream_source = "%s/source" % (options.stream) 
 
-## Create a new volume
-count = 0
-new_name = "%s.%02d.zip" % (args[1], count)
-print "Creating new volume %s" % new_name
-basefif.create_new_volume(new_name)
+basefif = fiffile = None
+
+
+if options.append:
+    mode='a'
+    filename = args[1]
+    basefif = fiffile = fif.FIFFile([filename])
+    print "Printing basefif.properties"
+    print basefif.properties
+    basefif.append_volume(filename)
+    print "Printing basefif.properties"
+    print basefif.properties
+                                   
+else:
+    ## Get a handle to the FIF file
+    basefif = fiffile = fif.FIFFile()
+    ## Create a new volume
+    count = 0
+    new_name = "%s.%02d.zip" % (args[1], count)
+    print "Creating new volume %s" % new_name
+    basefif.create_new_volume(new_name)
 
 ## Make a new stream on the new volume if needed. Encryption means to
 ## create a Encrypted stream on basefif. We create a new FIFFile and
 ## tell it to make a new volume on the encrypted stream.
 if options.encrypt:
     enc = basefif.create_stream_for_writing(stream_name='crypted',
-                                            stream_type='Encrypted',
-                                            scheme = options.scheme,
-                                            )
-
+                                                stream_type='aff2:Encrypted',
+                                                scheme = options.scheme,
+                                                )
     fiffile = enc.create_new_volume()
 
 ## Now we create a new Image stream on the fiffile to store the image
 ## in:
-stream = fiffile.create_stream_for_writing(stream_name=options.stream,
-                                           stream_type = "Image",
-                                           chunksize = options.chunksize * 1024)
+stream = fiffile.create_stream_for_writing(stream_type = "aff2:Image",
+                                              chunksize = options.chunksize * 1024,
+                                           local_name = infd.name)
+
+# create an information storage stream to store the source information
+infostream = fiffile.create_stream_for_writing(stream_type = "aff2:Info",
+                                              )
+
+stream.properties["aff2:streamSource"] = infostream.getId()
+infostream.properties["aff2:type"] = "aff2:File"
+infostream.properties["aff2:path"] = os.getcwd() + os.sep + infd.name
+basefif.properties["aff2:containsImage"] = stream.getId()
 
 ## This is the maxium volume size - we break up the volume when we
 ## exceed it:
@@ -76,15 +99,15 @@ while 1:
         new_name = "%s.%02d.zip" % (args[1], count)
         print "Creating new volume %s" % new_name
         ## Make sure that the old volume knows about the new one:
-        basefif.properties['volume'] = "file://" + new_name
+        basefif.properties['volume'] = "file:///" + new_name
 
         basefif.close()
         basefif.create_new_volume(new_name)
-        
+
     data = infd.read(1024 * 1024)
     if len(data)==0:
         break
-
+    
     stream.write(data)
 
 ## Close off all the streams in this order
