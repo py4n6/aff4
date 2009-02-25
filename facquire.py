@@ -37,9 +37,9 @@ if os.access(args[1], os.F_OK) and not options.append:
     print "%s already exists - you must specify -a to append to an existing file" % args[1]
     sys.exit(1)
 
-infd = open(args[0],'r')
+source_file_name = args[0]
+infd = open(source_file_name,'rb')
 mode = 'w'
-if options.append: mode='a'
 
 stream_source = "%s/source" % (options.stream) 
 
@@ -99,8 +99,7 @@ while 1:
         new_name = "%s.%02d.zip" % (args[1], count)
         print "Creating new volume %s" % new_name
         ## Make sure that the old volume knows about the new one:
-        basefif.properties['volume'] = "file:///" + new_name
-
+        #basefif.properties['volume'] = "file:///" + new_name
         basefif.close()
         basefif.create_new_volume(new_name)
 

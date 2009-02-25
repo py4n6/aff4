@@ -119,9 +119,20 @@ uint64_t FileLikeObject_tell(FileLikeObject self) {
   return self->readptr;
 };
 
+void FileLikeObject_close(FileLikeObject self) {
+  talloc_free(self);
+};
+void FileBackedObject_close(FileLikeObject self) {
+  FileBackedObject this=(FileBackedObject)self;
+
+  close(this->fd);
+  talloc_free(self);
+};
+
 VIRTUAL(FileLikeObject, Object)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
+     VMETHOD(close) = FileLikeObject_close;
 END_VIRTUAL
 
 /** A file backed object extends FileLikeObject */
@@ -129,6 +140,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(con) = FileBackedObject_con;
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
+     VMETHOD(super.close) = FileBackedObject_close;
 END_VIRTUAL;
 
 int ZipInfo_destructor(void *self) {
@@ -212,6 +224,7 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
   self->max_cache_size = 50;
   self->cache_size = 0;
   self->cache_head = CONSTRUCT(ZipInfo, ZipInfo, Con, self, NULL);
+  self->_didModify = 0;
 
   // If we were not given something to read, we are done.
   if(!fd) return self;
@@ -283,6 +296,10 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
  error:
     talloc_free(self);
     return NULL;
+};
+
+ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
+  return fetch_from_hashtable(self->hash_table, filename);
 };
 
 int ZipFile_read_member(ZipFile self, char *filename, 
@@ -446,6 +463,7 @@ FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
 					     ZipFileStream, Con, self, self,
 					     self->fd, filename, 'w', compression,
 					     self->directory_offset);
+    self->_didModify = 1;
     break;
   };
   case 'r':
@@ -465,16 +483,18 @@ void ZipFile_close(ZipFile self) {
   // place:
   ZipInfo j;
   int i,k=0;
-  ZipFileStream writer = (ZipFileStream)self->writer;
+  ZipFileStream writer = (ZipFileStream)self->fd;
 
   // We iterate over all the ZipInfo hashes we have and see which ones
   // point at this file. We will need to be rewritten back to this
   // file:
-  if(writer) {
+  if(self->_didModify) {
+    CALL(self->fd, seek, self->directory_offset, SEEK_SET);
+
     for(i=0; i<HASH_TABLE_SIZE; i++)
       if(self->hash_table[i]) {
 	list_for_each_entry(j, &self->hash_table[i]->list, list) {
-	  if(j->fd == writer->zinfo->fd) {
+	  if(j->fd == self->fd) {
 	    int length=(char *)&j->cd_header.filename - (char *)&j->cd_header;
 	    // Write the CD file entry
 	    CALL(j->fd, write, (char *)&j->cd_header, length);
@@ -493,9 +513,9 @@ void ZipFile_close(ZipFile self) {
       end.offset_of_cd = self->directory_offset;
       end.total_entries_in_cd_on_disk = k;
       end.total_entries_in_cd = k;
-      end.size_of_cd = CALL(writer->zinfo->fd, tell) - self->directory_offset;
+      end.size_of_cd = CALL(self->fd, tell) - self->directory_offset;
 
-      CALL(writer->zinfo->fd, write, (char *)&end, sizeof(end));
+      CALL(self->fd, write, (char *)&end, sizeof(end));
     };
   };
 };
@@ -517,6 +537,7 @@ VIRTUAL(ZipFile, Object)
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
+     VMETHOD(fetch_ZipInfo) = ZipFile_fetch_ZipInfo;
 END_VIRTUAL
 
 
@@ -658,6 +679,13 @@ void ZipFileStream_close(FileLikeObject self) {
 
   add_to_hash(this->zip, this->zinfo);
   this->zip->directory_offset = CALL(this->zinfo->fd, tell);
+
+  // Remove ourselves from the parent - its safe to open a new stream
+  // now:
+  this->zip->writer = NULL;
+
+  // Free ourselves
+  talloc_free(self);
 };
 
 VIRTUAL(ZipFileStream, FileLikeObject)

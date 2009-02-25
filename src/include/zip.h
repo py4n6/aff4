@@ -63,6 +63,9 @@ CLASS(FileLikeObject, Object)
      int METHOD(FileLikeObject, read, char *buffer, int length);
      int METHOD(FileLikeObject, write, char *buffer, int length);
      uint64_t METHOD(FileLikeObject, tell);
+
+// This closes the FileLikeObject and also frees it - it is not valid
+// to use the FileLikeObject after calling this.
      void METHOD(FileLikeObject, close);
 END_CLASS
 
@@ -116,6 +119,11 @@ CLASS(ZipFile, Object)
      int max_cache_size;
      ZipInfo cache_head;
 
+     /** This flag is set when the ZipFile is modified and needs to be
+	 rewritten on close
+     **/
+     int _didModify;
+
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, FileLikeObject file);
 
@@ -141,6 +149,9 @@ CLASS(ZipFile, Object)
 // A convenience function for storing a string as a new file
      void METHOD(ZipFile, writestr, char *filename, char *data, int len, int compression);
 
+/* A method to fetch the ZipInfo corresponding with a particular
+   filename within the archive */
+     ZipInfo METHOD(ZipFile, fetch_ZipInfo, char *filename);
 END_CLASS
 
 #define ZIP_STORED 0

@@ -77,7 +77,6 @@ void test2() {
   talloc_free(fd);
 };
 
-#if 0
 /** We try to create a new stream */
 void test3() {
   // Open the file for reading
@@ -87,7 +86,6 @@ void test3() {
   AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image", NULL);
   
 };
-#endif
 
 /** This tests the properties classes */
 void test4() {
@@ -149,6 +147,7 @@ void test5() {
 
 
 int main() {
+  talloc_enable_leak_report_full();
   /*
   ClearError();
   test1();

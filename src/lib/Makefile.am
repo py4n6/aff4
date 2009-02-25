@@ -1,4 +1,3 @@
-# Stuff that should be distributed:
 bin_PROGRAMS            = fifinfo
 noinst_LTLIBRARIES       = libfif.la liboo.la libmd5.la libsha1.la
 
@@ -14,4 +13,4 @@ fifinfo_SOURCES         = fifinfo.c
 
 libfif_la_SOURCES       = libfif.c zip.c stringio.c
 libfif_la_LIBADD	= libsha1.la liboo.la libmd5.la
-libfif_la_LDFLAGS       = -lz
+libfif_la_LDFLAGS       = -lz -luuid

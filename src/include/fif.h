@@ -46,6 +46,11 @@ CLASS(AFFFD, FileLikeObject)
 		  Properties props, struct FIFFile *parent);
 END_CLASS
 
+// The segments created by the Image stream are named by segment
+// number with this format.
+#define IMAGE_SEGMENT_NAME_FORMAT "%08d"  /** UUID, segment_id */
+
+
 /** The Image Stream represents an Image in chunks */
 CLASS(Image, AFFFD)
 // Data is divided into segments, when a segment is completed (it
@@ -82,7 +87,11 @@ extern struct dispatch_t dispatch[];
 // This is the main FIF class - it manages the Zip archive
 CLASS(FIFFile, ZipFile)
 
+     /** This is used to get a new stream handler for writing */
      AFFFD METHOD(FIFFile, create_stream_for_writing, char *stream_name,
 		  char *stream_type, Properties props);
+
+     /** Open the stream for reading */
+     AFFFD METHOD(FIFFile, open_stream, char *stream_name);
 END_CLASS
 

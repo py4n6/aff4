@@ -16,6 +16,11 @@ static void init_streams(void) {
   Image_init();
 };
 
+/** Dispatch and construct the stream from its type. Stream will be
+    
+    opened for writing. Callers should repeatadly write on it and must
+    call close() before a new stream can be opened.
+**/
 AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
 					char *stream_type, Properties props) {
   int i;
@@ -108,7 +113,7 @@ int dump_chunk(Image this, char *data, uint32_t length, int force) {
     // can flush it out:
     if(this->chunk_count >= this->chunks_in_segment || force) {
       char tmp[BUFF_SIZE];
-      snprintf(tmp, BUFF_SIZE, "%08d.dd", this->segment_count);
+      snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, this->segment_count);
       this->super.parent->super.writestr((ZipFile)this->super.parent, 
 					 tmp, this->segment_buffer->data, 
 					 this->segment_buffer->size, 
@@ -143,6 +148,57 @@ void Image_close(FileLikeObject self) {
 
   // Write the last chunk
   dump_chunk(this, this->chunk_buffer->data, this->chunk_buffer->size, 1);
+};
+
+/** Reads at most a single chunk and write to result. Return how much
+    data was actually read.
+*/
+static int partial_read(FileLikeObject self, StringIO result, int length) {
+  // which segment is it?
+  int chunk_id = self->readptr / this->chunk_size;
+  int segment_id = chunk_id / this->chunks_in_segment;
+
+  int chunk_offset = self->readptr % this->chunksize;
+  int available_to_read = min(this->chunksize - chunk_offset, length);
+  char *chunk;
+  
+  /** Now we need to figure out where the segment is */
+  char filename[BUFF_SIZE];
+  ZipInfo zip;
+
+  snprintf(filename, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, segment_id);
+  zip = CALL(self->parent, fetch_ZipInfo, filename);
+
+  // Just interpolate NULLs if the segment is missing
+  if(!zip) {
+    char pad[available_to_read];
+
+    memset(pad,0, this->chunksize);
+    RaiseError(ERuntimeError, "Segment %s for offset %lld is missing, padding", 
+	       filename, self->readptr);
+    CALL(result, write, pad, available_to_read);
+  } else {
+    // Fetch the extra field from the zip file header - this is the
+    // chunk index into the segment: 
+    CALL(self->fd, seek, zip->cd_header.relative_offset_local_header,
+	 SEEK_SET);
+    if(CALL(self->fd, read,(char *)&header, read_length) != read_length)
+      goto error;
+
+    
+  chunk = self.read_chunk(chunk_id);
+
+  length = CALL(result, write, chunk + chunk_offset, available_to_read);
+
+  talloc_free(chunk);
+
+  return length;
+};
+
+// Reads from the image stream
+int Image_read(FileLikeObject self, char *buffer, int length) {
+
+
 };
 
 
