@@ -13,6 +13,7 @@ to copy a file out of the logical disk, and check its hash.
 import fif,os,md5,sk, sys
 
 FILENAME = ".\\samples\\raid5.zip"
+targets = []
 
 def build_file():
     BASEDIR = ".\\images\\raid\\linux\\d%d.dd"
@@ -20,6 +21,7 @@ def build_file():
     for i in range(1,4):
         filename = BASEDIR % i
         fd = fiffile.create_stream_for_writing(local_name=filename)
+        targets.append(fd.getId())
         infd = open(filename)
         while 1:
             data = infd.read(fd.chunksize)
@@ -32,15 +34,16 @@ def build_file():
 def make_raid_map():
     blocksize = 64 * 1024
     properties = fif.properties()
-    properties['aff2:target'] = 'd1.dd'
-    properties['aff2:target'] = 'd2.dd'
-    properties['aff2:target'] = 'd3.dd'
+    properties['aff2:target'] = targets[0]
+    properties['aff2:target'] = targets[1]
+    properties['aff2:target'] = targets[2]
     properties['aff2:image_period'] = blocksize * 3
     properties['aff2:file_period'] = blocksize * 6
-    
-    new_stream = fiffile.create_stream_for_writing(stream_name="RAID",
+    print properties    
+    new_stream = fiffile.create_stream_for_writing(local_name="RAID",
                                                    stream_type='aff2:Map',
-                                                   properties = properties)
+                                                   properties = properties,
+                                                   target=targets)
     
     new_stream.add_point(0,            0,              1)
     new_stream.add_point(1 * blocksize,0 ,             0)
@@ -59,16 +62,15 @@ if 1:
     except: pass
 
     fiffile = fif.FIFFile()
-    fiffile.create_new_volume(os.path.basename(FILENAME))
+    fiffile.create_new_volume(FILENAME)
     build_file()
-    #make_raid_map()
+    make_raid_map()
     
     fiffile.close()
 else:
     fiffile = fif.FIFFile([FILENAME])
 
-os.exit(0)
-fd = fiffile.open_stream("RAID")
+fd = fiffile.open_stream_by_name("RAID")
 
 fs = sk.skfs(fd)
 f = fs.open(inode='13')

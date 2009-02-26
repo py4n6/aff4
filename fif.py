@@ -75,7 +75,10 @@ class properties:
         return result[0]
 
     def getarray(self, key):
-        return self.properties[key]
+        try:
+            return self.properties[key]
+        except KeyError:
+            return []
 
     def __setitem__(self, key, value):
         try:
@@ -97,9 +100,16 @@ class properties:
         return result
 
     def items(self):
+        """ FIXME:
+        as the driver architecture makes a habit of taking
+        arguments and turning them into properties, we filter out
+        any property here that is malnamed. This wont work in the future
+        when we move beyond aff2: as a prefix
+        """
         for k,v in self.properties.items():
-            for value in v:
-                yield (k,value)
+            if k.startswith("aff2"):
+                for value in v:
+                    yield (k,value)
                 
     def update(self, p):
         for k,v in p.items():
@@ -193,6 +203,9 @@ class InfoStore:
         return res
     
     def add(self, bag, s, p, o):
+        if type(o) == list:
+            print "ERROR adding (passed array) %s %s %s %s" % (bag, s, p, o)
+            raise RuntimeError("Bad argument")
         index = len(self.quads)
         self.quads.append([bag, s, p, o])
         if bag not in self.bagindex.keys():
@@ -213,7 +226,11 @@ class InfoStore:
 
     def add_properties(self, bag, subject, properties):
         for p,v in properties.items():
-            self.add(bag, subject, p,v)
+            if type(v) == list:
+                for el in v:
+                    self.add(bag, subject, p,el)
+            else:
+                self.add(bag, subject, p,v)
             
     def pretty_print(self):
         result = ''
@@ -607,14 +624,18 @@ class FIFFile(zipfile.ZipFile):
         """ Creates a new volume called filename. """
         ## Close the current file if needed:
         self.close()
-        filename = self.get_canonical_file_name(filename)
+        
         ## Were we given a filename or a file like object?
         try:
             filename.seek
             filename.read
             filename.write
+            filename = self.get_canonical_file_name(filename.name)
+            self.primary_names.append(filename)
         except AttributeError:
             try:
+                filename = self.get_canonical_file_name(filename)
+                self.primary_names.append(filename)
                 filename = open(filename,'r+b')
                 raise RuntimeError("The file %s already exists... I dont want to over write it so you need to remove it first!!!" % filename)
             except IOError:
@@ -622,6 +643,7 @@ class FIFFile(zipfile.ZipFile):
 
         ## Remember it
         self.zipfiles.append(filename)
+        
         self.size = 0
         self.readptr = 0
         
@@ -690,16 +712,21 @@ class FIFFile(zipfile.ZipFile):
             props["aff2:name"] = passedprops.get('local_name')
         
         stream = types[stream_type]
-        
+
+        print props
         new_stream = stream(fd=self, stream_name=id, mode='w',
                             properties=props, **args)
         self.writers.append( new_stream)
+        self.info.add_properties(self.primary_names[0], new_stream.getId(), props)
         return new_stream
 
     def open_stream_by_name(self, stream_name):
         results = []
+        print self.primary_names
         for name in self.primary_names:
-            for result in self.info.query(name, None, "aff2:name", stream_name):
+            queryresult = self.info.query(name, None, "aff2:name", stream_name)
+            print queryresult
+            for result in queryresult:
                 results.append(result)
 
         if len(results) > 1:
@@ -1139,18 +1166,31 @@ class MapDriver(FIFFD):
         
         try:
             count = 0
-            for target in properties.getarray('target'):
+
+            targets = []
+            print properties
+            if len(properties.getarray('target')) > 0:
+                targets = properties.getarray('target')
+                print "Found target"
+            else:   
+                targets = properties.getarray('aff2:target')
+                print "Found aff2:target"
+
+            print targets
+            for target in targets:
                 ## We can not open the target for reading at the same
                 ## time as we are trying to write it - this is
                 ## danegerous and may lead to file corruption.
                 properties['aff2:target'] = target
+                print 
                 if mode!='w':
                     self.targets[count] = fd.open_stream(target)
                     
                 count +=1
+                
         except KeyError:
             pass
-
+        print self.targets
         if count==0:
             raise RuntimeError("You must set some targets of the mapping stream")
 
