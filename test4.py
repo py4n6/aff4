@@ -8,11 +8,11 @@ You should have an image set created as in test.py
 
 import sk,fif,sys
 
-fiffile = fif.FIFFile([".\\samples\\ntfs1-gen2.00.zip"])
-mapfile = fif.FIFFile([".\\samples\\testmap.00.zip"])
+fiffile = fif.FIFFile(["./samples/ntfs1-gen2.00.zip"])
+mapfile = fif.FIFFile(["./samples/testmap.00.zip"])
 
 ## Now we compare the mapped stream with the stream produced by SK:
-image_fd = fiffile.open_stream_by_name("..\\images\\ntfs1-gen2.dd")
+image_fd = fiffile.open_stream_by_name("../images/ntfs1-gen2.dd")
 map_fd = mapfile.open_stream_by_name("logfile1.txt")
 
 fs = sk.skfs(image_fd)

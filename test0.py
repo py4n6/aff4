@@ -10,7 +10,7 @@ import time, sys, glob
 
 def main():
     if 1:
-        fiffile = fif.FIFFile(".\\samples\\mediumimage.00.zip", readwrite=True)
+        fiffile = fif.FIFFile("./samples/mediumimage.00.zip", readwrite=True)
         
         fd = fiffile.open_stream_by_name("mediumimage.dd")
         count = 0

@@ -35,9 +35,9 @@ def main():
     if 1:
         t = time.time()
         ## Open all the volumes at once:
-        fiffile = fif.FIFFile(".\\samples\\ntfs1-gen2.00.zip", readwrite=True)
+        fiffile = fif.FIFFile("./samples/ntfs1-gen2.00.zip", readwrite=True)
 
-        fd = fiffile.open_stream_by_name("..\\images\\ntfs1-gen2.dd")
+        fd = fiffile.open_stream_by_name("../images/ntfs1-gen2.dd")
 
         count = test_time(fd)
         fiffile.stats()

@@ -9,7 +9,7 @@ name should be ntfs1-gen2-mapinside.00.zip
 
 import sk,fif,sys
 
-FILENAME = '.\\samples\\ntfs1-gen2-mapinside.00.zip'
+FILENAME = './samples/ntfs1-gen2-mapinside.00.zip'
 fiffile = fif.FIFFile([FILENAME], None, False)
 
 

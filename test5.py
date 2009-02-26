@@ -12,11 +12,11 @@ to copy a file out of the logical disk, and check its hash.
 
 import fif,os,md5,sk, sys
 
-FILENAME = ".\\samples\\raid5.zip"
+FILENAME = "./samples/raid5.zip"
 targets = []
 
 def build_file():
-    BASEDIR = ".\\images\\raid\\linux\\d%d.dd"
+    BASEDIR = "./images/raid/linux/d%d.dd"
 
     for i in range(1,4):
         filename = BASEDIR % i

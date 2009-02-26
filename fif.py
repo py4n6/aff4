@@ -1,6 +1,6 @@
 import zipfile, struct, zlib, re
 import time, binascii
-import bisect, os, uuid, sys, sha
+import bisect, os, uuid, sys
 
 ## The version of this implementation of FIF
 VERSION = "FIF1.0"
@@ -303,7 +303,7 @@ class FIFFile(zipfile.ZipFile):
             filenames = [filenames]
         self.readwrite = readwrite
         self.primary_names = []
-        self.file_offsets = {}        
+        self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
         self.properties = properties()
@@ -401,6 +401,7 @@ class FIFFile(zipfile.ZipFile):
             zf = zipfile.ZipFile(file,
                              mode='r', allowZip64=True)
             infolist = zf.infolist()
+            zf.close()
             for zinfo in infolist:
                 if zinfo.filename == "properties":
                     #TODO: validate the fif version in the properties
@@ -478,7 +479,7 @@ class FIFFile(zipfile.ZipFile):
                     
                 ## Ok we add it to our volume set
                 if type(fileobj)==file:
-                    name = "file://%s" % os.path.basename(fileobj.name)
+                    name = "file:///%s" % os.path.basename(fileobj.name)
                 else:
                     name = fileobj.name
 
@@ -676,7 +677,7 @@ class FIFFile(zipfile.ZipFile):
             #print "Writing properties file: /properties"
             #print self.properties
             self.flush()
-
+            
             ## Call our base class to close us - this will dump out
             ## the CD
             self.fp.seek(self.readptr)

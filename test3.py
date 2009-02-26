@@ -10,7 +10,7 @@ You should have an image set created as in test2.py
 
 import sk,fif,sys
 
-FILENAME = '.\\samples\\ntfs1-gen2.00.zip'
+FILENAME = './samples/ntfs1-gen2.00.zip'
 fiffile = fif.FIFFile([FILENAME])
 mapfile = fif.FIFFile()
 
@@ -28,7 +28,7 @@ def add_map():
     ## We want to append to the last volume:
     fiffile.append_volume(FILENAME)
     count = 0
-    new_name = "%s.%02d.zip" % (".\\samples\\testmap", count)
+    new_name = "%s.%02d.zip" % ("./samples/testmap", count)
     
     mapfile.create_new_volume(new_name)
     ## Create a new Map stream
