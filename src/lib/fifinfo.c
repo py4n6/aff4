@@ -20,8 +20,10 @@ void test1() {
   // Create a new Zip volume for writing
   CALL(zip, create_new_volume, (FileLikeObject)fd);
 
+  CALL(zip, writestr, "hello", ZSTRING_NO_NULL("hello world"), NULL, 0, 0);
+
   // Open the member foobar for writing
-  out_fd = CALL(zip, open_member, "foobar", 'w',
+  out_fd = CALL(zip, open_member, "foobar", 'w', NULL, 0,
 		ZIP_DEFLATE);
 
   // It worked - now copy /bin/ls into it
@@ -60,11 +62,15 @@ void test2() {
   struct timeval epoch_time;
   struct timeval new_time;
   int diff;
-
+  
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    if(CALL(zip, read_member, "foobar", &result, &length)<0) break;
+    result = CALL(zip, read_member, "foobar", &length);
+    if(!result) {
+      RaiseError(ERuntimeError, "Error reading member");
+      break;
+    };
   };
 
   gettimeofday(&new_time, NULL);
@@ -79,12 +85,13 @@ void test2() {
 
 /** We try to create a new stream */
 void test3() {
+#if 0
   // Open the file for reading
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
   // Open the zip file
   FIFFile fif = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
   AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image", NULL);
-  
+#endif
 };
 
 /** This tests the properties classes */
@@ -96,7 +103,7 @@ void test4() {
   CALL(test, add, "key", "value", 0);
   CALL(test, add, "key", "something else", 0);
   CALL(test, add, "key2", "value", 0);
-  CALL(test, parse, "key=foobar\nhello=world\n",100);
+  CALL(test, parse, ZSTRING_NO_NULL("key=foobar\nhello=world\n"),100);
 
   while(1) {
     char *value=CALL(test, iter_next, &i, "key");
@@ -133,7 +140,7 @@ void test5() {
   // Make a new Image stream
   stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
   while(stream) {
-    length = read(out_fd, buffer, BUFF_SIZE * 10);
+    length = read(out_fd, buffer, 100);
     if(length == 0) break;
     
     CALL(stream, write, buffer, length);
@@ -145,10 +152,45 @@ void test5() {
   talloc_free(fiffile);
 };
 
+#define CHUNK_SIZE 32*1024
+
+/** Test reading of the Image stream */
+void test6() {
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
+  FIFFile fiffile;
+  AFFFD image;
+  int outfd;
+  char buff[CHUNK_SIZE];
+  int length;
+
+  if(!fd) goto error;
+
+  // Make a new zip file
+  fiffile  = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
+  if(!fiffile) goto error;
+
+  image = CALL(fiffile, open_stream, "default");
+  if(!image) goto error;
+
+  outfd = creat("output.dd", 0644);
+  if(outfd<0) goto error;
+
+  while(1) {
+    length = image->super.read((FileLikeObject)image, buff, 10);
+    if(length<=0) break;
+
+    write(outfd, buff, length);
+  };
+
+  close(outfd);
+ error:
+  talloc_free(fd);
+};
+
 
 int main() {
   talloc_enable_leak_report_full();
-  /*
+
   ClearError();
   test1();
   PrintError();
@@ -156,17 +198,21 @@ int main() {
   ClearError();
   test2();
   PrintError();
-
+  /*
   ClearError();
   test3();
   PrintError();
-
+  */
   ClearError();
   test4();
   PrintError();
-  */
+
   ClearError();
   test5();
+  PrintError();
+
+  ClearError();
+  test6();
   PrintError();
 
   return 0;

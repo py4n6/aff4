@@ -28,10 +28,13 @@ CLASS(Properties, Object)
      char *METHOD(Properties, iter_next, Properties *current, char *key);
 
      /** Parses the text file and append to our list */
-     int METHOD(Properties, parse, char *text, uint32_t date);
+     int METHOD(Properties, parse, char *text, uint32_t len, uint32_t date);
 
      /** Dumps the current properties array into a string. Callers own the memory. */
      char *METHOD(Properties, str);
+
+     /** Deletes all occurances of values with the specified keys */
+     void METHOD(Properties, del, char *key);
 END_CLASS
 
 /* A AFFFD is a special FileLikeObject for openning AFF2 streams */
@@ -68,10 +71,14 @@ CLASS(Image, AFFFD)
      StringIO segment_buffer;
      int chunk_count;
 
+     // Chunks are cached here. We cant use the main zip file cache
+     // because the zip file holds the full segment
+     Cache chunk_cache;
+
      int segment_count;
 
      // An array of indexes into the segment where chunks are stored
-     uint32_t *chunk_indexes;
+     int32_t *chunk_indexes;
 
 END_CLASS
 

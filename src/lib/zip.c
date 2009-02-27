@@ -13,6 +13,126 @@
 #include <zlib.h>
 #include <time.h>
 
+/** Implementation of Caches */
+
+/** A destructor on the cache object to automatically unlink up from
+    the lists.
+*/
+int Cache_destructor(void *this) {
+  Cache self = (Cache) this;
+  list_del(&self->cache_list);
+  list_del(&self->hash_list);
+
+  return 0;
+};
+Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
+  self->hash_table_width = hash_table_width;
+  self->max_cache_size = max_cache_size;
+
+  INIT_LIST_HEAD(&self->cache_list);
+  INIT_LIST_HEAD(&self->hash_list);
+
+  // Install our destructor
+  talloc_set_destructor((void *)self, Cache_destructor);
+  return self;
+};
+
+/** Quick and simple */
+unsigned int Cache_hash(Cache self, void *key) {
+  char *name = (char *)key;
+  int len = strlen(name);
+  char result = 0;
+  int i;
+  for(i=0; i<len; i++) 
+    result ^= name[i];
+
+  return result % self->hash_table_width;
+};
+
+int Cache_cmp(Cache self, void *other) {
+  return strcmp((char *)self->key, (char *)other);
+};
+
+void Cache_put(Cache self, void *key, void *data, int data_len) {
+  unsigned int hash;
+  Cache hash_list_head;
+  Cache new_cache;
+  Cache i,j;
+
+  // Check to see if we need to expire something else. We do this
+  // first to avoid the possibility that we migh expire the same key
+  // we are about to add.
+  list_for_each_entry_safe(i, j, &self->cache_list, cache_list) {
+    if(self->cache_size < self->max_cache_size) 
+      break;
+    else {
+      self->cache_size--;
+      talloc_free(i);
+    };
+  };
+
+  if(!self->hash_table)
+    self->hash_table = talloc_array(self, Cache, self->hash_table_width);
+
+  hash = CALL(self, hash, key);
+  hash_list_head = self->hash_table[hash];
+  new_cache = CONSTRUCT(Cache, Cache, Con, self, 0, 0);
+
+  // Take over the data
+  new_cache->key = key;
+  new_cache->data = data;
+  new_cache->data_len = data_len;
+  talloc_steal(new_cache, key);
+  talloc_steal(new_cache, data);
+
+
+  if(!hash_list_head) {
+    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 0, 0);
+  };
+
+  list_add_tail(&new_cache->hash_list, &hash_list_head->hash_list);
+  list_add_tail(&new_cache->cache_list, &self->cache_list);
+  self->cache_size ++;
+ 
+};
+
+Cache Cache_get(Cache self, void *key) {
+  int hash;
+  Cache hash_list_head;
+  Cache i;
+
+  hash = CALL(self, hash, key);
+  if(!self->hash_table) return NULL;
+
+  hash_list_head = self->hash_table[hash];
+
+  // There are 2 lists each Cache object is on - the hash list is a
+  // shorter list at the end of each hash table slot, while the cache
+  // list is a big list of all objects in the cache. We find the
+  // object using the hash list, but expire the object based on the
+  // cache list which includes all objects in the case.
+  if(!hash_list_head) return NULL;
+  list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
+    if(!CALL(i, cmp, key)) {
+      // Thats it - we remove it from where it in and put it on the
+      // tail:
+      list_del(&i->cache_list);
+      list_add_tail(&i->cache_list, &self->hash_table[hash]->cache_list);
+      return i;
+    };
+  };
+  
+  return NULL;
+};
+
+VIRTUAL(Cache, Object)
+     VMETHOD(Con) = Cache_Con;
+     VMETHOD(put) = Cache_put;
+     VMETHOD(cmp) = Cache_cmp;
+     VMETHOD(hash) = Cache_hash;
+     VMETHOD(get) = Cache_get;
+END_VIRTUAL
+
 /** Implementation of FileBackedObject.
 
 FileBackedObject is a FileLikeObject which uses a read file to back
@@ -83,7 +203,7 @@ uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
     read some data from our file into the buffer (which is assumed to
     be large enough).
 **/
-int FileBackedObject_read(FileLikeObject self, char *buffer, int length) {
+int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int length) {
   FileBackedObject this = (FileBackedObject)self;
   int result;
 
@@ -91,6 +211,7 @@ int FileBackedObject_read(FileLikeObject self, char *buffer, int length) {
   result = read(this->fd, buffer, length);
   if(result < 0) {
     RaiseError(EIOError, "Unable to read from %s (%s)", self->name, strerror(errno));
+    return -1;
   };
 
   self->readptr += result;
@@ -98,7 +219,7 @@ int FileBackedObject_read(FileLikeObject self, char *buffer, int length) {
   return result;
 };
 
-int FileBackedObject_write(FileLikeObject self, char *buffer, int length) {
+int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int length) {
   FileBackedObject this = (FileBackedObject)self;
   int result;
 
@@ -143,20 +264,9 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(super.close) = FileBackedObject_close;
 END_VIRTUAL;
 
-int ZipInfo_destructor(void *self) {
-  ZipInfo this = (ZipInfo)self;
-
-  // Make sure we remove ourselves from the list when we get freed
-  list_del(&this->list);
-
-  return 0;
-};
-
 /** Now implement Zip file support */
 ZipInfo ZipInfo_Con(ZipInfo self, FileLikeObject fd) {
   self->fd = fd;
-  INIT_LIST_HEAD(&self->list);
-  INIT_LIST_HEAD(&self->cache_list);
 
   return self;
 };
@@ -165,65 +275,21 @@ VIRTUAL(ZipInfo, Object)
      VMETHOD(Con) = ZipInfo_Con;
 END_VIRTUAL
 
-#define HASH_TABLE_SIZE 256
-
-/** Quick and simple */
-int hash(char *name, int len) {
-  char result = 0;
-  int i;
-  for(i=0; i<len; i++) 
-    result ^= name[i];
-
-  return result % HASH_TABLE_SIZE;
-};
-
-// Add the ZipInfo class into our internal hash table... Note that we
-// also steal the memory so callers should not free it.
-void add_to_hash(ZipFile self, ZipInfo zip) {
-  int index = hash(zip->cd_header.filename, zip->cd_header.file_name_length);
-
-  if(!self->hash_table[index]) {
-    self->hash_table[index] = CONSTRUCT(ZipInfo, ZipInfo, Con, self->hash_table, NULL);
-  };
-
-  // Just add to the list for now
-  list_add_tail(&zip->list, &self->hash_table[index]->list);
-
-  // Steal the zip
-  talloc_steal(self->hash_table, zip);
-};
-
-/** Fetch the ZipInfo from the hashtable - note that callers no longer
-    own it - they must not free it.
-*/
-ZipInfo fetch_from_hashtable(ZipInfo *hashtable, char *filename) {
-  ZipInfo zip;
-  int index = hash(ZSTRING(filename));
-
-  if(hashtable[index]) {
-    list_for_each_entry(zip, &(hashtable[index]->list), list) {
-      if(zip->cd_header.filename && !memcmp(filename, zip->cd_header.filename,
-					    zip->cd_header.file_name_length))
-	return zip;
-    };
-  };
-
-  RaiseError(EInvalidParameter, "Archive member %s not found", filename);
-  return NULL;
-};
-
 ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
   char buffer[4096];
   int length,i;
   self->fd = fd;
 
-  // Initialise the hash table:
-  self->hash_table = talloc_array(self, ZipInfo, HASH_TABLE_SIZE);
+  // A max_cache_size of 1e6 ensure that we do not expire any ZipInfo
+  // objects.
+  self->zipinfo_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 1E06);
 
-  // Make a new cache
-  self->max_cache_size = 50;
-  self->cache_size = 0;
-  self->cache_head = CONSTRUCT(ZipInfo, ZipInfo, Con, self, NULL);
+  // This cache is used to maintain entire zip archive members
+  self->file_data_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, CACHE_SIZE);
+  
+  // And this is the cache for the extra field
+  self->extra_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, CACHE_SIZE);
+
   self->_didModify = 0;
 
   // If we were not given something to read, we are done.
@@ -252,18 +318,16 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
 							    sizeof(*self->end));
     int i=0;
 
-    // The central directory starts at the current offset less the
-    // specified offset
+    // Find the CD
     CALL(self->fd, seek, self->end->offset_of_cd, SEEK_SET);
 
     while(i<self->end->total_entries_in_cd_on_disk) {
       ZipInfo zip = CONSTRUCT(ZipInfo, ZipInfo, Con, self, self->fd);
       // The length of the struct up to the filename
-      int length = ((char *)&zip->cd_header.filename - 
-		    (char *)&zip->cd_header);
 
       // Only read up to the filename member
-      if(length != CALL(self->fd, read, (char *)&zip->cd_header, length))
+      if(sizeof(struct CDFileHeader) != 
+	 CALL(self->fd, read, (char *)&zip->cd_header, sizeof(struct CDFileHeader)))
 	goto error_reason;
 
       // Does the magic match?
@@ -271,14 +335,15 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
 	goto error_reason;
 
       // Now read the filename
-      length = zip->cd_header.file_name_length;
-      zip->cd_header.filename = (char *)talloc_size(self, length);
+      zip->filename = talloc_array(zip, char, zip->cd_header.file_name_length+1);
 						
-      if(CALL(self->fd, read, zip->cd_header.filename, length) == 0)
+      if(CALL(self->fd, read, zip->filename,
+	      zip->cd_header.file_name_length) == 0)
 	goto error_reason;
 
-      // Add to our hashtable
-      add_to_hash(self, zip);
+      // Add to our hashtable (we need the strdup because the filename
+      // will be stolen.
+      CALL(self->zipinfo_cache, put, zip->filename, zip, sizeof(*zip));
 
       // Skip the comments - we dont care about them
       CALL(self->fd, seek, zip->cd_header.extra_field_len + 
@@ -299,34 +364,45 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
 };
 
 ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
-  return fetch_from_hashtable(self->hash_table, filename);
+  Cache result = CALL(self->zipinfo_cache, get, (void *)filename);
+  if(!result) {
+    return NULL;
+  };
+
+  return (ZipInfo)result->data;
 };
 
-int ZipFile_read_member(ZipFile self, char *filename, 
-			char **buffer, int *length) {
-  ZipInfo zip = fetch_from_hashtable(self->hash_table, filename);
-  char *result;
+/*** NOTE - The buffer callers receive will not be owned by the
+     callers. Callers should never free it nor steal it. The buffer is
+     owned by the cache system and callers merely borrow a reference
+     to it. length will be adjusted to the size of the buffer.
+*/
+char *ZipFile_read_member(ZipFile self, char *filename, 
+			  int *length) {
+  ZipInfo zip = CALL(self, fetch_ZipInfo, filename);
   char compression_method;
   struct ZipFileHeader header;
   int read_length = sizeof(header);
+  Cache cached_data;
+  char *buffer;
+
   if(!zip) return -1;
 
-  // We know how large we would like the buffer so we make it that big
-  if(*length < zip->cd_header.file_size) {
-    *buffer = talloc_realloc_size(self, *buffer, zip->cd_header.file_size);
-  };
-
-  *length = zip->cd_header.file_size;
-
   // Does this ZipInfo have a cache? If so just return that
-  if(zip->cached_data) {
-    // Move it to the tail of the list
-    list_del(&zip->cache_list);
-    list_add_tail(&zip->cache_list, &self->cache_head->cache_list);
+  cached_data = CALL(self->file_data_cache, get, filename); 
+  if(cached_data) {
+    *length = cached_data->data_len;
+    buffer = cached_data->data;
 
-    memcpy(*buffer, zip->cached_data, *length);
-    return *length;
+    return buffer;
   };
+
+  // Ok we have to read it the long way:
+
+  // We know how large we would like the buffer so we make it that big
+  // (bit extra for null termination).
+  buffer = talloc_size(self, zip->cd_header.file_size + 2);
+  *length = zip->cd_header.file_size;
 
   compression_method = zip->cd_header.compression_method;
 
@@ -338,17 +414,18 @@ int ZipFile_read_member(ZipFile self, char *filename,
   
   // Check the magic
   if(header.magic != 0x4034b50) {
-    RaiseError(ERuntimeError, "Unable to file file header");
+    RaiseError(ERuntimeError, "Unable to find file header");
     goto error;
   };
 
-  // Skip the filename and extra data
-  CALL(self->fd, seek, header.file_name_length + header.extra_field_len, SEEK_CUR);
+  // Skip the filename
+  CALL(self->fd, seek, header.file_name_length + 
+       header.extra_field_len, SEEK_CUR);
   
   if(compression_method == ZIP_DEFLATE) {
     int compressed_length = zip->cd_header.compress_size;
     int uncompressed_length = *length;
-    char *tmp = talloc_size(*buffer, compressed_length);
+    char *tmp = talloc_size(buffer, compressed_length);
     z_stream strm;
 
     memset(&strm, 0, sizeof(strm));
@@ -361,7 +438,7 @@ int ZipFile_read_member(ZipFile self, char *filename,
     /** Set up our decompressor */
     strm.next_in = (unsigned char *)tmp;
     strm.avail_in = compressed_length;
-    strm.next_out = (unsigned char *)*buffer;
+    strm.next_out = (unsigned char *)buffer;
     strm.avail_out = uncompressed_length;
     strm.zalloc = Z_NULL;
     strm.zfree = Z_NULL;
@@ -379,7 +456,7 @@ int ZipFile_read_member(ZipFile self, char *filename,
 
     inflateEnd(&strm);
   } else if(compression_method == ZIP_STORED) {
-    if(CALL(self->fd, read, *buffer, *length) != *length) {
+    if(CALL(self->fd, read, buffer, *length) != *length) {
       RaiseError(EIOError, "Unable to read %d bytes from %s@%lld", *length, 
 		 self->fd->name, self->fd->readptr);
       goto error;
@@ -393,36 +470,21 @@ int ZipFile_read_member(ZipFile self, char *filename,
   // Here we have a good buffer - now calculate the crc32
   {
     uLong crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, (unsigned char *)*buffer,
+    crc = crc32(crc, (unsigned char *)buffer,
 		zip->cd_header.file_size);
 
     if(crc != zip->cd_header.crc32) {
       RaiseError(EIOError, 
-		 "CRC not matched on decompressed file %s", zip->cd_header.filename);
+		 "CRC not matched on decompressed file %s", zip->filename);
       goto error;
     };
   };
 
   /** Ok we get here we have good data - so we cache it */
-  zip->cached_data = talloc_memdup(zip, *buffer, *length);
-  list_add_tail(&zip->cache_list, &self->cache_head->cache_list);
-  self->cache_size++;
-  /** Is it time to expire the cache? Expire the cache from the
-      front. This ensures we expire the oldest caches first.
-  */
-  while(self->cache_size >= self->max_cache_size) {
-    ZipInfo first;
-    list_next(first, &self->cache_head->cache_list, cache_list);
+  CALL(self->file_data_cache, put, talloc_strdup(buffer, zip->filename),
+       buffer, *length);
 
-    list_del(&first->cache_list);
-    if(first->cached_data) {
-      talloc_free(first->cached_data);
-      first->cached_data = NULL;
-    };
-    self->cache_size--;
-  };
-
-  return *length;
+  return buffer;
  error:
   return NULL;
 };
@@ -436,6 +498,7 @@ void ZipFile_create_new_volume(ZipFile self, FileLikeObject file) {
 };
 
 FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
+				   char *extra, int extra_field_len,
 				   int compression) {
   switch(mode) {
   case 'w': {
@@ -455,9 +518,11 @@ FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
     header.flags = 0x08;
     header.compression_method = compression;
     header.file_name_length = strlen(filename);
+    header.extra_field_len = extra_field_len;
     
     CALL(self->fd, write,(char *)&header, sizeof(header));
     CALL(self->fd, write, ZSTRING_NO_NULL(filename));
+    CALL(self->fd, write, extra, extra_field_len);
 
     self->writer = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 					     ZipFileStream, Con, self, self,
@@ -466,10 +531,39 @@ FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
     self->_didModify = 1;
     break;
   };
-  case 'r':
+  case 'r': {
+    ZipInfo zip;
+    struct ZipFileHeader header;
+    char *extra;
+    char *filename;
+
+    if(compression != ZIP_DEFLATE) {
+      RaiseError(ERuntimeError, "Unable to open seekable member for compressed members.");
+      break;
+    };
+
+    zip = CALL(self, fetch_ZipInfo, filename);
+    CALL(self->fd, seek, zip->cd_header.relative_offset_local_header, SEEK_SET);
     
+    // Read the file header
+    CALL(self->fd, read, (char *)&header, sizeof(header));
 
+    // Skip the filename:
+    filename = talloc_size(self, header.file_name_length);
+    CALL(self->fd, read, filename, header.file_name_length);
 
+    // Read the extra field so we can cache it
+    extra = talloc_size(self, header.extra_field_len);
+    CALL(self->fd, read, extra, header.extra_field_len);
+
+    // Cache it
+    CALL(self->extra_cache, put, filename, extra, header.extra_field_len);
+
+    self->writer = (FileLikeObject)CONSTRUCT(ZipFileStream, 
+					     ZipFileStream, Con, self, self,
+					     self->fd, filename, 'r', compression,
+					     self->directory_offset);    
+  };
   default:
     RaiseError(ERuntimeError, "Unsupported mode '%c'", mode);
     return NULL;
@@ -481,50 +575,50 @@ FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
 void ZipFile_close(ZipFile self) {
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
-  ZipInfo j;
-  int i,k=0;
-  ZipFileStream writer = (ZipFileStream)self->fd;
+  Cache i;
+  int k=0;
 
   // We iterate over all the ZipInfo hashes we have and see which ones
   // point at this file. We will need to be rewritten back to this
   // file:
   if(self->_didModify) {
-    CALL(self->fd, seek, self->directory_offset, SEEK_SET);
+    struct EndCentralDirectory end;
 
-    for(i=0; i<HASH_TABLE_SIZE; i++)
-      if(self->hash_table[i]) {
-	list_for_each_entry(j, &self->hash_table[i]->list, list) {
-	  if(j->fd == self->fd) {
-	    int length=(char *)&j->cd_header.filename - (char *)&j->cd_header;
-	    // Write the CD file entry
-	    CALL(j->fd, write, (char *)&j->cd_header, length);
-	    CALL(j->fd, write, j->cd_header.filename,
-		 j->cd_header.file_name_length);
-	    k++;
-	  };
-	};
+    CALL(self->fd, seek, self->directory_offset, SEEK_SET);
+    
+    // We rely on the fact that zipinfo_cache does not expire so we
+    // can iterate over all ZipInfos by running over the cache_list
+    list_for_each_entry(i, &self->zipinfo_cache->cache_list, cache_list) {
+      ZipInfo j = (ZipInfo)i->data;
+
+      // Its stored in this volume
+      if(j->fd == self->fd) {
+	// Write the CD file entry
+	CALL(j->fd, write, (char *)&j->cd_header, sizeof(j->cd_header));
+	CALL(j->fd, write, ZSTRING_NO_NULL(j->filename));
+	k++;
       };
+    };
 
     // Now write an end of central directory:
-    {
-      struct EndCentralDirectory end;
-      memset(&end, 0, sizeof(end));
-      end.magic = 0x6054b50;
-      end.offset_of_cd = self->directory_offset;
-      end.total_entries_in_cd_on_disk = k;
-      end.total_entries_in_cd = k;
-      end.size_of_cd = CALL(self->fd, tell) - self->directory_offset;
-
-      CALL(self->fd, write, (char *)&end, sizeof(end));
-    };
+    
+    memset(&end, 0, sizeof(end));
+    end.magic = 0x6054b50;
+    end.offset_of_cd = self->directory_offset;
+    end.total_entries_in_cd_on_disk = k;
+    end.total_entries_in_cd = k;
+    end.size_of_cd = CALL(self->fd, tell) - self->directory_offset;
+    
+    CALL(self->fd, write, (char *)&end, sizeof(end));
   };
 };
 
-
 /** This is just a convenience function - real simple now */
 void ZipFile_writestr(ZipFile self, char *filename, 
-		      char *data, int len, int compression) {
-  FileLikeObject fd = CALL(self, open_member, filename, 'w', compression);
+		      char *data, int len, char *extra, int extra_len, 
+		      int compression) {
+  FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
+			   compression);
 
   CALL(fd, write, data, len);
   CALL(fd, close);
@@ -548,7 +642,7 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
   self->zip = zip;
   self->mode = mode;
 
-  if(mode=='w') {
+  if(mode=='w' && compression == ZIP_DEFLATE) {
     // Initialise the stream compressor
     memset(&self->strm, 0, sizeof(self->strm));
     self->strm.next_in = talloc_size(self, BUFF_SIZE);
@@ -578,7 +672,7 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
     cd->dosdate = (now->tm_year + 1900 - 1980) << 9 | (now->tm_mon + 1) << 5 | now->tm_mday;
     cd->dostime = now->tm_hour << 11 | now->tm_min << 5 | now->tm_sec / 2;
     cd->file_name_length = strlen(filename);
-    cd->filename = talloc_strdup(self->zinfo, filename);
+    self->zinfo->filename = talloc_strdup(self->zinfo, filename);
     cd->relative_offset_local_header = header_offset;
     cd->file_size = 0;
     cd->compress_size = 0;
@@ -594,7 +688,7 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
 /**
    This zlib trickery comes from http://www.zlib.net/zlib_how.html
 **/
-int ZipFileStream_write(FileLikeObject self, char *buffer, int length) {
+int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
 
@@ -609,7 +703,7 @@ int ZipFileStream_write(FileLikeObject self, char *buffer, int length) {
     unsigned char compressed[BUFF_SIZE];
 
     /** Give the buffer to zlib */
-    this->strm.next_in = buffer;
+    this->strm.next_in = (unsigned char *)buffer;
     this->strm.avail_in = length;
 
     /** We spin here until zlib consumed all the data */
@@ -677,7 +771,11 @@ void ZipFileStream_close(FileLikeObject self) {
   CALL(this->zinfo->fd, write, (char *)&this->zinfo->cd_header.file_size,
        sizeof(uint32_t));
 
-  add_to_hash(this->zip, this->zinfo);
+  // Now the zinfo is complete we can add it to the volume cache:
+  CALL(this->zip->zipinfo_cache, put, 
+       this->zinfo->filename, this->zinfo, sizeof(*this->zinfo));
+
+  // Make this is the point where we will be writing the next file.
   this->zip->directory_offset = CALL(this->zinfo->fd, tell);
 
   // Remove ourselves from the parent - its safe to open a new stream

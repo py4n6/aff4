@@ -10,11 +10,11 @@ StringIO StringIO_constructor(StringIO self) {
   return self;
 };
 
-int StringIO_write(StringIO self,char *data, int len) {
+int StringIO_write(StringIO self,char *data, unsigned int len) {
   if(self->readptr+len > self->size) {
     self->size = self->readptr + len;
     
-    self->data = talloc_realloc_size(self,self->data,self->size+1);
+    self->data = talloc_realloc_size(self,self->data,self->size + 10);
   };
   
   memcpy(self->data+self->readptr,data,len);

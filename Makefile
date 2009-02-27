@@ -1,6 +1,6 @@
 
 test1:
-	python facquire.py -S10 ntfs1-gen2.dd test
+	python facquire.py -S10 images/ntfs1-gen2.dd samples/mediumimage
 
 clean:
-	rm test*zip
+	rm samples/test*zip
