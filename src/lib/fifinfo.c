@@ -176,13 +176,15 @@ void test6() {
   if(outfd<0) goto error;
 
   while(1) {
-    length = image->super.read((FileLikeObject)image, buff, 10);
+    length = image->super.read((FileLikeObject)image, buff, 1);
     if(length<=0) break;
 
     write(outfd, buff, length);
   };
 
   close(outfd);
+
+  exit(0);
  error:
   talloc_free(fd);
 };

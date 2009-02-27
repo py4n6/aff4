@@ -290,7 +290,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   int uncompressed_length=this->chunk_size + 1024;
 
   /** Now we need to figure out where the segment is */
-  char filename[BUFF_SIZE];
+  char *filename;
   ZipInfo zip;
 
   /** This holds the index into the segment of all the chunks.
@@ -321,31 +321,29 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   uncompressed_chunk = talloc_size(self, uncompressed_length);
 
   // What is the segment name?
-  snprintf(filename, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, segment_id);
+  filename = talloc_asprintf(self, IMAGE_SEGMENT_NAME_FORMAT, segment_id);
 
   // We are only after the extra field of this segment - if thats
   // already cached we dont need to re-read it:
   extra = CALL(this->super.parent->super.extra_cache, get, filename);
 
+  // Get the ZipInfo struct for this filename
+  zip = this->super.parent->super.fetch_ZipInfo((ZipFile)this->super.parent,
+						filename);
+  
+  // Just interpolate NULLs if the segment is missing
+  if(!zip) {
+    RaiseError(ERuntimeError, "Segment %s for offset %lld is missing, padding", 
+	       filename, self->readptr);
+    goto error;
+  };
+  
   // Is the extra cached? If so that is the chunk index
   if(extra) {    
     chunk_index = (int32_t *)extra->data;
 
     // No - we have to do it the slow way
   } else {
-    char *filename;
-
-    // Get the ZipInfo struct for this filename
-    zip = this->super.parent->super.fetch_ZipInfo((ZipFile)this->super.parent,
-						  filename);
-    
-    // Just interpolate NULLs if the segment is missing
-    if(!zip) {
-      RaiseError(ERuntimeError, "Segment %s for offset %lld is missing, padding", 
-		 filename, self->readptr);
-      goto error;
-    };
-
     // Fetch the extra field from the zip file header - this is the
     // chunk index into the segment: 
     CALL(zip->fd, seek, zip->cd_header.relative_offset_local_header,
@@ -363,7 +361,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     
     // Read the filename (A bit extra allocation for null
     // termination).
-    filename = talloc_size(self, header.file_name_length + 2);
+    filename = talloc_realloc(self, filename, char, header.file_name_length + 2);
     CALL(zip->fd, read, filename, header.file_name_length);
     
     // Check its what we expected - Zip files may have inconsistent
