@@ -18,14 +18,14 @@
 /** A destructor on the cache object to automatically unlink up from
     the lists.
 */
-int Cache_destructor(void *this) {
+static int Cache_destructor(void *this) {
   Cache self = (Cache) this;
   list_del(&self->cache_list);
   list_del(&self->hash_list);
 
   return 0;
 };
-Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
+static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
   self->hash_table_width = hash_table_width;
   self->max_cache_size = max_cache_size;
 
@@ -38,7 +38,7 @@ Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 };
 
 /** Quick and simple */
-unsigned int Cache_hash(Cache self, void *key) {
+static unsigned int Cache_hash(Cache self, void *key) {
   char *name = (char *)key;
   int len = strlen(name);
   char result = 0;
@@ -49,11 +49,11 @@ unsigned int Cache_hash(Cache self, void *key) {
   return result % self->hash_table_width;
 };
 
-int Cache_cmp(Cache self, void *other) {
+static int Cache_cmp(Cache self, void *other) {
   return strcmp((char *)self->key, (char *)other);
 };
 
-void Cache_put(Cache self, void *key, void *data, int data_len) {
+static void Cache_put(Cache self, void *key, void *data, int data_len) {
   unsigned int hash;
   Cache hash_list_head;
   Cache new_cache;
@@ -96,7 +96,7 @@ void Cache_put(Cache self, void *key, void *data, int data_len) {
  
 };
 
-Cache Cache_get(Cache self, void *key) {
+static Cache Cache_get(Cache self, void *key) {
   int hash;
   Cache hash_list_head;
   Cache i;
@@ -138,13 +138,13 @@ END_VIRTUAL
 FileBackedObject is a FileLikeObject which uses a read file to back
 itself.
 */
-int close_fd(void *self) {
+static int close_fd(void *self) {
   FileBackedObject this = (FileBackedObject)self;
   close(this->fd);
   return 0;
 };
 
-FileBackedObject FileBackedObject_con(FileBackedObject self, 
+static FileBackedObject FileBackedObject_con(FileBackedObject self, 
 				      char *filename, char mode) {
   int flags;
 
@@ -179,7 +179,7 @@ FileBackedObject FileBackedObject_con(FileBackedObject self,
   return self;
 };
 
-uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
+static uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
   if(whence==SEEK_SET) {
     self->readptr = offset;
   } else if(whence==SEEK_CUR) {
@@ -203,7 +203,7 @@ uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
     read some data from our file into the buffer (which is assumed to
     be large enough).
 **/
-int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int length) {
+static int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int length) {
   FileBackedObject this = (FileBackedObject)self;
   int result;
 
@@ -219,7 +219,7 @@ int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int l
   return result;
 };
 
-int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int length) {
+static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int length) {
   FileBackedObject this = (FileBackedObject)self;
   int result;
 
@@ -236,14 +236,14 @@ int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int 
   return result;
 };
 
-uint64_t FileLikeObject_tell(FileLikeObject self) {
+static uint64_t FileLikeObject_tell(FileLikeObject self) {
   return self->readptr;
 };
 
-void FileLikeObject_close(FileLikeObject self) {
+static void FileLikeObject_close(FileLikeObject self) {
   talloc_free(self);
 };
-void FileBackedObject_close(FileLikeObject self) {
+static void FileBackedObject_close(FileLikeObject self) {
   FileBackedObject this=(FileBackedObject)self;
 
   close(this->fd);
@@ -265,7 +265,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
 END_VIRTUAL;
 
 /** Now implement Zip file support */
-ZipInfo ZipInfo_Con(ZipInfo self, FileLikeObject fd) {
+static ZipInfo ZipInfo_Con(ZipInfo self, FileLikeObject fd) {
   self->fd = fd;
 
   return self;
@@ -275,7 +275,7 @@ VIRTUAL(ZipInfo, Object)
      VMETHOD(Con) = ZipInfo_Con;
 END_VIRTUAL
 
-ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
+static ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
   char buffer[4096];
   int length,i;
   self->fd = fd;
@@ -363,7 +363,7 @@ ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
     return NULL;
 };
 
-ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
+static ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
   Cache result = CALL(self->zipinfo_cache, get, (void *)filename);
   if(!result) {
     return NULL;
@@ -377,7 +377,7 @@ ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
      owned by the cache system and callers merely borrow a reference
      to it. length will be adjusted to the size of the buffer.
 */
-char *ZipFile_read_member(ZipFile self, char *filename, 
+static char *ZipFile_read_member(ZipFile self, char *filename, 
 			  int *length) {
   ZipInfo zip = CALL(self, fetch_ZipInfo, filename);
   char compression_method;
@@ -386,7 +386,7 @@ char *ZipFile_read_member(ZipFile self, char *filename,
   Cache cached_data;
   char *buffer;
 
-  if(!zip) return -1;
+  if(!zip) return NULL;
 
   // Does this ZipInfo have a cache? If so just return that
   cached_data = CALL(self->file_data_cache, get, filename); 
@@ -490,14 +490,17 @@ char *ZipFile_read_member(ZipFile self, char *filename,
 };
 
 /** file must be opened for writing */
-void ZipFile_create_new_volume(ZipFile self, FileLikeObject file) {
+static void ZipFile_create_new_volume(ZipFile self, FileLikeObject file) {
   // FIXME - close the old FD if thats still open
-  //if(self->fd) ...
+  if(self->fd) CALL(self, close);
   
+  self->directory_offset=CALL(file, tell);
   self->fd = file;
+  // We own it now.
+  talloc_steal(self, file);
 };
 
-FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
+static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
 				   char *extra, int extra_field_len,
 				   int compression) {
   switch(mode) {
@@ -572,7 +575,7 @@ FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
   return self->writer;
 };
 
-void ZipFile_close(ZipFile self) {
+static void ZipFile_close(ZipFile self) {
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
   Cache i;
@@ -600,8 +603,7 @@ void ZipFile_close(ZipFile self) {
       };
     };
 
-    // Now write an end of central directory:
-    
+    // Now write an end of central directory record
     memset(&end, 0, sizeof(end));
     end.magic = 0x6054b50;
     end.offset_of_cd = self->directory_offset;
@@ -614,7 +616,7 @@ void ZipFile_close(ZipFile self) {
 };
 
 /** This is just a convenience function - real simple now */
-void ZipFile_writestr(ZipFile self, char *filename, 
+static void ZipFile_writestr(ZipFile self, char *filename, 
 		      char *data, int len, char *extra, int extra_len, 
 		      int compression) {
   FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
@@ -635,7 +637,7 @@ VIRTUAL(ZipFile, Object)
 END_VIRTUAL
 
 
-ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip, 
+static ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip, 
 				FileLikeObject fd, char *filename,
 				char mode, int compression, 
 				uint64_t header_offset) {
@@ -688,7 +690,7 @@ ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
 /**
    This zlib trickery comes from http://www.zlib.net/zlib_how.html
 **/
-int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
+static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
 
@@ -737,7 +739,7 @@ int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int len
   return result;
 };
 
-void ZipFileStream_close(FileLikeObject self) {
+static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   
   if(this->mode == 'r') return;

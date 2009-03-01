@@ -1,7 +1,9 @@
 #include "fif.h"
 #include "time.h"
+#include <uuid/uuid.h>
 
-/** This is a dispatches of stream classes depending on their name */
+
+/** This is a dispatcher of stream classes depending on their name */
 struct dispatch_t dispatch[] = {
   { "Image", (AFFFD)(&__Image) },
   { NULL, NULL}
@@ -16,16 +18,31 @@ static void init_streams(void) {
   Image_init();
 };
 
-/** Dispatch and construct the stream from its type. Stream will be
-    
+/** Dispatch and construct the stream from its type. Stream will be    
     opened for writing. Callers should repeatadly write on it and must
     call close() before a new stream can be opened.
 **/
-AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
+static AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
 					char *stream_type, Properties props) {
   int i;
+  uuid_t stream_uuid;
+  char *uuid_stream_name;
 
   init_streams();
+
+  // This function creates a new stream from scratch so the stream
+  // name will be a new UUID
+  uuid_generate(stream_uuid);
+  uuid_stream_name = talloc_size(NULL, 40);
+  uuid_unparse(stream_uuid, uuid_stream_name);
+
+  // The new stream has a unique UUID. We use the friendly name
+  // provided by stream_name to set up a link to it. A link is simply
+  // a property of the main AFF volume linking the stream name with
+  // the UUID
+  self->props = CONSTRUCT(Properties, Properties, Con, self);
+  CALL(self->props, add, "name", talloc_asprintf(self->props, "%s:%s",
+						 stream_name, uuid_stream_name), 0);
 
   for(i=0; dispatch[i].type !=NULL; i++) {
     if(!strcmp(dispatch[i].type, stream_type)) {
@@ -33,7 +50,7 @@ AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
 
       // A special constructor from a class reference
       result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-					Con, self, stream_name, props, self);
+					Con, self, uuid_stream_name, props, self);
       return result;
     };
   };
@@ -42,7 +59,7 @@ AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
   return NULL;
 };
 
-AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
+static AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
   int length=0;
   char *buffer;
   Properties props;
@@ -51,14 +68,13 @@ AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
 
   init_streams();
 
-  props = CONSTRUCT(Properties, Properties, Con, self);
   buffer = self->super.read_member((ZipFile)self, "properties", &length);
   if(!buffer) {
     RaiseError(ERuntimeError, "Stream %s does not have properties?", stream_name);
-    talloc_free(buffer);
     return NULL;
   };
-  
+
+  props = CONSTRUCT(Properties, Properties, Con, self);  
   CALL(props, parse, buffer,length, 0);
 
   // We want to get the type of this stream
@@ -93,49 +109,111 @@ AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
   return NULL;
 };
 
-VIRTUAL(FIFFile, ZipFile)
-     VMETHOD(create_stream_for_writing) = FIFFile_create_stream_for_writing;
-     VMETHOD(open_stream)  = FIFFile_open_stream;
-END_VIRTUAL
+static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
+  FIFFile this = (FIFFile)self;
 
-AFFFD AFFFD_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
+  self = this->__super__->Con(self, fd);
+  if(!self) return NULL;
+
+  // If an FD was provided we parse its properties
+  if(fd) {
+    int length;
+    char *properties_file = CALL(self, read_member, "properties", &length);
+
+    this->props = CONSTRUCT(Properties, Properties, Con, self);
+
+    if(properties_file) {
+      // Parse our properties
+      CALL(this->props, parse, properties_file, length, 0);
+    };
+  } else {
+    // Otherwise we prepare a fresh properties object
+    this->props = CONSTRUCT(Properties, Properties, Con, self);
+  };
+
   return self;
 };
 
-VIRTUAL(AFFFD, FileLikeObject)
-     VMETHOD(Con) = AFFFD_Con;
+static void FIFFile_close(ZipFile self) {
+  // Force our properties to be written
+  FIFFile this = (FIFFile)self;
+  char *str = CALL(this->props, str);
+  CALL(self, writestr, "properties", ZSTRING_NO_NULL(str),
+       NULL,0, 0);
+
+  // Call our base class:
+  this->__super__->close(self);
+};
+
+VIRTUAL(FIFFile, ZipFile)
+     VMETHOD(create_stream_for_writing) = FIFFile_create_stream_for_writing;
+     VMETHOD(open_stream)  = FIFFile_open_stream;
+     VMETHOD(super.close) = FIFFile_close;
+     VMETHOD(super.Con) = FIFFile_Con;
 END_VIRTUAL
 
-/** This specialised hashing is for integer keys */
-unsigned int cache_hash_int(Cache self, void *key) {
-  uint32_t int_key = *(uint32_t *)key;
-
-  return int_key % self->hash_table_width;
-};
-
-int cache_cmp_int(Cache self, void *other) {
-  uint32_t int_key = *(uint32_t *)self->key;
-  uint32_t int_other = *(uint32_t *)other;  
-
-  return int_key != int_other;
-};
-
-AFFFD Image_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
-  Image this = (Image)self;
-  char *tmp;
+static AFFFD AFFFD_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
+  INIT_LIST_HEAD(&self->list);
 
   printf("Constructing an image %s\n", stream_name);
   if(!props) {
     props = CONSTRUCT(Properties, Properties, Con, self);
   } else{
-    talloc_steal(this, props);
+    talloc_steal(self, props);
   };
 
   self->props = props;
 
   // Ensure that we have the type in there
   CALL(props, del, "type");
-  CALL(props, add, "type", "Image", time(NULL));
+  CALL(props, add, "type", self->type, time(NULL));
+
+  // Take the stream name provided to us:
+  self->stream_name = stream_name;
+  talloc_steal(self, stream_name);
+
+  return self;
+};
+
+static void AFFFD_close(FileLikeObject self) {
+  AFFFD this = (AFFFD)self;
+  // Write out a properties memeber:
+  char *str = CALL(this->props, str);
+  char *filename = talloc_asprintf(str, "%s/properties", this->stream_name);
+
+  this->parent->super.writestr((ZipFile)this->parent, 
+			       filename, ZSTRING_NO_NULL(str),
+       NULL, 0, 0);
+
+  // Call our baseclass
+  this->__super__->close(self);
+};
+
+VIRTUAL(AFFFD, FileLikeObject)
+     VMETHOD(Con) = AFFFD_Con;
+     VMETHOD(super.close) = AFFFD_close;
+END_VIRTUAL
+
+/** This specialised hashing is for integer keys */
+static unsigned int cache_hash_int(Cache self, void *key) {
+  uint32_t int_key = *(uint32_t *)key;
+
+  return int_key % self->hash_table_width;
+};
+
+static int cache_cmp_int(Cache self, void *other) {
+  uint32_t int_key = *(uint32_t *)self->key;
+  uint32_t int_other = *(uint32_t *)other;  
+
+  return int_key != int_other;
+};
+
+static AFFFD Image_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
+  Image this = (Image)self;
+  char *tmp;
+
+  // Call our baseclass
+  this->__super__->Con(self, stream_name, props, parent);
 
   // Set the defaults
   tmp = CALL(props, iter_next, NULL, "chunks_in_segment");
@@ -148,9 +226,12 @@ AFFFD Image_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent)
   this->chunk_size = strtol(tmp, NULL,0);
 
   tmp = CALL(props, iter_next, NULL, "size");
-  if(tmp)
+  if(tmp) {
     self->super.size = strtoll(tmp, NULL, 0);
-  
+  } else {
+    self->super.size = 0;
+  };
+
   this->chunk_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   this->chunk_count = 0;
@@ -178,13 +259,14 @@ As new data is written we append it to the chunk buffer, then we
 remove chunk sized buffers from it and push them to the segment. When
 the segment is full we dump it to the parent container set.
 **/
-int dump_chunk(Image this, char *data, uint32_t length, int force) {
+static int dump_chunk(Image this, char *data, uint32_t length, int force) {
   // We just use compress() to get the compressed buffer.
   char cbuffer[compressBound(length)];
   int clength=compressBound(length);
 
   memset(cbuffer,0,clength);
 
+  // Should we even offer to store chunks uncompressed?
   if(0) {
     memcpy(cbuffer, data, length);
     clength = length;
@@ -208,7 +290,11 @@ int dump_chunk(Image this, char *data, uint32_t length, int force) {
   // can flush it out:
   if(this->chunk_count >= this->chunks_in_segment || force) {
     char tmp[BUFF_SIZE];
-    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, this->segment_count);
+    // Format the segment name
+    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, this->super.stream_name, 
+	     this->segment_count);
+
+    // Store the entire segment in the zip file
     this->super.parent->super.writestr((ZipFile)this->super.parent, 
 				       tmp, this->segment_buffer->data, 
 				       this->segment_buffer->readptr, 
@@ -223,14 +309,14 @@ int dump_chunk(Image this, char *data, uint32_t length, int force) {
     CALL(this->segment_buffer, truncate, 0);
     memset(this->chunk_indexes, -1, sizeof(int32_t) * this->chunks_in_segment);
     this->chunk_count =0;
-    
+    // Next segment
     this->segment_count ++;
   };
   
   return clength;
 };
 
-int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
+static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Image this = (Image)self;
 
   CALL(this->chunk_buffer, seek, 0, SEEK_END);
@@ -249,9 +335,8 @@ int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   return length;
 };
 
-void Image_close(FileLikeObject self) {
+static void Image_close(FileLikeObject self) {
   Image this = (Image)self;
-  char *properties_str;
   AFFFD pthis = (AFFFD)self;
   char tmp[BUFF_SIZE];
 
@@ -263,10 +348,7 @@ void Image_close(FileLikeObject self) {
   snprintf(tmp, BUFF_SIZE, "%lld", self->size);
   CALL(pthis->props, add, "size", tmp, time(NULL)); 
 
-  // Write a properties file
-  properties_str = CALL(pthis->props, str);
-  pthis->parent->super.writestr((ZipFile)pthis->parent,
-				"properties", ZSTRING_NO_NULL(properties_str), NULL, 0, 0);
+  this->__super__->super.close(self);
 };
 
 /** Reads at most a single chunk and write to result. Return how much
@@ -318,10 +400,11 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   // Prepare a buffer for decompressing - it will be committed to the
   // cache later on:
-  uncompressed_chunk = talloc_size(self, uncompressed_length);
+  uncompressed_chunk = talloc_size(NULL, uncompressed_length);
 
   // What is the segment name?
-  filename = talloc_asprintf(self, IMAGE_SEGMENT_NAME_FORMAT, segment_id);
+  filename = talloc_asprintf(self, IMAGE_SEGMENT_NAME_FORMAT, this->super.stream_name,
+			     segment_id);
 
   // We are only after the extra field of this segment - if thats
   // already cached we dont need to re-read it:
@@ -429,7 +512,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   // OK - now cache the uncompressed_chunk (this will steal it so we
   // dont need to free it):
-  CALL(this->chunk_cache, put, talloc_memdup(self, &chunk_id, sizeof(chunk_id)),
+  CALL(this->chunk_cache, put, talloc_memdup(NULL, &chunk_id, sizeof(chunk_id)),
        uncompressed_chunk, 
        uncompressed_length);
 
@@ -447,7 +530,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 };
 
 // Reads from the image stream
-int Image_read(FileLikeObject self, char *buffer, unsigned long int length) {
+static int Image_read(FileLikeObject self, char *buffer, unsigned long int length) {
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, self);
   int read_length;
   int len = 0;
@@ -477,17 +560,19 @@ VIRTUAL(Image, AFFFD)
      VMETHOD(super.super.write) = Image_write;
      VMETHOD(super.super.read) = Image_read;
      VMETHOD(super.super.close) = Image_close;
+
+     VATTR(super.type) = "Image";
 END_VIRTUAL
 
 
 /*** This is the implementation of properties */
-Properties Properties_Con(Properties self) {
+static Properties Properties_Con(Properties self) {
   INIT_LIST_HEAD(&self->list);
 
   return self;
 };
 
-void Properties_del(Properties self, char *key) {
+static void Properties_del(Properties self, char *key) {
   Properties i,j;
   
   list_for_each_entry_safe(i, j, &self->list, list) {
@@ -498,7 +583,7 @@ void Properties_del(Properties self, char *key) {
   };
 };
 
-char *Properties_add(Properties self, char *key, char *value,
+static char *Properties_add(Properties self, char *key, char *value,
 		    uint32_t date) {
   Properties new;
   Properties tmp;
@@ -520,7 +605,7 @@ char *Properties_add(Properties self, char *key, char *value,
   return value;
 };
 
-char *Properties_iter_next(Properties self, Properties *current, char *key) {
+static char *Properties_iter_next(Properties self, Properties *current, char *key) {
   Properties result;
 
   if(!current) 
@@ -544,7 +629,7 @@ char *Properties_iter_next(Properties self, Properties *current, char *key) {
 };
 
 /** We assume text is a null terminated string here */
-int Properties_parse(Properties self, char *text, uint32_t len, uint32_t date) {
+static int Properties_parse(Properties self, char *text, uint32_t len, uint32_t date) {
   int i,j;
   // Make our own local copy so we can modify it
   char *tmp = talloc_memdup(self, text, len+1);
@@ -569,7 +654,7 @@ int Properties_parse(Properties self, char *text, uint32_t len, uint32_t date) {
   return 0;
 };
 
-char *Properties_str(Properties self) {
+static char *Properties_str(Properties self) {
   char *result = NULL;
   Properties i;
 

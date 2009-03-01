@@ -54,27 +54,42 @@ struct ZipFileHeader {
 }__attribute__((packed));
 
 
-/** A cache is an object which automatically expires data according to
-    a most used policy - that is the data which is most used is put at
-    the end of the list, and when memory pressure increases we expire
-    data from the front of the list.
+/** A cache is an object which automatically expires data which is
+    least used - that is the data which is most used is put at the end
+    of the list, and when memory pressure increases we expire data
+    from the front of the list.
 */
 CLASS(Cache, Object)
+// The key which is used to access the data
      void *key;
+
+     // An opaque data object and its length. The object will be
+     // talloc_stealed into the cache object as we will be manging its
+     // memory.
      void *data;
      int data_len;
+
+     // Cache objects are put into two lists - the cache_list contains
+     // all the cache objects currently managed by us in order of
+     // least used to most used at the tail of the list. The same
+     // objects are also present on one of the hash lists which hang
+     // off the respective hash table. The hash_list should be shorter
+     // to search linearly as it only contains objects with the same hash.
      struct list_head cache_list;
      struct list_head hash_list;
 
-     // This is the hash table
-     int hash_table_width;
+     // The current number of objects managed by this cache
      int cache_size;
+
+     // The maximum number of objects which should be managed
      int max_cache_size;
 
+     // A hash table of the keys
+     int hash_table_width;
      Cache *hash_table;
 
      // These functions can be tuned to manage the hash table. The
-     // default implementation assumed key is a null terminated
+     // default implementation assumes key is a null terminated
      // string.
      unsigned int METHOD(Cache, hash, void *key);
      int METHOD(Cache, cmp, void *other);
@@ -124,16 +139,20 @@ CLASS(ZipInfo, Object)
 
      // These maintain some information about the archive memeber
      char *filename;
+     // This is an extra piece of data associated with the file
+     // header.
      char *extra_field;
+
+     // This extra piece of data is associated with the Central
+     // Directory (Currently not used in this implementation)
      char *file_comment;
 
      // Each ZipInfo object remembers which file it came from:
      FileLikeObject fd;
 
-     char *cached_data;
-     char *cached_extra_field;
-
-     // A shortcut way of going to the start of the file contents.
+     // A shortcut way of going to the start of the file contents
+     // (i.e. points to the relative_offset_local_header + sizeof(file
+     // header). This helps because file header varies in size.
      uint64_t file_offset;
 
      ZipInfo METHOD(ZipInfo, Con, FileLikeObject fd);
@@ -141,29 +160,31 @@ END_CLASS
 
 /** This represents a Zip file */
 CLASS(ZipFile, Object)
-/* We maintain read and write pointers separately to allow the file to
-   be updated at the same time as its read */
-     uint64_t writeptr;
-     uint64_t readptr;
+// This is the end of the last file record and the start of the
+// central directory. When adding a new file to the archive we just go
+// there.
      uint64_t directory_offset;
-     ZipInfo CentralDirectory;
      FileLikeObject writer;
      FileLikeObject fd;
+     // This keeps the end of central directory struct so we can
+     // recopy it when we update the CD.
      struct EndCentralDirectory *end;
 
      // A Cache of ZipInfo objects. These objects represent the
      // archive members in the CD. Note that they do not expire - we
-     // must keep them all alive.
+     // must keep them all alive so we can access any member of the
+     // volume set at once.
      Cache zipinfo_cache;
 
-     // This is a cache of file data
+     // This is a cache of file data saves us decompressing the same
+     // file too many times.
      Cache file_data_cache;
 
      // This is a cache for extra fields
      Cache extra_cache;
 
-     /** This flag is set when the ZipFile is modified and needs to be
-	 rewritten on close
+     /** This flag is set when the ZipFile is modified and a new CD
+	 needs to be rewritten on close
      **/
      int _didModify;
 
@@ -171,19 +192,22 @@ CLASS(ZipFile, Object)
      ZipFile METHOD(ZipFile, Con, FileLikeObject file);
 
 // Fetch a member as a string - this is suitable for small memebrs
-// only as we allocate memory for it.The buffer callers receive will
+// only as we allocate memory for it. The buffer callers receive will
 // not be owned by the callers. Callers should never free it nor steal
-// it.
+// it they must copy it out if they want to keep it.
      char *METHOD(ZipFile, read_member, char *filename, int *len);
 
-// This method is called to create a new volume on the FileLikeObject
+// This method is called to create a new volume on the
+// FileLikeObject. This call must preceed any calls to open_member for
+// writing.
      void METHOD(ZipFile, create_new_volume, FileLikeObject file);
 
 // This method opens an existing member or creates a new one. We
 // return a file like object which may be used to read and write the
 // member. If we open a member for writing the zip file will be locked
 // (so another attempt to open a new member for writing will raise,
-// until this member is promptly closed).
+// until this member is promptly closed). The ZipFile must have been
+// called with create_new_volume or append_volume before.
      FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
 			   char *extra, int extra_field_len,
 			   int compression);
@@ -192,7 +216,8 @@ CLASS(ZipFile, Object)
 // file. The file may still be accessed for reading after this.
      void METHOD(ZipFile, close);
 
-// A convenience function for storing a string as a new file
+// A convenience function for storing a string as a new file (it
+// basically calls open_member, writes the string then closes it).
      void METHOD(ZipFile, writestr, char *filename, char *data, int len,
 		 char *extra, int extra_field_len,
 		 int compression);

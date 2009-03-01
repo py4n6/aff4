@@ -83,15 +83,54 @@ void test2() {
   talloc_free(fd);
 };
 
-/** We try to create a new stream */
+/** This test writes a two part AFF2 file */
 void test3() {
-#if 0
-  // Open the file for reading
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
-  // Open the zip file
-  FIFFile fif = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
-  AFFFD image = CALL(fif, create_stream_for_writing, "default", "Image", NULL);
-#endif
+  // Make a new zip file
+  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+
+  // Make a new file
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+				  fiffile, "test.00.zip", 'w');
+
+  // Create a new properties object
+  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+
+  FileLikeObject stream;
+  int out_fd = open("/bin/ls", O_RDONLY);
+  char buffer[BUFF_SIZE * 10];
+  int length;
+  int volume_number=0;
+
+  // Create a new Zip volume for writing
+  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+
+  // For this test we have 2 chunks per segment
+  CALL(props, add, "chunks_in_segment", "2", 0);
+
+  // Make a new Image stream
+  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
+  while(stream) {
+    length = read(out_fd, buffer, 10000);
+    if(length == 0) break;
+    
+    CALL(stream, write, buffer, length);
+
+    // If the FIF File gets too large we make a new volume:
+    if(fd->super.size > 10000) {
+      // Make a new fd
+      volume_number ++ ;
+      snprintf(buffer, BUFF_SIZE, "test.%02d.zip", volume_number);
+      fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+		     fiffile, buffer, 'w');
+      
+      fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+    };
+  };
+
+  stream->close(stream);
+  fiffile->super.close((ZipFile)fiffile);
+
+  talloc_free(fiffile);
 };
 
 /** This tests the properties classes */
@@ -200,11 +239,11 @@ int main() {
   ClearError();
   test2();
   PrintError();
-  /*
+
   ClearError();
   test3();
   PrintError();
-  */
+  /*
   ClearError();
   test4();
   PrintError();
@@ -216,6 +255,6 @@ int main() {
   ClearError();
   test6();
   PrintError();
-
+  */
   return 0;
 };

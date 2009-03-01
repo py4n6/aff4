@@ -17,7 +17,7 @@ CLASS(StringIO,Object)
 
   /** Writes data into the string_io at the current offset, growing the
     string_io if needed **/
-  int METHOD(StringIO, write, char *data, int len);
+  int METHOD(StringIO, write, char *data, unsigned int len);
 
   /** Write a format string into the stringio **/
   int METHOD(StringIO, sprintf, char *fmt, ...);
