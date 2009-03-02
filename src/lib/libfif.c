@@ -6,6 +6,7 @@
 /** This is a dispatcher of stream classes depending on their name */
 struct dispatch_t dispatch[] = {
   { "Image", (AFFFD)(&__Image) },
+  { "Map", (AFFFD)(&__MapDriver)},
   { NULL, NULL}
 };
 
@@ -16,6 +17,7 @@ static void init_streams(void) {
   FileLikeObject_init();
   AFFFD_init();
   Image_init();
+  MapDriver_init();
 };
 
 /** Dispatch and construct the stream from its type. Stream will be    
@@ -40,7 +42,6 @@ static AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
   // provided by stream_name to set up a link to it. A link is simply
   // a property of the main AFF volume linking the stream name with
   // the UUID
-  self->props = CONSTRUCT(Properties, Properties, Con, self);
   CALL(self->props, add, "name", talloc_asprintf(self->props, "%s:%s",
 						 stream_name, uuid_stream_name), 0);
 
@@ -109,6 +110,13 @@ static AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
   return NULL;
 };
 
+static int FIFFile_destructor(void *self) {
+  ZipFile this = (ZipFile)self;
+  CALL(this, close);
+
+  return 0;
+};
+
 static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
   FIFFile this = (FIFFile)self;
 
@@ -131,15 +139,21 @@ static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
     this->props = CONSTRUCT(Properties, Properties, Con, self);
   };
 
+  // Close us if we get freed 
+  talloc_set_destructor(self, FIFFile_destructor);
+
   return self;
 };
 
 static void FIFFile_close(ZipFile self) {
   // Force our properties to be written
   FIFFile this = (FIFFile)self;
-  char *str = CALL(this->props, str);
-  CALL(self, writestr, "properties", ZSTRING_NO_NULL(str),
-       NULL,0, 0);
+  char *str;
+  if(self->_didModify) {
+    str = CALL(this->props, str);
+    CALL(self, writestr, "properties", ZSTRING_NO_NULL(str),
+	 NULL,0, 0);
+  };
 
   // Call our base class:
   this->__super__->close(self);
@@ -153,6 +167,8 @@ VIRTUAL(FIFFile, ZipFile)
 END_VIRTUAL
 
 static AFFFD AFFFD_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
+  char *tmp;
+
   INIT_LIST_HEAD(&self->list);
 
   printf("Constructing an image %s\n", stream_name);
@@ -167,6 +183,15 @@ static AFFFD AFFFD_Con(AFFFD self, char *stream_name, Properties props, FIFFile 
   // Ensure that we have the type in there
   CALL(props, del, "type");
   CALL(props, add, "type", self->type, time(NULL));
+
+  tmp = CALL(props, iter_next, NULL, "size");
+  if(tmp) {
+    self->super.size = strtoll(tmp, NULL, 0);
+  } else {
+    self->super.size = 0;
+  };
+
+  self->parent = parent;
 
   // Take the stream name provided to us:
   self->stream_name = stream_name;
@@ -183,7 +208,7 @@ static void AFFFD_close(FileLikeObject self) {
 
   this->parent->super.writestr((ZipFile)this->parent, 
 			       filename, ZSTRING_NO_NULL(str),
-       NULL, 0, 0);
+			       NULL, 0, 0);
 
   // Call our baseclass
   this->__super__->close(self);
@@ -225,18 +250,10 @@ static AFFFD Image_Con(AFFFD self, char *stream_name, Properties props, FIFFile 
 
   this->chunk_size = strtol(tmp, NULL,0);
 
-  tmp = CALL(props, iter_next, NULL, "size");
-  if(tmp) {
-    self->super.size = strtoll(tmp, NULL, 0);
-  } else {
-    self->super.size = 0;
-  };
-
   this->chunk_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   this->chunk_count = 0;
   this->segment_count =0;
-  self->parent = parent;
 
   this->chunk_indexes = talloc_array(self, int32_t, this->chunks_in_segment);
   // Fill it with -1 to indicate an invalid pointer
@@ -554,7 +571,6 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
   return len;
 };
 
-
 VIRTUAL(Image, AFFFD)
      VMETHOD(super.Con) = Image_Con;
      VMETHOD(super.super.write) = Image_write;
@@ -673,4 +689,103 @@ VIRTUAL(Properties, Object)
      VMETHOD(iter_next) = Properties_iter_next;
      VMETHOD(str) = Properties_str;
      VMETHOD(del) = Properties_del;
+END_VIRTUAL
+
+/*** This is the implementation of the MapDriver */
+AFFFD MapDriver_Con(AFFFD self, char *stream_name,
+		    Properties props, FIFFile parent) {
+  MapDriver this = (MapDriver)self;
+  // Call our baseclass
+  self = this->__super__->Con(self, stream_name, props, parent);
+
+  return self;
+};
+
+static int compare_points(const void *X, const void *Y) {
+  struct map_point *x=(struct map_point *)X;
+  struct map_point *y=(struct map_point *)Y;
+
+  return x->file_offset - y->file_offset;
+};
+
+void MapDriver_add(MapDriver self, uint64_t file_pos, uint64_t image_offset, 
+		   FileLikeObject target) {
+  int i,found=0;
+  struct map_point new_point;
+  MapDriver this=self;
+
+  new_point.file_offset = file_pos;
+  new_point.image_offset = image_offset;
+
+  // Find the target number of the target (is it enough to just
+  // compare pointers or do we need to compare the names?)
+  for(i=0;i<this->number_of_targets;i++) {
+    if(this->targets[i] == target) {
+      found = 1;
+      new_point.target_id = i;
+      break;
+    };
+  };
+
+  if(!found) {
+    this->targets = talloc_realloc(self, this->targets, AFFFD, 
+				   (this->number_of_targets+1) * sizeof(*this->targets));
+    new_point.target_id = this->number_of_targets;
+    this->targets[this->number_of_targets] = target;
+    this->number_of_targets++;
+  };
+
+  // Now append the new point to our struct:
+  this->points = talloc_realloc(self, this->points, 
+				struct map_point, 
+				(this->number_of_points + 1) * sizeof(*this->points));
+  memcpy(&this->points[this->number_of_points], &new_point, sizeof(new_point));
+
+  // Now sort the array
+  qsort(this->points, this->number_of_points, sizeof(*this->points),
+	compare_points);
+  this->number_of_points ++;
+};
+
+// This writes out the map to the stream
+void MapDriver_save_map(MapDriver self) {
+  char buff[BUFF_SIZE];
+  FileLikeObject fd;
+  struct map_point *point;
+  int i;
+
+  snprintf(buff, BUFF_SIZE, "%s/map", self->super.stream_name);
+  fd = self->super.parent->super.open_member((ZipFile)self->super.parent,
+					     buff, 'w',
+					     NULL, 0, 0);
+  for(i=0;i<self->number_of_points;i++) {
+    point = &self->points[i];
+    snprintf(buff, BUFF_SIZE, "%lld,%lld,%d\n", point->file_offset, point->image_offset, point->target_id);
+    CALL(fd, write, ZSTRING_NO_NULL(buff));
+  };
+
+  CALL(fd, close);
+};
+
+void MapDriver_close(FileLikeObject self) {
+  AFFFD pthis = (AFFFD)self;
+  MapDriver this=(MapDriver)self;
+
+  char tmp[BUFF_SIZE];
+
+  // Set the stream size
+  CALL(pthis->props, del, "size");
+  snprintf(tmp, BUFF_SIZE, "%lld", self->size);
+  CALL(pthis->props, add, "size", tmp, time(NULL)); 
+
+  this->__super__->super.close(self);
+};
+
+
+VIRTUAL(MapDriver, AFFFD)
+     VATTR(super.type) = "Map";
+
+     VMETHOD(add) = MapDriver_add;
+     VMETHOD(save_map) = MapDriver_save_map;
+     VMETHOD(super.super.close) = MapDriver_close;
 END_VIRTUAL

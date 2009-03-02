@@ -156,6 +156,30 @@ void test4() {
   talloc_free(test);
 };
 
+/** A little helper that copies a file into a fif archive */
+FileLikeObject create_image(FIFFile fiffile, char *filename) {
+  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+  
+  FileLikeObject stream;
+  int out_fd = open(filename, O_RDONLY);
+  char buffer[BUFF_SIZE * 10];
+  int length;
+
+  // Make a new Image stream
+  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, filename,
+				"Image", props);
+  while(stream) {
+    length = read(out_fd, buffer, BUFF_SIZE*10);
+    if(length == 0) break;
+    
+    CALL(stream, write, buffer, length);
+  };
+
+  CALL(stream, close);
+  return stream;
+};
+
+
 /** Test the Image class */
 void test5() {
   // Make a new zip file
@@ -228,10 +252,52 @@ void test6() {
   talloc_free(fd);
 };
 
+/** This tests the Map Image - we create an AFF file containing 3
+    seperate streams and build a map. Then we read the map off and
+    copy it into the output.
+*/
+void test7() {
+  // Make a new zip file
+  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+				  fiffile, "new_test.zip", 'w');
+  FileLikeObject d0,d1,d2;
+  MapDriver map;
+  int blocksize = 64 * 1024;
+  Properties props = CONSTRUCT(Properties, Properties, Con, fd);
+  char buff[BUFF_SIZE];
+
+  // Create a new Zip volume for writing
+  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+
+  d0=create_image(fiffile, "images/d1.dd");
+  d1=create_image(fiffile, "images/d2.dd");
+  d2=create_image(fiffile, "images/d3.dd");
+
+  // Now create a map stream:
+  CALL(props, add, "image_period", "196608",0);
+  CALL(props, add, "file_period", "393216",0);
+  map = (MapDriver)CALL(fiffile, create_stream_for_writing, "combined", "Map", props);
+
+  // Create the raid reassembly map
+  CALL(map, add, 0,             0,             d1);
+  CALL(map, add, 1 * blocksize, 0,             d0);
+  CALL(map, add, 2 * blocksize, 1 * blocksize, d2);
+  CALL(map, add, 3 * blocksize, 1 * blocksize, d1);
+  CALL(map, add, 4 * blocksize, 2 * blocksize, d0);
+  CALL(map, add, 5 * blocksize, 2 * blocksize, d2);
+  
+  map->super.super.size = d0->size * 2;
+  map->save_map(map);
+  map->super.super.close((FileLikeObject)map);
+
+  talloc_free(fiffile);
+};
 
 int main() {
   talloc_enable_leak_report_full();
-
+  /*
   ClearError();
   test1();
   PrintError();
@@ -243,7 +309,7 @@ int main() {
   ClearError();
   test3();
   PrintError();
-  /*
+
   ClearError();
   test4();
   PrintError();
@@ -256,5 +322,10 @@ int main() {
   test6();
   PrintError();
   */
+
+  ClearError();
+  test7();
+  PrintError();
+
   return 0;
 };

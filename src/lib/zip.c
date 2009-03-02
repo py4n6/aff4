@@ -60,13 +60,15 @@ static void Cache_put(Cache self, void *key, void *data, int data_len) {
   Cache i,j;
 
   // Check to see if we need to expire something else. We do this
-  // first to avoid the possibility that we migh expire the same key
+  // first to avoid the possibility that we might expire the same key
   // we are about to add.
   list_for_each_entry_safe(i, j, &self->cache_list, cache_list) {
     if(self->cache_size < self->max_cache_size) 
       break;
     else {
       self->cache_size--;
+      // By freeing the cache element it will take care of removing
+      // itself from whatever lists it needs to using its destructor.
       talloc_free(i);
     };
   };
@@ -241,7 +243,7 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 };
 
 static void FileLikeObject_close(FileLikeObject self) {
-  talloc_free(self);
+  //talloc_free(self);
 };
 static void FileBackedObject_close(FileLikeObject self) {
   FileBackedObject this=(FileBackedObject)self;
@@ -501,7 +503,7 @@ static void ZipFile_create_new_volume(ZipFile self, FileLikeObject file) {
 };
 
 static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
-				   char *extra, int extra_field_len,
+				   char *extra, uint16_t extra_field_len,
 				   int compression) {
   switch(mode) {
   case 'w': {
@@ -521,10 +523,12 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     header.flags = 0x08;
     header.compression_method = compression;
     header.file_name_length = strlen(filename);
-    header.extra_field_len = extra_field_len;
+    header.extra_field_len = extra_field_len + 4;
     
     CALL(self->fd, write,(char *)&header, sizeof(header));
     CALL(self->fd, write, ZSTRING_NO_NULL(filename));
+    CALL(self->fd, write, ZSTRING_NO_NULL("AF"));
+    CALL(self->fd, write, (char *)&extra_field_len, sizeof(extra_field_len));
     CALL(self->fd, write, extra, extra_field_len);
 
     self->writer = (FileLikeObject)CONSTRUCT(ZipFileStream, 
@@ -557,10 +561,19 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Read the extra field so we can cache it
     extra = talloc_size(self, header.extra_field_len);
-    CALL(self->fd, read, extra, header.extra_field_len);
+    {
+      char sig[2];
+      uint16_t extra_field_len;
 
-    // Cache it
-    CALL(self->extra_cache, put, filename, extra, header.extra_field_len);
+      CALL(self->fd, read, sig, sizeof(sig));
+      CALL(self->fd, read, (char *)&extra_field_len, sizeof(extra_field_len));
+      if(sig[0]=='A' && sig[1]=='F') {
+	CALL(self->fd, read, extra, extra_field_len);
+
+	// Cache it
+	CALL(self->extra_cache, put, filename, extra, header.extra_field_len);
+      };
+    };
 
     self->writer = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 					     ZipFileStream, Con, self, self,
@@ -785,7 +798,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   this->zip->writer = NULL;
 
   // Free ourselves
-  talloc_free(self);
+  //  talloc_free(self);
 };
 
 VIRTUAL(ZipFileStream, FileLikeObject)

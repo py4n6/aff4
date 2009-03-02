@@ -112,3 +112,67 @@ CLASS(FIFFile, ZipFile)
      AFFFD METHOD(FIFFile, open_stream, char *stream_name);
 END_CLASS
 
+
+/** The map stream driver maps an existing stream using a
+    transformation.
+
+
+    We require the stream properties to specify a 'target'. This can
+    either be a plain stream name or can begin with 'file://'. In the
+    latter case this indicates that we should be opening an external
+    file of the specified filename.
+
+    We expect to find a component in the archive called 'map' which
+    contains a mapping function. The file should be of the format:
+
+    - lines starting with # are ignored
+    
+    - other lines have 2 integers seperated by white space. The first
+    column is the current stream offset, while the second offset if
+    the target stream offset.
+
+    For example:
+    0     1000
+    1000  4000
+
+    This means that when the current stream is accessed in the range
+    0-1000 we fetch bytes 1000-2000 from the target stream, and after
+    that we fetch bytes from offset 4000.
+
+    Required properties:
+    
+    - target%d starts with 0 the number of target (may be specified as
+      a URL). e.g. target0, target1, target2
+
+    Optional properties:
+
+    - file_period - number of bytes in the file offset which this map
+      repreats on. (Useful for RAID)
+
+    - image_period - number of bytes in the target image each period
+      will advance by. (Useful for RAID)
+*/
+struct map_point {
+  uint64_t file_offset;
+  uint64_t image_offset;
+  int target_id;
+};
+
+CLASS(MapDriver, AFFFD)
+// An array of our targets
+     AFFFD *targets;
+     int number_of_targets;
+
+     // All the points in the map:
+     struct map_point *points;
+     int number_of_points;
+     
+     // Deletes the point at the specified file offset
+     void METHOD(MapDriver, del, uint64_t file_pos);
+
+     // Adds a new point ot the file offset table
+     void METHOD(MapDriver, add, uint64_t file_pos, uint64_t image_offset, 
+		 FileLikeObject target);
+
+     void METHOD(MapDriver, save_map);
+END_CLASS
