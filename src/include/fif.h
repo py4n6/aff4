@@ -104,12 +104,20 @@ extern struct dispatch_t dispatch[];
 CLASS(FIFFile, ZipFile)
      Properties props;
 
+     // Each FIFFile has a resolver which we use to resolve URNs to
+     // FileLikeObjects
+     struct Resolver *resolver;
+
+     // This is our own volume URN
+     char *uuid;
+
      /** This is used to get a new stream handler for writing */
      AFFFD METHOD(FIFFile, create_stream_for_writing, char *stream_name,
 		  char *stream_type, Properties props);
 
      /** Open the stream for reading */
      AFFFD METHOD(FIFFile, open_stream, char *stream_name);
+Object METHOD(FIFFile, resolve, char *urn, char *type);
 END_CLASS
 
 
@@ -175,4 +183,48 @@ CLASS(MapDriver, AFFFD)
 		 FileLikeObject target);
 
      void METHOD(MapDriver, save_map);
+END_CLASS
+
+
+/** The resolver is primarily responsbile with resolving references in
+    uri notation to return FileLikeObject. That means the resolver
+    will try to open to relevant volumes, streams or members.
+
+    The resolver may be implemented using a number of ways, but right
+    now we implemement a simple one.
+
+    Resolvers are a list of objects
+*/
+CLASS(ResolverHandler, Object)
+     char *method;
+
+     ResolverHandler METHOD(ResolverHandler, Con);
+     FileLikeObject METHOD(ResolverHandler, resolve, char *uri);
+END_CLASS
+
+CLASS(Resolver, Object)
+// This is a global cache of URN and their values - we try to only
+// have small URNs here and keep everything in memory.
+     Cache urn;
+     Resolver METHOD(Resolver, Con);
+
+/* This method tries to resolve the provided uri and returns an
+ instance of whatever the URI refers to. class_name can be provided as
+ a string to allow us to check that the type we return is actually the
+ type the caller is after. For example:
+
+ FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, 
+                             uri, "FileLikeObject");
+
+ If uri indeed refers to a FileLikeObject, fd will be that object,
+ however, if the uri is something else, it will NULL. Note that we
+ also check superclasses - in the example above, if the stream is
+ actually an Image, we will still return it since an Image is derived
+ from a FileLikeObject.
+*/
+     Object METHOD(Resolver, resolve, char *uri, char *class_name);
+
+//Stores the uri and the value in the resolver. The value will be
+//stolen, but the uri will be copied.
+     void METHOD(Resolver, add, char *uri, void *value, int len);
 END_CLASS

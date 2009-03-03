@@ -87,7 +87,6 @@ static void Cache_put(Cache self, void *key, void *data, int data_len) {
   talloc_steal(new_cache, key);
   talloc_steal(new_cache, data);
 
-
   if(!hash_list_head) {
     hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 0, 0);
   };
@@ -252,6 +251,12 @@ static void FileBackedObject_close(FileLikeObject self) {
   talloc_free(self);
 };
 
+static char *FileBackedObject_get_uri(FileLikeObject self) {
+  //FileBackedObject this = (FileBackedObject)self;
+
+  return talloc_asprintf(self, "file://%s", self->name);
+};
+
 VIRTUAL(FileLikeObject, Object)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
@@ -264,6 +269,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
      VMETHOD(super.close) = FileBackedObject_close;
+     VMETHOD(super.get_uri) = FileBackedObject_get_uri;
 END_VIRTUAL;
 
 /** Now implement Zip file support */
@@ -276,6 +282,10 @@ static ZipInfo ZipInfo_Con(ZipInfo self, FileLikeObject fd) {
 VIRTUAL(ZipInfo, Object)
      VMETHOD(Con) = ZipInfo_Con;
 END_VIRTUAL
+
+static void ZipFile_add_zipinfo_to_cache(ZipFile self, ZipInfo zip) {
+  CALL(self->zipinfo_cache, put, zip->filename, zip, sizeof(*zip));
+};
 
 static ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
   char buffer[4096];
@@ -345,7 +355,7 @@ static ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
 
       // Add to our hashtable (we need the strdup because the filename
       // will be stolen.
-      CALL(self->zipinfo_cache, put, zip->filename, zip, sizeof(*zip));
+      CALL(self, add_zipinfo_to_cache, zip);
 
       // Skip the comments - we dont care about them
       CALL(self->fd, seek, zip->cd_header.extra_field_len + 
@@ -647,6 +657,7 @@ VIRTUAL(ZipFile, Object)
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
      VMETHOD(fetch_ZipInfo) = ZipFile_fetch_ZipInfo;
+     VMETHOD(add_zipinfo_to_cache) = ZipFile_add_zipinfo_to_cache;
 END_VIRTUAL
 
 

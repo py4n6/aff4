@@ -119,6 +119,11 @@ CLASS(FileLikeObject, Object)
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
 
+// This method returns a newly allocated uri reference for this
+// FileLikeObject. Examples are file://filename.zip or uri:aff2:UUID
+
+     char *METHOD(FileLikeObject, get_uri);
+
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this.
      void METHOD(FileLikeObject, close);
@@ -209,7 +214,7 @@ CLASS(ZipFile, Object)
 // until this member is promptly closed). The ZipFile must have been
 // called with create_new_volume or append_volume before.
      FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
-			   char *extra, int extra_field_len,
+			   char *extra, uint16_t extra_field_len,
 			   int compression);
 
 // This method flushes the central directory and finalises the
@@ -226,6 +231,11 @@ CLASS(ZipFile, Object)
    filename within the archive */
      ZipInfo METHOD(ZipFile, fetch_ZipInfo, char *filename);
 
+/** This is called to add a new CD record to the zipinfo_cache. It is
+    a method in order to allow super classes to be notified when a new
+    CD is parsed. 
+*/
+    void METHOD(ZipFile, add_zipinfo_to_cache, ZipInfo zip);
 END_CLASS
 
 #define ZIP_STORED 0

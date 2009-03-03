@@ -203,7 +203,7 @@ void test5() {
   // Make a new Image stream
   stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
   while(stream) {
-    length = read(out_fd, buffer, 100);
+    length = read(out_fd, buffer, BUFF_SIZE*10);
     if(length == 0) break;
     
     CALL(stream, write, buffer, length);
@@ -228,11 +228,13 @@ void test6() {
 
   if(!fd) goto error;
 
+  __Resolver.urn = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 1e6);
   // Make a new zip file
   fiffile  = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
   if(!fiffile) goto error;
 
-  image = CALL(fiffile, open_stream, "default");
+  //image = CALL(fiffile, open_stream, "default");
+  image = CALL(fiffile, resolve, "default", "FileLikeObject");
   if(!image) goto error;
 
   outfd = creat("output.dd", 0644);
@@ -314,18 +316,23 @@ int main() {
   test4();
   PrintError();
 
+  
   ClearError();
+  printf("\n*******************\ntest 5\n********************\n");
   test5();
   PrintError();
+*/
+
 
   ClearError();
+  printf("\n*******************\ntest 6\n********************\n");
   test6();
   PrintError();
-  */
-
+  /*  
   ClearError();
+  printf("\n*******************\ntest 7\n********************\n");
   test7();
   PrintError();
-
+  */
   return 0;
 };

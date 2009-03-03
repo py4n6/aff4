@@ -20,6 +20,19 @@ static void init_streams(void) {
   MapDriver_init();
 };
 
+char *new_uuid(void *ctx) {
+  uuid_t uuid;
+  char *uuid_str;
+
+  // This function creates a new stream from scratch so the stream
+  // name will be a new UUID
+  uuid_generate(uuid);
+  uuid_str = talloc_size(ctx, 40);
+  uuid_unparse(uuid, uuid_str);
+
+  return uuid_str;
+};
+
 /** Dispatch and construct the stream from its type. Stream will be    
     opened for writing. Callers should repeatadly write on it and must
     call close() before a new stream can be opened.
@@ -27,31 +40,44 @@ static void init_streams(void) {
 static AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
 					char *stream_type, Properties props) {
   int i;
-  uuid_t stream_uuid;
-  char *uuid_stream_name;
+  // The new stream will get a new UUID
+  char *stream_uuid = new_uuid(self);
 
-  init_streams();
+  // We let the resolver know that we are found within this current
+  // volume:
+  char buffer[BUFF_SIZE];
+  char *value = talloc_asprintf(self, "urn:aff2:%s", self->uuid);
 
-  // This function creates a new stream from scratch so the stream
-  // name will be a new UUID
-  uuid_generate(stream_uuid);
-  uuid_stream_name = talloc_size(NULL, 40);
-  uuid_unparse(stream_uuid, uuid_stream_name);
+  // This says that stream_uuid is found in the volume self->uuid
+  snprintf(buffer, BUFF_SIZE, "urn:aff2:%s:aff2:volume", stream_uuid);  
+  CALL(self->resolver, add, buffer, ZSTRING_NO_NULL(value));
+  
+  // Add same to the global property file (this volume contains
+  // stream_uuid):
+  CALL(self->props, add, "aff2:contains", 
+       talloc_asprintf(self, "urn:aff2:%s", stream_uuid),0);
+  
+  // We can setup a link to the stream using its friendly name:
+  if(stream_name) {
+    char *stream_urn = talloc_asprintf(self, "urn:aff2:%s", stream_uuid);
 
-  // The new stream has a unique UUID. We use the friendly name
-  // provided by stream_name to set up a link to it. A link is simply
-  // a property of the main AFF volume linking the stream name with
-  // the UUID
-  CALL(self->props, add, "name", talloc_asprintf(self->props, "%s:%s",
-						 stream_name, uuid_stream_name), 0);
-
+    // This says that the volume self->uuid contains a link to
+    // stream_name which is found in the stream stream_name
+    snprintf(buffer, BUFF_SIZE, "urn:aff2:%s:%s:aff2:link",
+	     self->uuid, stream_name);
+    
+    CALL(self->resolver, add, buffer, ZSTRING_NO_NULL(stream_urn));   
+    // Add same to the global property file:
+    CALL(self->props, add, buffer, talloc_strdup(self,value),0);
+  };
+  
   for(i=0; dispatch[i].type !=NULL; i++) {
     if(!strcmp(dispatch[i].type, stream_type)) {
       AFFFD result;
 
       // A special constructor from a class reference
       result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-					Con, self, uuid_stream_name, props, self);
+					Con, self, stream_uuid, props, self);
       return result;
     };
   };
@@ -60,16 +86,27 @@ static AFFFD FIFFile_create_stream_for_writing(FIFFile self, char *stream_name,
   return NULL;
 };
 
+static void FIFFile_create_new_volume(ZipFile self, FileLikeObject file) {
+  FIFFile this=(FIFFile)self;
+  char buffer[BUFF_SIZE];
+  char *fd_uri = CALL(file,get_uri);
+
+  // We are about to open a new volume - record that
+  snprintf(buffer, BUFF_SIZE, "urn:aff2:%s:aff2:storage", this->uuid);
+  CALL(this->resolver, add, buffer, ZSTRING_NO_NULL(fd_uri));
+  
+  this->__super__->create_new_volume(self, file);
+};
+
 static AFFFD FIFFile_open_stream(FIFFile self, char *stream_name) {
   int length=0;
   char *buffer;
   Properties props;
   char *stream_type;
   int i;
+  char *path = talloc_asprintf(self, "%s/properties", stream_name);
 
-  init_streams();
-
-  buffer = self->super.read_member((ZipFile)self, "properties", &length);
+  buffer = self->super.read_member((ZipFile)self, path, &length);
   if(!buffer) {
     RaiseError(ERuntimeError, "Stream %s does not have properties?", stream_name);
     return NULL;
@@ -120,6 +157,13 @@ static int FIFFile_destructor(void *self) {
 static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
   FIFFile this = (FIFFile)self;
 
+  // Some initialization housework
+  init_streams();
+
+  // This is our resolver
+  this->resolver = CONSTRUCT(Resolver, Resolver, Con, self);
+  this->props = CONSTRUCT(Properties, Properties, Con, self);
+
   self = this->__super__->Con(self, fd);
   if(!self) return NULL;
 
@@ -128,12 +172,14 @@ static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
     int length;
     char *properties_file = CALL(self, read_member, "properties", &length);
 
-    this->props = CONSTRUCT(Properties, Properties, Con, self);
-
     if(properties_file) {
       // Parse our properties
       CALL(this->props, parse, properties_file, length, 0);
     };
+
+    // Try to get the uuid of this volume
+    this->uuid = CALL(this->props, iter_next, NULL, "storage:UUID");
+    
   } else {
     // Otherwise we prepare a fresh properties object
     this->props = CONSTRUCT(Properties, Properties, Con, self);
@@ -142,7 +188,68 @@ static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
   // Close us if we get freed 
   talloc_set_destructor(self, FIFFile_destructor);
 
+  if(!this->uuid) {
+    // Make up a new urn for this volume
+    this->uuid = new_uuid(self);
+    CALL(this->props, add, "storage:UUID", this->uuid, 0);
+  };
+
+  // Stores this in the resolver
+  if(fd) {
+    char buffer[BUFF_SIZE];
+    char *fd_uri = CALL(fd, get_uri);
+    Properties i=NULL;
+
+    // Make up a URN to record where we got this volume
+    snprintf(buffer, BUFF_SIZE, "urn:aff2:%s:aff2:storage",this->uuid);
+
+    // Cache this:
+    CALL(this->resolver, add, buffer, ZSTRING_NO_NULL(fd_uri));
+
+    // Now advise the resolver where the streams are
+    while(1) {
+      char *urn = CALL(this->props, iter_next, &i, "aff2:contains");
+      
+      if(!urn) 
+	break;
+      else {
+	char *our_urn = talloc_asprintf(self, "urn:aff2:%s", this->uuid);
+	
+	snprintf(buffer, BUFF_SIZE, "%s:aff2:volume", urn);
+	CALL(this->resolver, add, buffer, ZSTRING_NO_NULL(our_urn));
+      };
+    };
+  };
+
   return self;
+};
+
+static void FIFFile_add_zipinfo_to_cache(ZipFile self, ZipInfo zip) {
+  FIFFile this = (FIFFile)self;
+  int filename_length=strlen(zip->filename);
+  int properties_length = strlen("properties");
+
+  // We identify streams by their filename ending with "properties"
+  if(filename_length > properties_length && 
+     !strcmp("properties", zip->filename + filename_length - properties_length)) {
+    char *uuid = talloc_strdup(self, zip->filename);
+
+    // This is our current FIFFile uuid
+    char *our_urn = talloc_asprintf(self, "urn:aff2:%s", this->uuid);
+    char buffer[BUFF_SIZE];
+
+    uuid[filename_length-properties_length-1]=0;
+
+    // Add a reference to our global properties file to denote that we
+    // contain these streams.
+    CALL(this->props, add, "aff2:contains", 
+	 talloc_asprintf(self, "urn:aff2:%s",uuid),0);
+  };
+  printf("Found %s\n", zip->filename);
+
+  // Call our baseclass
+  this->__super__->add_zipinfo_to_cache(self,zip);
+
 };
 
 static void FIFFile_close(ZipFile self) {
@@ -159,11 +266,32 @@ static void FIFFile_close(ZipFile self) {
   this->__super__->close(self);
 };
 
+Object FIFFile_resolve(FIFFile self, char *urn, char *type) {
+  char *fqn;
+  Object result;
+
+  //Is this a local reference or a global reference?
+  if(strlen(urn)>8 && !memcmp(urn,ZSTRING_NO_NULL("urn:aff2:"))) {
+    fqn = talloc_strdup(self, urn);
+  } else {
+    fqn = talloc_asprintf(self, "urn:aff2:%s:%s", self->uuid, urn);
+  };
+
+  result = CALL(self->resolver, resolve, fqn, type);
+
+  talloc_free(fqn);
+  return result;
+};
+
+
 VIRTUAL(FIFFile, ZipFile)
      VMETHOD(create_stream_for_writing) = FIFFile_create_stream_for_writing;
      VMETHOD(open_stream)  = FIFFile_open_stream;
      VMETHOD(super.close) = FIFFile_close;
      VMETHOD(super.Con) = FIFFile_Con;
+     VMETHOD(super.add_zipinfo_to_cache) = FIFFile_add_zipinfo_to_cache;
+     VMETHOD(super.create_new_volume) = FIFFile_create_new_volume;
+VMETHOD(resolve) = FIFFile_resolve;
 END_VIRTUAL
 
 static AFFFD AFFFD_Con(AFFFD self, char *stream_name, Properties props, FIFFile parent) {
@@ -214,9 +342,16 @@ static void AFFFD_close(FileLikeObject self) {
   this->__super__->close(self);
 };
 
+static char *AFFFD_get_uri(FileLikeObject self) {
+  AFFFD this = (AFFFD)self;
+  
+  return talloc_asprintf(self, "uri:aff2:%s", this->stream_name);
+};
+
 VIRTUAL(AFFFD, FileLikeObject)
      VMETHOD(Con) = AFFFD_Con;
      VMETHOD(super.close) = AFFFD_close;
+     VMETHOD(super.get_uri) = AFFFD_get_uri;
 END_VIRTUAL
 
 /** This specialised hashing is for integer keys */
@@ -651,6 +786,9 @@ static int Properties_parse(Properties self, char *text, uint32_t len, uint32_t 
   char *tmp = talloc_memdup(self, text, len+1);
   char *tmp_text = tmp;
 
+  // Absolute urns are added to the global resolver
+  Resolver resolver=CONSTRUCT(Resolver, Resolver, Con, tmp);
+
   tmp[len]=0;
 
   // Find the next line:
@@ -662,6 +800,11 @@ static int Properties_parse(Properties self, char *text, uint32_t len, uint32_t 
     
     tmp_text[j]=0;
     CALL(self, add, tmp_text, tmp_text+j+1, date);
+    if(j>10 && !memcmp(tmp_text, ZSTRING_NO_NULL("urn:aff2:"))) {
+      // Its an absolute reference we will add to the global resolver:
+      CALL(resolver, add, tmp_text, ZSTRING_NO_NULL(talloc_strdup(NULL, tmp_text+j+1)));
+    };
+
     tmp_text += i+1;
   };
 
@@ -695,8 +838,36 @@ END_VIRTUAL
 AFFFD MapDriver_Con(AFFFD self, char *stream_name,
 		    Properties props, FIFFile parent) {
   MapDriver this = (MapDriver)self;
+  char *map;
+  int length;
+  char buff[BUFF_SIZE];
+
   // Call our baseclass
   self = this->__super__->Con(self, stream_name, props, parent);
+
+  /** Try to load the map from the stream */
+  snprintf(buff, BUFF_SIZE, "%s/map", stream_name);
+  map = parent->super.read_member((ZipFile)parent, buff, &length);
+  if(map) {
+    // Make a temporary copy
+    char *tmp = talloc_strdup(self, map);
+    char *x=tmp, *y;
+    struct map_point point;
+    
+    while(strlen(x)>0) {
+      // Look for the end of line and null terminate it:
+      y= x + strcspn(x, "\r\n");
+      *y=0;
+      if(sscanf(x,"%lld,%lld,%d", &point.file_offset, 
+		&point.image_offset, &point.target_id)==3) {
+	if(point.target_id < this->number_of_targets) 
+	  CALL(this, add, point.file_offset, point.image_offset, 
+	       (FileLikeObject)this->targets[point.target_id]);
+      };
+      x=y+1;
+    };
+
+  };
 
   return self;
 };
@@ -720,7 +891,7 @@ void MapDriver_add(MapDriver self, uint64_t file_pos, uint64_t image_offset,
   // Find the target number of the target (is it enough to just
   // compare pointers or do we need to compare the names?)
   for(i=0;i<this->number_of_targets;i++) {
-    if(this->targets[i] == target) {
+    if((FileLikeObject)this->targets[i] == target) {
       found = 1;
       new_point.target_id = i;
       break;
@@ -731,7 +902,7 @@ void MapDriver_add(MapDriver self, uint64_t file_pos, uint64_t image_offset,
     this->targets = talloc_realloc(self, this->targets, AFFFD, 
 				   (this->number_of_targets+1) * sizeof(*this->targets));
     new_point.target_id = this->number_of_targets;
-    this->targets[this->number_of_targets] = target;
+    this->targets[this->number_of_targets] = (AFFFD)target;
     this->number_of_targets++;
   };
 
@@ -754,6 +925,12 @@ void MapDriver_save_map(MapDriver self) {
   struct map_point *point;
   int i;
 
+  // Add the targets to our properties:
+  for(i=0;i<self->number_of_targets;i++) {
+    CALL(self->super.props, add, "target",
+	 self->targets[i]->super.get_uri((FileLikeObject)self->targets[i]),0);
+  };
+  
   snprintf(buff, BUFF_SIZE, "%s/map", self->super.stream_name);
   fd = self->super.parent->super.open_member((ZipFile)self->super.parent,
 					     buff, 'w',
@@ -789,3 +966,145 @@ VIRTUAL(MapDriver, AFFFD)
      VMETHOD(save_map) = MapDriver_save_map;
      VMETHOD(super.super.close) = MapDriver_close;
 END_VIRTUAL
+
+/* An array of handlers for different uri types. These handlers will
+   be tried in order until one of them works, and returns the required
+   object type 
+*/
+Object (*Resolver_handlers[])(Resolver self, char *uri);
+
+/** This resolves the stream uri. We basically find out where it has
+    been stored, and open it.
+*/
+Object resolve_AFF_Stream(Resolver self, char *uri) {
+  char buff[BUFF_SIZE];
+  char *file_reference;
+
+  // Check where the stream might be stored
+  snprintf(buff, BUFF_SIZE, "%s:aff2:storage", uri);
+  file_reference = (char *)CALL(self->urn, get, buff);
+  if(file_reference) {
+    FIFFile fiffile = (FIFFile)CALL(self, resolve, file_reference, "FIFFile");
+
+    if(fiffile) 
+      return (Object)CALL(fiffile, open_stream, uri);
+  };
+
+  return NULL;
+};
+
+/** This method returns a fiffile referenced by the uri.
+
+We first search the cache to see if the volume is already opened, if
+not we see if we can find a volume and open it directly.
+*/
+Object resolve_AFF_Volumes(Resolver self, char *uri) {
+  char buff[BUFF_SIZE];
+  FIFFile fiffile;
+
+  snprintf(buff, BUFF_SIZE, "%s:fiffile:cache", uri);
+  fiffile = (FIFFile)CALL(self->urn, get, buff);
+
+  // No its not in the cache, maybe we can just open the volume
+  // directly:
+  if(!fiffile) {
+    FileLikeObject fd=NULL;
+    char *reference;
+
+    snprintf(buff, BUFF_SIZE, "%s:aff2:volume", uri);
+    // Does the reference exit?
+    reference = (char *)CALL(self->urn, get, buff);
+    if(reference) {
+      fd = (FileLikeObject)CALL(self, resolve, reference, "FileLikeObject");
+      
+      if(fd) {
+	// Find the fiffile ourselves
+	fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, self, fd);
+      };
+    };
+  };
+  
+  return fiffile;
+};
+
+Object resolve_links(Resolver self, char *uri) {
+  /* Is the uri a link? */
+  char *target;
+  char buff[BUFF_SIZE];
+
+  snprintf(buff, BUFF_SIZE, "%s:aff2:link", uri);
+  target = (char *)CALL(self->urn, get, buff);
+  
+  if(target) {
+    printf("Resolved link as %s\n", target);
+    return (Object)CALL(self, resolve, target, "FileLikeObject");
+  };
+  return NULL;
+};
+
+
+/** This handler tries to resolve a file://filename reference by
+    opening the said file in the current directory.
+*/
+Object file_handler(Resolver self, char *uri) {
+  FileLikeObject fd;
+
+  if(!memcmp(uri, ZSTRING_NO_NULL("file://"))) {
+    return (Object)CONSTRUCT(FileBackedObject, FileBackedObject, con, self, 
+			     uri + strlen("file://"), 'r');
+  };
+  
+  return NULL;
+};
+
+static Resolver Resolver_Con(Resolver self) {
+  return self;
+};
+
+Object Resolver_resolve(Resolver self, char *urn, char *class_name) {
+  Object (**handler)(Resolver self, char *urn) = Resolver_handlers;
+  Object result;
+  int i;
+
+  for(i=0;handler[i];i++) {
+    result = handler[i](self, urn);
+    if(result) return result;
+  };
+  
+  return NULL;
+};
+
+void Resolver_add(Resolver self, char *uri, void *value, int length) {
+  char *uri_str = talloc_strdup(self, uri);
+ 
+  printf("Adding to resolver: %s=%s\n", uri, (char *)value);
+  fflush(stdout);
+  CALL(__Resolver.urn, put, uri_str, value, length);
+};
+
+/** Here we implement the resolver */
+VIRTUAL(Resolver, Object)
+     VMETHOD(Con) = Resolver_Con;
+/* The cache is a class attribute so all instances use a singleton
+ cache. We never expire this cache. The cache contains global
+ attributes in urn notation. Its basically a dictionary with urn
+ attributes as key and the attribute values as values. URNs may be
+ resolved via an external service as well. Currently supported is a
+ HTTP resolver which can be set by the AFF2_HTTP_RESOLVER environment
+ variable.
+*/
+     __Resolver.urn = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 1e6);
+     VMETHOD(resolve) = Resolver_resolve;
+     VMETHOD(add)  = Resolver_add;
+END_VIRTUAL
+
+/* Initialise the resolver handler dispatch table. This is a table of
+ hander dispatchers which will be tried one at the time to resolve the
+ provided uri into an object. URIs can refer to any object at
+ all. This array is used internally by the Resolver and its probably
+ not that useful outside of it.
+*/
+Object (*Resolver_handlers[])(Resolver self, char *uri) = { 
+  file_handler, resolve_AFF_Volumes, resolve_AFF_Stream, 
+  resolve_links,
+  NULL};
