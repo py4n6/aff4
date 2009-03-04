@@ -1,6 +1,7 @@
 import zipfile, struct, zlib, re
 import time, binascii
 import bisect, os, uuid, sys
+import logging
 
 ## The version of this implementation of FIF
 VERSION = "FIF1.0"
@@ -65,8 +66,9 @@ class properties:
     encoded in UTF8. If they represent binary data they should be
     encoded in base64.
     """
-    def __init__(self, init_string=None):
+    def __init__(self, init_string=None, parent=None):
         self.properties = {}
+        self.parent = parent
         if init_string:
             self.from_string(init_string)
 
@@ -84,6 +86,8 @@ class properties:
         try:
             if value not in self.getarray(key):
                 self.properties[key].append(value)
+                if self.parent != None:
+                    self.parent._didModify = True
         except (KeyError, ValueError):
             self.properties[key] = [ value ]
 
@@ -116,6 +120,8 @@ class properties:
             try:
                 if self[k] != v:
                     self[k] = v
+                    if self.parent != None:
+                        self.parent._didModify = True
             except KeyError:
                 self[k] = v
 
@@ -134,6 +140,8 @@ class properties:
     def set(self, key, value):
         del self[key]
         self[key] = value
+        if self.parent != None:
+            self.parent._didModify = True
 
 
 class InfoStore:
@@ -163,34 +171,66 @@ class InfoStore:
         return pp
     
     def query(self, bag, s, p, o):
-        #print self.print_query(bag,s,p,o)
+        logging.debug("Infostore: query= %s" % self.print_query(bag,s,p,o))
         result = []
 
         if bag != None:
-            bagindexes = self.bagindex[bag]
+            if bag not in self.bagindex.keys():
+                bagindexes = []
+            else:
+                bagindexes = self.bagindex[bag]
         else:
             bagindexes = range(len(self.quads))
 
         if s != None:
-            sindexes = self.subjectindex[s]
+            if s not in self.subjectindex.keys():
+                sindexes = []
+            else:
+                sindexes = self.subjectindex[s]
         else:
             sindexes = range(len(self.quads))
 
         if p != None:
-            pindexes = self.attributeindex[p]
+            if p not in self.attributeindex.keys():
+                pindexes = []
+            else:
+                pindexes = self.attributeindex[p]
         else:
             pindexes = range(len(self.quads))
 
         if o != None:
-            oindexes = self.valueindex[o]
+            if o not in self.valueindex.keys():
+                oindexes = []
+            else:
+                oindexes = self.valueindex[o]
         else:
             oindexes = range(len(self.quads))
 
+        logging.debug("Infostore: Bagindexes: %s" % str(bagindexes))
+        logging.debug("Infostore: Sindexes: %s" % str(sindexes))
+        logging.debug("Infostore: pindexes: %s" % str(pindexes))
+        logging.debug("Infostore: oindexes: %s" % str(oindexes))
+        
         intersect = set(bagindexes) & set(sindexes) & set(pindexes) & set(oindexes)
         for el in intersect:
             result.append(self.quads[el])
         return self.normalise_quads(result)
 
+    
+    def query_values(self, o):
+        if o != None:
+            oindexes = self.valueindex[o]
+        else:
+            oindexes = range(len(self.quads))
+
+        values = []
+        for el in oindexes:
+            value = self.quads[el][3]
+            if value not in values:
+                values.append(value)
+        return values           
+
+            
     def normalise_quads(self, quads):
         res = []
         for line in quads:
@@ -204,8 +244,7 @@ class InfoStore:
     
     def add(self, bag, s, p, o):
         if type(o) == list:
-            print "ERROR adding (passed array) %s %s %s %s" % (bag, s, p, o)
-            raise RuntimeError("Bad argument")
+            raise RuntimeError("Bad argument: ERROR adding (passed array) %s %s %s %s" % (bag, s, p, o))
         index = len(self.quads)
         self.quads.append([bag, s, p, o])
         if bag not in self.bagindex.keys():
@@ -248,9 +287,165 @@ class InfoStore:
                     count = count + 1
             result += "\r\n"
         return result
-        
-        
 
+class UnresolvedURNIterator:
+    def __init__(self, resolver):
+        self.resolver = resolver
+        self.last_seen_value = None
+        self.seen_values = []
+
+    def __iter__(self):
+        return self
+
+
+    def is_URI(self, value):
+        if value.startswith("urn:aff2") or value.startswith("file://"):
+            return True
+        else:
+            return False
+                                                            
+    def next(self):
+        values = self.resolver.infostore.query_values(None)
+        for value in values:
+            if value not in self.seen_values:
+                self.seen_values.append(value)
+                if self.is_URI(value):
+                    subject_query = self.resolver.infostore.query(None,value, None,None)
+                    if len(subject_query) == 0:
+                        # found an URI that we dont know about
+                        return value
+        raise StopIteration
+            
+class Resolver():
+    def __init__(self, rootContainer=None, autoload=False, infostore = None):
+        if infostore == None:
+            infostore = InfoStore()
+        self.infostore = infostore
+        self.volumes = {}
+        if rootContainer != None and len(rootContainer.primary_names) != 0:
+            self.volumes[rootContainer.primary_names[0]] = rootContainer
+        if autoload:
+            pass
+        self.closing = False
+        
+        logging.debug("Resolver initialized.")
+
+    def does_resolve(self, urn):
+        files = self.infostore.query(None, urn, None, None)
+        if len(files) == 0:
+            return False
+        else:
+            return True
+
+    def close(self, caller):
+        logging.debug("Resolver: receiving close signal from %s" % str(caller))
+        if not self.closing:
+            closing = True
+            for id in self.volumes.keys():
+                try:
+                    volume = self.volumes[id]
+                    if volume == caller:
+                        pass
+                    else:
+                        logging.debug("Resolver: closing %s" % str(volume))
+                        del self.volumes[id]
+                        volume.close()
+                except KeyError:
+                    # we may have deleted the item from the map from a recursive call - ignore
+                    pass
+        else:
+            # this is a callback from another close
+            pass
+        
+    def register(self, name, volume):
+        # when creating FIFFiles we need to register them with the Resolver
+        self.volumes[name] = volume
+
+    def dump(self):
+        logging.debug("Resolver: volumes map %s" % str(self.volumes))
+
+    def resolve_file_reference(self, urn):
+        filename = urn[len("file://"):]
+        tmpfn = filename
+        lastlength = len(filename)
+        found = False
+        while not found:
+            if tmpfn.endswith(".zip") and os.path.exists(tmpfn):
+                found = True
+            else:
+                tmpfn = os.path.split(tmpfn)[0]
+                if len(tmpfn) == lastlength:
+                    break
+                lastlength = len(tmpfn)
+                
+        if found:
+            if len(tmpfn) == len(filename):
+                # we most likely dont have a path after the archive
+                res = FIFFile([filename])
+                self.volumes[res.primary_names[0]] = res
+                return [res]
+            else:
+                archive = tmpfn
+                local_name = filename[len(tmpfn)+1:]
+                res = FIFFile([archive])
+                self.volumes[res.primary_names[0]] = res
+                stream = res.open_stream_by_name(local_name)
+                return [stream]
+
+        return []
+    
+    def resolve(self, urn):
+        logging.debug("Resolver: Resolving %s" % urn)
+        self.dump()
+        results = []
+        if not self.does_resolve(urn):
+            if urn.startswith("file://"):
+                try:
+                    return self.resolve_file_reference(urn)
+                except IOError:
+                    pass
+            else:
+                logging.debug("Resolver: Resolution failed. Looking for storage hints")
+                files = self.infostore.query(None, None, "aff2-storage:next_volume", None)
+                
+                subvolumes = []
+                for quad in files:
+                    fifURI = quad[3]
+                    logging.debug("Resolver: storage hint: %s" % fifURI)
+                    if fifURI not in self.volumes.keys():
+                        res = self.load(fifURI)
+                        if res != None:
+                            self.volumes[res.primary_names[0]] = res
+                            #return []
+                            self.dump()
+                            return self.resolve(urn)
+        else:
+            # find the
+            quads = self.infostore.query(None, urn, "aff2-storage:type", None)
+            for quad in quads:
+                logging.debug("Resolver: URN %s is a %s, and located in %s" % (urn, quad[3], quad[0]))
+                if quad[3] == "aff2-storage:Image":
+                    image = self.volumes[quad[0]]
+                    logging.debug("Resolver: image: %s" % str(image))
+                    results.append(image.open_stream(urn))
+        return results
+    
+    def load(self, URI):
+        
+        if URI.startswith("file://"):
+            filename = URI[7:]
+            logging.debug("Resolver: Loading %s" % filename)
+            container = FIFFile([filename], autoload = False, readwrite = False, resolver=self, infostore=self.infostore)
+            self.volumes[container.primary_names[0]] = container
+            return container
+        return None
+    
+    def tell(self, container, subject, attribute, value):
+        self.store(container, subject, attribute, value)
+
+    def unresolved_urns(self):
+        return UnresolvedURNIterator(self)
+        
                 
 class FIFFile(zipfile.ZipFile):
     """ A FIF file is just a Zip file which follows some rules.
@@ -287,7 +482,7 @@ class FIFFile(zipfile.ZipFile):
     _didModify = False
     start_dir = 0
 
-    def __init__(self, filenames=[], parent=None, autoload = True, readwrite = True):
+    def __init__(self, filenames=[], parent=None, autoload = False, readwrite = True, resolver = None, infostore = None):
         """ Build a new FIFFile object.
 
         filenames specify a list of file names or file like object
@@ -301,18 +496,23 @@ class FIFFile(zipfile.ZipFile):
         ## This is an index of all files in the archive set
         if type(filenames)==str:
             filenames = [filenames]
+        self.resolver = resolver
         self.readwrite = readwrite
         self.primary_names = []
         self.file_offsets = {}
         self.Store = Store()
         self.zipfiles = []
-        self.properties = properties()
-        self.info = InfoStore()
+        self.properties = properties(parent=self)
+        if infostore == None:
+            self.info = InfoStore()
+        else:
+            self.info = infostore
+            
         self.volume_directories = []
-        self.properties['aff2:version'] = VERSION
-        self.properties["aff2:type"] = "aff2:AFF2Containter"
+        self.properties['aff2-storage:version'] = VERSION
+        self.properties["aff2-storage:type"] = "aff2-storage:AFF2Containter"
         if parent:
-            self.properties.set('aff2:UUID', parent.properties['aff2:UUID'])
+            self.properties.set('aff2-storage:UUID', parent.properties['aff2-storage:UUID'])
         
         ## This is used to keep track of the current write position in
         ## the file. This is because the file may be read and written
@@ -344,29 +544,42 @@ class FIFFile(zipfile.ZipFile):
                                      allowZip64=True)
 
 
+        if resolver == None:
+            self.resolver = Resolver(self, infostore=self.info)
+            
         ## Load in any files given
         for f in filenames:
             name = self.get_canonical_file_name(f)
             self.merge_fif_volumes(name)
             self.primary_names.append(name)
-        #print self.primary_names
+            self.resolver.register(name, self)
+            
 
         ## Now recursively load in any other volumes:
-        while autoload:
-            volume = self.volume_loaded()
-            ## No unresolved volumes left
-            if not volume: break
+        #while autoload:
+        #    volume = self.volume_loaded()
+        #    ## No unresolved volumes left
+        #    if not volume: break
+        #
+        #    self.merge_fif_volumes(volume)
 
-            self.merge_fif_volumes(volume)
-
+        if autoload:
+            for urn in self.resolver.unresolved_urns():
+                for volume in self.resolver.resolve(urn):
+                    self.merge_fif_volumes(volume)
+                
         ## Now get a UUID if needed. We could have been provided a
         ## UUID from our parent or from any of the volume we loaded -
         ## but if not we need to come up with a new one:
         try:
-            self.properties['aff2:UUID']
+            self.properties['aff2-storage:UUID']
         except KeyError:
-            self.properties['aff2:UUID'] = uuid.uuid4().__str__()
-
+            self.properties['aff2-storage:UUID'] = uuid.uuid4().__str__()
+        if len(self.primary_names) != 0:
+            subjectname = "urn:aff2:%s" % self.properties['aff2-storage:UUID']
+            self.info.add_properties(self.primary_names[0], subjectname, self.properties)
+        
+        
     def get_canonical_file_name(self, name):
         return os.path.realpath(os.path.join(os.getcwd(), name))
     
@@ -387,8 +600,7 @@ class FIFFile(zipfile.ZipFile):
                 
             for volumedir in self.volume_directories:
                 for file in os.listdir(volumedir):
-                    #print self.volumes
-                    url = "file:///%s" % file
+                    url = "file://%s" % file
                     
                     if url not in self.volumes and self.is_fif_volume(os.path.join(volumedir, file)):
                         return os.path.join(volumedir, file)
@@ -412,7 +624,7 @@ class FIFFile(zipfile.ZipFile):
         """ Given a url, or stream name or file like object returns a
         file like object.
         """
-        #print "Resolving URL: %s" % fileobj
+
         ## Its already file like object
         try:
             fileobj.seek
@@ -432,21 +644,22 @@ class FIFFile(zipfile.ZipFile):
                 else:
                     ## Maybe its a stream within this current FIF
                     ## fileset
-                    fileobj = self.open_stream(fileobj)
+                    try:
+                        fileobj = self.open_stream(fileobj)
+                    except KeyError:
+                        raise IOError("Not found: %s" % fileobj)
                     
         return fileobj
 
     def merge_fif_volumes(self, url):
         """ Load and merge the FIF volumes specified. """
         fileobj = self.resolve_url(url)
-        #print "Loading %s %s" % (url, fileobj)
         
         if fileobj not in self.zipfiles:
             self.zipfiles.append(fileobj)
 
         ## We parse out the CD of each file and build an index
-        zf = zipfile.ZipFile(fileobj,
-                             mode='r', allowZip64=True)
+        zf = zipfile.ZipFile(fileobj, mode='r', allowZip64=True)
 
         parentUUID = None
 
@@ -455,12 +668,12 @@ class FIFFile(zipfile.ZipFile):
             self.update_index(fileobj, zinfo)
             if zinfo.filename == "properties":
                 filename = zinfo.filename
-                #print "reading properties file: %s" % filename
+
                 p = properties(zf.read(filename))
-                subjectname = "urn:aff2:%s" % p['aff2:UUID']
+                subjectname = "urn:aff2:%s" % p['aff2-storage:UUID']
                 self.info.add_properties(url, subjectname, p)
                 
-                parentUUID = p['aff2:UUID']
+                parentUUID = p['aff2-storage:UUID']
                 self.properties.update(p)
                 infolist.remove(zinfo)
 
@@ -470,22 +683,20 @@ class FIFFile(zipfile.ZipFile):
         for zinfo in infolist:
             filename = zinfo.filename
             if filename.endswith('properties'):
-                #print "found filename: %s" % filename
-                #print "reading properties file: %s" % filename
                 p = properties(zf.read(filename))
 
-                subjectname = "urn:aff2:%s" % p['aff2:UUID']
+                subjectname = "urn:aff2:%s" % p['aff2-storage:UUID']
                 self.info.add_properties(url, subjectname, p)
                     
                 ## Ok we add it to our volume set
                 if type(fileobj)==file:
-                    name = "file:///%s" % os.path.basename(fileobj.name)
+                    name = "file://%s" % os.path.basename(fileobj.name)
                 else:
                     name = fileobj.name
 
                 if name not in self.volumes:
                     self.volumes.add(name)
-                    self.properties['volume'] = name
+                    self.properties['aff2-storage:references'] = name
                     
                 #self.properties.update(p)
 
@@ -516,7 +727,7 @@ class FIFFile(zipfile.ZipFile):
 
         We can either open the member in read mode or write mode. In
         write mode we receive a stream directly into the archive. You
-        must call close() explicitely on the returned stream - this
+        must call finalise() explicitely on the returned stream - this
         will cause the fileheaders to be finalised. Note that you can
         not open a compressed member for random access, but you can
         write a compressed member using the stream interface (as an
@@ -604,7 +815,7 @@ class FIFFile(zipfile.ZipFile):
     def append_volume(self, filename):
         """ Append to this volume """
         ## Close the current file if needed:
-        self.close()
+        self.finalise()
         filename = self.get_canonical_file_name(filename)
         ## We want to set this filename as the current file to write
         ## on. Therefore, we need to reload the CD from that file so
@@ -624,7 +835,7 @@ class FIFFile(zipfile.ZipFile):
     def create_new_volume(self, filename):
         """ Creates a new volume called filename. """
         ## Close the current file if needed:
-        self.close()
+        self.finalise()
         
         ## Were we given a filename or a file like object?
         try:
@@ -663,19 +874,18 @@ class FIFFile(zipfile.ZipFile):
         #except AttributeError:
         #    pass
         
-    def close(self):
+    def finalise(self):
         """ Finalise any created volume """
         if self._didModify and self.fp:
             try:
-                self.properties['aff2:UUID']
+                self.properties['aff2-storage:UUID']
             except KeyError:
-                self.properties['aff2:UUID'] = uuid.uuid4().__str__()
+                self.properties['aff2-storage:UUID'] = uuid.uuid4().__str__()
 
             ##self.properties.set("current_volume", self.current_volume)
                 
             self.writestr("properties", self.properties)
-            #print "Writing properties file: /properties"
-            #print self.properties
+
             self.flush()
             
             ## Call our base class to close us - this will dump out
@@ -683,8 +893,16 @@ class FIFFile(zipfile.ZipFile):
             self.fp.seek(self.readptr)
             zipfile.ZipFile.close(self)
 
-    def create_stream_for_writing(self, id=None,
-                                  stream_type='aff2:Image',
+    def close(self):
+        self.finalise()
+      
+        for f in self.zipfiles:
+            f.close()
+            self.zipfiles.remove(f)
+        self.resolver.close(self)
+        
+    def create_stream_for_writing(self, id=None, stream_name=None,
+                                  stream_type='aff2-storage:Image',
                                   **args):
         """ This method creates a new stream for writing in the
         current FIF archive.
@@ -703,19 +921,21 @@ class FIFFile(zipfile.ZipFile):
         elif id.startswith("urn:aff2:"):
             id = id.replace("urn:aff2:", "")
 
-        props["aff2:UUID"] = id
+        if stream_name == None:
+            stream_name = id
+
+        props["aff2-storage:UUID"] = id
 
         # HACK. I dont know why the following statement fails...
-        #stream.properties["aff2:name"] = args['stream_name']
+        #stream.properties["aff2-storage:name"] = args['stream_name']
         passedprops = properties()
         passedprops.update(args)
         if passedprops.get('local_name') != None:
-            props["aff2:name"] = passedprops.get('local_name')
+            props["aff2-storage:name"] = passedprops.get('local_name')
         
         stream = types[stream_type]
 
-        print props
-        new_stream = stream(fd=self, stream_name=id, mode='w',
+        new_stream = stream(fd=self, stream_name=stream_name, mode='w',
                             properties=props, **args)
         self.writers.append( new_stream)
         self.info.add_properties(self.primary_names[0], new_stream.getId(), props)
@@ -723,17 +943,18 @@ class FIFFile(zipfile.ZipFile):
 
     def open_stream_by_name(self, stream_name):
         results = []
-        print self.primary_names
+
         for name in self.primary_names:
-            queryresult = self.info.query(name, None, "aff2:name", stream_name)
-            print queryresult
+            queryresult = self.info.query(name, None, "aff2-storage:name", stream_name)
             for result in queryresult:
                 results.append(result)
 
         if len(results) > 1:
-            raise RuntimeException("Open by name failed -local name used more than once")
+            raise IOError("Open by name failed for %s: local name used more than once" % stream_name)
+        if len(results) == 0:
+            raise IOError("Open by name failed for %s: name not found" % stream_name)
 
-        #print "Opening stream name %s : %s" % (stream_name, results[0][0])
+        logging.debug("FIFFile:open_stream_by_name: Opening stream name %s : %s" % (stream_name, results[0][1]))
         return self.open_stream(results[0][1])
         
     def open_stream(self, stream_name):
@@ -741,21 +962,22 @@ class FIFFile(zipfile.ZipFile):
 
         We basically instantiate the right driver and return it.
         """
+        logging.debug("FIFFile:open_stream: pening stream name: %s" % stream_name)
         if stream_name.startswith("urn:aff2:"):
             stream_name = stream_name.replace("urn:aff2:", "")
         
         props = properties(self.read_member("%s/properties" % stream_name))
-        #print props
-        stream = types[props['aff2:type']]
+
+        stream = types[props['aff2-storage:type']]
         return stream(fd=self, stream_name=stream_name, mode='r',
-                      properties=props)
+                      properties=props, parent=self)
 
     def stats(self):
-        print "Store load %s chunks total %s (expired %s)" % (
+        logging.info("Store load %s chunks total %s (expired %s)" % (
             len(self.Store.seq),
             self.Store.size,
             self.Store.expired,
-            )
+            ))
 
     def __del__(self):
         self.close()
@@ -763,7 +985,7 @@ class FIFFile(zipfile.ZipFile):
     def get_images(self):
         results = []
         for name in self.primary_names:
-            for result in self.info.query(name, None, "aff2:containsImage", None):
+            for result in self.info.query(name, None, "aff2-storage:containsImage", None):
                 results.append(result[3])
         return results
 
@@ -775,12 +997,10 @@ class FIFFD:
         """
         ## This will change as we go along so we only want one of
         ## these:
-        self.properties.set('aff2:size', self.size)
+        self.properties.set('aff2-storage:size', self.size)
         
         ## Make the properties file
         filename = "%s/properties" % self.stream_name
-        #print "Writing properties %s" % filename
-        #print self.properties
         
         self.fd.writestr(filename, self.properties)
 
@@ -814,13 +1034,15 @@ class FIFFD:
             self.fd.writers.pop(idx)
         except IndexError:
             pass
+        except ValueError:
+            pass
 
     def getId(self):
-        return "urn:aff2:%s" % (self.properties["aff2:UUID"])
+        return "urn:aff2:%s" % (self.properties["aff2-storage:UUID"])
     
 class InfoDriver(FIFFD):
     """ A stream writer for recording general informaiton """
-    type = "aff2:Info"
+    type = "aff2-storage:Info"
     size = 0
     
     def __init__(self, mode='w', stream_name='data',
@@ -831,7 +1053,7 @@ class InfoDriver(FIFFD):
         self.mode = mode
         self.name = self.stream_name = stream_name
         self.properties = properties
-        self.properties["aff2:type"] = "aff2:Info"
+        self.properties["aff2-storage:type"] = "aff2-storage:Info"
         
     def write_properties(self):
         """ This returns a formatted properties string. Properties are
@@ -840,8 +1062,7 @@ class InfoDriver(FIFFD):
        
         ## Make the properties file
         filename = "%s/properties" % self.stream_name
-        #print "Writing properties %s" % filename
-        #print self.properties
+
         self.fd.writestr(filename, self.properties)
         
     def close(self):
@@ -937,26 +1158,25 @@ class ZipFileStream(FIFFD):
 
 class Image(FIFFD):
     """ A stream writer for creating a new FIF archive """
-    type = "aff2:Image"
+    type = "aff2-storage:Image"
     size = 0
     
     def __init__(self, mode='w', stream_name='data',
                  attributes=None, fd=None,
                  properties = None, **args):
         
-        #print "reading properties"
         self.fd = fd
         self.mode = mode
         self.name = self.stream_name = stream_name
         self.chunk_id = 0
-        self.chunksize = int(properties.get('aff2:chunk_size', 32*1024))
-        self.size = int(properties.get('aff2:size',0))
+        self.chunksize = int(properties.get('aff2-storage:chunk_size', 32*1024))
+        self.size = int(properties.get('aff2-storage:size',0))
         self.readptr = 0
         self.Store = Store()
         self.stream_re = re.compile(r"%s/(\d+)+.dd" % self.stream_name)
         self.outstanding = ''
 
-        properties["aff2:type"] = "aff2:Image"
+        properties["aff2-storage:type"] = "aff2-storage:Image"
 
         ## The following are mandatory properties:
         self.properties = properties
@@ -992,7 +1212,7 @@ class Image(FIFFD):
         return self.fd.read_member(self.make_chunk_name(chunk_id))
 
     def write_properties(self):
-        self.properties.set('aff2:count', self.chunk_id)
+        self.properties.set('aff2-storage:count', self.chunk_id)
         FIFFD.write_properties(self)
         
     def make_chunk_name(self, chunk_id):
@@ -1027,13 +1247,13 @@ class Image(FIFFD):
         FIFFD.close(self)
 
     def getId(self):
-        return "urn:aff2:%s" % (self.properties["aff2:UUID"])
+        return "urn:aff2:%s" % (self.properties["aff2-storage:UUID"])
         
 class Overlay(Image):
     """ The overlay stream allows for external chunk references so we
     can just piggy back on top of files like EWF.
     """
-    type = 'aff2:Overlay'
+    type = 'aff2-storage:Overlay'
     def __init__(self, mode='w', *args, **kwargs):
         self.chunks = {}
         self.filenames = {}
@@ -1042,14 +1262,14 @@ class Overlay(Image):
         Image.__init__(self, mode=mode, *args, **kwargs)
         if mode=='r':
             self.open_overlay()
-        self.properties["aff2:type"] = 'aff2:Overlay'
+        self.properties["aff2-storage:type"] = 'aff2-storage:Overlay'
 
     def open_overlay(self):
         self.targets = []
-        for t in self.properties.getarray('aff2:target'):
+        for t in self.properties.getarray('aff2-storage:target'):
             self.targets.append(self.fd.resolve_url(t))
         
-        for segment in self.properties.getarray('aff2:overlay'):
+        for segment in self.properties.getarray('aff2-storage:overlay'):
             data = self.fd.read_member("%s/%s" % (self.stream_name, segment))
             for line in data.splitlines():
                 id, offset, size, compression, filename_id = line.split(",",5)
@@ -1075,7 +1295,7 @@ class Overlay(Image):
     def close(self):
         ## We add the attributes
         for i in range(len(self.inverted_filenames.keys())):
-            self.properties['aff2:target'] = 'file://%s' % self.inverted_filenames[i].strip()
+            self.properties['aff2-storage:target'] = 'file://%s' % self.inverted_filenames[i].strip()
 
         name = "overlay.%02d" % (self.overlay_count)
         self.overlay_count += 1
@@ -1092,7 +1312,7 @@ class Overlay(Image):
                 pass
 
         fd.close()
-        self.properties['aff2:overlay'] = name
+        self.properties['aff2-storage:overlay'] = name
         Image.close(self)
         
     def read_chunk(self, chunk_id):
@@ -1154,44 +1374,42 @@ class MapDriver(FIFFD):
       will advance by. (Useful for RAID)
     
     """
-    type = "aff2:Map"
+    type = "aff2-storage:Map"
     
     def __init__(self, fd=None, mode='r', stream_name='data',
-                 properties=None, **args):
+                 properties=None, parent=None, **args):
 
         properties.update(args)
-        #print properties
         ## Build up the list of targets
         self.mode = mode
         self.targets = {}
+        self.parent = parent
         
         try:
             count = 0
 
             targets = []
-            print properties
             if len(properties.getarray('target')) > 0:
                 targets = properties.getarray('target')
-                print "Found target"
             else:   
-                targets = properties.getarray('aff2:target')
-                print "Found aff2:target"
+                targets = properties.getarray('aff2-storage:target')
 
-            print targets
             for target in targets:
                 ## We can not open the target for reading at the same
                 ## time as we are trying to write it - this is
                 ## danegerous and may lead to file corruption.
-                properties['aff2:target'] = target
-                print 
+                properties['aff2-storage:target'] = target
                 if mode!='w':
-                    self.targets[count] = fd.open_stream(target)
+                    logging.debug("Map:__init__: Resolving target %s" % target)
+                    containers = self.parent.resolver.resolve(target)
+                    logging.debug("Map:__init__: Resolved target %s to %s" % (target, str(containers)))
+                    self.targets[count] = containers[0]
                     
                 count +=1
                 
         except KeyError:
             pass
-        print self.targets
+
         if count==0:
             raise RuntimeError("You must set some targets of the mapping stream")
 
@@ -1207,11 +1425,11 @@ class MapDriver(FIFFD):
         ## This holds the target index for each file offset
         self.target_index = {}
 
-        properties["aff2:type"] = "aff2:Map"
+        properties["aff2-storage:type"] = "aff2-storage:Map"
         self.properties = properties
         self.stream_name = stream_name
         self.readptr = 0
-        self.size = int(properties.get('aff2:size',0))
+        self.size = int(properties.get('aff2-storage:size',0))
         ## Check if there is a map to load:
         if mode=='r':
             self.load_map()
@@ -1270,8 +1488,8 @@ class MapDriver(FIFFD):
         until the next discontinuity.
         """
         try:
-            file_period = int(self.properties['aff2:file_period'])
-            image_period = int(self.properties['aff2:image_period'])
+            file_period = int(self.properties['aff2-storage:file_period'])
+            image_period = int(self.properties['aff2-storage:image_period'])
             period_number = file_offset / file_period
             file_offset = file_offset % file_period
         except KeyError:
@@ -1315,7 +1533,7 @@ class MapDriver(FIFFD):
         result = ''
         ## Cant read beyond end of file
         length = min(self.size - self.readptr, length)
-        
+
         while length>0:
             m, left, target_index = self.interpolate(self.readptr)
             ## Which target to read from?
@@ -1429,20 +1647,20 @@ try:
 
         def get_master_key(self):
             try:
-                salt = self.properties['aff2:salt'].decode("base64")
+                salt = self.properties['aff2-storage:salt'].decode("base64")
             except KeyError:
                 salt = POOL.get_bytes(8)
-                self.properties['aff2:salt'] = salt.encode("base64").strip()
+                self.properties['aff2-storage:salt'] = salt.encode("base64").strip()
                 
             try:
                 PSK = os.environ['FIF_PSK']
                 print "Read PSK from environment"
             except KeyError:
                 try:
-                    PSK = self.properties['aff2:PSK']
+                    PSK = self.properties['aff2-storage:PSK']
                     ## Clear the PSK from the properties so it doesnt
                     ## get written to file
-                    del self.properties['aff2:PSK']
+                    del self.properties['aff2-storage:PSK']
                 except KeyError:
                     PSK = raw_input("Type in a password:")
 
@@ -1477,7 +1695,7 @@ except ImportError:
     Crypto = None
 
 class Encrypted(Image):
-    type = "aff2:Encrypted"
+    type = "aff2-storage:Encrypted"
     fiffile = None
 
     def __init__(self, stream_name='crypt', properties = None, blocksize=4096,
@@ -1486,11 +1704,11 @@ class Encrypted(Image):
                        properties = properties, **args)
         print properties
         try:
-            scheme = properties['aff2:scheme']
+            scheme = properties['aff2-storage:scheme']
         except KeyError:
             scheme = 'null'
             print "No scheme specified, defaulting to %s" % scheme
-            properties['aff2:scheme'] = scheme
+            properties['aff2-storage:scheme'] = scheme
 
         try:
             self.crypto = crypto_schemes[scheme]
@@ -1501,7 +1719,7 @@ class Encrypted(Image):
         self.blocksize = int(blocksize)
         self.crypto = self.crypto(self.fd, self.stream_name, self.properties)
         self.Store = Store()
-        self.properties["aff2:type"] = "aff2:Encrypted"
+        self.properties["aff2-storage:type"] = "aff2-storage:Encrypted"
             
     def write_chunk(self, data):
         #print "Writing encrypted chunk %s %s" % (self.chunk_id, self.size)
@@ -1526,21 +1744,21 @@ class Encrypted(Image):
         inside the encrypted stream.
         """
         ## We contain a fif file
-        self.properties['aff2:content-type'] = CONTENT_TYPE
-        self.fd.properties['volume'] = self.stream_name
+        self.properties['aff2-storage:content-type'] = CONTENT_TYPE
+        self.fd.properties['aff2-storage:volume'] = self.stream_name
         
-        self.fiffile = FIFFile(parent = self.fd)
+        self.fiffile = FIFFile(parent = self.fd, resolver=self.resolver)
         self.fiffile.create_new_volume(self)
 
         return self.fiffile
 
     def close(self):
-        if self.properties.get('aff2:content-type') == CONTENT_TYPE:
+        if self.properties.get('aff2-storage:content-type') == CONTENT_TYPE:
         ## Make sure that our container is closed
             self.fiffile.close()
 
         Image.close(self)
 
 ## The following are the supported segment types
-types = {"aff2:Image" : Image, "aff2:Map" : MapDriver, "aff2:Encrypted" : Encrypted,
-             "aff2:Overlay" : Overlay, "aff2:Info" : InfoDriver}
+types = {"aff2-storage:Image" : Image, "aff2-storage:Map" : MapDriver, "aff2-storage:Encrypted" : Encrypted,
+             "aff2-storage:Overlay" : Overlay, "aff2-storage:Info" : InfoDriver}

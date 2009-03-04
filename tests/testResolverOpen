@@ -1,0 +1,28 @@
+import fif
+import unittest
+
+class TestResolverOpen(unittest.TestCase):
+
+    def setUp(self):
+        pass
+
+    def testOpenUnknownFile(self):
+        resolver = fif.Resolver()
+        res = resolver.resolve("file://unknown.zip")
+        self.assertEquals(len(res), 0)
+        
+    def testOpenLocalImage(self):
+        resolver = fif.Resolver()
+        res = resolver.resolve("file://../samples/mediumimage.00.zip")
+        self.assertEquals(len(res), 1)
+        self.assertEquals(type(res[0]), fif.FIFFile)
+       
+        
+def suite():
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestOpen)
+    return suite
+
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestOpen)
+    unittest.TextTestRunner(verbosity=2).run(suite)

@@ -2,7 +2,9 @@
 forensic acquisition and interchange.
 """
 
-import fif, optparse, sys, os
+import fif, optparse, sys, os, logging
+
+logging.basicConfig(filename="/dev/stderr",level=logging.DEBUG,)
 
 parser = optparse.OptionParser()
 parser.add_option("-s", "--stream", default="default",
@@ -27,6 +29,9 @@ parser.add_option("-e", "--encrypt", default=False,
 parser.add_option("-E", "--scheme", default='aes-sha-psk',
                   help='Default encryption scheme')
 
+parser.add_option("-L", "--link", dest="link", default=False, action="store_true",
+                  help='Create friendly name')
+
 (options, args) = parser.parse_args()
 
 if len(args)!=2:
@@ -50,11 +55,7 @@ if options.append:
     mode='a'
     filename = args[1]
     basefif = fiffile = fif.FIFFile([filename])
-    print "Printing basefif.properties"
-    print basefif.properties
     basefif.append_volume(filename)
-    print "Printing basefif.properties"
-    print basefif.properties
                                    
 else:
     ## Get a handle to the FIF file
@@ -62,7 +63,6 @@ else:
     ## Create a new volume
     count = 0
     new_name = "%s.%02d.zip" % (args[1], count)
-    print "Creating new volume %s" % new_name
     basefif.create_new_volume(new_name)
 
 ## Make a new stream on the new volume if needed. Encryption means to
@@ -70,26 +70,32 @@ else:
 ## tell it to make a new volume on the encrypted stream.
 if options.encrypt:
     enc = basefif.create_stream_for_writing(stream_name='crypted',
-                                                stream_type='aff2:Encrypted',
+                                                stream_type='aff2-storage:Encrypted',
                                                 scheme = options.scheme,
                                                 )
     fiffile = enc.create_new_volume()
 
 ## Now we create a new Image stream on the fiffile to store the image
 ## in:
-stream = fiffile.create_stream_for_writing(stream_type = "aff2:Image",
+stream = fiffile.create_stream_for_writing(stream_type = "aff2-storage:Image",
                                               chunksize = options.chunksize * 1024,
                                            local_name = infd.name)
 
 # create an information storage stream to store the source information
-infostream = fiffile.create_stream_for_writing(stream_type = "aff2:Info",
-                                              )
+infostream = fiffile.create_stream_for_writing(stream_type = "aff2-storage:Info")
 
-stream.properties["aff2:streamSource"] = infostream.getId()
-infostream.properties["aff2:type"] = "aff2:File"
-infostream.properties["aff2:path"] = os.getcwd() + os.sep + infd.name
-basefif.properties["aff2:containsImage"] = stream.getId()
+stream.properties["aff2-storage:streamSource"] = infostream.getId()
+infostream.properties["aff2-storage:type"] = "aff2-info:File"
+infostream.properties["aff2-storage:path"] = os.getcwd() + os.sep + infd.name
+basefif.properties["aff2-storage:containsImage"] = stream.getId()
 
+print options.link
+if options.link:
+    link_infostream = fiffile.create_stream_for_writing(stream_type = "aff2-storage:Info",
+                                                        stream_name=options.stream)
+    link_infostream.properties["aff2-storage:type"] = "aff2-storage:Link"
+    link_infostream.properties["aff2-storage:target"] = stream.getId()
+    
 ## This is the maxium volume size - we break up the volume when we
 ## exceed it:
 max_size = options.volume_size * 1024 * 1024
