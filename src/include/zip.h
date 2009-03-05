@@ -105,11 +105,23 @@ CLASS(Cache, Object)
 
 // Store the key, data in a new Cache object. The key and data will be
 // stolen.
-     void METHOD(Cache, put, void *key, void *data, int data_len);
+     Cache METHOD(Cache, put, void *key, void *data, int data_len);
+END_CLASS
+
+/** All AFF Objects inherit from this one. The URI must be set to
+    represent the globally unique URI of this object. */
+CLASS(AFFObject, Object)
+     char *uri;
+
+     // This is the type of this object
+     char *type;
+     
+     /** Any object may be asked to be constructed from its URI */
+     AFFObject METHOD(AFFObject, Con, char *uri);
 END_CLASS
 
 // Base class for file like objects
-CLASS(FileLikeObject, Object)
+CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
      uint64_t size;
      char *name;
@@ -118,11 +130,6 @@ CLASS(FileLikeObject, Object)
      int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
-
-// This method returns a newly allocated uri reference for this
-// FileLikeObject. Examples are file://filename.zip or uri:aff2:UUID
-
-     char *METHOD(FileLikeObject, get_uri);
 
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this.
@@ -133,7 +140,7 @@ END_CLASS
 CLASS(FileBackedObject, FileLikeObject)
      int fd;
 
-     FileBackedObject METHOD(FileBackedObject, con, char *filename, char mode);
+     FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
 END_CLASS
 
 /** This represents a single Zip entry.  We only implement as much as
@@ -164,7 +171,7 @@ CLASS(ZipInfo, Object)
 END_CLASS
 
 /** This represents a Zip file */
-CLASS(ZipFile, Object)
+CLASS(ZipFile, AFFObject)
 // This is the end of the last file record and the start of the
 // central directory. When adding a new file to the archive we just go
 // there.

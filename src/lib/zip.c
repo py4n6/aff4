@@ -25,6 +25,8 @@ static int Cache_destructor(void *this) {
 
   return 0;
 };
+
+/** A max_cache_size of 0 means we never expire anything */
 static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
   self->hash_table_width = hash_table_width;
   self->max_cache_size = max_cache_size;
@@ -53,7 +55,7 @@ static int Cache_cmp(Cache self, void *other) {
   return strcmp((char *)self->key, (char *)other);
 };
 
-static void Cache_put(Cache self, void *key, void *data, int data_len) {
+static Cache Cache_put(Cache self, void *key, void *data, int data_len) {
   unsigned int hash;
   Cache hash_list_head;
   Cache new_cache;
@@ -63,7 +65,7 @@ static void Cache_put(Cache self, void *key, void *data, int data_len) {
   // first to avoid the possibility that we might expire the same key
   // we are about to add.
   list_for_each_entry_safe(i, j, &self->cache_list, cache_list) {
-    if(self->cache_size < self->max_cache_size) 
+    if(self->max_cache_size==0 || self->cache_size < self->max_cache_size) 
       break;
     else {
       self->cache_size--;
@@ -78,7 +80,7 @@ static void Cache_put(Cache self, void *key, void *data, int data_len) {
 
   hash = CALL(self, hash, key);
   hash_list_head = self->hash_table[hash];
-  new_cache = CONSTRUCT(Cache, Cache, Con, self, 0, 0);
+  new_cache = CONSTRUCT(Cache, Cache, Con, self->hash_table, HASH_TABLE_SIZE, 0);
 
   // Take over the data
   new_cache->key = key;
@@ -88,19 +90,22 @@ static void Cache_put(Cache self, void *key, void *data, int data_len) {
   talloc_steal(new_cache, data);
 
   if(!hash_list_head) {
-    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 0, 0);
+    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 
+							HASH_TABLE_SIZE, 0);
+    talloc_set_name_const(hash_list_head, "Hash Head");
   };
 
   list_add_tail(&new_cache->hash_list, &hash_list_head->hash_list);
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
  
+  return new_cache;
 };
 
 static Cache Cache_get(Cache self, void *key) {
   int hash;
   Cache hash_list_head;
-  Cache i;
+  Cache i,j;
 
   hash = CALL(self, hash, key);
   if(!self->hash_table) return NULL;
@@ -113,12 +118,12 @@ static Cache Cache_get(Cache self, void *key) {
   // object using the hash list, but expire the object based on the
   // cache list which includes all objects in the case.
   if(!hash_list_head) return NULL;
-  list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
+  list_for_each_entry_safe(i, j, &hash_list_head->hash_list, hash_list) {
     if(!CALL(i, cmp, key)) {
       // Thats it - we remove it from where it in and put it on the
       // tail:
       list_del(&i->cache_list);
-      list_add_tail(&i->cache_list, &self->hash_table[hash]->cache_list);
+      list_add_tail(&i->cache_list, &self->cache_list);
       return i;
     };
   };
@@ -145,7 +150,7 @@ static int close_fd(void *self) {
   return 0;
 };
 
-static FileBackedObject FileBackedObject_con(FileBackedObject self, 
+static FileBackedObject FileBackedObject_Con(FileBackedObject self, 
 				      char *filename, char mode) {
   int flags;
 
@@ -176,6 +181,26 @@ static FileBackedObject FileBackedObject_con(FileBackedObject self,
   // Work out what the file size is:
   self->super.size = lseek(self->fd, 0, SEEK_END);
   self->super.name = talloc_strdup(self, filename);
+
+  // Set our uri
+  self->super.super.uri = talloc_asprintf(self, "file://%s", filename);
+
+  return self;
+};
+
+// This is the low level constructor for FileBackedObject.
+static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
+  FileBackedObject this = (FileBackedObject)self;
+
+  if(urn) {
+    // If the urn starts with file:// we open the filename, otherwise
+    // we try to open the actual file itself:
+    if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
+      this->Con(this, urn + strlen("file://"), 'r');
+    } else {
+      this->Con(this, urn, 'r');
+    };
+  };
 
   return self;
 };
@@ -251,13 +276,7 @@ static void FileBackedObject_close(FileLikeObject self) {
   talloc_free(self);
 };
 
-static char *FileBackedObject_get_uri(FileLikeObject self) {
-  //FileBackedObject this = (FileBackedObject)self;
-
-  return talloc_asprintf(self, "file://%s", self->name);
-};
-
-VIRTUAL(FileLikeObject, Object)
+VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
      VMETHOD(close) = FileLikeObject_close;
@@ -265,11 +284,12 @@ END_VIRTUAL
 
 /** A file backed object extends FileLikeObject */
 VIRTUAL(FileBackedObject, FileLikeObject)
-     VMETHOD(con) = FileBackedObject_con;
+     VMETHOD(Con) = FileBackedObject_Con;
+     VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
+
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
      VMETHOD(super.close) = FileBackedObject_close;
-     VMETHOD(super.get_uri) = FileBackedObject_get_uri;
 END_VIRTUAL;
 
 /** Now implement Zip file support */
@@ -353,8 +373,6 @@ static ZipFile ZipFile_Con(ZipFile self, FileLikeObject fd) {
 	      zip->cd_header.file_name_length) == 0)
 	goto error_reason;
 
-      // Add to our hashtable (we need the strdup because the filename
-      // will be stolen.
       CALL(self, add_zipinfo_to_cache, zip);
 
       // Skip the comments - we dont care about them
@@ -391,13 +409,16 @@ static ZipInfo ZipFile_fetch_ZipInfo(ZipFile self, char *filename) {
 */
 static char *ZipFile_read_member(ZipFile self, char *filename, 
 			  int *length) {
-  ZipInfo zip = CALL(self, fetch_ZipInfo, filename);
+  ZipInfo zip=NULL;
   char compression_method;
   struct ZipFileHeader header;
   int read_length = sizeof(header);
   Cache cached_data;
   char *buffer;
-
+  uint64_t original_offset;
+  
+  zip = CALL(self, fetch_ZipInfo, filename);
+  original_offset = CALL(self->fd, tell);
   if(!zip) return NULL;
 
   // Does this ZipInfo have a cache? If so just return that
@@ -480,7 +501,7 @@ static char *ZipFile_read_member(ZipFile self, char *filename,
   };
 
   // Here we have a good buffer - now calculate the crc32
-  {
+  if(0){
     uLong crc = crc32(0L, Z_NULL, 0);
     crc = crc32(crc, (unsigned char *)buffer,
 		zip->cd_header.file_size);
@@ -496,8 +517,11 @@ static char *ZipFile_read_member(ZipFile self, char *filename,
   CALL(self->file_data_cache, put, talloc_strdup(buffer, zip->filename),
        buffer, *length);
 
+  // Make sure we return the file to the position we found it in
+  CALL(self->fd,seek, original_offset, SEEK_SET);
   return buffer;
  error:
+  CALL(self->fd,seek, original_offset, SEEK_SET);
   return NULL;
 };
 
@@ -649,7 +673,7 @@ static void ZipFile_writestr(ZipFile self, char *filename,
   CALL(fd, close);
 };
 
-VIRTUAL(ZipFile, Object)
+VIRTUAL(ZipFile, AFFObject)
      VMETHOD(Con) = ZipFile_Con;
      VMETHOD(read_member) = ZipFile_read_member;
      VMETHOD(create_new_volume) = ZipFile_create_new_volume;
@@ -817,3 +841,11 @@ VIRTUAL(ZipFileStream, FileLikeObject)
      VMETHOD(super.write) = ZipFileStream_write;
      VMETHOD(super.close) = ZipFileStream_close;
 END_VIRTUAL
+
+void print_cache(Cache self) {
+  Cache i;
+
+  list_for_each_entry(i, &self->cache_list, cache_list) {
+    printf("%s %p %s\n",(char *) i->key,i->data, (char *)i->data);
+  };
+};

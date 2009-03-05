@@ -6,6 +6,69 @@
 
 struct FIFFile;
 
+     /** The resolver is at the heart of the AFF2 specification - its
+	 responsible with returning various objects from a globally
+	 unique identifier (URI).
+     */
+CLASS(Resolver, Object)
+// This is a global cache of URN and their values - we try to only
+// have small URNs here and keep everything in memory.
+     Cache urn;
+
+     // This is a cache of AFFObject objects (keyed by URI) which have
+     // been constructed previously. This cache is quite small and can
+     // expire objects at any time. The objects should be able to be
+     // reconstructured at any time by calling Resolver.resolver(URI).
+     Cache cache;
+
+     Resolver METHOD(Resolver, Con);
+
+/* This method tries to resolve the provided uri and returns an
+ instance of whatever the URI refers to. class_name can be provided as
+ a string to allow us to check that the type we return is actually the
+ type the caller is after. For example:
+
+ FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, 
+                             uri, "FileLikeObject");
+
+ If uri indeed refers to a FileLikeObject, fd will be that object,
+ however, if the uri is something else, it will NULL. Note that we
+ also check superclasses - in the example above, if the stream is
+ actually an Image, we will still return it since an Image is derived
+ from a FileLikeObject.
+*/
+     AFFObject METHOD(Resolver, open, char *uri, char *class_name);
+     char *METHOD(Resolver, resolve, char *uri, char *attribute);
+
+//Stores the uri and the value in the resolver. The value will be
+//stolen, but the uri will be copied.
+     void METHOD(Resolver, add, char *uri, char *attribute, char *value);
+
+     // Exports all the properties to do with uri - user owns the buffer.
+     char *METHOD(Resolver, export, char *uri);
+END_CLASS
+
+/** The resolver is primarily responsbile with resolving references in
+    uri notation to return FileLikeObject. That means the resolver
+    will try to open to relevant volumes, streams or members.
+
+    The resolver may be implemented using a number of ways, but right
+    now we implemement a simple one.
+
+    Resolvers are a list of objects
+*/
+CLASS(ResolverHandler, Object)
+     char *method;
+
+     ResolverHandler METHOD(ResolverHandler, Con);
+     FileLikeObject METHOD(ResolverHandler, open, char *uri);
+END_CLASS
+
+// A link simply returns the URI its pointing to
+CLASS(Link, AFFObject)
+END_CLASS
+
+
 /** Properties are key value pairs. We preserve their order though */
 CLASS(Properties, Object)
      struct list_head list;
@@ -54,8 +117,7 @@ CLASS(AFFFD, FileLikeObject)
      // The name of this stream (Its UUID)
      char *stream_name;
 
-     AFFFD METHOD(AFFFD, Con, char *stream_name, 
-		  Properties props, struct FIFFile *parent);
+     AFFFD METHOD(AFFFD, Con, char *uri);
 END_CLASS
 
 // The segments created by the Image stream are named by segment
@@ -91,19 +153,8 @@ CLASS(Image, AFFFD)
 
 END_CLASS
 
-struct dispatch_t {
-  char *type;
-  AFFFD class_ptr;
-};
-
-// A dispatch table for instantiating the right classes according to
-// the stream_type
-extern struct dispatch_t dispatch[];
-
 // This is the main FIF class - it manages the Zip archive
 CLASS(FIFFile, ZipFile)
-     Properties props;
-
      // Each FIFFile has a resolver which we use to resolve URNs to
      // FileLikeObjects
      struct Resolver *resolver;
@@ -117,7 +168,6 @@ CLASS(FIFFile, ZipFile)
 
      /** Open the stream for reading */
      AFFFD METHOD(FIFFile, open_stream, char *stream_name);
-Object METHOD(FIFFile, resolve, char *urn, char *type);
 END_CLASS
 
 
@@ -185,46 +235,8 @@ CLASS(MapDriver, AFFFD)
      void METHOD(MapDriver, save_map);
 END_CLASS
 
-
-/** The resolver is primarily responsbile with resolving references in
-    uri notation to return FileLikeObject. That means the resolver
-    will try to open to relevant volumes, streams or members.
-
-    The resolver may be implemented using a number of ways, but right
-    now we implemement a simple one.
-
-    Resolvers are a list of objects
-*/
-CLASS(ResolverHandler, Object)
-     char *method;
-
-     ResolverHandler METHOD(ResolverHandler, Con);
-     FileLikeObject METHOD(ResolverHandler, resolve, char *uri);
-END_CLASS
-
-CLASS(Resolver, Object)
-// This is a global cache of URN and their values - we try to only
-// have small URNs here and keep everything in memory.
-     Cache urn;
-     Resolver METHOD(Resolver, Con);
-
-/* This method tries to resolve the provided uri and returns an
- instance of whatever the URI refers to. class_name can be provided as
- a string to allow us to check that the type we return is actually the
- type the caller is after. For example:
-
- FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, 
-                             uri, "FileLikeObject");
-
- If uri indeed refers to a FileLikeObject, fd will be that object,
- however, if the uri is something else, it will NULL. Note that we
- also check superclasses - in the example above, if the stream is
- actually an Image, we will still return it since an Image is derived
- from a FileLikeObject.
-*/
-     Object METHOD(Resolver, resolve, char *uri, char *class_name);
-
-//Stores the uri and the value in the resolver. The value will be
-//stolen, but the uri will be copied.
-     void METHOD(Resolver, add, char *uri, void *value, int len);
+// A blob is a single lump of data
+CLASS(Blob, AFFObject)
+     char *data;
+     int length;
 END_CLASS

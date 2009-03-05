@@ -11,6 +11,6 @@ libsha1_la_SOURCES	= sha1.c
 fifinfo_LDADD           = libfif.la
 fifinfo_SOURCES         = fifinfo.c
 
-libfif_la_SOURCES       = libfif.c zip.c stringio.c
+libfif_la_SOURCES       = libfif.c zip.c stringio.c resolver.c blob.c
 libfif_la_LIBADD	= libsha1.la liboo.la libmd5.la
 libfif_la_LDFLAGS       = -lz -luuid

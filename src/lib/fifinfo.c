@@ -8,13 +8,15 @@
 #include <time.h>
 
 
+#define TEST_FILE "test.zip"
+
 /** First test builds a new zip file from /bin/ls */
 void test1() {
   // Make a new zip file
-  ZipFile zip = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
+  ZipFile zip = (ZipFile)CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
 
   // Make a new file
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, zip, "new_test.zip", 'w');
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, zip, TEST_FILE, 'w');
   FileLikeObject out_fd;
 
   // Create a new Zip volume for writing
@@ -25,7 +27,7 @@ void test1() {
   // Open the member foobar for writing
   out_fd = CALL(zip, open_member, "foobar", 'w', NULL, 0,
 		ZIP_DEFLATE);
-
+  
   // It worked - now copy /bin/ls into it
   if(out_fd) {
     char buffer[BUFF_SIZE];
@@ -52,9 +54,10 @@ void test1() {
 /** This tests the cache for reading zip members */
 void test2() {
   // Open the file for reading
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
   // Open the zip file
-  ZipFile zip = CONSTRUCT(ZipFile, ZipFile, Con, fd, (FileLikeObject)fd);
+  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
+  ZipFile zip = (ZipFile)fiffile;
 
   char *result=NULL;
   int length=0;
@@ -62,7 +65,11 @@ void test2() {
   struct timeval epoch_time;
   struct timeval new_time;
   int diff;
+  Blob blob;
   
+  // Now ask the resolver for the different files
+  blob = CALL(fiffile->resolver, open, "hello", "Blob");
+  printf("Resolving foobar produced **************\n%s\n******************\n", blob->data);
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
@@ -89,7 +96,7 @@ void test3() {
   FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
 
   // Make a new file
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
 				  fiffile, "test.00.zip", 'w');
 
   // Create a new properties object
@@ -120,7 +127,7 @@ void test3() {
       // Make a new fd
       volume_number ++ ;
       snprintf(buffer, BUFF_SIZE, "test.%02d.zip", volume_number);
-      fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
+      fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
 		     fiffile, buffer, 'w');
       
       fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
@@ -186,8 +193,8 @@ void test5() {
   FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
 
   // Make a new file
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
-				  fiffile, "new_test.zip", 'w');
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
+				  fiffile, TEST_FILE, 'w');
 
   // Create a new properties object
   Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
@@ -219,7 +226,7 @@ void test5() {
 
 /** Test reading of the Image stream */
 void test6() {
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con, NULL, "new_test.zip", 'r');
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
   FIFFile fiffile;
   AFFFD image;
   int outfd;
@@ -228,13 +235,13 @@ void test6() {
 
   if(!fd) goto error;
 
-  __Resolver.urn = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 1e6);
   // Make a new zip file
   fiffile  = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
   if(!fiffile) goto error;
 
+  goto error;
   //image = CALL(fiffile, open_stream, "default");
-  image = CALL(fiffile, resolve, "default", "FileLikeObject");
+  image = CALL(fiffile->resolver, resolve, "default", "FileLikeObject");
   if(!image) goto error;
 
   outfd = creat("output.dd", 0644);
@@ -262,8 +269,8 @@ void test7() {
   // Make a new zip file
   FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
 
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, con,
-				  fiffile, "new_test.zip", 'w');
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
+				  fiffile, TEST_FILE, 'w');
   FileLikeObject d0,d1,d2;
   MapDriver map;
   int blocksize = 64 * 1024;
@@ -299,7 +306,6 @@ void test7() {
 
 int main() {
   talloc_enable_leak_report_full();
-  /*
   ClearError();
   test1();
   PrintError();
@@ -307,6 +313,7 @@ int main() {
   ClearError();
   test2();
   PrintError();
+  /*
 
   ClearError();
   test3();
@@ -321,14 +328,13 @@ int main() {
   printf("\n*******************\ntest 5\n********************\n");
   test5();
   PrintError();
-*/
 
 
   ClearError();
   printf("\n*******************\ntest 6\n********************\n");
   test6();
   PrintError();
-  /*  
+
   ClearError();
   printf("\n*******************\ntest 7\n********************\n");
   test7();
