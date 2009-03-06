@@ -31,16 +31,13 @@
  */
 char *__error_str;
 enum _error_type _global_error;
-#define ERROR_BUFFER_SIZE 1024
-char _error_buff[ERROR_BUFFER_SIZE];
-char _traceback[ERROR_BUFFER_SIZE];
+char *_traceback=NULL;
 
 void *raise_errors(enum _error_type t, char *reason, ...) {
   if(reason) {
     va_list ap;
     va_start(ap, reason);
-    vsnprintf(_error_buff, ERROR_BUFFER_SIZE-1,reason,ap);
-    _error_buff[ERROR_BUFFER_SIZE]=0;
+    _traceback = talloc_vasprintf_append(_traceback, reason,ap);
     va_end(ap);
   };
 

@@ -1,10 +1,129 @@
+#ifndef __FIF_H
+#define __FIF_H
+
 #include "config.h"
 #include "class.h"
 #include "talloc.h"
-#include "zip.h"
 #include "stringio.h"
+#include "list.h"
 
-struct FIFFile;
+uint64_t parse_int(char *string);
+
+/** A cache is an object which automatically expires data which is
+    least used - that is the data which is most used is put at the end
+    of the list, and when memory pressure increases we expire data
+    from the front of the list.
+*/
+CLASS(Cache, Object)
+// The key which is used to access the data
+     void *key;
+     
+     // An opaque data object and its length. The object will be
+     // talloc_stealed into the cache object as we will be manging its
+     // memory.
+     void *data;
+     int data_len;
+
+     // Cache objects are put into two lists - the cache_list contains
+     // all the cache objects currently managed by us in order of
+     // least used to most used at the tail of the list. The same
+     // objects are also present on one of the hash lists which hang
+     // off the respective hash table. The hash_list should be shorter
+     // to search linearly as it only contains objects with the same hash.
+     struct list_head cache_list;
+     struct list_head hash_list;
+
+     // The current number of objects managed by this cache
+     int cache_size;
+
+     // The maximum number of objects which should be managed
+     int max_cache_size;
+
+     // A hash table of the keys
+     int hash_table_width;
+     Cache *hash_table;
+
+     // These functions can be tuned to manage the hash table. The
+     // default implementation assumes key is a null terminated
+     // string.
+     unsigned int METHOD(Cache, hash, void *key);
+     int METHOD(Cache, cmp, void *other);
+
+     Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
+
+// Return a cache object or NULL if its not there. Callers do not own
+// the cache object. If they want to steal the data, they can but they
+// must call talloc_free on the Cache object so it can be removed from
+// the cache.
+// (i.e. talloc_steal(result->data); talloc_free(result); )
+     Cache METHOD(Cache, get, void *key);
+
+// A shorthand for getting the actual data itself rather than the
+// Cache object itself:
+     void *METHOD(Cache, get_item, char *key);
+
+// Store the key, data in a new Cache object. The key and data will be
+// stolen.
+     Cache METHOD(Cache, put, void *key, void *data, int data_len);
+END_CLASS
+
+/** All AFF Objects inherit from this one. The URI must be set to
+    represent the globally unique URI of this object. */
+CLASS(AFFObject, Object)
+     char *urn;
+
+     // This is the type of this object
+     char *type;
+     
+     /** Any object may be asked to be constructed from its URI */
+     AFFObject METHOD(AFFObject, Con, char *uri);
+
+     /** The is called to set properties on the object */
+     void METHOD(AFFObject, set_property, char *attribute, char *value);
+
+     /** Finally the object may be ready for use. We return the ready
+	 object or NULL if something went wrong.
+     */
+     AFFObject METHOD(AFFObject, finish);
+
+/** This is how an AFFObject can be created. First the oracle is asked
+    to create new instance of that object:
+
+    FileLikeObject fd = CALL(oracle, create, CLASSOF(FileLikeObject));
+
+    Now properties can be set on the object:
+    CALL(fd, set_property, "aff2:location", "file://hello.txt")
+
+    Finally we make the object ready for use:
+    CALL(fd, finish)
+
+    and CALL(fd, write, ZSTRING_NO_NULL("foobar"))
+*/
+
+END_CLASS
+
+// Base class for file like objects
+CLASS(FileLikeObject, AFFObject)
+     int64_t readptr;
+     uint64_t size;
+     char *name;
+     
+     uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
+     int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
+     int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
+     uint64_t METHOD(FileLikeObject, tell);
+
+// This closes the FileLikeObject and also frees it - it is not valid
+// to use the FileLikeObject after calling this.
+     void METHOD(FileLikeObject, close);
+END_CLASS
+
+// This file like object is backed by a real disk file:
+CLASS(FileBackedObject, FileLikeObject)
+     int fd;
+
+     FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
+END_CLASS
 
      /** The resolver is at the heart of the AFF2 specification - its
 	 responsible with returning various objects from a globally
@@ -17,27 +136,39 @@ CLASS(Resolver, Object)
 
      // This is a cache of AFFObject objects (keyed by URI) which have
      // been constructed previously. This cache is quite small and can
-     // expire objects at any time. The objects should be able to be
-     // reconstructured at any time by calling Resolver.resolver(URI).
+     // expire objects at any time. All clients of the open() method
+     // get references back from this cache. They do not own any of
+     // the objects and must not maintain references to them. Clients
+     // may keep references to each object's urn and re-fetch the
+     // object from the open method each time they want to use
+     // it. This implies that clients do not need to generally do any
+     // caching at all.
      Cache cache;
 
      Resolver METHOD(Resolver, Con);
 
 /* This method tries to resolve the provided uri and returns an
- instance of whatever the URI refers to. class_name can be provided as
- a string to allow us to check that the type we return is actually the
- type the caller is after. For example:
+ instance of whatever the URI refers to (As an AFFObject which is the
+ common base class. You should check to see that what you get back is
+ actually what you need. For example:
 
- FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, 
-                             uri, "FileLikeObject");
-
- If uri indeed refers to a FileLikeObject, fd will be that object,
- however, if the uri is something else, it will NULL. Note that we
- also check superclasses - in the example above, if the stream is
- actually an Image, we will still return it since an Image is derived
- from a FileLikeObject.
+ FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);
+ if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;
+ 
+ NOTE: Callers do not own the returned objects and must not keep
+ references to them at all. The returned objects are generally cached
+ in the resolver and may be expired at any time. If the object is
+ cached it is not expensive to retrieve it, so callers should always
+ re-fetch objects by their URNs rather than maintaining references.
 */
-     AFFObject METHOD(Resolver, open, char *uri, char *class_name);
+     AFFObject METHOD(Resolver, open, char *uri);
+
+/* This create a new object of the specified type. */
+     AFFObject METHOD(Resolver, create, AFFObject *class_reference);
+
+/* Returns an attribute about a particular uri if know. This may
+     consult an external data source.
+*/
      char *METHOD(Resolver, resolve, char *uri, char *attribute);
 
 //Stores the uri and the value in the resolver. The value will be
@@ -46,87 +177,31 @@ CLASS(Resolver, Object)
 
      // Exports all the properties to do with uri - user owns the buffer.
      char *METHOD(Resolver, export, char *uri);
+
+// Deletes the attribute from the resolver
+     void METHOD(Resolver, del, char *uri, char *attribute);
+
+// This updates the value or adds it if needed
+     void METHOD(Resolver, set, char *uri, char *attribute, char *value);
+
 END_CLASS
 
-/** The resolver is primarily responsbile with resolving references in
-    uri notation to return FileLikeObject. That means the resolver
-    will try to open to relevant volumes, streams or members.
+// This is a global instance of the oracle. All AFFObjects must
+// communicate with the oracle rather than instantiate their own.
+extern Resolver oracle;
 
-    The resolver may be implemented using a number of ways, but right
-    now we implemement a simple one.
-
-    Resolvers are a list of objects
-*/
-CLASS(ResolverHandler, Object)
-     char *method;
-
-     ResolverHandler METHOD(ResolverHandler, Con);
-     FileLikeObject METHOD(ResolverHandler, open, char *uri);
-END_CLASS
+// This function must be called to initialise the library - we prepare
+// all the classes and intantiate an oracle.
+void AFF2_Init(void);
 
 // A link simply returns the URI its pointing to
 CLASS(Link, AFFObject)
+     void METHOD(Link, link, Resolver resolver, char *storage_urn, 
+		 char *target, char *friendly_name);
 END_CLASS
-
-
-/** Properties are key value pairs. We preserve their order though */
-CLASS(Properties, Object)
-     struct list_head list;
-     char *key;
-     char *value;
-     uint32_t date;
-     
-     /** We can create a properties object from a text file which we
-	 can parse.
-     */
-     Properties METHOD(Properties, Con);
-
-     /** Add new key value to the list, returns the value.
-     */
-     char *METHOD(Properties, add, char *key, char *value, uint32_t date);
-
-     /* An iterator over the properties list to return the list of values
-	of the given key.
-     */
-     char *METHOD(Properties, iter_next, Properties *current, char *key);
-
-     /** Parses the text file and append to our list */
-     int METHOD(Properties, parse, char *text, uint32_t len, uint32_t date);
-
-     /** Dumps the current properties array into a string. Callers own the memory. */
-     char *METHOD(Properties, str);
-
-     /** Deletes all occurances of values with the specified keys */
-     void METHOD(Properties, del, char *key);
-END_CLASS
-
-/* A AFFFD is a special FileLikeObject for openning AFF2 streams */
-CLASS(AFFFD, FileLikeObject)
-// We store properties for the stream here
-     Properties props;
-
-     // This is FIFFile who owns.
-     struct FIFFile *parent;
-
-     // All Currently open streams are linked here
-     struct list_head list;
-
-     // The name of this type
-     char *type;
-
-     // The name of this stream (Its UUID)
-     char *stream_name;
-
-     AFFFD METHOD(AFFFD, Con, char *uri);
-END_CLASS
-
-// The segments created by the Image stream are named by segment
-// number with this format.
-#define IMAGE_SEGMENT_NAME_FORMAT "%s/%08d"  /** UUID, segment_id */
-
 
 /** The Image Stream represents an Image in chunks */
-CLASS(Image, AFFFD)
+CLASS(Image, FileLikeObject)
 // Data is divided into segments, when a segment is completed (it
 // contains chunks_in_segment chunks) we dump it to the archive. These
 // are stream attributes
@@ -152,24 +227,6 @@ CLASS(Image, AFFFD)
      int32_t *chunk_indexes;
 
 END_CLASS
-
-// This is the main FIF class - it manages the Zip archive
-CLASS(FIFFile, ZipFile)
-     // Each FIFFile has a resolver which we use to resolve URNs to
-     // FileLikeObjects
-     struct Resolver *resolver;
-
-     // This is our own volume URN
-     char *uuid;
-
-     /** This is used to get a new stream handler for writing */
-     AFFFD METHOD(FIFFile, create_stream_for_writing, char *stream_name,
-		  char *stream_type, Properties props);
-
-     /** Open the stream for reading */
-     AFFFD METHOD(FIFFile, open_stream, char *stream_name);
-END_CLASS
-
 
 /** The map stream driver maps an existing stream using a
     transformation.
@@ -216,9 +273,9 @@ struct map_point {
   int target_id;
 };
 
-CLASS(MapDriver, AFFFD)
+CLASS(MapDriver, AFFObject)
 // An array of our targets
-     AFFFD *targets;
+     char **target_urns;
      int number_of_targets;
 
      // All the points in the map:
@@ -240,3 +297,8 @@ CLASS(Blob, AFFObject)
      char *data;
      int length;
 END_CLASS
+
+ char *resolver_get_with_default(Resolver self, char *urn, 
+				 char *attribute, char *default_value);
+
+#endif

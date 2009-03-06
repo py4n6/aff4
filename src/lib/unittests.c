@@ -1,5 +1,4 @@
-#include "fif.h"
-#include "class.h"
+#include "zip.h"
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -51,36 +50,96 @@ void test1() {
 
 #define TIMES 1000
 
-/** This tests the cache for reading zip members */
+/** Try to create a new FIFFile.
+
+When creating a new AFFObject we:
+
+1) Ask the oracle to create it (prividing the class pointer).
+
+2) Set all the required and optional parameters.
+
+3) Call the finish method. If it succeeds we have a fully operational
+object. If it fails (returns NULL), we may have failed to set some
+parameters.
+
+*/
+void test1_5() {
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__FileBackedObject);
+  FIFFile fiffile;
+
+  // We now set critical parameters of the FileBackedObject
+  fd->super.urn = "file://" TEST_FILE;
+  
+  // If this works the file is ok. 
+  if(fd->super.finish((AFFObject)fd)) {
+    // Now create a new AFF2 file on top of it
+    fiffile = (FIFFile)CALL(oracle, create, (AFFObject *)&__FIFFile);
+    CALL((AFFObject)fiffile, set_property, "aff2:stored", fd->super.urn);
+
+    if(CALL((AFFObject)fiffile, finish)) {
+      char buffer[BUFF_SIZE];
+      int fd=open("/bin/ls",O_RDONLY);
+      int length;
+      FileLikeObject out_fd = CALL((ZipFile)fiffile, 
+				   open_member, "foobar", 'w', NULL, 0, 
+				   ZIP_DEFLATE);
+      while(1) {
+	length = read(fd, buffer, BUFF_SIZE);
+	if(length == 0) break;
+	
+	CALL(out_fd, write, buffer, length);
+      };
+      CALL(out_fd,close);
+
+      CALL((ZipFile)fiffile, writestr, "hello",
+	   ZSTRING_NO_NULL("hello world"), NULL, 0, 0);
+
+      CALL((ZipFile)fiffile,close);
+    };
+  };
+  
+  talloc_free(fd);
+};
+
+/** This tests the cache for reading zip members.
+
+There are two steps: 
+
+1) We open the zip file directly to populate the oracle.
+
+2) We ask the oracle to open anything it knows about.
+
+If you have a persistent oracle you dont need to use step 1 at all
+since the information is already present.
+
+*/
 void test2() {
   // Open the file for reading
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
   // Open the zip file
-  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
-  ZipFile zip = (ZipFile)fiffile;
-
-  char *result=NULL;
-  int length=0;
   int i;
   struct timeval epoch_time;
   struct timeval new_time;
   int diff;
   Blob blob;
-  
+
+  // This is only needed to populate the oracle
+  if(CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd))
+    talloc_free(fd);
+
   // Now ask the resolver for the different files
-  blob = CALL(fiffile->resolver, open, "hello", "Blob");
-  printf("Resolving foobar produced **************\n%s\n******************\n", blob->data);
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    result = CALL(zip, read_member, "foobar", &length);
-    if(!result) {
+    blob = (Blob)CALL(oracle, open, "hello");
+    if(!blob) {
       RaiseError(ERuntimeError, "Error reading member");
       break;
     };
   };
 
   gettimeofday(&new_time, NULL);
+  printf("Resolving foobar produced **************\n%s\n******************\n", blob->data);
   diff = (new_time.tv_sec * 1000 + new_time.tv_usec/1000) -
     (epoch_time.tv_sec * 1000 + epoch_time.tv_usec/1000);
   printf("Decompressed foobar %d times in %d mseconds (%f)\n", 
@@ -90,7 +149,118 @@ void test2() {
   talloc_free(fd);
 };
 
-/** This test writes a two part AFF2 file */
+/** This test writes a two part AFF2 file.
+
+First we ask the oracle to create a FileBackedObject then attach that
+to a FIFFile volume. We then create an Image stream and attach that to
+the FIFFile volume.
+
+*/
+void test_image_create() {
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__FileBackedObject);
+  FIFFile fiffile;
+  Image image;
+  char buffer[BUFF_SIZE];
+  int in_fd;
+  int length;
+  Link link;
+
+  if(!fd) goto error;
+
+  // We now set critical parameters of the FileBackedObject
+  fd->super.urn = "file://" TEST_FILE;
+  
+  // Is it ok?
+  if(!CALL((AFFObject)fd, finish))
+    goto error;
+
+  // Now build the FIF Volume:
+  fiffile = (FIFFile)CALL(oracle, create, (AFFObject *)&__FIFFile);
+  
+  // Tell the fiffile that it should live in the FileBackedObject
+  CALL((AFFObject)fiffile, set_property, "aff2:stored", fd->super.urn);
+
+  // Is it ok?
+  if(!CALL((AFFObject)fiffile, finish))
+    goto error;
+
+  // Now we need to create an Image stream
+  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
+  
+  // Tell the image that it should be stored in the volume
+  CALL((AFFObject)image, set_property, "aff2:stored", 
+       ((AFFObject)fiffile)->urn);
+
+  // Is it ok?
+  if(!CALL((AFFObject)image, finish))
+    goto error;
+
+  in_fd=open("/bin/ls",O_RDONLY);
+  while(in_fd >= 0) {
+    length = read(in_fd, buffer, BUFF_SIZE);
+    if(length == 0) break;
+    
+    CALL((FileLikeObject)image, write, buffer, length);
+  };
+
+  CALL((FileLikeObject)image, close);
+
+  // We want to make it easy to locate this image so we set up a link
+  // to it:
+  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
+  // The link will be stored in this fiffile
+  CALL((AFFObject)link, set_property, "aff2:stored", 
+       ((AFFObject)fiffile)->urn);
+  CALL(link, link, oracle, ((AFFObject)fiffile)->urn,
+       ((AFFObject)image)->urn, "default");
+  CALL((AFFObject)link, finish);
+
+  CALL((ZipFile)fiffile, close);
+  
+ error:
+  if(fd) talloc_free(fd);
+};
+
+/** Test reading of the Image stream.
+
+We need to open the aff file in order to populate the oracle.
+*/
+void test_image_read() {
+  char *link_name = "default";
+  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
+  Image image;
+  int outfd;
+  char buff[BUFF_SIZE];
+  int length;
+
+  if(CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd)){};
+
+  image = (Image)CALL(oracle, open, link_name);
+
+  if(!fd) goto error;
+  if(!image) {
+    RaiseError(ERuntimeError, "Unable to find stream %s", link_name);
+    goto error;
+  };
+
+  outfd = creat("output.dd", 0644);
+  if(outfd<0) goto error;
+
+  while(1) {
+    length = CALL((FileLikeObject)image, read, buff, BUFF_SIZE);
+    if(length<=0) break;
+
+    write(outfd, buff, length);
+  };
+
+  close(outfd);
+
+ error:
+  return;
+};
+
+#if 0
+
 void test3() {
   // Make a new zip file
   FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
@@ -224,43 +394,6 @@ void test5() {
 
 #define CHUNK_SIZE 32*1024
 
-/** Test reading of the Image stream */
-void test6() {
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
-  FIFFile fiffile;
-  AFFFD image;
-  int outfd;
-  char buff[CHUNK_SIZE];
-  int length;
-
-  if(!fd) goto error;
-
-  // Make a new zip file
-  fiffile  = CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd);
-  if(!fiffile) goto error;
-
-  goto error;
-  //image = CALL(fiffile, open_stream, "default");
-  image = CALL(fiffile->resolver, resolve, "default", "FileLikeObject");
-  if(!image) goto error;
-
-  outfd = creat("output.dd", 0644);
-  if(outfd<0) goto error;
-
-  while(1) {
-    length = image->super.read((FileLikeObject)image, buff, 1);
-    if(length<=0) break;
-
-    write(outfd, buff, length);
-  };
-
-  close(outfd);
-
-  exit(0);
- error:
-  talloc_free(fd);
-};
-
 /** This tests the Map Image - we create an AFF file containing 3
     seperate streams and build a map. Then we read the map off and
     copy it into the output.
@@ -304,25 +437,37 @@ void test7() {
   talloc_free(fiffile);
 };
 
+#endif
+
 int main() {
   talloc_enable_leak_report_full();
+
+  /*
+  AFF2_Init();
+  ClearError();
+  test1_5();
+  PrintError();
+
   ClearError();
   test1();
   PrintError();
 
+  AFF2_Init();
   ClearError();
   test2();
   PrintError();
-  /*
-
+  */
+  AFF2_Init();
   ClearError();
-  test3();
+  test_image_create();
   PrintError();
 
+  AFF2_Init();
   ClearError();
-  test4();
+  test_image_read();
   PrintError();
-
+  
+/*
   
   ClearError();
   printf("\n*******************\ntest 5\n********************\n");

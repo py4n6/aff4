@@ -131,12 +131,22 @@ static Cache Cache_get(Cache self, void *key) {
   return NULL;
 };
 
+void *Cache_get_item(Cache self, char *key) {
+  Cache tmp = CALL(self, get, key);
+
+  if(tmp && tmp->data)
+    return tmp->data;
+
+  return NULL;
+};
+
 VIRTUAL(Cache, Object)
      VMETHOD(Con) = Cache_Con;
      VMETHOD(put) = Cache_put;
      VMETHOD(cmp) = Cache_cmp;
      VMETHOD(hash) = Cache_hash;
      VMETHOD(get) = Cache_get;
+     VMETHOD(get_item) = Cache_get_item;
 END_VIRTUAL
 
 /** Implementation of FileBackedObject.
@@ -183,7 +193,7 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
   self->super.name = talloc_strdup(self, filename);
 
   // Set our uri
-  self->super.super.uri = talloc_asprintf(self, "file://%s", filename);
+  self->super.super.urn = talloc_asprintf(self, "file://%s", filename);
 
   return self;
 };
@@ -200,6 +210,8 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
     } else {
       this->Con(this, urn, 'r');
     };
+  } else {
+    this->__super__->super.Con((AFFObject)this, urn);
   };
 
   return self;
@@ -276,6 +288,17 @@ static void FileBackedObject_close(FileLikeObject self) {
   talloc_free(self);
 };
 
+static AFFObject FileBackedObject_finish(AFFObject self) {
+  FileBackedObject this = (FileBackedObject)self;
+  char *urn = self->urn;
+ 
+  if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
+    return (AFFObject)this->Con(this, urn + strlen("file://"), 'w');
+  } else {
+    return (AFFObject)this->Con(this, urn, 'w');
+  };
+};
+
 VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
@@ -286,6 +309,7 @@ END_VIRTUAL
 VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(Con) = FileBackedObject_Con;
      VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
+     VMETHOD(super.super.finish) = FileBackedObject_finish;
 
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
@@ -544,7 +568,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     struct ZipFileHeader header;
 
     if(self->writer) {
-      RaiseError(ERuntimeError, "Unable to create a new member for writing '%s', when one is already writing '%s'", filename, self->writer->name);
+      RaiseError(ERuntimeError, "Unable to create a new member for writing '%s', when one is already writing '%s'", filename, self->writer->super.urn);
       return NULL;
     };
 
@@ -575,10 +599,9 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
   case 'r': {
     ZipInfo zip;
     struct ZipFileHeader header;
-    char *extra;
-    char *filename;
+    //    char *extra;
 
-    if(compression != ZIP_DEFLATE) {
+    if(compression != ZIP_STORED) {
       RaiseError(ERuntimeError, "Unable to open seekable member for compressed members.");
       break;
     };
@@ -589,10 +612,14 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     // Read the file header
     CALL(self->fd, read, (char *)&header, sizeof(header));
 
-    // Skip the filename:
-    filename = talloc_size(self, header.file_name_length);
+    // Skip the filename (bit extra for null termination):
+    filename = talloc_size(self, header.file_name_length + 1);
     CALL(self->fd, read, filename, header.file_name_length);
 
+
+    // We dont use the extra field for anything any more
+    CALL(self->fd, seek, header.extra_field_len, SEEK_CUR);
+#if 0
     // Read the extra field so we can cache it
     extra = talloc_size(self, header.extra_field_len);
     {
@@ -608,11 +635,14 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 	CALL(self->extra_cache, put, filename, extra, header.extra_field_len);
       };
     };
+#endif
 
     self->writer = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 					     ZipFileStream, Con, self, self,
 					     self->fd, filename, 'r', compression,
 					     self->directory_offset);    
+    self->writer->size = zip->cd_header.file_size;
+    break;
   };
   default:
     RaiseError(ERuntimeError, "Unsupported mode '%c'", mode);
@@ -668,9 +698,10 @@ static void ZipFile_writestr(ZipFile self, char *filename,
 		      int compression) {
   FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
 			   compression);
-
-  CALL(fd, write, data, len);
-  CALL(fd, close);
+  if(fd) {
+    CALL(fd, write, data, len);
+    CALL(fd, close);
+  };
 };
 
 VIRTUAL(ZipFile, AFFObject)
@@ -691,6 +722,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, ZipFile zip,
 				uint64_t header_offset) {
   self->zip = zip;
   self->mode = mode;
+  self->super.super.urn = filename;
 
   if(mode=='w' && compression == ZIP_DEFLATE) {
     // Initialise the stream compressor
@@ -787,6 +819,18 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   return result;
 };
 
+static int ZipFileStream_read(FileLikeObject self, char *buffer,
+			      unsigned long int length) {
+  ZipFileStream this = (ZipFileStream)self;
+  int len;
+
+  /** Position our write pointer */
+  CALL(this->zinfo->fd, seek, this->zip_offset + self->readptr, SEEK_SET);
+  len = CALL(this->zinfo->fd, read, buffer, length);
+  self->readptr += len;
+  return len;
+};
+
 static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   
@@ -839,6 +883,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 VIRTUAL(ZipFileStream, FileLikeObject)
      VMETHOD(Con) = ZipFileStream_Con;
      VMETHOD(super.write) = ZipFileStream_write;
+     VMETHOD(super.read) = ZipFileStream_read;
      VMETHOD(super.close) = ZipFileStream_close;
 END_VIRTUAL
 

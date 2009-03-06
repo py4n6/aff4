@@ -1,4 +1,4 @@
-#include "fif.h"
+#include "zip.h"
 
 /** This is the implementation for the blob AFFObject */
 AFFObject Blob_Con(AFFObject self, char *urn) {
@@ -7,7 +7,6 @@ AFFObject Blob_Con(AFFObject self, char *urn) {
   /** If urn was provided it means we need to go get ourselves */
   if(urn) {
     FIFFile fiffile;
-    Resolver oracle = CONSTRUCT(Resolver, Resolver, Con, self);
     char *url;
 
     // First step - we need to ask the oracle about where the blob is
@@ -18,8 +17,8 @@ AFFObject Blob_Con(AFFObject self, char *urn) {
       goto error;
     }
 
-    // Now we open the volume:
-    fiffile = CALL(oracle, open, url, "FIFFile");
+    // Now we ask the oracle to open the volume:
+    fiffile = CALL(oracle, open, url);
     if(!fiffile) {
       goto error;
     };
@@ -28,8 +27,9 @@ AFFObject Blob_Con(AFFObject self, char *urn) {
     // zipfile cache is expired.
     this->data = fiffile->super.read_member((ZipFile)fiffile, urn, &this->length);
     this->data = talloc_memdup(self, this->data, this->length);
+    
+    self->urn = talloc_strdup(self, urn);
 
-    talloc_free(oracle);
   } else {
     this->__super__->Con(self, urn);
   };

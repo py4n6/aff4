@@ -178,6 +178,7 @@ super.add as well.
 #endif
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 
+extern char *_traceback;
 
 #ifdef max
 #undef max
@@ -205,7 +206,7 @@ super.add as well.
 
 ***************************************************/
 #define CALL(x, method, ... )			\
-  x->method(x, ## __VA_ARGS__)
+  (x)->method((x), ## __VA_ARGS__)
 
 #define END_CLASS };
 
@@ -322,7 +323,7 @@ super.add as well.
     (GETCLASS(Foo)) or &__Foo
 */
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
-  ( class->constructor(							\
+  ( class->constructor(						\
 		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
 		      ## __VA_ARGS__) )
 
@@ -404,21 +405,21 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 
 // Some helpful little things
 #define ERROR_BUFFER_SIZE 1024
-extern char _traceback[];
 
 #define ZSTRING_NO_NULL(str) str , (strlen(str))
 #define ZSTRING(str) str , (strlen(str)+1)
 #define RaiseError(t, ...)			\
-  do {						\
-    snprintf(_traceback, ERROR_BUFFER_SIZE, "%s:%d - %s", __FILE__,	\
-	     __LINE__, __FUNCTION__);					\
+  do {									\
+    _traceback = (char *)talloc_asprintf_append(_traceback, "%s:%d - %s: ", __FILE__, \
+						__LINE__, __FUNCTION__); \
     raise_errors(t, __VA_ARGS__);					\
+    _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
   } while(0);								
 
 #define ClearError()				\
-  do {_global_error = EZero; } while(0);
+  do {_global_error = EZero; if(_traceback) {talloc_free(_traceback); _traceback=NULL;}; } while(0);
 
 #define PrintError()				\
-  do {if(_global_error) printf("Error occured in %s: %s\n",_traceback, _error_buff);}while(0);
+  do {if(_global_error) printf("%s",_traceback); fflush(stdout); }while(0);
 
 #endif

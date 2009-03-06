@@ -1,8 +1,12 @@
+#ifndef __ZIP_H
+#define __ZIP_H
+
 #include "misc.h"
 #include "class.h"
 #include "talloc.h"
 #include "list.h"
 #include <zlib.h>
+#include "fif.h"
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 0
@@ -52,96 +56,6 @@ struct ZipFileHeader {
   uint16_t file_name_length;
   uint16_t extra_field_len;
 }__attribute__((packed));
-
-
-/** A cache is an object which automatically expires data which is
-    least used - that is the data which is most used is put at the end
-    of the list, and when memory pressure increases we expire data
-    from the front of the list.
-*/
-CLASS(Cache, Object)
-// The key which is used to access the data
-     void *key;
-
-     // An opaque data object and its length. The object will be
-     // talloc_stealed into the cache object as we will be manging its
-     // memory.
-     void *data;
-     int data_len;
-
-     // Cache objects are put into two lists - the cache_list contains
-     // all the cache objects currently managed by us in order of
-     // least used to most used at the tail of the list. The same
-     // objects are also present on one of the hash lists which hang
-     // off the respective hash table. The hash_list should be shorter
-     // to search linearly as it only contains objects with the same hash.
-     struct list_head cache_list;
-     struct list_head hash_list;
-
-     // The current number of objects managed by this cache
-     int cache_size;
-
-     // The maximum number of objects which should be managed
-     int max_cache_size;
-
-     // A hash table of the keys
-     int hash_table_width;
-     Cache *hash_table;
-
-     // These functions can be tuned to manage the hash table. The
-     // default implementation assumes key is a null terminated
-     // string.
-     unsigned int METHOD(Cache, hash, void *key);
-     int METHOD(Cache, cmp, void *other);
-
-     Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
-
-// Return a cache object or NULL if its not there. Callers do not own
-// the cache object. If they want to steal the data, they can but they
-// must call talloc_free on the Cache object so it can be removed from
-// the cache.
-// (i.e. talloc_steal(result->data); talloc_free(result); )
-     Cache METHOD(Cache, get, void *key);
-
-// Store the key, data in a new Cache object. The key and data will be
-// stolen.
-     Cache METHOD(Cache, put, void *key, void *data, int data_len);
-END_CLASS
-
-/** All AFF Objects inherit from this one. The URI must be set to
-    represent the globally unique URI of this object. */
-CLASS(AFFObject, Object)
-     char *uri;
-
-     // This is the type of this object
-     char *type;
-     
-     /** Any object may be asked to be constructed from its URI */
-     AFFObject METHOD(AFFObject, Con, char *uri);
-END_CLASS
-
-// Base class for file like objects
-CLASS(FileLikeObject, AFFObject)
-     int64_t readptr;
-     uint64_t size;
-     char *name;
-     
-     uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
-     int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
-     int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
-     uint64_t METHOD(FileLikeObject, tell);
-
-// This closes the FileLikeObject and also frees it - it is not valid
-// to use the FileLikeObject after calling this.
-     void METHOD(FileLikeObject, close);
-END_CLASS
-
-// This file like object is backed by a real disk file:
-CLASS(FileBackedObject, FileLikeObject)
-     int fd;
-
-     FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
-END_CLASS
 
 /** This represents a single Zip entry.  We only implement as much as
     we need for FIF.
@@ -265,3 +179,22 @@ CLASS(ZipFileStream, FileLikeObject)
 			  char mode, int compression, 
 			  uint64_t header_offset);
 END_CLASS
+
+// This is the main FIF class - it manages the Zip archive
+CLASS(FIFFile, ZipFile)
+     // Each FIFFile has a resolver which we use to resolve URNs to
+     // FileLikeObjects
+     struct Resolver *resolver;
+
+     // This is our own volume URN
+     char *uuid;
+
+     /** This is used to get a new stream handler for writing */
+     //     AFFFD METHOD(FIFFile, create_stream_for_writing, char *stream_name,
+     //		  char *stream_type, Properties props);
+
+     /** Open the stream for reading */
+     // AFFFD METHOD(FIFFile, open_stream, char *stream_name);
+END_CLASS
+
+#endif
