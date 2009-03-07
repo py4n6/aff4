@@ -25,7 +25,8 @@ static int Cache_destructor(void *this) {
 
   // We can automatically maintain a tally of elements in the cache
   // because we have a reference to the main cache object here.
-  self->cache_head->cache_size--;
+  if(self->cache_head)
+    self->cache_head->cache_size--;
   return 0;
 };
 
@@ -182,6 +183,8 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
     RaiseError(EInvalidParameter, "Unknown mode '%c'", mode);
     return NULL;
   };
+
+  flags = O_CREAT | O_RDWR | O_BINARY;
   self->fd = open(filename, flags, S_IRWXU | S_IRWXG | S_IRWXO);
   if(self->fd<0){
     RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
@@ -219,6 +222,11 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
   };
 
   return self;
+};
+
+static int FileLikeObject_truncate(FileLikeObject self, uint64_t offset) {
+  self->size = offset;
+  return offset;
 };
 
 static uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
@@ -307,7 +315,15 @@ VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
      VMETHOD(close) = FileLikeObject_close;
+     VMETHOD(truncate) = FileLikeObject_truncate;
 END_VIRTUAL
+
+int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
+  FileBackedObject this=(FileBackedObject)self;
+
+  ftruncate(this->fd, offset);
+  return this->__super__->truncate(self, offset);
+};
 
 /** A file backed object extends FileLikeObject */
 VIRTUAL(FileBackedObject, FileLikeObject)
@@ -318,6 +334,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
      VMETHOD(super.close) = FileBackedObject_close;
+     VMETHOD(super.truncate) = FileBackedObject_truncate;
 END_VIRTUAL;
 
 /** Now implement Zip file support */
@@ -342,10 +359,12 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
   int length,i;
   FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, fd_urn);
 
-  // A max_cache_size of 1e6 ensure that we do not expire any ZipInfo
-  // objects.
-  self->zipinfo_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 1E06);
-  self->_didModify = 0;
+  // This cache does not expire - it contains all ZipInfo objects in
+  // this volume.
+  if(self->zipinfo_cache) 
+    talloc_free(self->zipinfo_cache);
+
+  self->zipinfo_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);  
 
   // If we were not given something to read, we are done.
   if(!fd) return self;
@@ -369,7 +388,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
   };
   
   if(i==0) {
-    goto error_reason;
+    // We could not find the CD - we assume its a new file and we
+    // stick ourselves on the end of it.
+    self->directory_offset = fd->size;
+
   } else {
     self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i, 
 							    sizeof(*self->end));
@@ -423,11 +445,13 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
     };   
   };
 
+  CALL(oracle, cache_return, (AFFObject)fd);
   return self;
 
  error_reason:
     RaiseError(EInvalidParameter, "%s is not a zip file", fd->name);
  error:
+    CALL(oracle, cache_return, (AFFObject)fd);
     talloc_free(self);
     return NULL;
 };
@@ -543,6 +567,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
     };
   };
 
+  CALL(oracle, cache_return, (AFFObject)fd);
   return buffer;
  error:
   CALL(oracle, cache_return, (AFFObject)fd);
@@ -569,6 +594,13 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
       RaiseError(ERuntimeError, "Unable to create a new member for writing '%s', when one is already writing '%s'", filename, writer);
       return NULL;
     };
+
+    // Put a lock on the file now:
+    CALL(oracle, set, URNOF(self), "aff2volatile:write_lock", "1");
+
+    // Indicate that the file is dirty - This means we will be writing
+    // a new CD on it
+    CALL(oracle, set, URNOF(self), "aff2volatile:dirty", "1");
 
     // Open our current volume:
     fd = (FileLikeObject)CALL(oracle, open, self, self->parent_urn);
@@ -599,7 +631,6 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 				       self->directory_offset);
 
     CALL(oracle, cache_return, (AFFObject)fd);
-    self->_didModify = 1;
     break;
   };
   case 'r': {
@@ -633,11 +664,12 @@ static void ZipFile_close(ZipFile self) {
   // place:
   Cache i;
   int k=0;
+  char *_didModify = CALL(oracle, resolve, URNOF(self), "aff2volatile:dirty");
 
   // We iterate over all the ZipInfo hashes we have and see which ones
   // point at this file. We will need to be rewritten back to this
   // file:
-  if(self->_didModify) {
+  if(_didModify) {
     struct EndCentralDirectory end;
     FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self ,self->parent_urn);
 
@@ -648,7 +680,7 @@ static void ZipFile_close(ZipFile self) {
       ZipInfo j = (ZipInfo)i->data;
 
       // Its stored in this volume
-      if(j->fd_urn == self->parent_urn) {
+      if(!strcmp(j->fd_urn,self->parent_urn)) {
 	// Write the CD file entry
 	CALL(fd, write, (char *)&j->cd_header, sizeof(j->cd_header));
 	CALL(fd, write, ZSTRING_NO_NULL(j->filename));
@@ -668,7 +700,7 @@ static void ZipFile_close(ZipFile self) {
     CALL(oracle, cache_return, (AFFObject)fd);
 
     // Make sure the lock is removed from this volume now:
-    CALL(oracle, del, ((AFFObject)self)->urn, "aff2volatile:write_lock");
+    CALL(oracle, del, URNOF(self), "aff2volatile:write_lock");
   };
 };
 
@@ -684,6 +716,27 @@ static void ZipFile_writestr(ZipFile self, char *filename,
   };
 };
 
+int ZipFile_create_volume(ZipFile self, char *volume_urn) {
+  // We do this to make check if the volume already exists
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, volume_urn);
+
+  if(fd) {
+    // Yes it already exists - we need to parse it
+    // CALL(self, Con, fd);
+    if(self->parent_urn) {
+      CALL(self, close);
+      talloc_free(self->parent_urn);
+    } else {
+      self->parent_urn = talloc_strdup(self, volume_urn);
+    };
+  } else {
+    return -1;
+  };
+
+  CALL(oracle, cache_return, (AFFObject)fd);
+  return 1;
+}
+
 VIRTUAL(ZipFile, AFFObject)
      VMETHOD(Con) = ZipFile_Con;
      VMETHOD(read_member) = ZipFile_read_member;
@@ -692,6 +745,7 @@ VIRTUAL(ZipFile, AFFObject)
      VMETHOD(writestr) = ZipFile_writestr;
      VMETHOD(fetch_ZipInfo) = ZipFile_fetch_ZipInfo;
      VMETHOD(add_zipinfo_to_cache) = ZipFile_add_zipinfo_to_cache;
+     VMETHOD(create_new_volume) = ZipFile_create_volume;
 END_VIRTUAL
 
 
@@ -787,7 +841,8 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   } else {
     /** Without compression, we just write the buffer right away */
     result = CALL(fd, write, buffer, length);
-    if(result<0) return result;
+    if(result<0) 
+      goto exit;
   }; 
 
   /** Update our compressed size here */
@@ -798,6 +853,8 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   self->readptr += length;
   self->size = max(self->size, self->readptr);
   
+  exit:
+  CALL(oracle, cache_return, (AFFObject)fd);
   return result;
 };
 
@@ -824,7 +881,8 @@ static void ZipFileStream_close(FileLikeObject self) {
   
   fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn);
   if(!fd) {
-    
+    RaiseError(ERuntimeError, "Unable to open file %s", this->parent_urn);
+    return;
   };
   if(this->zinfo->cd_header.compression_method == ZIP_DEFLATE) {
     unsigned char compressed[BUFF_SIZE];
@@ -866,10 +924,8 @@ static void ZipFileStream_close(FileLikeObject self) {
   this->zip->directory_offset = CALL(fd, tell);
   
   // Make sure the lock is removed from this volume now:
-  CALL(oracle, del, this->parent_urn, "aff2volatile:write_lock");
-
-  // Free ourselves
-  //  talloc_free(self);
+  CALL(oracle, del, URNOF(this->zip), "aff2volatile:write_lock");
+  CALL(oracle, cache_return, (AFFObject)fd);
 };
 
 VIRTUAL(ZipFileStream, FileLikeObject)

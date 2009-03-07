@@ -116,6 +116,9 @@ CLASS(FileLikeObject, AFFObject)
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
 
+// This method is just like the standard ftruncate call
+     int METHOD(FileLikeObject, truncate, uint64_t offset);
+
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this.
      void METHOD(FileLikeObject, close);

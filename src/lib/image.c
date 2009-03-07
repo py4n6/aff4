@@ -61,7 +61,7 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
       this->parent_urn = talloc_strdup(self, this->parent_urn);
 
     // Make sure the oracle knows we are an image
-    CALL(oracle, add, self->urn, "aff2:type", "image");
+    CALL(oracle, set, self->urn, "aff2:type", "image");
 
     this->chunk_buffer = talloc_size(self, this->chunk_size);
 

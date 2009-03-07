@@ -49,11 +49,13 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
     snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);
 
     fd = CALL((ZipFile)fiffile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
-    properties = CALL(oracle, export, friendly_name);
-    CALL(fd, write, ZSTRING_NO_NULL(properties));
-    talloc_free(properties);
+    if(fd) {
+      properties = CALL(oracle, export, friendly_name);
+      CALL(fd, write, ZSTRING_NO_NULL(properties));
+      talloc_free(properties);
 
-    CALL(fd, close);
+      CALL(fd, close);
+    };
     CALL(oracle, cache_return, (AFFObject)fiffile);
   };
 };

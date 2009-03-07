@@ -160,8 +160,14 @@ char *Resolver_export(Resolver self, char *urn) {
   if(!i) return result;
 
   list_for_each_entry(j, &i->cache_list, cache_list) {
-    result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
-				    (char *)j->key, (char *)j->data);
+    char *attribute = (char *)j->key;
+    char *value = (char *)j->data;
+
+    // Do not write volatile data
+    if(memcmp(attribute, ZSTRING_NO_NULL("aff2volatile:"))) {
+      result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
+				      attribute, value);
+    };
   };
 
   return result;
@@ -187,10 +193,6 @@ AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
 
   result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL);
 
-  // Cache it
-  CALL(self->cache, put, talloc_strdup(NULL, result->urn),
-       result, sizeof(*result));
-
   return result;
 };
 
@@ -202,6 +204,7 @@ void Resolver_del(Resolver self, char *uri, char *attribute) {
   while(1) {
     j = CALL(tmp, get, attribute);
     if(!j) break;
+    printf("Removing %s %s\n",uri, attribute);
     talloc_free(j);
   };
 };
@@ -241,7 +244,9 @@ AFFObject AFFObject_Con(AFFObject self, char *uri) {
 
     uri = talloc_asprintf(self, "urn:aff2:%s", uuid_str);
   };
-  self->urn = uri;
+
+  if(!self->urn)
+    self->urn = uri;
 
   return self;
 };

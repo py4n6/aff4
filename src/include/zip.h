@@ -23,24 +23,25 @@ struct EndCentralDirectory {
   uint16_t comment_len;
 }__attribute__((packed));
 
+/** As we parse these fields we populate the oracle */
 struct CDFileHeader {
   uint32_t magic;
   uint16_t version_made_by;
   uint16_t version_needed;
   uint16_t flags;
-  uint16_t compression_method;
-  uint16_t dostime;
+  uint16_t compression_method;	/* aff2volatile:compression */
+  uint16_t dostime;		/* aff2volatile:timestamp */
   uint16_t dosdate;
   uint32_t crc32;
-  uint32_t compress_size;
-  uint32_t file_size;
+  uint32_t compress_size;	/* aff2volatile:compress_size */
+  uint32_t file_size;		/* aff2volatile:file_size */
   uint16_t file_name_length;
   uint16_t extra_field_len;
   uint16_t file_comment_length;
   uint16_t disk_number_start;
   uint16_t internal_file_attr;
   uint32_t external_file_attr;
-  uint32_t relative_offset_local_header;
+  uint32_t relative_offset_local_header; /* aff2volatile:header_offset */
 }__attribute__((packed));
 
 struct ZipFileHeader {
@@ -105,11 +106,6 @@ CLASS(ZipFile, AFFObject)
      // that
      char *parent_urn;
 
-     /** This flag is set when the ZipFile is modified and a new CD
-	 needs to be rewritten on close
-     **/
-     int _didModify;
-
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn);
 
@@ -119,10 +115,11 @@ CLASS(ZipFile, AFFObject)
      char *METHOD(ZipFile, read_member, void *ctx,
 		  char *filename, int *len);
 
-// This method is called to create a new volume on the
-// FileLikeObject. This call must preceed any calls to open_member for
-// writing.
-     void METHOD(ZipFile, create_new_volume, FileLikeObject file);
+// This method is called to specify a new volume for us to use. If we
+// already have an existing volume, we will automatically call close
+// on it. The volume parent_urn must already exist (it can be newly
+// created).
+     int METHOD(ZipFile, create_new_volume, char *parent_urn);
 
 // This method opens an existing member or creates a new one. We
 // return a file like object which may be used to read and write the

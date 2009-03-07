@@ -39,28 +39,34 @@ static int FIFFile_destructor(void *self) {
   return 0;
 };
 
-static ZipFile FIFFile_Con(ZipFile self, char *fd_urn) {
+static ZipFile FIFFile_Con(ZipFile self, char *parent_urn) {
   FIFFile this = (FIFFile)self;
   Cache i;
 
   // Open the file now
-  self = this->__super__->Con(self, fd_urn);
+  self = this->__super__->Con(self, parent_urn);
+  if(!self) return NULL;
+
+  // If we dont have a URN by now we need to make one
+  if(!URNOF(self)) {
+    CALL((AFFObject)self, Con, NULL);
+  };
 
   // Now tell the resolver about everything we know:
   list_for_each_entry(i, &self->zipinfo_cache->cache_list, cache_list) {
     ZipInfo zip = (ZipInfo)i->data;
 
-    CALL(oracle, add,
+    CALL(oracle, set,
 	 zip->filename,
 	 "aff2:location",
-	 self->super.urn);
+	 URNOF(self));
 
-    CALL(oracle, add,
+    CALL(oracle, set,
 	 zip->filename,
 	 "aff2:type",
 	 "blob");
-
   };
+
 
   return self;
 };
@@ -159,7 +165,9 @@ static void FIFFile_close(ZipFile self) {
   // Force our properties to be written
   FIFFile this = (FIFFile)self;
   char *str;
-  if(self->_didModify) {
+  // Are we dirty?
+  char *_didModify = CALL(oracle, resolve, URNOF(self), "aff2volatile:dirty");
+  if(_didModify) {
     // Export the volume properties here
     str = CALL(oracle, export, self->super.urn);
     if(str) {
@@ -171,6 +179,9 @@ static void FIFFile_close(ZipFile self) {
 
   // Call our base class:
   this->__super__->close(self);
+
+  // We are no longer dirty:
+  CALL(oracle, del, URNOF(self), "aff2volatile:dirty");
 };
 
 /** This is the constructor which will be used when we get
@@ -184,23 +195,15 @@ AFFObject FIFFile_AFFObject_Con(AFFObject self, char *urn) {
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
     char *url = CALL(oracle, resolve, urn, "aff2:stored");
-    FileLikeObject fd;
-
     // We have no idea where we are stored:
     if(!url) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
       goto error;
     };
 
-    // Ask the oracle for the file object
-    fd = (FileLikeObject)CALL(oracle, open, self, url);
-    if(!fd) goto error;
-
+    self->urn = talloc_strdup(self, urn);
     // Call our other constructor to actually read this file:
-    self = (AFFObject)this->super.Con((ZipFile)this, ((AFFObject)fd)->urn);
-
-    // Done with fd
-    CALL(oracle, cache_return, (AFFObject)fd);
+    self = (AFFObject)this->super.Con((ZipFile)this, url);
   } else {
     // Call ZipFile's AFFObject constructor.
     this->__super__->super.Con(self, urn);
@@ -215,29 +218,25 @@ AFFObject FIFFile_AFFObject_Con(AFFObject self, char *urn) {
 static AFFObject FIFFile_finish(AFFObject self) {
   FIFFile this = (FIFFile)self;
   char *file_urn = CALL(oracle, resolve, self->urn, "aff2:stored");
-  FileLikeObject fd;
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, NULL, file_urn);
 
-  if(!file_urn) {
+  if(!file_urn || !fd) {
     RaiseError(ERuntimeError, "Volume %s has no aff2:stored property?", self->urn);
     return NULL;
   };
 
-  // Try to open our underlying FileLikeObject
-  fd = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__FileBackedObject);
-  fd->super.urn = file_urn;
-  
-  // Did it work?
-  if(CALL((AFFObject)fd, finish)) {
-    CALL(oracle, add, 
-	 ((AFFObject)self)->urn,	       /* Source URI */
-	 "aff2:type",   /* Attributte */
-	 "volume");  /* Value */
-
-    // Call our base class to actually create the new volume:
-    this->__super__->Con((ZipFile)this, NULL);
-    CALL((ZipFile)this, create_new_volume, fd);
+  // Do we need to truncate it?
+  if(!CALL(oracle, resolve, self->urn, "aff2volatile:append")) {
+    CALL(fd, truncate, 0);
   };
-  
+
+  CALL(oracle, set, 
+       URNOF(self), 	       /* Source URI */
+       "aff2:type",            /* Attributte */
+       "volume");              /* Value */
+    
+  CALL((ZipFile)this, create_new_volume, file_urn);
+  CALL((ZipFile)this, Con, NULL);
   return self;
 };
 
