@@ -1,6 +1,26 @@
 #include "fif.h"
 #include "zip.h"
 
+/*************************************************************
+  The Image stream works by collecting chunks into segments. Chunks
+  are compressed seperately using zlib's compress function.
+
+  Defined attributes:
+
+  aff2:type                "image"
+  aff2:chunk_size          The size of the chunk in bytes (32k)
+  aff2:chunks_in_segment   The number of chunks in each segment (2048)
+  aff2:stored              The URN of the object which stores this
+                           stream - This must be a "volume" object
+  aff2:size                The size of this stream in bytes (0)
+
+  Note that segments are "blob" objects with an implied URN of:
+
+  "%s/%08d" % (Image.urn, segment_number)
+
+**************************************************************/
+
+
 // The segments created by the Image stream are named by segment
 // number with this format.
 #define IMAGE_SEGMENT_NAME_FORMAT "%s/%08d"  /** Stream URN, segment_id */
@@ -36,15 +56,24 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
     value = resolver_get_with_default(oracle, self->urn, "aff2:size", "0");
     this->super.size = parse_int(value);
 
+    this->parent_urn = CALL(oracle, resolve, URNOF(this), "aff2:stored");
+    if(this->parent_urn)
+      this->parent_urn = talloc_strdup(self, this->parent_urn);
+
     // Make sure the oracle knows we are an image
     CALL(oracle, add, self->urn, "aff2:type", "image");
 
-    this->chunk_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
+    this->chunk_buffer = talloc_size(self, this->chunk_size);
+
     this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
+    // This is a hack to make us pre-allocate the buffer
+    CALL(this->segment_buffer, seek, this->chunk_size * this->chunks_in_segment, SEEK_SET);
+    CALL(this->segment_buffer, seek, 0, SEEK_SET);
+
     this->chunk_count = 0;
     this->segment_count =0;
     
-    this->chunk_indexes = talloc_array(self, int32_t, this->chunks_in_segment);
+    this->chunk_indexes = talloc_array(self, int32_t, this->chunks_in_segment + 2);
     // Fill it with -1 to indicate an invalid pointer
     memset(this->chunk_indexes, 0xff, sizeof(int32_t) * this->chunks_in_segment);
 
@@ -75,12 +104,10 @@ the segment is full we dump it to the parent container set.
 **/
 static int dump_chunk(Image this, char *data, uint32_t length, int force) {
   // We just use compress() to get the compressed buffer.
-  char cbuffer[compressBound(length)];
-  int clength=compressBound(length);
+  char cbuffer[2*compressBound(length)];
+  int clength=2*compressBound(length);
 
-  memset(cbuffer,0,clength);
-
-  // Should we even offer to store chunks uncompressed?
+  // Should we offer to store chunks uncompressed?
   if(0) {
     memcpy(cbuffer, data, length);
     clength = length;
@@ -105,21 +132,22 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
   // open a FIFFile on it:
   if(this->chunk_count >= this->chunks_in_segment || force) {
     char tmp[BUFF_SIZE];
-    char *parent_urn = CALL(oracle, resolve, ((AFFObject)this)->urn, "aff2:stored");
     FIFFile parent;
 
-    if(!parent_urn) {
+    if(!this->parent_urn) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
       goto error;
     }
 
-    parent  = (FIFFile)CALL(oracle, open, parent_urn);
+    parent  = (FIFFile)CALL(oracle, open, this, this->parent_urn);
     // Format the segment name
     snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
 	     this->segment_count);
 
     // Push one more offset to the index to cover the last chunk
     this->chunk_indexes[this->chunk_count + 1] = this->segment_buffer->readptr;
+
+    printf("Dumping segment %s\n", tmp);
 
     // Store the entire segment in the zip file
     CALL((ZipFile)parent, writestr,
@@ -141,6 +169,9 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
 	 NULL, 0,
 	 ZIP_STORED
 	 );
+
+    // Done with parent
+    CALL(oracle, cache_return, (AFFObject)parent);
 	 
     // Reset everything to the start
     CALL(this->segment_buffer, truncate, 0);
@@ -157,18 +188,26 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
 
 static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Image this = (Image)self;
+  int available_to_read;
+  int buffer_readptr=0;
 
-  CALL(this->chunk_buffer, seek, 0, SEEK_END);
-  CALL(this->chunk_buffer, write, buffer, length);
-  while(this->chunk_buffer->readptr > this->chunk_size) {
-    if(dump_chunk(this, this->chunk_buffer->data, this->chunk_size, 0)<0)
-      return -1;
-      
-    // Consume the chunk from the chunk_buffer
-    CALL(this->chunk_buffer, skip, this->chunk_size);
+  while(buffer_readptr < length) {
+    available_to_read = min(this->chunk_size - this->chunk_buffer_readptr, 
+			    length - buffer_readptr);
+    memcpy(this->chunk_buffer + this->chunk_buffer_readptr,
+	   buffer + buffer_readptr, available_to_read);
+    this->chunk_buffer_readptr += available_to_read;
+
+    if(this->chunk_buffer_readptr == this->chunk_size) {
+      if(dump_chunk(this, this->chunk_buffer, this->chunk_size, 0)<0)
+	return -1;
+      this->chunk_buffer_readptr = 0;
+    };
+
+    buffer_readptr += available_to_read;
+    self->readptr += available_to_read;
   };
-
-  self->readptr += length;
+  
   self->size = max(self->readptr, self->size);
 
   return length;
@@ -180,7 +219,7 @@ static void Image_close(FileLikeObject self) {
   char *properties;
 
   // Write the last chunk
-  dump_chunk(this, this->chunk_buffer->data, this->chunk_buffer->readptr, 1);
+  dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
 
   // Set the stream size
   snprintf(tmp, BUFF_SIZE, "%lld", self->size);
@@ -189,14 +228,15 @@ static void Image_close(FileLikeObject self) {
   // Write out a properties file
   properties = CALL(oracle, export, ((AFFObject)self)->urn);
   if(properties) {
-    char *parent_urn = CALL(oracle, resolve, ((AFFObject)this)->urn, "aff2:stored");
-    FIFFile fiffile = (FIFFile)CALL(oracle, open, parent_urn);
+    FIFFile fiffile = (FIFFile)CALL(oracle, open, self, this->parent_urn);
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
     CALL((ZipFile)fiffile, writestr, tmp, ZSTRING_NO_NULL(properties),
 	 NULL, 0, ZIP_STORED);
 
     talloc_free(properties);
+    // Done with fiffile
+    CALL(oracle, cache_return, (AFFObject)fiffile);
   };
 
   this->__super__->close(self);
@@ -225,12 +265,9 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   /** Now we need to figure out where the segment is */
   char buffer[BUFF_SIZE];
-  char *parent_urn;
   FIFFile parent;
-  Blob temp_blob;
-  int32_t *chunk_index;
-  int chunks_in_segment;
   FileLikeObject fd;
+  int32_t chunk_offset_in_segment;
 
   /** Fast path - check if the chunk is already cached.  If it is - we
   can just copy a subset of it on the result and get out of here....
@@ -253,54 +290,68 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   // Make some memory on the heap - it will be stolen by the cache
   uncompressed_chunk = talloc_size(self, uncompressed_length);
-
-  // No we need to read the FIFFile directly
-  parent_urn = CALL(oracle, resolve, ((AFFObject)this)->urn, "aff2:stored");
-  parent = (FIFFile)CALL(oracle, open, parent_urn);
-  if(!parent) {
-    RaiseError(ERuntimeError, "No storage for Image stream?");
-    goto error;
-  }
   
   /** First we need to locate the chunk indexes */
   snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
 	   ((AFFObject)this)->urn, 
 	   segment_id);
 
-  temp_blob = (Blob)CALL(oracle, open, buffer);
-  if(!temp_blob) {
-    RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
-    goto error;
+  // Now we work out the offsets on the chunk in the segment - we read
+  // the segment index which is a blob:
+  {
+    Blob temp_blob = (Blob)CALL(oracle, open, self, buffer);
+    int32_t *chunk_index;
+    int chunks_in_segment;
+
+    if(!temp_blob) {
+      RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
+      goto error;
+    };
+    
+    /** This holds the index into the segment of all the chunks.
+	It is an array of chunks_in_segment ints long.
+    */
+    chunk_index = (int32_t *)temp_blob->data;
+    chunks_in_segment = temp_blob->length / sizeof(int32_t);
+    
+    /** By here we have the chunk_index which is an array of offsets
+	into the segment where the chunks begin. We work out the size of
+	the chunk by subtracting the next chunk offset from the current
+	one. It seems to be ok to over read here so if the numbers dont
+	make too much sense we just choose to overread.
+    */
+    compressed_length = min((uint32_t)chunk_index[chunk_index_in_segment+1] -
+			    (uint32_t)chunk_index[chunk_index_in_segment], 
+			    this->chunk_size + 1024);
+    
+    /** Now obtain a handler directly into the segment */
+    snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
+	     ((AFFObject)this)->urn, 
+	     segment_id);
+    
+    chunk_offset_in_segment = (uint32_t)chunk_index[chunk_index_in_segment];
+    CALL(oracle, cache_return, (AFFObject)temp_blob);
   };
 
-  /** This holds the index into the segment of all the chunks.
-      It is an array of chunks_in_segment ints long.
-  */
-  chunk_index = (int32_t *)temp_blob->data;
-  chunks_in_segment = temp_blob->length / sizeof(int32_t);
-  
-  /** By here we have the chunk_index which is an array of offsets
-      into the segment where the chunks begin. We work out the size of
-      the chunk by subtracting the next chunk offset from the current
-      one. It seems to be ok to over read here so if the numbers dont
-      make too much sense we just choose to overread.
-  */
-  compressed_length = min((uint32_t)chunk_index[chunk_index_in_segment+1] -
-			  (uint32_t)chunk_index[chunk_index_in_segment], 
-			  this->chunk_size + 1024);
-
-  /** Now obtain a handler directly into the segment */
-  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
-	   ((AFFObject)this)->urn, 
-	   segment_id);
+  // Now we need to read the FIFFile directly
+  parent = (FIFFile)CALL(oracle, open, self, this->parent_urn);
+  if(!parent) {
+    RaiseError(ERuntimeError, "No storage for Image stream?");
+    goto error;
+  }
   
   fd = CALL((ZipFile)parent, open_member, buffer, 'r', NULL, 0, ZIP_STORED);
 
   // Fetch the compressed chunk
-  CALL(fd, seek, chunk_index[chunk_index_in_segment],
-       SEEK_SET);
+  CALL(fd, seek, chunk_offset_in_segment, SEEK_SET);
 
+  //  printf("compressed_length %d %d ", compressed_length, uncompressed_length);
   CALL(fd, read, compressed_chunk, compressed_length);
+
+  // Done with parent and blob
+  CALL(oracle, cache_return, (AFFObject)parent);
+  CALL(fd, close);
+  talloc_free(fd);
 
   // Try to decompress it:
   if(uncompress((unsigned char *)uncompressed_chunk, 
@@ -310,7 +361,8 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
     goto error;
   };
-
+  
+  //  printf("%d\n", uncompressed_length);
   // Copy it on the output stream
   length = CALL(result, write, uncompressed_chunk + chunk_offset, 
 		available_to_read);

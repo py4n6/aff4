@@ -11,7 +11,7 @@ AFFObject Link_Con(AFFObject self, char *urn) {
       goto error;
     };
 
-    return CALL(oracle, open, target);
+    return CALL(oracle, open, self, target);
   } else {
     this->__super__->Con(self, urn);
   };
@@ -32,7 +32,7 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
 	       char *target, char *friendly_name) {
   AFFObject this = (AFFObject)self;
   if(storage_urn) {
-    FIFFile fiffile = (FIFFile)CALL(oracle, open, storage_urn);
+    FIFFile fiffile = (FIFFile)CALL(oracle, open, self, storage_urn);
     char tmp[BUFF_SIZE];
     FileLikeObject fd;
     char *properties;
@@ -54,6 +54,7 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
     talloc_free(properties);
 
     CALL(fd, close);
+    CALL(oracle, cache_return, (AFFObject)fiffile);
   };
 };
 

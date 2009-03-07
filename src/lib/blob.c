@@ -18,18 +18,17 @@ AFFObject Blob_Con(AFFObject self, char *urn) {
     }
 
     // Now we ask the oracle to open the volume:
-    fiffile = CALL(oracle, open, url);
+    fiffile = (FIFFile)CALL(oracle, open, self, url);
     if(!fiffile) {
       goto error;
     };
 
     // Make our own private copy so we can keep it around in case the
     // zipfile cache is expired.
-    this->data = fiffile->super.read_member((ZipFile)fiffile, urn, &this->length);
-    this->data = talloc_memdup(self, this->data, this->length);
-    
-    self->urn = talloc_strdup(self, urn);
+    this->data = fiffile->super.read_member((ZipFile)fiffile, this, urn, &this->length);
+    CALL(oracle, cache_return, (AFFObject)fiffile);
 
+    self->urn = talloc_strdup(self, urn);
   } else {
     this->__super__->Con(self, urn);
   };

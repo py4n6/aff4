@@ -75,6 +75,7 @@ void test1_5() {
     // Now create a new AFF2 file on top of it
     fiffile = (FIFFile)CALL(oracle, create, (AFFObject *)&__FIFFile);
     CALL((AFFObject)fiffile, set_property, "aff2:stored", fd->super.urn);
+    CALL((AFFObject)fiffile, set_property, "aff2:chunks_in_segment", "256");
 
     if(CALL((AFFObject)fiffile, finish)) {
       char buffer[BUFF_SIZE];
@@ -124,18 +125,20 @@ void test2() {
   Blob blob;
 
   // This is only needed to populate the oracle
-  if(CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd))
+  if(CONSTRUCT(FIFFile, ZipFile, super.Con, fd, URNOF(fd)))
     talloc_free(fd);
 
   // Now ask the resolver for the different files
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    blob = (Blob)CALL(oracle, open, "hello");
+    blob = (Blob)CALL(oracle, open, fd, "hello");
     if(!blob) {
       RaiseError(ERuntimeError, "Error reading member");
       break;
     };
+
+    CALL(oracle, cache_return, (AFFObject)blob);
   };
 
   gettimeofday(&new_time, NULL);
@@ -190,12 +193,13 @@ void test_image_create() {
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set_property, "aff2:stored", 
        ((AFFObject)fiffile)->urn);
-
+  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "256");
+  
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
     goto error;
 
-  in_fd=open("/bin/ls",O_RDONLY);
+  in_fd=open("/var/tmp/uploads/testimages/ntfs/ntfs1-gen2.dd",O_RDONLY);
   while(in_fd >= 0) {
     length = read(in_fd, buffer, BUFF_SIZE);
     if(length == 0) break;
@@ -232,12 +236,24 @@ void test_image_read() {
   int outfd;
   char buff[BUFF_SIZE];
   int length;
+  FIFFile fiffile;
 
-  if(CONSTRUCT(FIFFile, ZipFile, super.Con, fd, (FileLikeObject)fd)){};
+  if(!fd) {
+    RaiseError(ERuntimeError, "Unable to open file %s", TEST_FILE);
+    return;
+  };
 
-  image = (Image)CALL(oracle, open, link_name);
+  fiffile =CONSTRUCT(FIFFile, ZipFile, super.Con, fd, URNOF(fd));
+  if(!fiffile) {
+    RaiseError(ERuntimeError, "%s is not a zip file?", TEST_FILE);
+    talloc_free(fd);
+    return;
+  };
 
-  if(!fd) goto error;
+  // We just put it in the cache anyway
+  CALL(oracle, cache_return, (AFFObject)fiffile);
+
+  image = (Image)CALL(oracle, open, NULL, link_name);
   if(!image) {
     RaiseError(ERuntimeError, "Unable to find stream %s", link_name);
     goto error;
@@ -256,6 +272,7 @@ void test_image_read() {
   close(outfd);
 
  error:
+  CALL(oracle, cache_return, (AFFObject)image);
   return;
 };
 
@@ -457,6 +474,7 @@ int main() {
   test2();
   PrintError();
   */
+
   AFF2_Init();
   ClearError();
   test_image_create();

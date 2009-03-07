@@ -9,7 +9,7 @@
 #include "fif.h"
 
 #define HASH_TABLE_SIZE 256
-#define CACHE_SIZE 0
+#define CACHE_SIZE 5
 
 /** These are ZipFile structures */
 struct EndCentralDirectory {
@@ -73,15 +73,15 @@ CLASS(ZipInfo, Object)
      // Directory (Currently not used in this implementation)
      char *file_comment;
 
-     // Each ZipInfo object remembers which file it came from:
-     FileLikeObject fd;
+     // Each ZipInfo object remembers where it came from
+     char * fd_urn;
 
      // A shortcut way of going to the start of the file contents
      // (i.e. points to the relative_offset_local_header + sizeof(file
      // header). This helps because file header varies in size.
      uint64_t file_offset;
 
-     ZipInfo METHOD(ZipInfo, Con, FileLikeObject fd);
+     ZipInfo METHOD(ZipInfo, Con, char *fd_urn);
 END_CLASS
 
 /** This represents a Zip file */
@@ -90,8 +90,7 @@ CLASS(ZipFile, AFFObject)
 // central directory. When adding a new file to the archive we just go
 // there.
      uint64_t directory_offset;
-     FileLikeObject writer;
-     FileLikeObject fd;
+
      // This keeps the end of central directory struct so we can
      // recopy it when we update the CD.
      struct EndCentralDirectory *end;
@@ -102,12 +101,9 @@ CLASS(ZipFile, AFFObject)
      // volume set at once.
      Cache zipinfo_cache;
 
-     // This is a cache of file data saves us decompressing the same
-     // file too many times.
-     Cache file_data_cache;
-
-     // This is a cache for extra fields
-     Cache extra_cache;
+     // This is our own current URN - new files will be appended to
+     // that
+     char *parent_urn;
 
      /** This flag is set when the ZipFile is modified and a new CD
 	 needs to be rewritten on close
@@ -115,13 +111,13 @@ CLASS(ZipFile, AFFObject)
      int _didModify;
 
      /** A zip file is opened on a file like object */
-     ZipFile METHOD(ZipFile, Con, FileLikeObject file);
+     ZipFile METHOD(ZipFile, Con, char *file_urn);
 
 // Fetch a member as a string - this is suitable for small memebrs
 // only as we allocate memory for it. The buffer callers receive will
-// not be owned by the callers. Callers should never free it nor steal
-// it they must copy it out if they want to keep it.
-     char *METHOD(ZipFile, read_member, char *filename, int *len);
+// owned by ctx. 
+     char *METHOD(ZipFile, read_member, void *ctx,
+		  char *filename, int *len);
 
 // This method is called to create a new volume on the
 // FileLikeObject. This call must preceed any calls to open_member for
@@ -169,32 +165,21 @@ CLASS(ZipFileStream, FileLikeObject)
      uint64_t zip_offset;
      char mode;
      ZipInfo zinfo;
+     char *parent_urn;
 
 // This is the constructor for the file like object. Note that we
 // steal the underlying file pointer which should be the underlying
 // zip file and should be given to us already seeked to the right
 // place.
      ZipFileStream METHOD(ZipFileStream, Con, ZipFile zip,
-			  FileLikeObject fd, char *filename,
+			  char *fd_urn, char *filename,
 			  char mode, int compression, 
+			  uint64_t zip_offset,
 			  uint64_t header_offset);
 END_CLASS
 
 // This is the main FIF class - it manages the Zip archive
 CLASS(FIFFile, ZipFile)
-     // Each FIFFile has a resolver which we use to resolve URNs to
-     // FileLikeObjects
-     struct Resolver *resolver;
-
-     // This is our own volume URN
-     char *uuid;
-
-     /** This is used to get a new stream handler for writing */
-     //     AFFFD METHOD(FIFFile, create_stream_for_writing, char *stream_name,
-     //		  char *stream_type, Properties props);
-
-     /** Open the stream for reading */
-     // AFFFD METHOD(FIFFile, open_stream, char *stream_name);
 END_CLASS
 
 #endif

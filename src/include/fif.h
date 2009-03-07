@@ -17,7 +17,7 @@ uint64_t parse_int(char *string);
 CLASS(Cache, Object)
 // The key which is used to access the data
      void *key;
-     
+
      // An opaque data object and its length. The object will be
      // talloc_stealed into the cache object as we will be manging its
      // memory.
@@ -32,6 +32,9 @@ CLASS(Cache, Object)
      // to search linearly as it only contains objects with the same hash.
      struct list_head cache_list;
      struct list_head hash_list;
+
+     // This is a pointer to the head of the cache
+     struct Cache *cache_head;
 
      // The current number of objects managed by this cache
      int cache_size;
@@ -155,13 +158,14 @@ CLASS(Resolver, Object)
  FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);
  if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;
  
- NOTE: Callers do not own the returned objects and must not keep
- references to them at all. The returned objects are generally cached
- in the resolver and may be expired at any time. If the object is
- cached it is not expensive to retrieve it, so callers should always
- re-fetch objects by their URNs rather than maintaining references.
+ Once the resolver provides the object it is attached to the context
+ ctx and removed from the cache. This ensures that the object can not
+ expire from the cache while callers are holding it. For efficiency
+ you must return the object to the cache as soon as possible by
+ calling cache_return.
 */
-     AFFObject METHOD(Resolver, open, char *uri);
+      AFFObject METHOD(Resolver, open, void *ctx, char *uri);
+      void METHOD(Resolver, cache_return, AFFObject obj);
 
 /* This create a new object of the specified type. */
      AFFObject METHOD(Resolver, create, AFFObject *class_reference);
@@ -210,7 +214,9 @@ CLASS(Image, FileLikeObject)
                               // -> Default segment size 64Mb
 
      // Writes get queued here until full chunks are available
-     StringIO chunk_buffer;
+     char *chunk_buffer;
+     int chunk_buffer_readptr;
+     int chunk_buffer_size;
 
      // The segment is written here until its complete and then it
      // gets flushed
@@ -225,6 +231,7 @@ CLASS(Image, FileLikeObject)
 
      // An array of indexes into the segment where chunks are stored
      int32_t *chunk_indexes;
+     char *parent_urn;
 
 END_CLASS
 
@@ -300,5 +307,7 @@ END_CLASS
 
  char *resolver_get_with_default(Resolver self, char *urn, 
 				 char *attribute, char *default_value);
+
+#define URNOF(x)  ((AFFObject)x)->urn
 
 #endif

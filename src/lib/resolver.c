@@ -45,9 +45,11 @@ void AFF2_Init(void) {
 
 static Resolver Resolver_Con(Resolver self) {
   self->urn = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
+  talloc_set_name_const(self->urn, "Main Resolver");
 
   // This is a cache for frequently used objects
   self->cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
+  talloc_set_name_const(self->cache, "Temporary Cache");
   return self;
 };
 
@@ -63,17 +65,23 @@ char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
   return CALL(i, get_item, attribute);
 };
 
-AFFObject Resolver_open(Resolver self, char *urn) {
+AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
   int i;
   char *stream_type;
   struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
+  Cache tmp;
 
   if(!urn) return NULL;
 
   // Is this object cached?
-  result = (AFFObject)CALL(self->cache, get_item, urn);
-  if(result) return result;
+  tmp = CALL(self->cache, get, urn);
+  if(tmp) {
+    result = (AFFObject)tmp->data;
+    talloc_steal(ctx, result);
+    talloc_free(tmp);
+    return result;
+  };
 
   // OK Maybe the type is encoded into the URN:
   for(i=0; dispatch[i].type !=NULL; i++) {
@@ -109,12 +117,19 @@ AFFObject Resolver_open(Resolver self, char *urn) {
   
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-				    Con, self, urn);
+				    Con, ctx, urn);
   
-  // Cache it
-  CALL(self->cache, put, talloc_strdup(NULL, urn),
-       result, sizeof(*result));
   return result; 
+};
+
+/** Return the object to the cache. Callers may not make a reference
+    to it after that.
+*/
+void Resolver_return(Resolver self, AFFObject obj) {
+  // Cache it
+  if(obj)
+    CALL(self->cache, put, talloc_strdup(self, obj->urn),
+	 obj, sizeof(*obj));
 };
 
 void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
@@ -149,6 +164,20 @@ char *Resolver_export(Resolver self, char *urn) {
 				    (char *)j->key, (char *)j->data);
   };
 
+  return result;
+};
+
+char *Resolver_export_all(Resolver self) {
+  Cache i;
+  char *result=talloc_strdup(NULL, "");  
+
+  list_for_each_entry(i, &self->urn->cache_list, cache_list) {
+    char *urn = (char *)i->key;
+    char *tmp =Resolver_export(self, urn);
+
+    result = talloc_asprintf_append(result, "%s\n", tmp);
+    talloc_free(tmp);
+  };
   return result;
 };
 
@@ -191,6 +220,7 @@ VIRTUAL(Resolver, Object)
      VMETHOD(add)  = Resolver_add;
      VMETHOD(export) = Resolver_export;
      VMETHOD(open) = Resolver_open;
+     VMETHOD(cache_return) = Resolver_return;
      VMETHOD(set) = Resolver_set;
      VMETHOD(del) = Resolver_del;
 END_VIRTUAL

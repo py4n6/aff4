@@ -39,12 +39,12 @@ static int FIFFile_destructor(void *self) {
   return 0;
 };
 
-static ZipFile FIFFile_Con(ZipFile self, FileLikeObject fd) {
+static ZipFile FIFFile_Con(ZipFile self, char *fd_urn) {
   FIFFile this = (FIFFile)self;
   Cache i;
 
   // Open the file now
-  self = this->__super__->Con(self, fd);
+  self = this->__super__->Con(self, fd_urn);
 
   // Now tell the resolver about everything we know:
   list_for_each_entry(i, &self->zipinfo_cache->cache_list, cache_list) {
@@ -91,12 +91,14 @@ static void FIFFile_add_zipinfo_to_cache(ZipFile self, ZipInfo zip) {
     char *attribute;
     char *value;
 
-    text = CALL(self, read_member, zip->filename, &len);
+    text = CALL(self, read_member, self, zip->filename, &len);
     if(!text) return;
 
-    tmp = talloc_memdup(self, text, len+1);
+    tmp = talloc_memdup(text, text, len+1);
     tmp[len]=0;
     tmp_text = tmp;
+    
+    printf("Found property file %s\n%s", zip->filename, tmp);
 
     // Find the next line:
     while((i=strcspn(tmp_text, "\r\n"))) {
@@ -130,9 +132,9 @@ static void FIFFile_add_zipinfo_to_cache(ZipFile self, ZipInfo zip) {
 
       // Try to recognise a statement like URN stored . (URN stored
       // here) to find the current volumes UUID.
-      if((!strcmp(value,".") || !strcmp(value,self->fd->super.urn)) && 
+      if((!strcmp(value,".") || !strcmp(value, zip->fd_urn)) && 
 	  !strcmp(attribute,"aff2:stored")) {
-	value = self->fd->super.urn;
+	value = zip->fd_urn;
 	self->super.urn = talloc_strdup(self, source);
       };
 
@@ -146,11 +148,9 @@ static void FIFFile_add_zipinfo_to_cache(ZipFile self, ZipInfo zip) {
       // Move to the next line
       tmp_text = tmp_text + i+1;
     };
-    
-  printf("Found property file %s\n%s", zip->filename, text);
 
  exit:
-  talloc_free(tmp);
+  talloc_free(text);
   };
 
 };
@@ -193,11 +193,14 @@ AFFObject FIFFile_AFFObject_Con(AFFObject self, char *urn) {
     };
 
     // Ask the oracle for the file object
-    fd = (FileLikeObject)CALL(oracle, open, url);
+    fd = (FileLikeObject)CALL(oracle, open, self, url);
     if(!fd) goto error;
 
     // Call our other constructor to actually read this file:
-    self = (AFFObject)this->super.Con((ZipFile)this, fd);
+    self = (AFFObject)this->super.Con((ZipFile)this, ((AFFObject)fd)->urn);
+
+    // Done with fd
+    CALL(oracle, cache_return, (AFFObject)fd);
   } else {
     // Call ZipFile's AFFObject constructor.
     this->__super__->super.Con(self, urn);
