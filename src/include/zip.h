@@ -58,49 +58,11 @@ struct ZipFileHeader {
   uint16_t extra_field_len;
 }__attribute__((packed));
 
-/** This represents a single Zip entry.  We only implement as much as
-    we need for FIF.
-*/
-CLASS(ZipInfo, Object)
-     struct CDFileHeader cd_header;
-
-     // These maintain some information about the archive memeber
-     char *filename;
-     // This is an extra piece of data associated with the file
-     // header.
-     char *extra_field;
-
-     // This extra piece of data is associated with the Central
-     // Directory (Currently not used in this implementation)
-     char *file_comment;
-
-     // Each ZipInfo object remembers where it came from
-     char * fd_urn;
-
-     // A shortcut way of going to the start of the file contents
-     // (i.e. points to the relative_offset_local_header + sizeof(file
-     // header). This helps because file header varies in size.
-     uint64_t file_offset;
-
-     ZipInfo METHOD(ZipInfo, Con, char *fd_urn);
-END_CLASS
-
 /** This represents a Zip file */
 CLASS(ZipFile, AFFObject)
-// This is the end of the last file record and the start of the
-// central directory. When adding a new file to the archive we just go
-// there.
-     uint64_t directory_offset;
-
      // This keeps the end of central directory struct so we can
      // recopy it when we update the CD.
      struct EndCentralDirectory *end;
-
-     // A Cache of ZipInfo objects. These objects represent the
-     // archive members in the CD. Note that they do not expire - we
-     // must keep them all alive so we can access any member of the
-     // volume set at once.
-     Cache zipinfo_cache;
 
      // This is our own current URN - new files will be appended to
      // that
@@ -140,16 +102,6 @@ CLASS(ZipFile, AFFObject)
      void METHOD(ZipFile, writestr, char *filename, char *data, int len,
 		 char *extra, int extra_field_len,
 		 int compression);
-
-/* A method to fetch the ZipInfo corresponding with a particular
-   filename within the archive */
-     ZipInfo METHOD(ZipFile, fetch_ZipInfo, char *filename);
-
-/** This is called to add a new CD record to the zipinfo_cache. It is
-    a method in order to allow super classes to be notified when a new
-    CD is parsed. 
-*/
-    void METHOD(ZipFile, add_zipinfo_to_cache, ZipInfo zip);
 END_CLASS
 
 #define ZIP_STORED 0
@@ -157,22 +109,22 @@ END_CLASS
 
 // This is a FileLikeObject which is used from within the Zip file:
 CLASS(ZipFileStream, FileLikeObject)
-     ZipFile zip;
      z_stream strm;
-     uint64_t zip_offset;
-     char mode;
-     ZipInfo zinfo;
+     uint64_t file_offset;
+     char *container_urn;
      char *parent_urn;
+     uint32_t crc32;
+     uint32_t compress_size;
+     uint32_t compression;
+     char mode;
 
 // This is the constructor for the file like object. Note that we
 // steal the underlying file pointer which should be the underlying
 // zip file and should be given to us already seeked to the right
 // place.
-     ZipFileStream METHOD(ZipFileStream, Con, ZipFile zip,
-			  char *fd_urn, char *filename,
-			  char mode, int compression, 
-			  uint64_t zip_offset,
-			  uint64_t header_offset);
+     ZipFileStream METHOD(ZipFileStream, Con, char *filename, 
+			  char *parent_urn, char *container_urn,
+			  char mode);
 END_CLASS
 
 // This is the main FIF class - it manages the Zip archive

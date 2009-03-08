@@ -12,7 +12,7 @@
 /** First test builds a new zip file from /bin/ls */
 void test1() {
   // Make a new zip file
-  ZipFile zip = (ZipFile)CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+  ZipFile zip = (ZipFile)CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
 
   // Make a new file
   FileLikeObject out_fd;
@@ -49,7 +49,7 @@ void test1() {
 
 #define TIMES 1000
 
-/** Try to create a new FIFFile.
+/** Try to create a new ZipFile.
 
 When creating a new AFFObject we:
 
@@ -63,17 +63,17 @@ parameters.
 
 */
 void test1_5() {
-  FIFFile fiffile;
+  ZipFile zipfile;
 
   // Now create a new AFF2 file on top of it
-  fiffile = (FIFFile)CALL(oracle, create, (AFFObject *)&__FIFFile);
-  CALL((AFFObject)fiffile, set_property, "aff2:stored", "file://" TEST_FILE);
+  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
 
-  if(CALL((AFFObject)fiffile, finish)) {
+  if(CALL((AFFObject)zipfile, finish)) {
     char buffer[BUFF_SIZE];
     int fd=open("/bin/ls",O_RDONLY);
     int length;
-    FileLikeObject out_fd = CALL((ZipFile)fiffile, 
+    FileLikeObject out_fd = CALL((ZipFile)zipfile, 
 				 open_member, "foobar", 'w', NULL, 0, 
 				 ZIP_DEFLATE);
     while(1) {
@@ -84,13 +84,13 @@ void test1_5() {
     };
     CALL(out_fd,close);
 
-    CALL((ZipFile)fiffile, writestr, "hello",
+    CALL((ZipFile)zipfile, writestr, "hello",
 	 ZSTRING("hello world"), NULL, 0, 0);
 
-    CALL((ZipFile)fiffile,close);
+    CALL((ZipFile)zipfile,close);
   };
 
-  CALL(oracle, cache_return, (AFFObject)fiffile);
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 
 /** This tests the cache for reading zip members.
@@ -111,11 +111,11 @@ void test2() {
   struct timeval new_time;
   int diff;
   Blob blob;
-  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, "file://" TEST_FILE);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
 
   // This is only needed to populate the oracle  
-  if(!fiffile) return;
-  CALL(oracle, cache_return, (AFFObject)fiffile);
+  if(!zipfile) return;
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now ask the resolver for the different files
   gettimeofday(&epoch_time, NULL);
@@ -142,31 +142,38 @@ void test2() {
 /** This test writes a two part AFF2 file.
 
 First we ask the oracle to create a FileBackedObject then attach that
-to a FIFFile volume. We then create an Image stream and attach that to
-the FIFFile volume.
+to a ZipFile volume. We then create an Image stream and attach that to
+the ZipFile volume.
 
 */
 void test_image_create() {
-  FIFFile fiffile = (FIFFile)CALL(oracle, create, (AFFObject *)&__FIFFile);
+  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
   Image image;
   char buffer[BUFF_SIZE];
   int in_fd;
   int length;
   Link link;
+  char zipfile_urn[BUFF_SIZE];
 
-  if(!fiffile) goto error;
+  if(!zipfile) goto error;
 
-  CALL((AFFObject)fiffile, set_property, "aff2:stored", "file://" TEST_FILE);
+  // Make local copy of zipfile's URN
+  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
+
+  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
 
   // Is it ok?
-  if(!CALL((AFFObject)fiffile, finish))
+  if(!CALL((AFFObject)zipfile, finish))
     goto error;
+  
+  // Finished with it for the moment
+  //  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now we need to create an Image stream
   image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
   
   // Tell the image that it should be stored in the volume
-  CALL((AFFObject)image, set_property, "aff2:stored", URNOF(fiffile));
+  CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
   CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "256");
 
   // Is it ok?
@@ -186,18 +193,20 @@ void test_image_create() {
   // We want to make it easy to locate this image so we set up a link
   // to it:
   link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
-  // The link will be stored in this fiffile
+  // The link will be stored in this zipfile
   CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
   CALL(link, link, oracle, image->parent_urn, URNOF(image), "default");
   CALL((AFFObject)link, finish);
   CALL(oracle, cache_return, (AFFObject)link);
 
-  CALL((ZipFile)fiffile, close);
+  // Close the zipfile - get it back
+  //  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn); 
+  CALL((ZipFile)zipfile, close);
   
  error:
   // We are done with that now
   CALL(oracle, cache_return, (AFFObject)image);
-  CALL(oracle, cache_return, (AFFObject)fiffile);
+  CALL(oracle, cache_return, (AFFObject)zipfile);
   
 };
 
@@ -212,22 +221,22 @@ void test_image_read() {
   int outfd;
   char buff[BUFF_SIZE];
   int length;
-  FIFFile fiffile;
+  ZipFile zipfile;
 
   if(!fd) {
     RaiseError(ERuntimeError, "Unable to open file %s", TEST_FILE);
     return;
   };
 
-  fiffile =CONSTRUCT(FIFFile, ZipFile, super.Con, fd, URNOF(fd));
-  if(!fiffile) {
+  zipfile =CONSTRUCT(ZipFile, ZipFile, Con, fd, URNOF(fd));
+  if(!zipfile) {
     RaiseError(ERuntimeError, "%s is not a zip file?", TEST_FILE);
     talloc_free(fd);
     return;
   };
 
   // We just put it in the cache anyway
-  CALL(oracle, cache_return, (AFFObject)fiffile);
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   image = (Image)CALL(oracle, open, NULL, link_name);
   if(!image) {
@@ -256,14 +265,14 @@ void test_image_read() {
 
 void test3() {
   // Make a new zip file
-  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
 
   // Make a new file
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  fiffile, "test.00.zip", 'w');
+				  zipfile, "test.00.zip", 'w');
 
   // Create a new properties object
-  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
 
   FileLikeObject stream;
   int out_fd = open("/bin/ls", O_RDONLY);
@@ -272,13 +281,13 @@ void test3() {
   int volume_number=0;
 
   // Create a new Zip volume for writing
-  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
 
   // For this test we have 2 chunks per segment
   CALL(props, add, "chunks_in_segment", "2", 0);
 
   // Make a new Image stream
-  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
+  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, "default","Image", props);
   while(stream) {
     length = read(out_fd, buffer, 10000);
     if(length == 0) break;
@@ -291,16 +300,16 @@ void test3() {
       volume_number ++ ;
       snprintf(buffer, BUFF_SIZE, "test.%02d.zip", volume_number);
       fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-		     fiffile, buffer, 'w');
+		     zipfile, buffer, 'w');
       
-      fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+      zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
     };
   };
 
   stream->close(stream);
-  fiffile->super.close((ZipFile)fiffile);
+  zipfile->super.close((ZipFile)zipfile);
 
-  talloc_free(fiffile);
+  talloc_free(zipfile);
 };
 
 /** This tests the properties classes */
@@ -327,8 +336,8 @@ void test4() {
 };
 
 /** A little helper that copies a file into a fif archive */
-FileLikeObject create_image(FIFFile fiffile, char *filename) {
-  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+FileLikeObject create_image(ZipFile zipfile, char *filename) {
+  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
   
   FileLikeObject stream;
   int out_fd = open(filename, O_RDONLY);
@@ -336,7 +345,7 @@ FileLikeObject create_image(FIFFile fiffile, char *filename) {
   int length;
 
   // Make a new Image stream
-  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, filename,
+  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, filename,
 				"Image", props);
   while(stream) {
     length = read(out_fd, buffer, BUFF_SIZE*10);
@@ -353,14 +362,14 @@ FileLikeObject create_image(FIFFile fiffile, char *filename) {
 /** Test the Image class */
 void test5() {
   // Make a new zip file
-  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, super.Con, NULL, NULL);
 
   // Make a new file
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  fiffile, TEST_FILE, 'w');
+				  zipfile, TEST_FILE, 'w');
 
   // Create a new properties object
-  Properties props = CONSTRUCT(Properties, Properties, Con, fiffile);
+  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
 
   FileLikeObject stream;
   int out_fd = open("/bin/ls", O_RDONLY);
@@ -368,10 +377,10 @@ void test5() {
   int length;
 
   // Create a new Zip volume for writing
-  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
 
   // Make a new Image stream
-  stream = (FileLikeObject)CALL(fiffile, create_stream_for_writing, "default","Image", props);
+  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, "default","Image", props);
   while(stream) {
     length = read(out_fd, buffer, BUFF_SIZE*10);
     if(length == 0) break;
@@ -380,9 +389,9 @@ void test5() {
   };
 
   stream->close(stream);
-  fiffile->super.close((ZipFile)fiffile);
+  zipfile->super.close((ZipFile)zipfile);
 
-  talloc_free(fiffile);
+  talloc_free(zipfile);
 };
 
 #define CHUNK_SIZE 32*1024
@@ -393,10 +402,10 @@ void test5() {
 */
 void test7() {
   // Make a new zip file
-  FIFFile fiffile = CONSTRUCT(FIFFile, ZipFile, super.Con, NULL, NULL);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
 
   FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  fiffile, TEST_FILE, 'w');
+				  zipfile, TEST_FILE, 'w');
   FileLikeObject d0,d1,d2;
   MapDriver map;
   int blocksize = 64 * 1024;
@@ -404,16 +413,16 @@ void test7() {
   char buff[BUFF_SIZE];
 
   // Create a new Zip volume for writing
-  fiffile->super.create_new_volume((ZipFile)fiffile, (FileLikeObject)fd);
+  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
 
-  d0=create_image(fiffile, "images/d1.dd");
-  d1=create_image(fiffile, "images/d2.dd");
-  d2=create_image(fiffile, "images/d3.dd");
+  d0=create_image(zipfile, "images/d1.dd");
+  d1=create_image(zipfile, "images/d2.dd");
+  d2=create_image(zipfile, "images/d3.dd");
 
   // Now create a map stream:
   CALL(props, add, "image_period", "196608",0);
   CALL(props, add, "file_period", "393216",0);
-  map = (MapDriver)CALL(fiffile, create_stream_for_writing, "combined", "Map", props);
+  map = (MapDriver)CALL(zipfile, create_stream_for_writing, "combined", "Map", props);
 
   // Create the raid reassembly map
   CALL(map, add, 0,             0,             d1);
@@ -427,7 +436,7 @@ void test7() {
   map->save_map(map);
   map->super.super.close((FileLikeObject)map);
 
-  talloc_free(fiffile);
+  talloc_free(zipfile);
 };
 
 #endif
@@ -435,33 +444,31 @@ void test7() {
 int main() {
   talloc_enable_leak_report_full();
 
-  /*
-
   AFF2_Init();
   ClearError();
   test1_5();
   PrintError();
-
+  /*
   ClearError();
   test1();
   PrintError();
-
+  */
   AFF2_Init();
   ClearError();
   test2();
   PrintError();
-  */
-  
+
   AFF2_Init();
   ClearError();
   test_image_create();
   PrintError();
-  /*
+
   AFF2_Init();
   ClearError();
   test_image_read();
   PrintError();
-  
+
+  /*  
   ClearError();
   printf("\n*******************\ntest 5\n********************\n");
   test5();

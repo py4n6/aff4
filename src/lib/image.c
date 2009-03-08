@@ -129,17 +129,17 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
   
   // Is the segment buffer full? If it has enough chunks in it we
   // can flush it out. We need to find out where our storage is and
-  // open a FIFFile on it:
+  // open a ZipFile on it:
   if(this->chunk_count >= this->chunks_in_segment || force) {
     char tmp[BUFF_SIZE];
-    FIFFile parent;
+    ZipFile parent;
 
     if(!this->parent_urn) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
       goto error;
     }
 
-    parent  = (FIFFile)CALL(oracle, open, this, this->parent_urn);
+    parent  = (ZipFile)CALL(oracle, open, this, this->parent_urn);
     // Format the segment name
     snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
 	     this->segment_count);
@@ -228,15 +228,15 @@ static void Image_close(FileLikeObject self) {
   // Write out a properties file
   properties = CALL(oracle, export, ((AFFObject)self)->urn);
   if(properties) {
-    FIFFile fiffile = (FIFFile)CALL(oracle, open, self, this->parent_urn);
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, this->parent_urn);
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
-    CALL((ZipFile)fiffile, writestr, tmp, ZSTRING_NO_NULL(properties),
+    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
 	 NULL, 0, ZIP_STORED);
 
     talloc_free(properties);
-    // Done with fiffile
-    CALL(oracle, cache_return, (AFFObject)fiffile);
+    // Done with zipfile
+    CALL(oracle, cache_return, (AFFObject)zipfile);
   };
 
   this->__super__->close(self);
@@ -265,7 +265,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   /** Now we need to figure out where the segment is */
   char buffer[BUFF_SIZE];
-  FIFFile parent;
+  ZipFile parent;
   FileLikeObject fd;
   int32_t chunk_offset_in_segment;
 
@@ -333,8 +333,8 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     CALL(oracle, cache_return, (AFFObject)temp_blob);
   };
 
-  // Now we need to read the FIFFile directly
-  parent = (FIFFile)CALL(oracle, open, self, this->parent_urn);
+  // Now we need to read the ZipFile directly
+  parent = (ZipFile)CALL(oracle, open, self, this->parent_urn);
   if(!parent) {
     RaiseError(ERuntimeError, "No storage for Image stream?");
     goto error;

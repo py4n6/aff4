@@ -32,12 +32,12 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
 	       char *target, char *friendly_name) {
   AFFObject this = (AFFObject)self;
   if(storage_urn) {
-    FIFFile fiffile = (FIFFile)CALL(oracle, open, self, storage_urn);
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, storage_urn);
     char tmp[BUFF_SIZE];
     FileLikeObject fd;
     char *properties;
 
-    if(!fiffile) {
+    if(!zipfile) {
       RaiseError(ERuntimeError, "Unable to get storage container %s", storage_urn);
       return;
     };
@@ -48,7 +48,7 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);
 
-    fd = CALL((ZipFile)fiffile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
+    fd = CALL((ZipFile)zipfile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
     if(fd) {
       properties = CALL(oracle, export, friendly_name);
       CALL(fd, write, ZSTRING_NO_NULL(properties));
@@ -56,7 +56,7 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
 
       CALL(fd, close);
     };
-    CALL(oracle, cache_return, (AFFObject)fiffile);
+    CALL(oracle, cache_return, (AFFObject)zipfile);
   };
 };
 

@@ -8,6 +8,7 @@
 #include "list.h"
 
 uint64_t parse_int(char *string);
+char *from_int(uint64_t arg);
 
 /** A cache is an object which automatically expires data which is
     least used - that is the data which is most used is put at the end
@@ -191,6 +192,8 @@ CLASS(Resolver, Object)
 // This updates the value or adds it if needed
      void METHOD(Resolver, set, char *uri, char *attribute, char *value);
 
+// Parses the properties file
+void METHOD(Resolver, parse, char *context, char *text, int len);
 END_CLASS
 
 // This is a global instance of the oracle. All AFFObjects must
