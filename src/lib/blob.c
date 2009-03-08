@@ -23,9 +23,8 @@ AFFObject Blob_Con(AFFObject self, char *urn) {
       goto error;
     };
 
-    // Make our own private copy so we can keep it around in case the
-    // zipfile cache is expired.
-    this->data = zipfile->super.read_member((ZipFile)zipfile, this, urn, &this->length);
+    // Keep a copy of the data
+    this->data = zipfile->read_member((ZipFile)zipfile, this, urn, &this->length);
     CALL(oracle, cache_return, (AFFObject)zipfile);
 
     self->urn = talloc_strdup(self, urn);

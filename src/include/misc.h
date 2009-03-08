@@ -10,6 +10,6 @@
 #define O_BINARY 0
 #endif
 
-#define BUFF_SIZE 4096 * 100
+#define BUFF_SIZE 4096
 
 #endif

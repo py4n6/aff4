@@ -11,6 +11,6 @@ libsha1_la_SOURCES	= sha1.c
 unittests_LDADD           = libfif.la
 unittests_SOURCES         = unittests.c
 
-libfif_la_SOURCES       = libfif.c zip.c stringio.c resolver.c blob.c image.c link.c
+libfif_la_SOURCES       = misc.c zip.c stringio.c resolver.c blob.c image.c link.c map.c
 libfif_la_LIBADD	= libsha1.la liboo.la libmd5.la
 libfif_la_LDFLAGS       = -lz -luuid

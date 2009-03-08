@@ -1,4 +1,3 @@
-#include "fif.h"
 #include "zip.h"
 
 /*************************************************************
@@ -37,6 +36,14 @@ static int cache_cmp_int(Cache self, void *other) {
   uint32_t int_other = *(uint32_t *)other;  
 
   return int_key != int_other;
+};
+
+int Image_destructor(void *this) {
+  Image self = (Image)this;
+
+  CALL((FileLikeObject)self, close);
+
+  return 0;
 };
 
 static AFFObject Image_Con(AFFObject self, char *uri) {
@@ -89,6 +96,11 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
     this->__super__->super.Con(self, uri);
   };
 
+  // NOTE - its a really bad idea to set destructors which call
+  // close() because they might try to reaccess the cache, which may
+  // be invalid while we get free (basically a reference cycle).  The
+  // downside is that we insist people call close() explicitely.
+  // talloc_set_destructor(self, Image_destructor);
   return self;
 };
   
@@ -226,7 +238,7 @@ static void Image_close(FileLikeObject self) {
   CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
 
   // Write out a properties file
-  properties = CALL(oracle, export, ((AFFObject)self)->urn);
+  properties = CALL(oracle, export, URNOF(self));
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, self, this->parent_urn);
 

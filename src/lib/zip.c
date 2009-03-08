@@ -216,10 +216,10 @@ AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn) {
 
     self->urn = talloc_strdup(self, urn);
     // Call our other constructor to actually read this file:
-    self = (AFFObject)this->super.Con((ZipFile)this, url);
+    self = (AFFObject)this->Con((ZipFile)this, url);
   } else {
     // Call ZipFile's AFFObject constructor.
-    this->__super__->super.Con(self, urn);
+    this->__super__->Con(self, urn);
   };
 
   return self;
@@ -248,7 +248,7 @@ static AFFObject ZipFile_finish(AFFObject self) {
        "aff2:type",            /* Attributte */
        "volume");              /* Value */
     
-  CALL((ZipFile)this, Con, NULL);
+  CALL((ZipFile)this, Con, file_urn);
   return self;
 };
 
@@ -265,7 +265,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
   int length,i;
   FileLikeObject fd;
 
-  talloc_set_destructor((void *)self, ZipFile_destructor);
+  //talloc_set_destructor((void *)self, ZipFile_destructor);
   memset(buffer,0,BUFF_SIZE+1);
 
   // Make sure we have a URN
@@ -323,6 +323,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
     while(j<self->end->total_entries_in_cd_on_disk) {
       struct CDFileHeader cd_header;
       char *filename;
+      char *escaped_filename;
 
       // The length of the struct up to the filename
 
@@ -336,11 +337,14 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
 	goto error_reason;
 
       // Now read the filename
-      filename = talloc_array(self, char, cd_header.file_name_length+1);
+      escaped_filename = talloc_array(self, char, cd_header.file_name_length+1);
 						
-      if(CALL(fd, read, filename, cd_header.file_name_length) != 
+      if(CALL(fd, read, escaped_filename, cd_header.file_name_length) != 
 	 cd_header.file_name_length)
 	goto error_reason;
+
+      // Unescape the filename
+      filename = unescape_filename(escaped_filename);
 
       // Tell the oracle about this new member
       CALL(oracle, set, filename, "aff2:location", URNOF(self));
@@ -512,7 +516,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
 
     if(crc != file_crc) {
       RaiseError(EIOError, 
-		 "CRC not matched on decompressed file %s", zip->filename);
+		 "CRC not matched on decompressed file %s", filename);
       goto error;
     };
   };
@@ -540,7 +544,8 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     uint64_t directory_offset = parse_int(CALL(oracle, resolve, 
 					       URNOF(self), 
 					       "aff2volatile:directory_offset"));
-    
+    char *escaped_filename = escape_filename(filename);
+
     // Check to see if this zip file is already open - a global lock
     // (Note if the resolver is external this will lock all other
     // writers).
@@ -558,6 +563,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Open our current volume:
     fd = (FileLikeObject)CALL(oracle, open, self, self->parent_urn);
+    if(!fd) return NULL;
 
     // Go to the start of the directory_offset
     CALL(fd, seek, directory_offset, SEEK_SET);
@@ -569,11 +575,11 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     // We prefer to write trailing directory structures
     header.flags = 0x08;
     header.compression_method = compression;
-    header.file_name_length = strlen(filename);
+    header.file_name_length = strlen(escaped_filename);
     header.extra_field_len = extra_field_len;
     
     CALL(fd, write,(char *)&header, sizeof(header));
-    CALL(fd, write, ZSTRING_NO_NULL(filename));
+    CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
     //    CALL(fd, write, ZSTRING_NO_NULL("AF"));
     //    CALL(fd, write, (char *)&extra_field_len, sizeof(extra_field_len));
     //    CALL(fd, write, extra, extra_field_len);
@@ -649,7 +655,7 @@ static void ZipFile_close(ZipFile self) {
 	  time_t epoch_time = parse_int(CALL(oracle, resolve, value, 
 					     "aff2volatile:timestamp"));
 	  struct tm *now = localtime(&epoch_time);
-	  char *filename =  value;
+	  char *escaped_filename =  escape_filename(value);
 
 	  memset(&cd, 0, sizeof(cd));
 
@@ -667,7 +673,7 @@ static void ZipFile_close(ZipFile self) {
 	  cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
 	    now->tm_sec / 2;
 
-	  cd.file_name_length = strlen(filename);
+	  cd.file_name_length = strlen(escaped_filename);
 	  cd.relative_offset_local_header = parse_int(CALL(oracle, resolve, value, 
 			      "aff2volatile:relative_offset_local_header"));
 	  cd.file_size = parse_int(CALL(oracle, resolve, value, 
@@ -676,7 +682,7 @@ static void ZipFile_close(ZipFile self) {
 					     "aff2volatile:compress_size"));;
 	  
 	  CALL(fd, write, (char *)&cd, sizeof(cd));
-	  CALL(fd, write, (char *)ZSTRING_NO_NULL(filename));
+	  CALL(fd, write, (char *)ZSTRING_NO_NULL(escaped_filename));
 	  k++;
 	};
       };
@@ -742,8 +748,8 @@ VIRTUAL(ZipFile, AFFObject)
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
-     VMETHOD(super.super.Con) = ZipFile_AFFObject_Con;
-     VMETHOD(super.super.finish) = ZipFile_finish;
+     VMETHOD(super.Con) = ZipFile_AFFObject_Con;
+     VMETHOD(super.finish) = ZipFile_finish;
 END_VIRTUAL
 
 /** container_urn is the URN of the ZipFile container which holds this
@@ -925,6 +931,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   // Make sure the lock is removed from this volume now:
   CALL(oracle, del, this->container_urn, "aff2volatile:write_lock");
   CALL(oracle, cache_return, (AFFObject)fd);
+  talloc_free(self);
 };
 
 VIRTUAL(ZipFileStream, FileLikeObject)

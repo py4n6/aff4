@@ -76,6 +76,9 @@ void test1_5() {
     FileLikeObject out_fd = CALL((ZipFile)zipfile, 
 				 open_member, "foobar", 'w', NULL, 0, 
 				 ZIP_DEFLATE);
+
+    if(!out_fd) return;
+
     while(1) {
       length = read(fd, buffer, BUFF_SIZE);
       if(length == 0) break;
@@ -174,7 +177,7 @@ void test_image_create() {
   
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
-  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "256");
+  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "2");
 
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
@@ -261,137 +264,46 @@ void test_image_read() {
   return;
 };
 
-#if 0
-
-void test3() {
-  // Make a new zip file
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
-
-  // Make a new file
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  zipfile, "test.00.zip", 'w');
-
-  // Create a new properties object
-  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
-
-  FileLikeObject stream;
-  int out_fd = open("/bin/ls", O_RDONLY);
+/** A little helper that copies a file into a volume */
+char *create_image(char *volume, char *filename, char *friendly_name) {
+  Image image;
+  int in_fd;
   char buffer[BUFF_SIZE * 10];
   int length;
-  int volume_number=0;
+  Link link;
 
-  // Create a new Zip volume for writing
-  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
+  // Now we need to create an Image stream
+  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
+  if(!image) return NULL;
 
-  // For this test we have 2 chunks per segment
-  CALL(props, add, "chunks_in_segment", "2", 0);
+  // Tell the image that it should be stored in the volume
+  CALL((AFFObject)image, set_property, "aff2:stored", volume);
+  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "256");
 
-  // Make a new Image stream
-  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, "default","Image", props);
-  while(stream) {
-    length = read(out_fd, buffer, 10000);
+  // Is it ok?
+  if(!CALL((AFFObject)image, finish))
+    return NULL;
+
+  in_fd=open(filename, O_RDONLY);
+  while(in_fd >= 0) {
+    length = read(in_fd, buffer, BUFF_SIZE);
     if(length == 0) break;
     
-    CALL(stream, write, buffer, length);
-
-    // If the FIF File gets too large we make a new volume:
-    if(fd->super.size > 10000) {
-      // Make a new fd
-      volume_number ++ ;
-      snprintf(buffer, BUFF_SIZE, "test.%02d.zip", volume_number);
-      fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-		     zipfile, buffer, 'w');
-      
-      zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
-    };
+    CALL((FileLikeObject)image, write, buffer, length);
   };
 
-  stream->close(stream);
-  zipfile->super.close((ZipFile)zipfile);
+  CALL((FileLikeObject)image, close);
 
-  talloc_free(zipfile);
-};
-
-/** This tests the properties classes */
-void test4() {
-  Properties test = CONSTRUCT(Properties, Properties, Con, NULL);
-  Properties i=NULL;
-
-  CALL(test, add, "key", "value", 0);
-  CALL(test, add, "key", "value", 0);
-  CALL(test, add, "key", "something else", 0);
-  CALL(test, add, "key2", "value", 0);
-  CALL(test, parse, ZSTRING_NO_NULL("key=foobar\nhello=world\n"),100);
-
-  while(1) {
-    char *value=CALL(test, iter_next, &i, "key");
-    if(!value) break;
-    printf("Got value %s\n", value);
-  };
-
-  // Now dump the whole thing:
-  printf("'%s'", CALL(test, str));	 
-
-  talloc_free(test);
-};
-
-/** A little helper that copies a file into a fif archive */
-FileLikeObject create_image(ZipFile zipfile, char *filename) {
-  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
+  // We want to make it easy to locate this image so we set up a link
+  // to it:
+  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
+  // The link will be stored in this zipfile
+  CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
+  CALL(link, link, oracle, image->parent_urn, URNOF(image), friendly_name);
+  CALL((AFFObject)link, finish);
+  CALL(oracle, cache_return, (AFFObject)link);
   
-  FileLikeObject stream;
-  int out_fd = open(filename, O_RDONLY);
-  char buffer[BUFF_SIZE * 10];
-  int length;
-
-  // Make a new Image stream
-  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, filename,
-				"Image", props);
-  while(stream) {
-    length = read(out_fd, buffer, BUFF_SIZE*10);
-    if(length == 0) break;
-    
-    CALL(stream, write, buffer, length);
-  };
-
-  CALL(stream, close);
-  return stream;
-};
-
-
-/** Test the Image class */
-void test5() {
-  // Make a new zip file
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, super.Con, NULL, NULL);
-
-  // Make a new file
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  zipfile, TEST_FILE, 'w');
-
-  // Create a new properties object
-  Properties props = CONSTRUCT(Properties, Properties, Con, zipfile);
-
-  FileLikeObject stream;
-  int out_fd = open("/bin/ls", O_RDONLY);
-  char buffer[BUFF_SIZE * 10];
-  int length;
-
-  // Create a new Zip volume for writing
-  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
-
-  // Make a new Image stream
-  stream = (FileLikeObject)CALL(zipfile, create_stream_for_writing, "default","Image", props);
-  while(stream) {
-    length = read(out_fd, buffer, BUFF_SIZE*10);
-    if(length == 0) break;
-    
-    CALL(stream, write, buffer, length);
-  };
-
-  stream->close(stream);
-  zipfile->super.close((ZipFile)zipfile);
-
-  talloc_free(zipfile);
+  return URNOF(image);
 };
 
 #define CHUNK_SIZE 32*1024
@@ -400,59 +312,75 @@ void test5() {
     seperate streams and build a map. Then we read the map off and
     copy it into the output.
 */
-void test7() {
-  // Make a new zip file
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
+#define IMAGES "images/"
+#define D0  "d1.dd"
+#define D1  "d2.dd"
+#define D2  "d3.dd"
 
-  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con,
-				  zipfile, TEST_FILE, 'w');
-  FileLikeObject d0,d1,d2;
+void test_map_create() {
   MapDriver map;
-  int blocksize = 64 * 1024;
-  Properties props = CONSTRUCT(Properties, Properties, Con, fd);
-  char buff[BUFF_SIZE];
+  FileLikeObject fd;
+  char *d0;
+  char *d1;
+  char *d2;
+  char *volume;
+  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
+  
+  if(!CALL((AFFObject)zipfile, finish))
+    return;
 
-  // Create a new Zip volume for writing
-  zipfile->super.create_new_volume((ZipFile)zipfile, (FileLikeObject)fd);
+  volume = URNOF(zipfile);
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 
-  d0=create_image(zipfile, "images/d1.dd");
-  d1=create_image(zipfile, "images/d2.dd");
-  d2=create_image(zipfile, "images/d3.dd");
+  d0=create_image(volume, IMAGES D0, D0);
+  d1=create_image(volume, IMAGES D1, D1);
+  d2=create_image(volume, IMAGES D2, D2);
 
   // Now create a map stream:
-  CALL(props, add, "image_period", "196608",0);
-  CALL(props, add, "file_period", "393216",0);
-  map = (MapDriver)CALL(zipfile, create_stream_for_writing, "combined", "Map", props);
+  map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
+  if(map) {
+    CALL((AFFObject)map, set_property, "aff2:stored", volume);
+    CALL((AFFObject)map, set_property, "aff2:image_period", "3");
+    CALL((AFFObject)map, set_property, "aff2:file_period", "6");
+    CALL((AFFObject)map, set_property, "aff2:blocksize", "64k");
+    map = (MapDriver)CALL((AFFObject)map, finish);
+  };
+
+  if(!map) {
+    RaiseError(ERuntimeError, "Unable to create a map stream?");
+    goto exit;
+  };
 
   // Create the raid reassembly map
-  CALL(map, add, 0,             0,             d1);
-  CALL(map, add, 1 * blocksize, 0,             d0);
-  CALL(map, add, 2 * blocksize, 1 * blocksize, d2);
-  CALL(map, add, 3 * blocksize, 1 * blocksize, d1);
-  CALL(map, add, 4 * blocksize, 2 * blocksize, d0);
-  CALL(map, add, 5 * blocksize, 2 * blocksize, d2);
-  
-  map->super.super.size = d0->size * 2;
-  map->save_map(map);
-  map->super.super.close((FileLikeObject)map);
+  CALL(map, add, 0, 0, D1);
+  CALL(map, add, 1, 0, D0);
+  CALL(map, add, 2, 1, D2);
+  CALL(map, add, 3, 1, D1);
+  CALL(map, add, 4, 2, D0);
+  CALL(map, add, 5, 2, D2);
 
-  talloc_free(zipfile);
+  fd = (FileLikeObject)CALL(oracle, open, NULL, D1);
+  CALL((AFFObject)map, set_property, "size", from_int(fd->size * 2));
+  CALL(oracle, cache_return, (AFFObject)fd);
+
+  CALL(map, save_map);
+  CALL((FileLikeObject)map, close);
+  CALL(oracle, cache_return, (AFFObject)map);
+
+ exit:
+  zipfile = (ZipFile)CALL(oracle, open, NULL, volume);
+  CALL(zipfile, close);
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 };
-
-#endif
 
 int main() {
   talloc_enable_leak_report_full();
-
   AFF2_Init();
   ClearError();
   test1_5();
   PrintError();
-  /*
-  ClearError();
-  test1();
-  PrintError();
-  */
+
   AFF2_Init();
   ClearError();
   test2();
@@ -468,22 +396,11 @@ int main() {
   test_image_read();
   PrintError();
 
-  /*  
+  AFF2_Init();
   ClearError();
   printf("\n*******************\ntest 5\n********************\n");
-  test5();
+  test_map_create();
   PrintError();
 
-
-  ClearError();
-  printf("\n*******************\ntest 6\n********************\n");
-  test6();
-  PrintError();
-
-  ClearError();
-  printf("\n*******************\ntest 7\n********************\n");
-  test7();
-  PrintError();
-  */
   return 0;
 };

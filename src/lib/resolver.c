@@ -14,6 +14,7 @@ static struct dispatch_t dispatch[] = {
   { "volume", (AFFObject)&__ZipFile },
   { "link", (AFFObject)&__Link },
   { "image", (AFFObject)&__Image },
+  { "map", (AFFObject)&__MapDriver},
   { "file://", (AFFObject)&__FileBackedObject },
   { NULL, NULL}
 };
@@ -29,10 +30,12 @@ void AFF2_Init(void) {
   FileBackedObject_init();
   ZipFile_init();
   Image_init();
-  //  MapDriver_init();
+  MapDriver_init();
   Blob_init();
   Resolver_init();
   Link_init();
+
+  init_luts();
 
   // Make a global oracle
   if(oracle) {
@@ -280,7 +283,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
-  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
+  //  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
   fflush(stdout);
   
   tmp = CALL(self->urn, get_item, uri);
@@ -335,7 +338,7 @@ static char *Resolver_export_all(Resolver self) {
 
 static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
   AFFObject result;
-  if(!class_reference) return NULL;
+  if(!class_reference || !*class_reference) return NULL;
 
   result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL);
 
@@ -350,7 +353,7 @@ static void Resolver_del(Resolver self, char *uri, char *attribute) {
   while(1) {
     j = CALL(tmp, get, attribute);
     if(!j) break;
-    printf("Removing %s %s\n",uri, attribute);
+    //    printf("Removing %s %s\n",uri, attribute);
     talloc_free(j);
   };
 };
