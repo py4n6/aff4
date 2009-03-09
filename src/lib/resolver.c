@@ -284,7 +284,6 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
   //  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
-  fflush(stdout);
   
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {

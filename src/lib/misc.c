@@ -60,12 +60,13 @@ char *escape_filename(char *filename) {
   int length = strlen(filename)+1;
   
   for(i=0;i<length;i++) {
-    if(illegal_filename_lut[filename[i]]) {
-      sprintf(buffer+j, "%%%02X", filename[i]);
+    char x=filename[i];
+    if(illegal_filename_lut[x] || x>128) {
+      sprintf(buffer+j, "%%%02X", x);
       j+=3;
       if(j>BUFF_SIZE-10) break;
     } else {
-      buffer[j]=filename[i];
+      buffer[j]=x;
       j++;
     };
   };

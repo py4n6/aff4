@@ -57,7 +57,6 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
 
   // Work out what the file size is:
   self->super.size = lseek(self->fd, 0, SEEK_END);
-  self->super.name = talloc_strdup(self, filename);
 
   // Set our uri
   self->super.super.urn = talloc_asprintf(self, "file://%s", filename);
@@ -120,7 +119,7 @@ static int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned lon
   lseek(this->fd,self->readptr,0);
   result = read(this->fd, buffer, length);
   if(result < 0) {
-    RaiseError(EIOError, "Unable to read from %s (%s)", self->name, strerror(errno));
+    RaiseError(EIOError, "Unable to read from %s (%s)", URNOF(self), strerror(errno));
     return -1;
   };
 
@@ -136,7 +135,7 @@ static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned lo
   lseek(this->fd,self->readptr,0);
   result = write(this->fd, buffer, length);
   if(result < 0) {
-    RaiseError(EIOError, "Unable to write to %s (%s)", self->name, strerror(errno));
+    RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self), strerror(errno));
   };
 
   self->readptr += result;
@@ -417,7 +416,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
   return self;
 
  error_reason:
-    RaiseError(EInvalidParameter, "%s is not a zip file", fd->name);
+  RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
  error:
     CALL(oracle, cache_return, (AFFObject)fd);
     talloc_free(self);
@@ -498,7 +497,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
   } else if(compression_method == ZIP_STORED) {
     if(CALL(fd, read, buffer, *length) != *length) {
       RaiseError(EIOError, "Unable to read %d bytes from %s@%lld", *length, 
-		 fd->name, fd->readptr);
+		 URNOF(fd), fd->readptr);
       goto error;
     };
 

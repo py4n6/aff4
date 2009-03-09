@@ -120,7 +120,6 @@ END_CLASS
 CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
      uint64_t size;
-     char *name;
      
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
      int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
@@ -292,7 +291,9 @@ END_CLASS
       will advance by. (Useful for RAID)
 */
 struct map_point {
-  uint64_t file_offset;
+  // The offset in the target
+  uint64_t target_offset;
+  // This logical offset this represents
   uint64_t image_offset;
   char *target_urn;
 };
@@ -301,14 +302,19 @@ CLASS(MapDriver, FileLikeObject)
 // An array of our targets
      struct map_point *points;
      int number_of_points;
-
+     
+     // The period offsets repeat within each target
+     uint64_t target_period;
+     // The period offsets repear within the logical image
+     uint64_t image_period;
+     
      char *parent_urn;
 
      // Deletes the point at the specified file offset
-     void METHOD(MapDriver, del, uint64_t file_pos);
+     void METHOD(MapDriver, del, uint64_t target_pos);
 
      // Adds a new point ot the file offset table
-     void METHOD(MapDriver, add, uint64_t file_pos, uint64_t image_offset, 
+     void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,
 		 char *target);
 
      void METHOD(MapDriver, save_map);

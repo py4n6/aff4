@@ -341,8 +341,8 @@ void test_map_create() {
   map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
   if(map) {
     CALL((AFFObject)map, set_property, "aff2:stored", volume);
-    CALL((AFFObject)map, set_property, "aff2:image_period", "3");
-    CALL((AFFObject)map, set_property, "aff2:file_period", "6");
+    CALL((AFFObject)map, set_property, "aff2:target_period", "3");
+    CALL((AFFObject)map, set_property, "aff2:image_period", "6");
     CALL((AFFObject)map, set_property, "aff2:blocksize", "64k");
     map = (MapDriver)CALL((AFFObject)map, finish);
   };
@@ -361,12 +361,23 @@ void test_map_create() {
   CALL(map, add, 5, 2, D2);
 
   fd = (FileLikeObject)CALL(oracle, open, NULL, D1);
-  CALL((AFFObject)map, set_property, "size", from_int(fd->size * 2));
+  CALL((AFFObject)map, set_property, "aff2:size", from_int(fd->size * 2));
   CALL(oracle, cache_return, (AFFObject)fd);
 
   CALL(map, save_map);
   CALL((FileLikeObject)map, close);
   CALL(oracle, cache_return, (AFFObject)map);
+
+  // Make a link to the map:
+  {
+    Link link;
+    
+    link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
+    // The link will be stored in this zipfile
+    CALL(link, link, oracle, volume, URNOF(map), "map");
+    CALL((AFFObject)link, finish);
+    CALL(oracle, cache_return, (AFFObject)link);
+  };
 
  exit:
   zipfile = (ZipFile)CALL(oracle, open, NULL, volume);
@@ -374,8 +385,37 @@ void test_map_create() {
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 
+#define TEST_BUFF_SIZE 63*1024
+void test_map_read() {
+  MapDriver map;
+  int outfd, length;
+  char buff[TEST_BUFF_SIZE];
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
+
+  CALL(oracle, cache_return, (AFFObject)zipfile);
+  map  = (MapDriver)CALL(oracle, open, NULL, "map");
+  if(!map) return;
+
+  outfd = creat("output.dd", 0644);
+  if(outfd<0) goto error;
+
+  while(1) {
+    length = CALL((FileLikeObject)map, read, buff, TEST_BUFF_SIZE);
+    if(length<=0) break;
+
+    write(outfd, buff, length);
+  };
+
+  close(outfd);
+
+ error:
+  CALL(oracle, cache_return, (AFFObject)map);
+  return;
+};
+
 int main() {
-  talloc_enable_leak_report_full();
+  //  talloc_enable_leak_report_full();
+  /*
   AFF2_Init();
   ClearError();
   test1_5();
@@ -395,11 +435,17 @@ int main() {
   ClearError();
   test_image_read();
   PrintError();
-
+ 
   AFF2_Init();
   ClearError();
   printf("\n*******************\ntest 5\n********************\n");
   test_map_create();
+  PrintError();
+ */
+
+  AFF2_Init();
+  ClearError();
+  test_map_read();
   PrintError();
 
   return 0;
