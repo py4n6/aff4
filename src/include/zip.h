@@ -141,6 +141,16 @@ CLASS(FileBackedObject, FileLikeObject)
      FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
 END_CLASS
 
+#include <curl/curl.h>
+
+// This is implemented in HTTP
+CLASS(HTTPObject, FileLikeObject)
+// The socket
+     CURL *curl;
+     StringIO buffer;
+
+     HTTPObject METHOD(HTTPObject, Con, char *url);
+END_CLASS
 
      /** The resolver is at the heart of the AFF2 specification - its
 	 responsible with returning various objects from a globally

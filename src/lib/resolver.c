@@ -16,6 +16,10 @@ static struct dispatch_t dispatch[] = {
   { "image", (AFFObject)&__Image },
   { "map", (AFFObject)&__MapDriver},
   { "file://", (AFFObject)&__FileBackedObject },
+  // All handled by libcurl
+  { "http://", (AFFObject)&__HTTPObject },
+  { "https://", (AFFObject)&__HTTPObject },
+  { "ftp://", (AFFObject)&__HTTPObject },
   { NULL, NULL}
 };
 
@@ -34,6 +38,7 @@ void AFF2_Init(void) {
   Blob_init();
   Resolver_init();
   Link_init();
+  HTTPObject_init();
 
   init_luts();
 

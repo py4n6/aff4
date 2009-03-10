@@ -386,11 +386,11 @@ void test_map_create() {
 };
 
 #define TEST_BUFF_SIZE 63*1024
-void test_map_read() {
+void test_map_read(char *filename) {
   MapDriver map;
   int outfd, length;
   char buff[TEST_BUFF_SIZE];
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL,filename);
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
   map  = (MapDriver)CALL(oracle, open, NULL, "map");
@@ -411,6 +411,14 @@ void test_map_read() {
  error:
   CALL(oracle, cache_return, (AFFObject)map);
   return;
+};
+
+void test_http_handle() {
+  FileLikeObject http = CONSTRUCT(HTTPObject, HTTPObject, Con,NULL, "http://127.0.0.1/test.c");
+  char buff[BUFF_SIZE];
+
+  CALL(http, read, buff, 100);
+
 };
 
 int main() {
@@ -441,11 +449,16 @@ int main() {
   printf("\n*******************\ntest 5\n********************\n");
   test_map_create();
   PrintError();
+
+  AFF2_Init();
+  ClearError();
+  test_map_read( "file://" TEST_FILE);
+  PrintError();
  */
 
   AFF2_Init();
   ClearError();
-  test_map_read();
+  test_map_read("http://127.0.0.1/" TEST_FILE);
   PrintError();
 
   return 0;

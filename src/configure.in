@@ -126,6 +126,7 @@ AC_SYS_LARGEFILE
 AC_OUTPUT([ 
 	Makefile 
 	lib/Makefile
+	tools/Makefile
 	])
 
 ## Tell the use what we found:
