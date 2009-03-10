@@ -5,6 +5,30 @@
 %\documentclass[12pt]{IEEEtran}
 %\documentclass{elsart5p}
 
+% DFRWS Call Information:
+% http://www.dfrws.org/2009/cfp.shtml
+% Important Dates
+% Submission deadline: March 16, 2009 (any time zone)
+% Author notification: April 28, 2009
+% Final draft due: May 19, 2009
+% Pre-conference Workshops: August 16, 2009
+% Conference dates: August 17-19, 2009
+
+% Publication Criteria
+% Research papers must be original contributions, not substantially
+% duplicate previous work, and must not be under simultaneous
+% publication review elsewhere. The review process will be
+% ``double-blind'' (the reviewers will not know who the authors are, and
+% the authors will not know who the reviewers are). Therefore, the
+% version submitted for review should not contain the names or
+% affiliations of the authors. When referring to their own previous
+% work, authors should use the third person instead of the first person
+% (i.e. ``Smith and Jones [2] previously determined...'' instead of ``We
+% [2] previously determined..''). Authors are expected to present their
+% work in person at the workshop and must have at least one registration
+% per paper in order to be included in the proceedings.
+
+
 % Make sure we know its a draft for now
 \usepackage{draftwatermark}
 \usepackage{verbatim}
@@ -23,19 +47,24 @@
 
 %\begin{frontmatter}
 \begin{document}
-\title{The Forensic Interchange Format - a file format for digital evidence}
-\author{M. I. Cohen\footnote{scudette@gmail.com} and Bradley Schatz}
+\title{Extending the Advanced Forensic Format to accommodate Multiple
+  Data Sources, Logical Evidence and Forensic Workflow}
+\author{Blinded for review}
+%\author{M. I. Cohen\footnote{scudette@gmail.com}, Simson Garfinkel, and Bradley Schatz}
 %\author{M. I. Cohen}
 %\address{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}
 %\baselineskip=20pt %Sets line spacing to 1 unit
 %\end{frontmatter}
-%\thanks{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}%
+%\thanks{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}
 \maketitle
 
 \begin{abstract}
 Forensics analysis requires the acquisition and management of many
-different types of evidence material. Often the same evidence is
-reviewed by several different tools. We propose an open, extensible
+different types of evidence material, including individual disk
+drives, RAID sets, network packets, memory images, and extracted files. Often the same evidence is
+reviewed by several different tools or examiners in different
+locations. We propose a backwards-compatible evolutionary redesign of the Advanced
+Forensic Format an open, extensible
 file format for storing of evidence and interchanging analysis results
 among different tools. The Forensic Interchange Format (FIF) was
 designed to be simple to implement, relying on the well supported Zip
@@ -43,6 +72,118 @@ specifications for bit level file access.
 \end{abstract}
 
 \section{Introduction}
+
+Unlike other kinds of evidence, digital evidence can be instantly lost
+or corrupted if technical measures are not immediately taken to
+preserve its existence and integrity. As a result, preserving digital
+evidence is an important part of most digital
+investigations\cite{carrier:event-based}.
+
+In recent years there has been a steady and growing interest in the
+actual file formats and containers used to store this digital
+evidence. Early practitioners created exact bit-for-bit copies (``mirror disks'') employed
+proprietary software systems (e.g. \cite{safeback,ilook,encase}) for
+making and authenticating ``images'' of digital evidence. PyFlag\cite{pyflag}
+introduced a ``seekable gzip'' format that allowed disk images to be
+stored in a form that was compressed but allowed the random-access to
+evidence data necessary for forensic analysis. The Advanced Forensic
+Format (AFF) expanded on this idea with a forensic file format that
+allowed both data and arbitrary metadata to be stored in a single
+digital archive\cite{garfinkel:aff}. Recently the open source AFF
+implementation library (AFFLIB) was expanded to support both
+encryption and digital signatures of digital evidence\cite{garfinkel:affcrypto}.
+
+This paper extends the previous work by adapting AFF to the multiple
+heterogeneous data types that might arise in a modern digital
+investigation, including data from multiple data storage devices, new
+data types (including network packets and memory images), extracted
+logical evidence, and forensic workflow. We do this in a manner that
+is at once upwards compatible with AFF while adopting the AFF
+bit-level specification so that AFF files can be processed using
+standard non-forensic tools. 
+
+\section{A New Forensic Format}
+
+AFF's flexibility comes from the fact that forensic data and metadata
+is stored as arbitrary name/value pairs called \emph{segments}. For example, the first 16MB
+of a disk image is stored in a segment called \texttt{page0}, the
+second 16MB in a segment called \texttt{page1}, \emph{etc.} Because of
+this flexibility, it was
+relatively easy for Garfinkel to extend AFF to support encryption,
+digital signatures, and the storage of new kinds of metadata such as
+chain-of-custody information\cite{garfinkel:affcrypto}. .
+
+\subsection{AFF Limitations}
+After imaging literally thousands of devices using Garfinkel's AFF
+tools and adding support for AFF to numerous open source programs, we
+observed numerous problems in the underlying standard
+and Garfinkel's AFFLIB implementation:
+
+\begin{itemize}
+\item While AFF's design stores a single disk image in each evidence
+  file, modern digital investigations typically involve many seized
+  computers or pieces of media. 
+\item AFF has no provision for storing memory images or intercepted
+  network packets.
+\item AFF has no provisions for storing extracted files that is
+  analogous to the EnCase ``Logical Evidence File'' (L01) format.
+\item AFF's encryption system leaks information about the contents of
+  an evidence file because segment names are not encrypted.
+\item AFF's default compression page size of 16MB can impose significant overhead
+  when accessing NTFS Master File Tables (MFT), as these structures
+  tend to be highly fragmented on systems that have seen significant
+  use. 
+\item Although the AFF specification calls for a ``table of contents'' similar
+  to the ZIP\cite{zip-format} ``central directory'' that is stored at the end of AFF
+  files, Garfinkel never implemented this directory in the publicly
+  released AFFLIB. As a result, every header of every segment in an
+  AFF file needs to be read when a file is opened. It practice this
+  can take 10-30 seconds the first time a large AFF file is
+  opened. (Once the file is opened, the sectors corresponding to the
+  segment headers are stored in the computer's disk cache.)
+\item AFF's bit-level specification is essentially a simple container
+  file specification. Given the that there are other container file
+  specifications that are much more widely supported with both
+  developer and end-user tools, it seemed reasonable to migrate AFF
+  from its home-grown format to one of the existing standards.
+\end{itemize}
+
+We have addressed these issues with a three step process. First, we
+have extended the AFF schema to support multiple forensic images
+(which are now called \emph{streams}) in a single evidence
+file. Second, we have changed the on disk format, jettisoning AFF1.0's
+unique container format and replacing it with the ZIP64 file
+format. Third, we are adopting AFFLIB to implement the new schema and
+file format, which will allow existing AFF-aware programs to access
+files written in the new format without modification. We call this new
+format AFF2.
+
+
+\subsection{AFF2: New Features}
+AFF2 is designed to include the following functionality:
+
+\begin{itemize}
+\item Evidence is stored in \emph{volumes}. A volume can consist of a
+  single file (\emph{e.g.} a file with the \texttt{.aff} extension), multiple files (\texttt{.afd}), an
+  object storage system (such as Amazon S3), or a hybrid (for example,
+  metadata stored in an SQL database with physical data stored in
+  large files in a file system.)
+\item A single volume can contain evidence from one or more physical
+  devices.
+\item RAID information can be directly encoded, allowing data within a
+  RAID to be logically constructed at read time.
+\item Although the page size remains 16MB by default, each 16MB page
+  can be built from multiple compressed chunks (8K size by default),
+  significantly decreasing the overhead to access a few blocks inside
+  a compressed page.
+\item The bit-level container file format has changed from AFFs's
+  original container file format to ZIP64, allowing improved
+  integration with existing developer tools.
+\item Transparent upwards compatibility, so that programs linked with
+  the AFFLIB implementation or the pyaff.py python library can
+  interchangeably read either AFF1 or AFF2 files. 
+\end{itemize}
+
 
 \section{FIF Specifications}
 The FIF specifications distinct between bit level specifications and

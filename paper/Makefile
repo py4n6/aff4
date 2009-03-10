@@ -1,4 +1,4 @@
-all: paper.dvi
+all: paper.dvi paper.pdf
 
 %.pdf: %.dvi
 	dvips $(*F).dvi -o $(*F).ps
@@ -8,4 +8,5 @@ all: paper.dvi
 	latex $(*F).tex; bibtex $(*F); latex $(*F).tex; latex $(*F).tex
 
 clean:
-	rm -f *aux *bbl *blg *log *dvi
+	rm -f *aux *bbl *blg *log *dvi paper.pdf
+
