@@ -116,12 +116,18 @@ version numbers 1, 2 and 3. We therefore call our system AFF4 to avoid confusion
 \item Schema allowing evidence files to contain memory
   images, network packet intercepts, Netflow data, and extracted
   files.
-\item Direct encoding of RAID configuration, allowing RAID volumes
-  to be automatically reassembled from evidence files made of the
-  physical RAID devices.
+
+%% Raid is only one example of the application of the map stream - the
+%% most important might be the ability to use sleuthkit to generate
+%% block allocation tables for all the files - thereby allowing
+%% arbitrary programs to read individual files without using sleuthkit
+\item Direct encoding of arbitrary mapping transformations of one or
+more sources to allow multiple logical views. For example, allowing
+RAID volumes to be automatically reassembled from evidence files made
+of the physical RAID devices.
 \item A revised compression system that allows individual chunks
   within a 16MB segment to be decompressed without decompressing the
-  entire segment. 
+  entire segment.
 \item Support for Global Distributed Evidence Management.
 \end{itemize}
 \end{minipage}}
@@ -242,112 +248,172 @@ We call the result of our work effort AFF4.
 
 \section{Introducing AFF4}
 
-
 \subsection{New Concepts and Terminology}
 
 This section discusses the AFF4 terminology. 
 
+%% Since this is the itemised definition its probably better to
+%% restrict it to the basic definitions and then move most of the
+%% discussion a bit later. I want to show how concepts build on one
+%% another - maybe even put a UML or class diagram
+
 \begin{itemize}
-\item \emph{An Evidence Volume} is a single file with a \texttt{.aff}
-  extension. 
-\item \emph{An Evidence Set} is a collection of one or more Evidence
-  Volumes. Evidence Sets can also be stored in object storage system (such as
-  Amazon S3), or a hybrid---for example, metadata stored in an SQL
-  database with physical data stored in large files in a file
-  system. 
-\item \emph{An Evidence Set UUID} is a unique identifier generated
-  according to RFC4122\cite{rfc4122} for each new Evidence
-  Set. Multiple Evidence Volumes that make up the same Evidence Set
-  should all have the same UUID. When an Evidence Set is opened all its volumes are
-  loaded, their UUIDs are checked, and all of their contents are
-  logically merged so as to be visible as if they were all found in the same volume.
-\item \emph{A segment} is a single unit of data written to volume. AFF4
-  segments have a \emph{segment name}, a \emph{segment timestamp}, and
-  a \emph{segment contents}.
+\item \emph{An AFF Object} is the basic building block of our
+file format. AFF Objects have a globally unique name (URN) as described in
+\cite{RFC1737}. The name is defined within the aff2 namespace, and is
+made unique by use of a unique identifier generated as per
+RFC4122\cite{rfc4122}.
 
-\item \emph{A stream} is a collection of segments that can be
-  concatenated together to form a single data object.
+\item \emph{A Relation} is a statement about an AFF Object which
+expresses some property of the object. The relation comprises of a
+triple of (Subject, Attribute, Value). All metadata is reduced to the
+triple notation.
 
-\item \emph{An image stream} is a stream that is dedicated to storing evidence from a single
-  source of data.  For example, a stream may contain a disk image or a network
-  capture. Whereas AFF could only support a single stream in an evidence
-  file, AFF4 allows any number of streams to be stored. Each stream in
-  the archive is  given a unique identifier.
+\item \emph{An Evidence Volume} is a type of AFF Object which is
+responsible for providing storage to AFF segments. Volumes may be
+implemented in a number of ways, but must provide a mechanism for
+storing and retrieving segments by their URN. We discuss several
+Volume implementations below.
 
-\item \emph{A bevy} is a specific segment that is used to hold
-  forensic image data, such as disk sectors, memory pages, or network
-  packets. AFF1 used the term ``pages'' to describe bevys, but this
-  term caused confusion when AFF was used to hold memory images, hence the
-  new term. 
+\item \emph{A segment} is a single unit of data written to a volume. AFF4
+  segments have a \emph{segment name} provided by their URN, a
+  \emph{segment timestamp} in GMT, and the \emph{segment contents}.
 
-\item \emph{A segment name} is the name under which a segment is
-  stored within the archive. AFF4 segments have two-part names that
-  typically contain a \emph{stream name} and \emph{bevy number}. For
-  example the segment named \texttt{default/000001} refers to the stream
-  called \texttt{default} and has a chunk name of \texttt{000001}. All segment
-  names are encoded using UTF8. AFFLIB is being modified to allow any
-  stream to be opened using the \texttt{af\_open} function; if a
-  stream name is not specified, AFF4 implementations will open the
-  stream named ``default.''
+\item \emph{A stream} is an AFF Object which provides the ability to
+seek and read random data. Stream objects are free to implement their storage
+in a number of ways, but must provide clients the stream like
+interface. We discuss a number of stream types below.
 
-\item \emph{The segment timestamp} is a timestamp for the segment
-  recorded in GMT.
+% Is it important to define this? do we use it?
+%\item \emph{An Evidence Set} is a loose collection of one or more Evidence
+%Volumes.
 
-\item \emph{Attributes} are a list of key/value pairs stored in each
-stream's ``properties'' segment (e.g. ``stream/properties''). The
-``properties'' file is a text file which stores attributes one on each
-line. Attribute lines consist of the key, immediately followed by
-``='' for text values or ``:'' for binary values. This is immediately
-followed by the encoded value. Values containing text are encoded
-using UTF8, while values containing binary data are encoded using
-Base64. There may be multiple values for each attribute; in these
-cases the order is preserved
-by implementations. Implements may present different keys may be
-presented in any order, however.
-\vspace{1ex}
-Each AFF4 archive must also have a top-level set of attributes---that
-is, there is always a segment named ``properties.'' These volume
-attributes are used to specify a Unique Identifier (UUID). (AFF1
-stored each property in its own named segment. This created
-significant overhead in many situations.)
+%Evidence Sets can also be stored in object storage system (such as
+%  Amazon S3), or a hybrid---for example, metadata stored in an SQL
+%  database with physical data stored in large files in a file
+%  system. 
 
-\item \emph{A Target Reference} is a way of referencing objects. This is used
-in a number of places which will be highlighted below. Using
-references it is possible for the FIF file to refer to objects
-embedded within itself, or within other FIF files. Its is also
-possible to refer to external flat files. A number of usage scenarios
-are described in Section \ref{usage_scenarios}. 
+% I would describe this process after the definitions.
+
+%\item \emph{An Evidence Set UUID} is a unique identifier generated
+%  according to RFC4122\cite{rfc4122} for each new Evidence
+%  Set. Multiple Evidence Volumes that make up the same Evidence Set
+%  should all have the same UUID. When an Evidence Set is opened all its volumes are
+%  loaded, their UUIDs are checked, and all of their contents are
+%  logically merged so as to be visible as if they were all found in
+% the same volume.
+
+%% I Wonder if this explaination should be postposed to the section we
+%% actually discuss it - otherwise we duplicate it again
+%% \item \emph{An image stream} is a stream that is dedicated to storing evidence from a single
+%%  source of data.  For example, a stream may contain a disk image or a network
+%%  capture. Whereas AFF could only support a single stream in an evidence
+%%  file, AFF4 allows any number of streams to be stored. Each stream in
+%%  the archive is  given a unique identifier.
+
+%%\item \emph{A bevy} is a specific segment that is used to hold
+%%  forensic image data, such as disk sectors, memory pages, or network
+%%  packets. AFF1 used the term ``pages'' to describe bevys, but this
+%%  term caused confusion when AFF was used to hold memory images, hence the
+%%  new term. 
+
+
+%% This is no longer correct - segment names are URNs and are encoded
+%% according to RFC1737 as mentioned above.
+%%\item \emph{A segment name} is the name under which a segment is
+%%  stored within the archive. AFF4 segments have two-part names that
+%%  typically contain a \emph{stream name} and \emph{bevy number}. For
+%%  example the segment named \texttt{default/000001} refers to the stream
+%%  called \texttt{default} and has a chunk name of \texttt{000001}. All segment
+%%  names are encoded using UTF8. AFFLIB is being modified to allow any
+%%  stream to be opened using the \texttt{af\_open} function; if a
+%%  stream name is not specified, AFF4 implementations will open the
+%%  stream named ``default.''
+
+%%\item \emph{The segment timestamp} is a timestamp for the segment
+%%  recorded in GMT.
+
+
+%% This should be discussed as a way we are storing the RDF triples,
+%% rather than as a definition.
+%% \item \emph{Attributes} are a list of key/value pairs stored in each
+%% stream's ``properties'' segment (e.g. ``stream/properties''). The
+%% ``properties'' file is a text file which stores attributes one on each
+%%line. Attribute lines consist of the key, immediately followed by
+%%``='' for text values or ``:'' for binary values. This is immediately
+%%followed by the encoded value. Values containing text are encoded
+%%using UTF8, while values containing binary data are encoded using
+%%Base64. There may be multiple values for each attribute; in these
+%%cases the order is preserved
+%%by implementations. Implements may present different keys may be
+%%presented in any order, however.
+%%\vspace{1ex}
+
+%% This is not correct any more as volumes must store their own URN in
+%% a different way (the zip implementation uses an archive comment for
+%% this).
+
+%% Each AFF4 archive must also have a top-level set of attributes---that
+%% is, there is always a segment named ``properties.'' These volume
+%% attributes are used to specify a Unique Identifier (UUID). (AFF1
+%% stored each property in its own named segment. This created
+%% significant overhead in many situations.)
+
+%% Since target references are all just URNs now the resolving is automatic.
+
+\item \emph{A Target Reference} is a way of referencing objects by use
+of a Uniform Resource Identifier (URI). The URI can be another AFF
+Object URN or may be a more general Uniform Resource Locator (URL),
+such as for example a HTTP or FTP object.
+
+\item \emph{The Resolver} is a central data store which collects and resolves
+attributes for the different AFF Objects. We discuss the Resolver in
+detail in Section \ref{resolver}.
+
+%%in a number of places which will be highlighted below. Using
+%%references it is possible for the FIF file to refer to objects
+%%embedded within itself, or within other FIF files. Its is also
+%%possible to refer to external flat files. A number of usage scenarios
+%%are described in Section \ref{usage_scenarios}. 
 \end{itemize}
 
-The Target Reference is an important AFF4 innovation: this mechanism
-gives AFF4 files a way for describing evidence that is stored in
-different evidence volumes, in the host computer's file system, or on
-the Internet. We have defined the following target reference schema:
+Since AFF Objects have globally unique URNs it is possible for an
+Object in one volume to refer to an object in another volume. The
+resolver has visibility of all URNs and their current physical
+location.
+
+%The Target Reference is an important AFF4 innovation: this mechanism
+%gives AFF4 files a way for describing evidence that is stored in
+%different evidence volumes, in the host computer's file system, or on
+%the Internet. We have defined the following target reference schema:
 
 \label{target_reference}
 
-\begin{itemize}
-\item A reference in the format {\em aff://UUID/stream/segment} refers
-to an external Evidence file set (identified by its UUID). If the segment
-is missing (i.e. the reference ends with a ``/''), the reference is
-for the entire stream. We do not specify a way of actually resolving
-the UUID into a physical locations. This can achieved by
-implementations using many methods, such as Active Directory, LDAP,
-DNS, flat files or SQL databases.
+%\begin{itemize}
+%\item A reference in the format {\em aff://UUID/stream/segment} refers
+%to an external Evidence file set (identified by its UUID). If the segment
+%is missing (i.e. the reference ends with a ``/''), the reference is
+%for the entire stream. We do not specify a way of actually resolving
+%the UUID into a physical locations. This can achieved by
+%implementations using many methods, such as Active Directory, LDAP,
+%DNS, flat files or SQL databases.
 
-\item A reference starting with {\em file://} refers to an external
-file. The external file reference must be sanitised (to remove
-.. directory traversal) and rooted at the current directory. A
-filename of ``.'' refers to the current FIF volume.
+%\item A reference starting with {\em file://} refers to an external
+%file. The external file reference must be sanitised (to remove
+%.. directory traversal) and rooted at the current directory. A
+%filename of ``.'' refers to the current FIF volume.
 
-\item A reference starting with {\em http://} refers to a HTTP
-object which will be fetched. Support for this is optional.
+%\item A reference starting with {\em http://} refers to a HTTP
+%object which will be fetched. Support for this is optional.
 
-\item A references ending with a ``/'' signifies a reference to a
-stream in the current FIF file. The stream will be opened in its
-entirety. If the reference does not end with a ``/'', the reference is
-for a single segment.
-\end{itemize}
+%% This is no longer correct as all segments, streams and volumes have
+%% a unique URN so we dont need to make these distinctions.
+
+%% \item A references ending with a ``/'' signifies a reference to a
+%% stream in the current FIF file. The stream will be opened in its
+%% entirety. If the reference does not end with a ``/'', the reference is
+%% for a single segment.
+%%\end{itemize}
 
 \subsection{Streams}
 As discussed above, individual segments in an AFF4 evidence set can be
