@@ -1,0 +1,4 @@
+bin_PROGRAMS          = aff2imager
+
+aff2imager_SOURCES    = aff2imager.c
+aff2imager_LDADD      = ../lib/libaff2.la

@@ -159,7 +159,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
     // Push one more offset to the index to cover the last chunk
     this->chunk_indexes[this->chunk_count + 1] = this->segment_buffer->readptr;
 
-    printf("Dumping segment %s\n", tmp);
+    printf("Dumping segment %s (%d bytes)\n", tmp, this->segment_buffer->readptr);
 
     // Store the entire segment in the zip file
     CALL((ZipFile)parent, writestr,

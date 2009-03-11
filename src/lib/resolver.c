@@ -165,8 +165,10 @@ static Cache Cache_get(Cache self, void *key) {
     if(!CALL(i, cmp, key)) {
       // Thats it - we remove it from where its in and put it on the
       // tail:
-      list_move(&i->cache_list, &self->cache_list);
-      list_move(&i->hash_list, &hash_list_head->hash_list);
+      if(self->policy == CACHE_EXPIRE_LEAST_USED) {
+	list_move(&i->cache_list, &self->cache_list);
+	list_move(&i->hash_list, &hash_list_head->hash_list);
+      };
       //printf("Getting %p\n", i);
       return i;
     };
@@ -435,6 +437,7 @@ VIRTUAL(Resolver, Object)
      VMETHOD(resolve) = Resolver_resolve;
      VMETHOD(add)  = Resolver_add;
      VMETHOD(export) = Resolver_export;
+     VMETHOD(export_all) = Resolver_export_all;
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_return;
      VMETHOD(set) = Resolver_set;

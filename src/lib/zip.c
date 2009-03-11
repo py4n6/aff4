@@ -398,7 +398,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
 	  char *text = CALL(self, read_member, self, filename, &len);
 	  char *context = dirname(filename);
 
-	  printf("Found property file %s\n%s", filename, text);
+	  //	  printf("Found property file %s\n%s", filename, text);
 
 	  if(text) {
 	    CALL(oracle, parse, context, text, len);

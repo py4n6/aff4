@@ -25,6 +25,11 @@ char *unescape_filename(char *filename);
     of the list, and when memory pressure increases we expire data
     from the front of the list.
 */
+enum Cache_policy {
+  CACHE_EXPIRE_FIRST,
+  CACHE_EXPIRE_LEAST_USED
+};
+
 CLASS(Cache, Object)
 // The key which is used to access the data
      void *key;
@@ -46,6 +51,7 @@ CLASS(Cache, Object)
 
      // This is a pointer to the head of the cache
      struct Cache *cache_head;
+     enum Cache_policy policy;
 
      // The current number of objects managed by this cache
      int cache_size;
@@ -205,6 +211,9 @@ CLASS(Resolver, Object)
 
      // Exports all the properties to do with uri - user owns the buffer.
      char *METHOD(Resolver, export, char *uri);
+
+     // Exports all the properties to do with uri - user owns the buffer.
+     char *METHOD(Resolver, export_all);
 
 // Deletes the attribute from the resolver
      void METHOD(Resolver, del, char *uri, char *attribute);

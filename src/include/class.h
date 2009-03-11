@@ -422,4 +422,8 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 #define PrintError()				\
   do {if(_global_error) printf("%s",_traceback); fflush(stdout); }while(0);
 
+#define CheckError(error)			\
+  (_global_error == error)
+
+
 #endif
