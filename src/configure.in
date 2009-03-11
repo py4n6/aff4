@@ -107,12 +107,16 @@ if test $have_libewf = yes; then
 	  LIBS=$ac_check_lib_save_LIBS
 fi
 
+#curl support
+LIBCURL_CHECK_CONFIG([yes], [], have_libcurl=yes, have_libcurl=no)
+
 ## Conditionals for automake
 AM_CONDITIONAL(HAVE_LIBAFFLIB, test "$have_libafflib" = yes)
 AM_CONDITIONAL(HAVE_LIBEWF, test "$have_libewf" = yes)
 AM_CONDITIONAL(HAVE_GEOIP, test "$have_geoip" = yes)
 AM_CONDITIONAL(HAVE_LIBJPEG, test "$have_libjpeg" = yes)
 AM_CONDITIONAL(HAVE_WINDOWS, test "$have_windows" = yes)
+AM_CONDITIONAL(HAVE_LIBCURL, test "$have_libcurl" = yes)
 
 # defines and output
 AC_DEFINE([__DEBUG__], [], [Debuging enabled])
@@ -135,5 +139,6 @@ AC_MSG_NOTICE([*****************************************])
 AC_MSG_NOTICE([FIFLib ${PACKAGE} ${VERSION} configuration])
 AC_MSG_NOTICE([EWF Support:             $have_libewf ])
 AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
+AC_MSG_NOTICE([CURL Support:            $have_libcurl ])
 AC_MSG_NOTICE([*****************************************])
 AC_MSG_NOTICE([])

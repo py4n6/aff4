@@ -53,7 +53,7 @@ void test1() {
 
 When creating a new AFFObject we:
 
-1) Ask the oracle to create it (prividing the class pointer).
+1) Ask the oracle to create it (providing the class pointer).
 
 2) Set all the required and optional parameters.
 
