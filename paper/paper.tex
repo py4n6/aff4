@@ -31,10 +31,11 @@
 
 % Make sure we know its a draft for now
 \usepackage{draftwatermark}
+\SetWatermarkFontSize{3cm}
 \usepackage{verbatim}
 %\documentclass[12pt]{article}
 \usepackage{epsfig}
-\usepackage[hypertexnames=false,bookmarksopenlevel=1,bookmarksopen,bookmarksnumbered,colorlinks,plainpages=false,linktocpage]{hyperref}
+\usepackage[hypertexnames=false,bookmarksopenlevel=1,bookmarksopen,bookmarksnumbered,colorlinks,plainpages=false,linktocpage,linkcolor=black,citecolor=black,filecolor=black,urlcolor=black]{hyperref}
 %\usepackage{natbib}
 %\pagestyle{empty}
 %\psdraft
@@ -100,127 +101,372 @@ data types (including network packets and memory images), extracted
 logical evidence, and forensic workflow. We do this in a manner that
 is at once upwards compatible with AFF while adopting the AFF
 bit-level specification so that AFF files can be processed using
-standard non-forensic tools. 
+standard non-forensic tools.  We call the new system AFF4, and use the
+phrase AFF1 to refer to the legacy system developed by
+Garfinkel.\footnote{Although Garfinkel never changed the AFF bit-level
+specification, Garfinkel released AFFLIB implementations with major
+version numbers 1, 2 and 3. We therefore call our system AFF4 to avoid confusion.}
 
-\section{A New Forensic Format}
+\begin{figure}
+\fbox{
+\begin{minipage}{.95\linewidth}
+\begin{itemize}
+\item The ability to store evidence from one or more physical
+  devices.
+\item Schema allowing evidence files to contain memory
+  images, network packet intercepts, Netflow data, and extracted
+  files.
+\item Direct encoding of RAID configuration, allowing RAID volumes
+  to be automatically reassembled from evidence files made of the
+  physical RAID devices.
+\item A revised compression system that allows individual chunks
+  within a 16MB segment to be decompressed without decompressing the
+  entire segment. 
+\item Support for Global Distributed Evidence Management.
+\end{itemize}
+\end{minipage}}
+\caption{Specific design goals for the next generation forensic file
+  format.}
+\end{figure}
+\section{The Need for an Improved Forensic Format}
 
-AFF's flexibility comes from the fact that forensic data and metadata
-is stored as arbitrary name/value pairs called \emph{segments}. For example, the first 16MB
-of a disk image is stored in a segment called \texttt{page0}, the
-second 16MB in a segment called \texttt{page1}, \emph{etc.} Because of
-this flexibility, it was
-relatively easy for Garfinkel to extend AFF to support encryption,
-digital signatures, and the storage of new kinds of metadata such as
-chain-of-custody information\cite{garfinkel:affcrypto}. .
+AFF1's flexibility came from the fact that forensic data and metadata
+is stored as arbitrary name/value pairs called \emph{segments}. For
+example, the first 16MB of a disk image is stored in a segment called
+\texttt{page0}, the second 16MB in a segment called \texttt{page1},
+\emph{etc.} Because of this flexibility, it was relatively easy for
+Garfinkel to extend AFF1 to support encryption, digital signatures, and
+the storage of new kinds of metadata such as chain-of-custody
+information\cite{garfinkel:affcrypto}. 
 
 \subsection{AFF Limitations}
-After imaging literally thousands of devices using Garfinkel's AFF
-tools and adding support for AFF to numerous open source programs, we
+After imaging literally thousands of devices using Garfinkel's AFF1
+tools and adding support for AFF1 to numerous open source programs, we
 observed numerous problems in the underlying standard
 and Garfinkel's AFFLIB implementation:
 
 \begin{itemize}
-\item While AFF's design stores a single disk image in each evidence
+\item While AFF1's design stores a single disk image in each evidence
   file, modern digital investigations typically involve many seized
   computers or pieces of media. 
-\item AFF has no provision for storing memory images or intercepted
+\item AFF1 has no provision for storing memory images or intercepted
   network packets.
-\item AFF has no provisions for storing extracted files that is
-  analogous to the EnCase ``Logical Evidence File'' (L01) format.
-\item AFF's encryption system leaks information about the contents of
+\item AFF1 has no provisions for storing extracted files that is
+  analogous to the EnCase ``Logical Evidence File'' (L01) format, or
+  for linking evidence to web pages.
+\item AFF1's encryption system leaks information about the contents of
   an evidence file because segment names are not encrypted.
-\item AFF's default compression page size of 16MB can impose significant overhead
+\item AFF1's default compression page size of 16MB can impose significant overhead
   when accessing NTFS Master File Tables (MFT), as these structures
   tend to be highly fragmented on systems that have seen significant
   use. 
-\item Although the AFF specification calls for a ``table of contents'' similar
+\item Although the AFF1 specification calls for a ``table of contents'' similar
   to the ZIP\cite{zip-format} ``central directory'' that is stored at the end of AFF
   files, Garfinkel never implemented this directory in the publicly
-  released AFFLIB. As a result, every header of every segment in an
+  released AFF1 implementation, AFFLIB. As a result, every header of every segment in an
   AFF file needs to be read when a file is opened. It practice this
-  can take 10-30 seconds the first time a large AFF file is
+  can take 10--30 seconds the first time a large AFF file is
   opened. (Once the file is opened, the sectors corresponding to the
   segment headers are stored in the computer's disk cache.)
-\item AFF's bit-level specification is essentially a simple container
+\item AFF1's bit-level specification is essentially a simple container
   file specification. Given the that there are other container file
   specifications that are much more widely supported with both
   developer and end-user tools, it seemed reasonable to migrate AFF
-  from its home-grown format to one of the existing standards.
+  from its home-grown format to one of the existing standards. 
 \end{itemize}
 
-We have addressed these issues with a three step process. First, we
-have extended the AFF schema to support multiple forensic images
-(which are now called \emph{streams}) in a single evidence
-file. Second, we have changed the on disk format, jettisoning AFF1.0's
-unique container format and replacing it with the ZIP64 file
-format. Third, we are adopting AFFLIB to implement the new schema and
-file format, which will allow existing AFF-aware programs to access
-files written in the new format without modification. We call this new
-format AFF2.
+\subsection{Global Distributed Evidence Management}
+While Garfinkel designed AFF for use on a single machine that could
+both image evidence and perform analysis, the main use of AFF in
+practice has been in distributed environments in which imaging and
+analysis takes place in multiple locations and is performed by
+multiple individuals.
 
+Managing evidence in a globally distributed system requires the use of
+globally unique identifiers. The original AFF specification assigned
+each piece of evidence a unique 128-bit identifier called a GID but did
+not make it clear when this identifier should be changed and when it
+should remain the same. 
 
-\subsection{AFF2: New Features}
-AFF2 is designed to include the following functionality:
+In practice, however, global distributed evidence management requires
+more than simply tracking the movement of disk images: it requires
+approaches for sharing evidence to multiple disconnected
+evidence, allowing offline work, and then seamlessly recombining the
+work products of the analysts in a third security domain.
 
-\begin{itemize}
-\item Evidence is stored in \emph{volumes}. A volume can consist of a
-  single file (\emph{e.g.} a file with the \texttt{.aff} extension), multiple files (\texttt{.afd}), an
-  object storage system (such as Amazon S3), or a hybrid (for example,
-  metadata stored in an SQL database with physical data stored in
-  large files in a file system.)
-\item A single volume can contain evidence from one or more physical
-  devices.
-\item RAID information can be directly encoded, allowing data within a
-  RAID to be logically constructed at read time.
-\item Although the page size remains 16MB by default, each 16MB page
-  can be built from multiple compressed chunks (8K size by default),
-  significantly decreasing the overhead to access a few blocks inside
-  a compressed page.
-\item The bit-level container file format has changed from AFFs's
-  original container file format to ZIP64, allowing improved
-  integration with existing developer tools.
-\item Transparent upwards compatibility, so that programs linked with
-  the AFFLIB implementation or the pyaff.py python library can
-  interchangeably read either AFF1 or AFF2 files. 
-\end{itemize}
+Consider the typical usage scenario depicted in Figure \ref{usage}, of
+an file which contains a disk image. This volume is distributed to two
+independent analysts, Alice and Bob. Alice may find and extract
+individual files, while Bob may correlate information in the evidence
+file with other data that is available on departmental
+servers. Although in some environments Alice and Bob may be able to
+work on a shared file that is located on a server, in other
+environments there will not be sufficient bandwidth or
+connectivity. Instead, each analyst will be required to store the
+information in their own evidence file; these files will then be
+recombined at a later point in time.
 
+In this case they can
+each create a new volume which extends to original volume and save
+their analysis on this new volume. Now they only need to share this
+new volume with other analysts who also have a copy of the old volume
+to interchange their findings. 
 
-\section{FIF Specifications}
-The FIF specifications distinct between bit level specifications and
-a high level schema. The bit level specifications refer to how the
-files are to be actually represented on disk. The schema specifies a
-stream based abstraction which is implemented using the bit level
-specification. 
-
-\subsection{FIF bit level specification}
-The FIF specifications only require the underlying storage mechanism
-be capable of storing multiple named segments of data. The current
-specification uses the Zip file format as the underlying storage
-mechanism, however in future versions of the specifications other
-storage layers may be also be defined.
-
-The Zip file specifications are publicly available and widely
-implemented. The Zip64 extensions are provided to enable Zip archives
-to grow beyond a two gigabyte limit by using 64 bit
-references. Although Zip64 also defines encryption and authentication
-extensions, we do not use these in this specification due to the
-restrictions imposed on their use. Rather, we specify stream based
-encryption scheme for use in FIF files (See section
-\ref{crypted_stream}).
-
-The basic structure of a Zip archive is shown in Figure
-\ref{zip_structure}. For bit level details see the Zip file
-Application notes \cite{zipspecs}.
+This is made possible because each volume is independent of one
+another, but can still be recombined into a bigger evidence set. 
 
 \begin{figure}[tb]
   \begin{center}
-  \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
-  \caption{The basic structure of a Zip archive}
-  \label{zip_structure}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{usage1.eps}}
+  \caption{A typical usage scenario. Both Alice and Bob receive an AFF
+  volume but work independently. Rather than modifying the volume,
+  they each create their own local volumes and save their results into
+  those files. They can now exchange the smaller new volumes and
+  effectively merge their results into the same AFF set when they are finished.}
+  \label{usage}
   \end{center}
 \end{figure}
 
-As can be seen, the archive consists of a {\em Central Directory (CD)}
+\subsection{Migration from AFF1 to AFF4}
+
+We have addressed these issues in three steps. First, we have extended
+the AFF schema to support multiple forensic images (which are now
+called \emph{streams}) in a single evidence file. Second, we replaced
+AFF's ``bit-level'' format with an improved format that is more
+flexible and has better existing support. Third, we are adopting
+AFFLIB to implement the new schema and file format, which will allow
+existing AFF-aware programs to access files written in either the old
+or the new format without modification.
+
+We call the result of our work effort AFF4.
+
+\section{Introducing AFF4}
+
+
+\subsection{AFF4 Terminology and New Concepts}
+
+This section discusses the AFF4 terminology. 
+
+\begin{itemize}
+\item \emph{An Evidence Volume} is a single file with a \texttt{.aff}
+  extension. 
+\item \emph{An Evidence Set} is a collection of one or more Evidence
+  Volumes. Evidence Sets can also be stored in object storage system (such as
+  Amazon S3), or a hybrid---for example, metadata stored in an SQL
+  database with physical data stored in large files in a file
+  system. 
+\item \emph{An Evidence Set UUID} is a unique identifier generated
+  according to RFC4122\cite{rfc4122} for each new Evidence
+  Set. Multiple Evidence Volumes that make up the same Evidence Set
+  should all have the same UUID. When an Evidence Set is opened all its volumes are
+  loaded, their UUIDs are checked, and all of their contents are
+  logically merged so as to be visible as if they were all found in the same volume.
+\item \emph{A segment} is a single unit of data written to volume. AFF4
+  segments have a \emph{segment name}, a \emph{segment timestamp}, and
+  a \emph{segment contents}.
+
+\item \emph{A stream} is a collection of segments that can be
+  concatenated together to form a single data object.
+
+\item \emph{An image stream} is a stream that is dedicated to storing evidence from a single
+  source of data.  For example, a stream may contain a disk image or a network
+  capture. Whereas AFF could only support a single stream in an evidence
+  file, AFF4 allows any number of streams to be stored. Each stream in
+  the archive is  given a unique identifier.
+
+\item \emph{A bevy} is a specific segment that is used to hold
+  forensic image data, such as disk sectors, memory pages, or network
+  packets. AFF1 used the term ``pages'' to describe bevys, but this
+  term caused confusion when AFF was used to hold memory images, hence the
+  new term. 
+
+\item \emph{A segment name} is the name under which a segment is
+  stored within the archive. AFF4 segments have two-part names that
+  typically contain a \emph{stream name} and \emph{bevy number}. For
+  example the segment named \texttt{default/000001} refers to the stream
+  called \texttt{default} and has a chunk name of \texttt{000001}. All segment
+  names are encoded using UTF8. AFFLIB is being modified to allow any
+  stream to be opened using the \texttt{af\_open} function; if a
+  stream name is not specified, AFF4 implementations will open the
+  stream named ``default.''
+
+\item \emph{The segment timestamp} is a timestamp for the segment
+  recorded in GMT.
+
+\item \emph{Attributes} are a list of key/value pairs stored in each
+stream's ``properties'' segment (e.g. ``stream/properties''). The
+``properties'' file is a text file which stores attributes one on each
+line. Attribute lines consist of the key, immediately followed by
+``='' for text values or ``:'' for binary values. This is immediately
+followed by the encoded value. Values containing text are encoded
+using UTF8, while values containing binary data are encoded using
+Base64. There may be multiple values for each attribute; in these
+cases the order is preserved
+by implementations. Implements may present different keys may be
+presented in any order, however.
+\vspace{1ex}
+Each AFF4 archive must also have a top-level set of attributes---that
+is, there is always a segment named ``properties.'' These volume
+attributes are used to specify a Unique Identifier (UUID). (AFF1
+stored each property in its own named segment. This created
+significant overhead in many situations.)
+
+\item \emph{A Target Reference} is a way of referencing objects. This is used
+in a number of places which will be highlighted below. Using
+references it is possible for the FIF file to refer to objects
+embedded within itself, or within other FIF files. Its is also
+possible to refer to external flat files. A number of usage scenarios
+are described in Section \ref{usage_scenarios}. 
+\end{itemize}
+
+The Target Reference is an important AFF4 innovation: this mechanism
+gives AFF4 files a way for describing evidence that is stored in
+different evidence volumes, in the host computer's file system, or on
+the Internet. We have defined the following target reference schema:
+
+\label{target_reference}
+
+\begin{itemize}
+\item A reference in the format {\em aff://UUID/stream/segment} refers
+to an external Evidence file set (identified by its UUID). If the segment
+is missing (i.e. the reference ends with a ``/''), the reference is
+for the entire stream. We do not specify a way of actually resolving
+the UUID into a physical locations. This can achieved by
+implementations using many methods, such as Active Directory, LDAP,
+DNS, flat files or SQL databases.
+
+\item A reference starting with {\em file://} refers to an external
+file. The external file reference must be sanitised (to remove
+.. directory traversal) and rooted at the current directory. A
+filename of ``.'' refers to the current FIF volume.
+
+\item A reference starting with {\em http://} refers to a HTTP
+object which will be fetched. Support for this is optional.
+
+\item A references ending with a ``/'' signifies a reference to a
+stream in the current FIF file. The stream will be opened in its
+entirety. If the reference does not end with a ``/'', the reference is
+for a single segment.
+\end{itemize}
+
+\subsection{AFF4 Streams}
+As discussed above, individual segments in an AFF4 evidence set can be
+combined into a single logical object called a \emph{stream}. AFF4
+supports an arbitrary number of streams per volume. The AFFLIB library
+allows the segments in a stream to be operated on as if they were a
+single file inside a file system by supporting the traditional
+POSIX-like functionality of \texttt{open()}, \texttt{seek()} and
+\texttt{read()}.
+
+AFFLIB also supports the \emph{writing} of streams, a feature that is
+used by Garfinkel's \texttt{aimage} disk imaging program. In general
+arbitrary writing to streams can be expensive, especially when writing
+is combined with seek operations. The current \texttt{aimage} program
+will create AFF files with gaps in them during its error recovery
+process (when \texttt{aimage} seeks to the end of a disk and reads it
+backwards in an attempt to get around media failures). We are working
+on a rewrite of \texttt{aimage} which performs imaging and recovery
+on bevy boundaries, rather than using the current arbitrary
+``high-water-mark'' and ``low-water-mark.''
+
+All streams within an Evidence Set \emph{must} have a properties segment. The
+properties segment describes what the stream contains and determines
+how the stream is processed. 
+
+
+\subsection{The Image Stream}
+\label{image_stream}
+The AFF4 \emph{Image} stream contains a single read-only forensic data
+set. For example, this stream might contains a hard
+disk image, a memory image or a network capture (in PCAP
+format). Random read access into the stream is provided with
+AFFLIB. (AFFLIB also provided the ability to randomly \emph{write}
+into the evidence stream for sanitization purposes, although this
+feature may be removed at a later date.) 
+
+Image streams must have at several attributes. First, they must have
+\texttt{type=image} to indicate that they are image streams. Streams
+must have a \texttt{size} attribute (specified in 8-bit bytes) to
+indicate the last addressable byte in the stream. Streams can have
+holes in them; in this case, attempts to read data from within the
+holes can generate an error or return NULLs.
+
+The image itself is stored in \emph{pages} within the AFF4 file. Pages are
+segments named as an 8 digit, zero padded decimal integer
+representation of their chunk id (e.g. ``default/00000032''). Image
+streams must specify the \texttt{page\_size} attribute, as the number of
+image bytes each chunk contains. Pages may be compressed at the
+page level, or may be broken up into multiple chunks (typically 8KB),
+and individually compressed. In this case the beginning of the page
+segment will contain an offset table indicating the location of each
+compression chunk. This is similar to the technique used by the Expert
+Witness file format used by EnCase\cite{encase-3.0} and implemented by
+the open source libewf\cite{libewf} package.
+
+Pages can optionally be individually hashed, allowing for detection
+of modifications. The attribute \texttt{hash\_type} specifies the type of
+hash used (implementations will typically support md5,sha1 and sha256, but can
+define others). The hashes are stored in any number of segments within
+the stream, of arbitrary name. The hash segment names is provided by
+using the \texttt{hash\_name} stream attribute.
+
+Hashes are calculated in an identical way to that defined by AFF1's
+crypto layer\cite{garfinkel:affcrypto}---that is, the full name of the
+segment (including stream component) is followed by a single NULL
+byte, followed by the (uncompressed) content of the chunk. The
+inclusion of the segment name ensure that even identical chunks in
+content will have a different hash and prevents reordering attacks.
+
+Each hash segment is a list of a chunk id encoded in 32 bit
+little endian integer format followed by the hash (the length of which
+depends on the hash itself). This approach is illustrated in Figure
+\ref{hash_index}. 
+
+Hash segments can contain any number of chunk hashes in them. It is
+recommended that a hash segment be created when a volume is closed to
+cover all the chunks within that volume. This allows for hashes to be
+verified even if some volumes are missing. The AFFLIB implementation
+may update a hash of a chunk previously set by an earlier hash
+segment---this would be required when a chunk is updated. The hash
+segment can then be signed to assure the integrity of the updated segment.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{hash.eps}}
+  \caption{The structure of a hashing segment. The attributes {\em
+  hash} and {\em hash\_type} declare the hash segment. The segment
+  contains a list of integer encoded chunk id followed by an unencoded
+  hash for each chunk.}
+  \label{hash_index}
+  \end{center}
+\end{figure}
+
+This design differs from AFF1, which creates a separate segment for
+each hash. AFF4 uses headers that are more verbose than the AFF
+segment headers. Therefore, creating a new segment for each hash value
+would result in too much overhead: Packing the hashes into a few
+segments it is possible to reduce this overhead to a minimum.
+
+\subsection{ZIP64}
+For AFF4, we have decided to change AFF1's
+original container file format to ZIP64\cite{zipspecs}. There are many
+reasons for this decision:
+
+\begin{itemize}
+\item There is already wide support for the ZIP and ZIP64 formats. By
+  migrating to these formats, we can take advantage of the rich number
+  of user and developer tools already available.
+\item ZIP64 includes a CRC32 and timestamp for each segment. We
+  believe that the additional integrity checks and timestamps will be
+  useful in a forensic environment.
+\item ZIP64 already includes support for the ``table of contents''
+  envisioned but never implemented by Garfinkel; ZIP64 calls this
+  table the ``Central Directory.'' It is written at the end of the
+  ZIP64 volume.
+\end{itemize}
+
+Figure~\ref{zip_structure} shows the basic structure of a Zip
+archive. As can be seen, the archive consists of a {\em Central Directory} (CD)
 located at the end of the archive. The CD is a list of pointers to
 individual {\em File header} structures located within the body of the
 archive. Headers are then followed by the file data, after it has been
@@ -232,112 +478,75 @@ without needing to seek in the output file. This allows Zip files to
 be written to pipes for example, sending an image over the network
 using netcat or ssh.
 
-\subsection{FIF Definitions}
-The FIF specification defines a number of basic terms:
-\begin{itemize}
-\item {\em A FIF Volume} is a single ZIP archive containing {\em
-segments}.
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
+  \caption{The basic structure of a Zip archive}
+  \label{zip_structure}
+  \end{center}
+\end{figure}
 
-\item {\em A segment} is a single unit of data written to the Zip
-archive as an archive file. The only properties of segments of
-interest to the FIF specification are the segment name and the
-timestamp.
+It is important to note that AFF4 only requires that the underlying storage mechanism
+be capable of storing multiple named segments of data. Although our
+AFF4 implementation will use the ZIP64 file format as an underlying storage
+mechanism, our system also supports legacy AFF1 volumes as well as
+segments that are stored in other storage systems---for example,
+Amazon.com's Simple Storage System (S3)\cite{s2-aws-home-page-money}.
 
-\item {\em The segment name} is the name under which a segment is
-stored within the archive. This consists of a directory part named
-{\em a stream} and an {\em chunk name}. For example the segment named
-``default/000001'' refers to the stream called ``default'' and has a
-chunk name of ``000001''. Although the ZIP specification does not
-specify the encoding of segment names, the FIF specification requires
-all segment names to be encoded using UTF8. If stream name is
-unspecified, implementations should open the stream named ``default''.
+\subsubsection{Unused ZIP64 Features}
 
-\item {\em Attributes} are a list of key/value pairs stored at each
-stream's ``properties'' segment (e.g. ``stream/properties''). The
-``properties'' file is a text file which stores attributes one on each
-line. Attribute lines consist of the key, immediately followed by
-``='' for text values or ``:'' for binary values. This is immediately
-followed by the encoded value. Values containing text MUST be encoded
-using UTF8, while values containing binary data MAY be encoded using
-Base64. If keys are repeated, their relative order MUST be preserved
-by implementations, but different keys may be presented in any order.
-
-Attributes MUST be specified at the top level of each volume
-(i.e. must have a segment named ``properties''). The volume attributes
-are used to specify the volume UUID.
-
-%about the stream. A properties file also exists at the top
-%level of the ZIP hierarchy to store global information such as the
-%volumes UUID, the FIF version and other volumes which make up the 
-
-\item {\em A FIF file} is a collection of volumes with the same
-UUID. The UUID is generated according to RFC4122 for each new FIF
-file. As new volumes are created for the same file, the UUID is copied
-to all related volumes. When a FIF file is opened, all its volumes are
-loaded and merged in such a way that all the segments from all the
-volumes are visible as if they were all found in the same volume.
-
-\end{itemize}
-
-\label{target_reference}
-{\em A target reference} is a way of referencing objects. This is used
-in a number of places which will be highlighted below. Using
-references it is possible for the FIF file to refer to objects
-embedded within itself, or within other FIF files. Its is also
-possible to refer to external flat files. A number of usage scenarios
-are described in Section \ref{usage_scenarios}. The reference is
-specified with the following conventions:
-
-\begin{itemize}
-\item A reference starting with {\em file://} refers to an external
-file. The external file reference must be sanitised (to remove
-.. directory traversal) and rooted at the current directory. A
-filename of ``.'' refers to the current FIF volume.
-
-\item A reference starting with {\em http://} refers to a HTTP
-object which will be fetched. Support for this is optional.
-
-\item A reference in the format {\em fif://UUID/stream/segment} refers
-to an external FIF file set (identified by its UUID). If the segment
-is missing (i.e. the reference ends with a ``/''), the reference is
-for the entire stream. We do not specify a way of actually resolving
-the UUID into a physical locations. This can achieved by
-implementations using many methods, such as Active Directory, LDAP,
-DNS, flat files or SQL databases.
-
-\item A references ending with a ``/'' signify a reference to a
-stream in the current FIF file. The stream will be opened in its
-entirety. If the reference does not end with a ``/'', the reference is
-for a single segment.
-\end{itemize}
-
-\subsection{FIF Volumes and segment merging}
 There are a number of aspects in the Zip file format specifications
-which we do not utilize. For example, the Zip64 specification allows
-for a multitude of encryption and hashing algorithms. Some of these
-features however, seem to be patent encumbered. Since the FIF
-specification aims to separate high level information such as hashes,
-cryptography and signatures from the low bit level representation, we
-implement those features at a higher level.
+which we do not utilize. 
+\begin{itemize}
+\item We ignore Zip64's built-in support for splitting
+archives into multiple ZIP files. Instead, our implementation treats
+each volume as complete and stand-alone ZIP file. The AFF4
+implementation then considers the segments contained within as 
+belonging to a larger collection. The reason behind this decision is that
+often it is needed to add new volumes to an existing set without
+modifying the existing set at all. Zip64's built-in support for
+splitting an archive renders each individual volume in the set
+unusable unless all are available. 
+
+\item Although Zip64 also defines encryption and authentication
+extensions, we do not use them due to the
+restrictions imposed on their use and because they lack of functionality that is
+important for forensic user. Instead, we use AFF1's digital signature
+facilities for integrity and non-repudiation, and we introduce a new  stream based
+encryption scheme for ensuring data privacy (Section~\ref{crypted_stream}).
+
+\end{itemize}
+
+\subsubsection{A Forensicly Sound Strategy For Updating ZIP64 Files}
 
 In many forensic applications, individual segments within the volume
-need to be updated \cite{AFF}. These updates can cause the volume to
+need to be updated. To this end, Garfinkel implemented several
+``update'' functions in AFF1\cite{garfinkel:aff}. 
+
+There were two problems with the original AFF updating approach:
+\begin{itemize}
+\item Updates can cause the volume to
 become fragmented as holes appear within the middle of the volume, and
 updated segments are added at the end.
+\item Updates could be performed silently, raising questions of
+  forensic soundness.
+\end{itemize}
 
-When we wish to add a new segment to an existing volume, the new
-segment header SHOULD overwrite the volume central directory, and the
+In AFF4, when a new segment is added to an existing volume, the new
+segment header overwrites the volume central directory, and the
 central directory should be rewritten including the new entry
 immediately after the last file in the archive. If it is not possible
 to overwrite the file, the new segment can be written at the end,
 followed by an updated copy of the central directory (in that case the
 old central directory remains in the file). This is illustrated in
-Figure \ref{zip_structure}. Implementations may choose to delay
-writing the central directory until the file is closed.
+Figure \ref{zip_structure}. Implementations may delay
+writing the central directory until the file is closed; should the
+system crash before the central directory is written, it can be
+recovered by scanning the entire ZIP file.
 
 A segment within the archive is considered to be updated when a new
 segment is added to the archive with the same name and a later
-timestamp. Implementations MUST satisfy read requests for duplicate
+timestamp. Implementations satisfy read requests for duplicate
 segment names with those segments with the later timestamp, or if the
 two timestamps are the same, the segment which appears at a later
 offset in the volume. This effectively allows for a segment to be
@@ -345,144 +554,20 @@ updated without leading to internal volume fragmentation.
 
 The fact that the older version of all updated segments remains intact
 within each volume can be used for auditing, or to allow a rollback to
-previous versions of the segment. The {\em frepack} tool is provided
-to repack, split and manage FIF volumes by creating new volumes and
-redistributing segments among them.
+previous versions of the segment. We have created a new tool,
+\texttt{afrepack}, which can repack, split and manage AFF4 volumes by
+creating new volumes and redistributing segments among them.
 
-Note that we do not rely on Zip64's built-in support for splitting
-archives at all (although implementations should be able to read such
-files). Each volume is a complete and stand alone ZIP file. It is the
-FIF implementation which considers the segments contained within it to
-belong to a larger collection. The reason behind this decision is that
-often it is needed to add new volumes to an existing set without
-modifying the existing set at all.
+\subsubsection{Segment merging}
 
-Consider the typical usage scenario depicted in Figure \ref{usage}, of
-a FIF file which contains a disk image. This volume is distributed to
-two independent analysts, which wish to add new streams to the FIF
-file (for example the result of their analysis). In this case they can
-each create a new volume which extends to original volume and save
-their analysis on this new volume. Now they only need to share this
-new volume with other analysts who also have a copy of the old volume
-to interchange their findings. 
 
-\begin{figure}[tb]
-  \begin{center}
-  \mbox{\epsfxsize=0.6\columnwidth \epsffile{usage1.eps}}
 
-  \caption{A typical usage scenario. Both Alice and Bob receive a FIF
-  volume but work independently. Rather than modifying the volume,
-  they each create another volume and save their results to the new
-  volume. They can now exchange the smaller new volumes and
-  effectively merge their results into the same FIF set.}
 
-  \label{usage}
-  \end{center}
-\end{figure}
-
-This is made possible because each volume is independent of one
-another, and can be loosely collated into a bigger FIF file
-set.
-
-\subsection{FIF Streams}
-The above section explained how FIF file sets can be split into
-volumes, each containing segments. When the entire FIF file set is
-loaded, segments may be fetched from any volume. The present section
-describes how these individual segments are used to form {\em stream
-abstractions}.
-
-A stream is a high level abstraction of a single source of data. For
-example, a stream may contain a disk image or a network
-capture. Although we do not specify the exact API, implementations
-MUST make a stream opened for reading have at a minimum a read, seek
-and tell methods. Seeking MUST support the whence argument as
-described in the standard C implementation (i.e. allow seeking to the
-end of the stream).
-
-Streams opened for writing MAY limit support for seeking, as efficient
-seeking in compressed streams may not be possible. Applications should
-avoid needing to seek in output streams, and try to structure writes
-serially. It is usually possible to reorder a sequence of non
-overlapping random writes into an Image stream and a Map Stream (These
-are discussed in Sections \ref{image_stream} and
-\ref{map_stream}). Implementations are free to hide the inability to
-seek in writing streams by automatically implementing such a scheme,
-but this is not mandated by the specification.
-
-All streams within the FIF file MUST have a properties segment. The
-properties segment describes the stream attributes as specified
-previously. Streams must have the {\em type} attribute which allows
-implementations to determine how they should be processed. 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Standard FIF segments}
 The FIF specification defines a number of basic types, but extensions
 are encouraged. Future versions of the specification might standardize
 further types. Implementations MUST implement the basic types.
-
-\subsection{The Image Stream}
-\label{image_stream}
-The {\em Image} stream ({\em type=image}) contains a single read only
-forensic data source. For example, this Stream might contains a hard
-disk image, a memory image or a network capture (in PCAP format). The
-Image stream provides random read access into the stream (i.e. allows
-for randomly seeking the stream to any point). The {\em size}
-attribute MUST be specified to determine how large the stream is.
-
-The image itself is stored in chunks within the FIF file. Chunks are
-segments named as an 8 digit, zero padded decimal integer
-representation of their chunk id (e.g. ``default/00000032''). Image
-streams must specify the {\em chunk\_size} attribute, as the number of
-image bytes each chunk contains. Chunks may be compressed at the
-underlying Zip container level, using any of the compression
-algorithms specified by the zip specifications.
-
-Chunks can optionally be individually hashed, allowing for detection
-of modifications. The attribute {\em hash\_type} specifies the type of
-hash used (implementations SHOULD support md5,sha1 and sha256, but can
-define others). The hashes are stored in any number of segments within
-the stream, of arbitrary name. The hash segment names is provided by
-using the {\em hash} stream attribute.
-
-Each hash segment MUST be a list of a chunk id encoded in 32 bit
-little endian integer format followed by the hash (the length of which
-depends on the hash itself). This approach is illustrated in Figure
-\ref{hash_index}. 
-
-Hash segments can contain any number of chunk hashes in them. It is
-recommended that a hash segment be created when a volume is closed to
-cover all the chunks within that volume. This allows for hashes to be
-verified even if some volumes are missing. It is permitted for a hash
-segment to update a hash of a chunk previously set by an earlier hash
-segment - this may be required when a chunk is updated. The hash
-segment can then be signed to assure the integrity of the updated
-segment.
-
-\begin{figure}[tb]
-  \begin{center}
-  \mbox{\epsfxsize=0.6\columnwidth \epsffile{hash.eps}}
-
-  \caption{The structure of a hashing segment. The attributes {\em
-  hash} and {\em hash\_type} declare the hash segment. The segment
-  contains a list of integer encoded chunk id followed by an unencoded
-  hash for each chunk.}
-
-  \label{hash_index}
-  \end{center}
-\end{figure}
-
-This design differs from AFF, which creates a separate segment for
-each hash. The Zip headers are more verbose than the AFF segment
-headers, and typically FIF chunks are much smaller (default 32kb, vs
-16Mb for AFF). Therefore, creating a new segment for each hash value
-results in more overheads in the FIF format. By packing the hashes
-into a few segments it is possible to reduce this overhead to a
-minimum.
-
-Hashes are calculated in an identical way to that defined by AFF,
-thats is the full name of the segment (including stream component) is
-followed by a single NULL byte, followed by the (uncompressed) content
-of the chunk. The inclusion of the segment name ensure that even
-identical chunks in content will have a different hash.
 
 \subsection{The Map Stream}
 \label{map_stream}
@@ -877,6 +962,13 @@ volume set to now belong to the other volume set - the merge is almost
 instantaneous as they only need to write an extra ``properties'' file
 on the merged volumes.
 
+\section{Conclusion and Future Work}
+\subsection{Expanding AFFLIB for AFF4}
+Although we do not specify the exact API, implementations
+MUST make a stream opened for reading have at a minimum a read, seek
+and tell methods. Seeking MUST support the whence argument as
+described in the standard C implementation (i.e. allow seeking to the
+end of the stream).
 
 \bibliography{IEEEabrv,paper}
 \end{document}
