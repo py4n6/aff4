@@ -32,7 +32,7 @@
 % Make sure we know its a draft for now
 \usepackage{draftwatermark}
 \SetWatermarkFontSize{3cm}
-\usepackage{verbatim}
+\usepackage{fancyvrb}
 %\documentclass[12pt]{article}
 \usepackage{epsfig}
 \usepackage[hypertexnames=false,bookmarksopenlevel=1,bookmarksopen,bookmarksnumbered,colorlinks,plainpages=false,linktocpage,linkcolor=black,citecolor=black,filecolor=black,urlcolor=black]{hyperref}
@@ -243,7 +243,7 @@ We call the result of our work effort AFF4.
 \section{Introducing AFF4}
 
 
-\subsection{AFF4 Terminology and New Concepts}
+\subsection{New Concepts and Terminology}
 
 This section discusses the AFF4 terminology. 
 
@@ -349,7 +349,7 @@ entirety. If the reference does not end with a ``/'', the reference is
 for a single segment.
 \end{itemize}
 
-\subsection{AFF4 Streams}
+\subsection{Streams}
 As discussed above, individual segments in an AFF4 evidence set can be
 combined into a single logical object called a \emph{stream}. AFF4
 supports an arbitrary number of streams per volume. The AFFLIB library
@@ -373,6 +373,120 @@ All streams within an Evidence Set \emph{must} have a properties segment. The
 properties segment describes what the stream contains and determines
 how the stream is processed. 
 
+
+\subsection{ZIP64}
+For AFF4, we have changed AFF1's original container file format to
+ZIP64\cite{zipspecs}. There are many reasons for this decision:
+
+\begin{itemize}
+\item There is already wide support for the ZIP and ZIP64 formats. By
+  migrating to these formats, we can take advantage of the rich number
+  of user and developer tools already available.
+\item ZIP64 includes a CRC32 and timestamp for each segment. We
+  believe that the additional integrity checks and timestamps will be
+  useful in a forensic environment.
+\item ZIP64 already includes support for the ``table of contents''
+  envisioned but never implemented by Garfinkel; ZIP64 calls this
+  table the ``Central Directory.'' It is written at the end of the
+  ZIP64 volume.
+\end{itemize}
+
+Figure~\ref{zip_structure} shows the basic structure of a Zip
+archive. As can be seen, the archive consists of a {\em Central Directory} (CD)
+located at the end of the archive. The CD is a list of pointers to
+individual {\em File header} structures located within the body of the
+archive. Headers are then followed by the file data, after it has been
+compressed by the appropriate compression method (as specified in the
+header). Each archived file is optionally followed by a {\em Data
+Descriptor} describing the length and CRC of the archived file. Using
+the data descriptor field allows implementations to write archives
+without needing to seek in the output file. This allows Zip files to
+be written to pipes for example, sending an image over the network
+using netcat or ssh.
+
+\begin{figure}[tb]
+  \begin{center}
+  \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
+  \caption{The basic structure of a Zip archive}
+  \label{zip_structure}
+  \end{center}
+\end{figure}
+
+It is important to note that AFF4 only requires that the underlying storage mechanism
+be capable of storing multiple named segments of data. Although our
+AFF4 implementation will use the ZIP64 file format as an underlying storage
+mechanism, our system also supports legacy AFF1 volumes as well as
+segments that are stored in other storage systems---for example,
+Amazon.com's Simple Storage System (S3)\cite{s2-aws-home-page-money}.
+
+\subsubsection{Unused ZIP64 Features}
+
+There are a number of aspects in the Zip file format specifications
+which we do not utilize. 
+\begin{itemize}
+\item We ignore Zip64's built-in support for splitting
+archives into multiple ZIP files. Instead, our implementation treats
+each volume as complete and stand-alone ZIP file. The AFF4
+implementation then considers the segments contained within as 
+belonging to a larger collection. The reason behind this decision is that
+often it is needed to add new volumes to an existing set without
+modifying the existing set at all. Zip64's built-in support for
+splitting an archive renders each individual volume in the set
+unusable unless all are available. 
+
+\item Although Zip64 also defines encryption and authentication
+extensions, we do not use them due to the
+restrictions imposed on their use and because they lack of functionality that is
+important for forensic user. Instead, we use AFF1's digital signature
+facilities for integrity and non-repudiation, and we introduce a new  stream based
+encryption scheme for ensuring data privacy (Section~\ref{crypted_stream}).
+
+\end{itemize}
+
+\subsubsection{A Forensically Sound Strategy For Updating ZIP64 Files}
+
+In many forensic applications, individual segments within the volume
+need to be updated. To this end, Garfinkel implemented several
+``update'' functions in AFF1\cite{garfinkel:aff}. 
+
+There were two problems with the original AFF updating approach:
+\begin{itemize}
+\item Updates can cause the volume to
+become fragmented as holes appear within the middle of the volume, and
+updated segments are added at the end.
+\item Updates could be performed silently, raising questions of
+  forensic soundness.
+\end{itemize}
+
+In AFF4, when a new segment is added to an existing volume, the new
+segment header overwrites the volume central directory, and the
+central directory should be rewritten including the new entry
+immediately after the last file in the archive. If it is not possible
+to overwrite the file, the new segment can be written at the end,
+followed by an updated copy of the central directory (in that case the
+old central directory remains in the file). This is illustrated in
+Figure \ref{zip_structure}. Implementations may delay
+writing the central directory until the file is closed; should the
+system crash before the central directory is written, it can be
+recovered by scanning the entire ZIP file.
+
+A segment within the archive is considered to be updated when a new
+segment is added to the archive with the same name and a later
+timestamp. Implementations satisfy read requests for duplicate
+segment names with those segments with the later timestamp, or if the
+two timestamps are the same, the segment which appears at a later
+offset in the volume. This effectively allows for a segment to be
+updated without leading to internal volume fragmentation.
+
+The fact that the older version of all updated segments remains intact
+within each volume can be used for auditing, or to allow a rollback to
+previous versions of the segment. We have created a new tool,
+\texttt{afrepack}, which can repack, split and manage AFF4 volumes by
+creating new volumes and redistributing segments among them.
+
+\section{Standard AFF4 Streams}
+In this section we discuss specific stream types that we have created
+in our initial AFF4 implementation. 
 
 \subsection{The Image Stream}
 \label{image_stream}
@@ -447,145 +561,24 @@ segment headers. Therefore, creating a new segment for each hash value
 would result in too much overhead: Packing the hashes into a few
 segments it is possible to reduce this overhead to a minimum.
 
-\subsection{ZIP64}
-For AFF4, we have decided to change AFF1's
-original container file format to ZIP64\cite{zipspecs}. There are many
-reasons for this decision:
-
-\begin{itemize}
-\item There is already wide support for the ZIP and ZIP64 formats. By
-  migrating to these formats, we can take advantage of the rich number
-  of user and developer tools already available.
-\item ZIP64 includes a CRC32 and timestamp for each segment. We
-  believe that the additional integrity checks and timestamps will be
-  useful in a forensic environment.
-\item ZIP64 already includes support for the ``table of contents''
-  envisioned but never implemented by Garfinkel; ZIP64 calls this
-  table the ``Central Directory.'' It is written at the end of the
-  ZIP64 volume.
-\end{itemize}
-
-Figure~\ref{zip_structure} shows the basic structure of a Zip
-archive. As can be seen, the archive consists of a {\em Central Directory} (CD)
-located at the end of the archive. The CD is a list of pointers to
-individual {\em File header} structures located within the body of the
-archive. Headers are then followed by the file data, after it has been
-compressed by the appropriate compression method (as specified in the
-header). Each archived file is optionally followed by a {\em Data
-Descriptor} describing the length and CRC of the archived file. Using
-the data descriptor field allows implementations to write archives
-without needing to seek in the output file. This allows Zip files to
-be written to pipes for example, sending an image over the network
-using netcat or ssh.
-
-\begin{figure}[tb]
-  \begin{center}
-  \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
-  \caption{The basic structure of a Zip archive}
-  \label{zip_structure}
-  \end{center}
-\end{figure}
-
-It is important to note that AFF4 only requires that the underlying storage mechanism
-be capable of storing multiple named segments of data. Although our
-AFF4 implementation will use the ZIP64 file format as an underlying storage
-mechanism, our system also supports legacy AFF1 volumes as well as
-segments that are stored in other storage systems---for example,
-Amazon.com's Simple Storage System (S3)\cite{s2-aws-home-page-money}.
-
-\subsubsection{Unused ZIP64 Features}
-
-There are a number of aspects in the Zip file format specifications
-which we do not utilize. 
-\begin{itemize}
-\item We ignore Zip64's built-in support for splitting
-archives into multiple ZIP files. Instead, our implementation treats
-each volume as complete and stand-alone ZIP file. The AFF4
-implementation then considers the segments contained within as 
-belonging to a larger collection. The reason behind this decision is that
-often it is needed to add new volumes to an existing set without
-modifying the existing set at all. Zip64's built-in support for
-splitting an archive renders each individual volume in the set
-unusable unless all are available. 
-
-\item Although Zip64 also defines encryption and authentication
-extensions, we do not use them due to the
-restrictions imposed on their use and because they lack of functionality that is
-important for forensic user. Instead, we use AFF1's digital signature
-facilities for integrity and non-repudiation, and we introduce a new  stream based
-encryption scheme for ensuring data privacy (Section~\ref{crypted_stream}).
-
-\end{itemize}
-
-\subsubsection{A Forensicly Sound Strategy For Updating ZIP64 Files}
-
-In many forensic applications, individual segments within the volume
-need to be updated. To this end, Garfinkel implemented several
-``update'' functions in AFF1\cite{garfinkel:aff}. 
-
-There were two problems with the original AFF updating approach:
-\begin{itemize}
-\item Updates can cause the volume to
-become fragmented as holes appear within the middle of the volume, and
-updated segments are added at the end.
-\item Updates could be performed silently, raising questions of
-  forensic soundness.
-\end{itemize}
-
-In AFF4, when a new segment is added to an existing volume, the new
-segment header overwrites the volume central directory, and the
-central directory should be rewritten including the new entry
-immediately after the last file in the archive. If it is not possible
-to overwrite the file, the new segment can be written at the end,
-followed by an updated copy of the central directory (in that case the
-old central directory remains in the file). This is illustrated in
-Figure \ref{zip_structure}. Implementations may delay
-writing the central directory until the file is closed; should the
-system crash before the central directory is written, it can be
-recovered by scanning the entire ZIP file.
-
-A segment within the archive is considered to be updated when a new
-segment is added to the archive with the same name and a later
-timestamp. Implementations satisfy read requests for duplicate
-segment names with those segments with the later timestamp, or if the
-two timestamps are the same, the segment which appears at a later
-offset in the volume. This effectively allows for a segment to be
-updated without leading to internal volume fragmentation.
-
-The fact that the older version of all updated segments remains intact
-within each volume can be used for auditing, or to allow a rollback to
-previous versions of the segment. We have created a new tool,
-\texttt{afrepack}, which can repack, split and manage AFF4 volumes by
-creating new volumes and redistributing segments among them.
-
-\subsubsection{Segment merging}
-
-
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Standard FIF segments}
-The FIF specification defines a number of basic types, but extensions
-are encouraged. Future versions of the specification might standardize
-further types. Implementations MUST implement the basic types.
-
 \subsection{The Map Stream}
 \label{map_stream}
 Linear transformations of data are commonplace in forensic
 analysis. For example, a file is often simply a collection of bytes
-drawn from an image. A TCP/IP stream is simply a collection of
-payloads from selected network packets. Sometimes the same data may be
-viewed in a number of ways - for example a Virtual Address Space is a
+drawn from an image, while a TCP/IP stream is simply a collection of
+payloads from selected network packets. 
+Sometimes the same data may be
+viewed in a number of ways---for example a Virtual Address Space is a
 mapping of the Physical Address Space through a page table
-transformation. It is, therefore, beneficial to define a way in which
-the underlying storage system can apply transformations to existing
-data to produce transformed data.
-
-For example, Zero Storage Carving \cite{Meijer2006}, is a way of
+transformation.  Zero Storage Carving \cite{Meijer2006} is a way of
 specifying carved files in terms of a sequence of blocks taken from
-the image. \cite{Cohen2007} extended this concept to an arbitrary
-mapping function. This is the approach chosen in this specification
-due to its flexibility. 
+the image; Cohen extended this concept to an arbitrary
+mapping function\cite{Cohen2007} . 
+
+AFF4 defines a common way in
+which the underlying storage system can apply transformations to
+existing data to produce transformed data. This transformation is
+performed using a \emph{map stream}.
 
 The Map stream defines a mapping function, as a piecewise continuous
 linear transform of one or more {\em target} streams to produce a new
@@ -600,7 +593,7 @@ given in the attribute section (list index starts at zero for the
 first entry).
 
 Denoting the stream offset by $x$, and the target offset by $y$, the
-map specifies a set of points $(X_i,Y_i,T_i)$. Read requests for a
+Map specifies a set of points $(X_i,Y_i,T_i)$. Read requests for a
 byte at a mapped stream offset $x$ can then be satisfied by reading a
 byte from target $T_i$ at offset $y$ given by:
 \begin{eqnarray}
@@ -631,10 +624,12 @@ x' &:=& mod(x ,S_p)  \\   \label{eq:no1}
 y &:=& (x'-X_i) + Y_i + p \times T_p
 \end{eqnarray*}
 
-Where $mod$ is the modulus function, while $floor$ signifies integer
-division. For example consider the following, which corresponds to a 3
-disk RAID-5 array:
-\begin{verbatim*}
+Where $mod$ is the modulus function and $floor$ signifies integer
+division. For example consider Figure~\ref{map}, which corresponds to a 3
+disk RAID-5 array.
+
+\begin{figure}
+\begin{Verbatim}[frame=single]
 stream_period=393216
 target_period=196608
 
@@ -644,21 +639,24 @@ target_period=196608
 196608,65536,1
 262144,131072,0
 327680,131072,2
-\end{verbatim*}
+\end{Verbatim}
+\caption{A Map stream that corresponds to a 3 disk RAID-5 array}\label{ref}
+\end{figure}
 
-\subsection{The Overlay stream}
-The Overlay stream is a variant of the {\em Image} stream in that it
-allows for images to be stored in (possibly compressed) chunks. The
-main utility of the Overlay stream is in providing transparent access
-to other forensic formats, such as EWF or AFF. These formats also use
-chunk based compression to provide the ability to randomly seek while
-reading. To access these file formats we only need to have an index of
-each chunk offset, and then directly use the overlayed files. The {\em
-ewf2fif} tool provides such an overlay feature for EWF volumes by
+\subsection{The Overlay Stream}
+The Overlay Stream is a variant of the {\em Image} stream that
+provides a layer of indirection between requests made for specific
+bytes (or chunks or bevys) and the actual location where the requested
+information is stored. The main utility of the Overlay stream is in
+providing transparent access to legacy forensic formats, such as EWF.
+
+To access these legacy file formats we only need to have an index of
+each chunk offset, and then directly use the overlayed files.  The {\em
+ewf2aff} tool provides such an overlay feature for EWF volumes by
 employing libewf to scan the internal data structures.
 
-Therefore, the {\em chunk\_size} attribute must be specified. In
-addition the {\em compression\_type} attribute MAY be specified. The
+Overlay stream require that a \texttt{chunk\_size} attribute be specified. In
+addition the {\em compression\_type} attribute may be specified. The
 attribute should contain an integer corresponding to a suitable Zip
 compression scheme (e.g. DEFLATE). If not specified it is assumed
 that no compression is used.
@@ -678,12 +676,12 @@ necessary.
 
 It is possible to refer to the current file by providing a target of
 ``file://.''. This can be useful for modifying an existing EWF file to
-be a FIF file. Since Zip files are normally read from the end of the
-file, but EWF and AFF are both read from the front of the file it may
-be possible to append a FIF file to the end of an EWF file without
+be a AFF4 file. Since Zip files are normally read from the end of the
+file, but EWF are both read from the front of the file, it may
+be possible to append a AFF4 Central Directory to the end of an EWF file without
 interfering with the overlayed file. In this case the converted file
-can still be used as an EWF file without change, but it can also be
-used as a FIF file.
+can still be used as an EWF file without change, but could also be
+used as an AFF4 file.
 
 In image streams some chunks may compress very well. In that case, the
 overheads introduced by the Zip File Header for each chunk in the
@@ -700,7 +698,7 @@ coalesced chunks.}
   \end{center}
 \end{figure}
 
-In the above figure a segment is written to the FIF volume which
+In the above figure a segment is written to the AFF4 volume which
 contains a number of chunks back to back. An overlay stream then uses
 direct references to each compressed chunk within the coalesced
 segment. The target is then specified as the segment name. Although
@@ -710,30 +708,13 @@ longer possible to simply unzip all the chunks and concatenate them
 together to recover the original image.
 
 
-\subsection{The Private stream}
-Often forensic software needs to store internal state, such as the
-current state of the GUI, or internal data structures which may be
-required for caching. Usually, software create additional cache files
-to maintain this information. It is advantageous to be able to store
-these in the evidence file itself. The evidence file can then be
-re-opened by the software at a later stage and private data can be
-retrieved and used directly. Such private application data can be
-stored in a Private stream. There is no specification of what can be
-stored in the private stream, and applications with private streams
-should be able to store arbitrary segments in any format at all.
-
-It is recommended that applications name their private segment
-sufficiently accurately so as not to be confused with other
-applications, or different versions of the same application
-(e.g. ``pyflag/0.87/cache/'').
 
 \subsection{Encrypted Streams}
-Encryption is an important property in an evidence file format
-\cite{AFF}. In particular with the FIF format, multiple streams may be
-present in the file set, and often different access levels are
-desired. For example, for evidence set containing both network
-captures and disk images it may be desirable to limit access to
-streams based on legal authorizations.
+Encryption is an important property in an evidence file format. In
+particular, multiple streams may be present in the file set, and often
+different access levels are desired. For example, for evidence set
+containing both network captures and disk images it may be desirable
+to limit access to streams based on legal authorizations.
 
 Although the Zip64 standard specifies encryption, it is not suitable
 for our purposes since it encrypts each segment separately, and does
@@ -742,48 +723,38 @@ keys). Segment based encryption may lead to information leakage when
 segments are compressed, as the uncompressed size of the segment may
 be deduced.
 
-The Encrypted Stream ({\em type=encrypted}) SHOULD be implemented by
-FIF implementations, but may be omitted with an obvious loss of
-functionality (Encryption may be prohibited or restricted in some
-jurisdictions).
-
-The Encrypted Stream is similar to the Image Stream above in that data
-is written out in chunks (although its probably not effective to
-compress these chunks at all). Each chunk is to be encrypted upon
-writing and transparently decrypted using a scheme declared in the
-{\em scheme} attribute. 
+AFF4 therefore introduces a new encryption scheme, the Encrypted
+Stream.  The Encrypted Stream is a stream that encapsulates other
+streams on a bevy-by-bevy basis. Each bevy transparently encrypted upon
+writing and decrypted on reading. The choice of algorithm and mode is declared in the
+Stream's \texttt{scheme} attribute. 
 
 The Encrypted Stream may contain any data at all. It is useful
-however, to store an actual FIF volume within the Encrypted
-stream. This provides block level encryption for the contained FIF
-volume. It is recommended that Encrypted Streams containing a FIF
-volume set an attribute ({\em content-type=application/x-fif-volume})
+however, to store an actual AFF4 volume within the Encrypted
+stream. This provides block level encryption for the contained AFF4
+volume. It is recommended that Encrypted Streams containing a AFF
+volume set an attribute (\texttt{content-type=application/x-aff-volume})
 to allow implementations to automatically recognize volumes. This
-approach is illustrated in Figure \ref{crypted_fif}.
+approach is illustrated in Figure~\ref{crypted_fif}.
 
 \begin{figure}[tb]
   \begin{center}
   \mbox{\epsfxsize=0.8\columnwidth \epsffile{crypted.eps}}
-  \caption{Embedding an encrypted FIF volume within an Encrypted Stream.}
+  \caption{Embedding an encrypted AFF4 volume within an Encrypted Stream.}
   \label{crypted_fif}
   \end{center}
 \end{figure}
 
-The result is that a number of FIF volume are used as {\em Container
+The result is that a number of AFF4 volumes are used as {\em Container
 Volumes} to provide storage for Encrypted Streams. The main {\em
 Embedded Volume}, which actually contains data is stored within the
 Encrypted Stream, effectively distributed throughout the container
-volumes. Note that the Container Volume may contain several Encrypted
-Streams and therefore contain multiple Encrypted FIF
+volumes. Note that the outer Volume may contain several Encrypted
+Streams and therefore contain multiple AFF4 Encrypted 
 Volumes. Container Volumes may contain non encrypted streams as well,
 and may implement different encryption schemes and keys for each
 Encrypted scheme. This effectively allows arbitrary access policies to
 be implemented as only volumes which can be accessed can be merged.
-
-Implementations should create embedded FIF volumes as extensions to
-the container volumes (i.e. with the same UUID). Thus when embedded
-volumes are opened, their streams become automatically viewable as
-part of the evidence set.
 
 \subsection{Encryption Schemes}
 We specify a number of encryption schemes, but extra schemes may be
@@ -819,65 +790,70 @@ Implementations MUST specify the salt as a stream attribute named {\em
 salt} in base 64 encoding. Implementations are free to specify any API
 for passing the Pre-Shared Key, for example the PSK can be specified
 in a configuration file, typed in at the terminal, passed in using
-process environment variables, or encoded within the FIF filename
+process environment variables, or encoded within the AFF4 filename
 itself.
 
-\subsection{Optional features}
-Implementations may implement the following features to simplify the
-interfaces.
+\subsection{Private Streams}
+Often forensic software needs to store internal state, such as the
+current state of the GUI, or internal data structures which may be
+required for caching. Usually, software create additional cache files
+to maintain this information. It is advantageous to be able to store
+these in the evidence file itself. The evidence file can then be
+re-opened by the software at a later stage and private data can be
+retrieved and used directly. Such private application data can be
+stored in a Private stream. There is no specification of what can be
+stored in the private stream, and applications with private streams
+should be able to store arbitrary segments in any format at all.
 
-\subsubsection{Automated volume loading}
-FIF volumes are effectively independent, as each volume does not need
-to know anything about other volumes. This makes it necessary to
-specify in advance all volumes for the implementation to merge them
-all. In particular it may be necessary to specify encrypted volumes
-(which may not be read if the user has no authorization for the
-Encrypted Stream).
-
-As an optional enhancement FIF specifies a volume attribute named {\em
-volume} (i.e. an attribute present in the top level ``properties''
-segment). This is a target reference (see section
-\ref{target_reference}) for other volumes. 
-Implementations should attempt to open external references (e.g. using
-the {\em file://} convention) before internal references. As new
-volumes are merged their volume attributes must be scanned for
-additional references. Each volume must list all other known volumes
-as volume attributes.
-
-In this way, encrypted volumes, and external volumes can be located
-and found automatically.
+It is recommended that applications name their private segment
+sufficiently accurately so as not to be confused with other
+applications, or different versions of the same application
+(e.g. ``pyflag/0.87/cache/'').
 
 
-\section{Implementation Recommendations}
-Since the individual chunks are simply files in a Zip archive, any zip
-library can be utilized for reading these chunks. However, this may
-not be efficient since simple Zip implementations might rescan the
+
+\section{Implementing AFF4 in AFFLIB}
+Although there are numerous ZIP implementations available
+today, we have created our own implementation using a combination of
+available open source technology and our own novel contributions. We
+are in the process of integrating this code into the AFFLIB library
+and performing extensive regression testing. 
+
+There are many reasons to develop our own ZIP64 implementation for
+AFF4:
+
+\begin{itemize}
+\item Most ZIP implementations do not implement the ZIP64
+  extensions. These extensions are required to support Evidence
+  Volumes larger than 2GB.
+\item Simple Zip implementations might rescan the
 Central Directory for each segment request. Since in practice there
-can be a large number of chunks in each volume, it is recommended that
-implementations build an index of offsets and length of each chunk
-into the file. This kind of index is very similar to the strategy
-other file formats use \cite{EWF}. The index may then be saved to the
-file by use of a Private stream.
+can be a large number of segments in a volume, it is advisable to have
+a ZIP64 implementation that is optimized to storing thousands (or even
+hundreds of thousands) of segments in an efficient data structure. 
+\item While the ZIP specification duplicates data found in the Central
+  Directory entry in each File Header (such as filename, size, CRC
+  etc), many implementations that we have examined only populate this
+  information in one of these places. In the interest of robustness,
+  we wanted to assure that data stored in both locations would be
+  populated to allow recovery of at least \emph{some} evidence that
+  might exist in damaged volumes. If central directory is lost, it is
+  possible to scan through the zip file and repair the central
+  directory from the File headers.
 
-Zip64 specifies duplicate data in the Central Directory entry for each
-segment and its File Header (such as filename, size, CRC etc). Many
-implementations only populate this information in one of these
-places. In the interest of robustness, it is recommended that FIF
-implementations populate both places at the slight expense of higher
-overheads, because this can be used to recover and correct damaged
-files. If the central directory is lost, it is possible to scan
-through the zip file and repair the central directory from the File
-headers.
-
-The underlying Zip implementation should support multiple writers
-simultaneously by interleaving their writes to the file. For example,
-for two streams being written concurrently, the new segments can be
-added to the same archive in any order. In addition, the volume may be
-closed and a new volume opened without writers being aware of
-this. Since all segments from all volumes are merged, streams can be
-split arbitrarily across volumes in any way. It is recommended that
-stream properties be written to each volume to ensure at least some of
-the stream can be used even if some volumes are lost.
+\item Our implementation supports simultaneous access by multiple
+  readers and writers. Our system allows concurrency by locking the
+  file and interleaving write operations. Managing simultaneous
+  writers is simplified through our update strategy which only writes
+  new segments to the file, never modifying old segments. 
+\item AFF4 ``properties'' have specific semantics above and beyond
+  normal segments. For example, AFF4 calls for all of the property
+  segments associated with a file to be merged together. Furthermore,
+  when updating the properties in a multi-volume Set, it is useful to
+  write the same properties to each volume to ensure at least some of
+the stream can be used even if some volumes are lost. Such
+functionality is not present in standard ZIP64 implementations.
+\end{itemize}
 
 \section{Usage Scenarios}
 In this section we describe how a FIF file format may be used in
@@ -963,12 +939,11 @@ instantaneous as they only need to write an extra ``properties'' file
 on the merged volumes.
 
 \section{Conclusion and Future Work}
-\subsection{Expanding AFFLIB for AFF4}
-Although we do not specify the exact API, implementations
-MUST make a stream opened for reading have at a minimum a read, seek
-and tell methods. Seeking MUST support the whence argument as
-described in the standard C implementation (i.e. allow seeking to the
-end of the stream).
 
 \bibliography{IEEEabrv,paper}
 \end{document}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
