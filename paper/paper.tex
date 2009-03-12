@@ -4,6 +4,19 @@
 %\documentclass{article}
 %\documentclass[12pt]{IEEEtran}
 %\documentclass{elsart5p}
+\usepackage{listings}
+\lstset{language=Python,
+	frame=single,
+	captionpos=b,
+	frameround=tttt,
+	basicstyle=\small,          % print whole listing small
+	keywordstyle=\color{black}\bfseries,
+                            % underlined bold black keywords
+	identifierstyle=,           % nothing happens
+	commentstyle=\color{white}, % white comments
+	stringstyle=\ttfamily,      % typewriter type for strings
+	showstringspaces=false}     % no special string spaces
+
 
 % DFRWS Call Information:
 % http://www.dfrws.org/2009/cfp.shtml
@@ -270,19 +283,21 @@ triple of (Subject, Attribute, Value). All metadata is reduced to the
 triple notation.
 
 \item \emph{An Evidence Volume} is a type of AFF Object which is
-responsible for providing storage to AFF segments. Volumes may be
-implemented in a number of ways, but must provide a mechanism for
-storing and retrieving segments by their URN. We discuss several
-Volume implementations below.
+responsible for providing storage to AFF segments. Volumes must
+provide a mechanism for storing and retrieving segments by their
+URN. We discuss two volume implementations below, namely the {\em
+Zip64 based volume} and the {\em Directory} based volume.
 
 \item \emph{A segment} is a single unit of data written to a volume. AFF4
   segments have a \emph{segment name} provided by their URN, a
   \emph{segment timestamp} in GMT, and the \emph{segment contents}.
 
 \item \emph{A stream} is an AFF Object which provides the ability to
-seek and read random data. Stream objects are free to implement their storage
-in a number of ways, but must provide clients the stream like
-interface. We discuss a number of stream types below.
+seek and read random data. Stream objects implement abstracted
+storage, but must provide clients the stream like interface. For
+example, we discuss the {\em Image stream} used to store large images,
+the {\em Map stream} used to create transformations and the {\em
+Encrypted stream} used to provide encryption.
 
 % Is it important to define this? do we use it?
 %\item \emph{An Evidence Set} is a loose collection of one or more Evidence
@@ -441,21 +456,60 @@ how the stream is processed.
 
 
 \subsection{ZIP64}
-For AFF4, we have changed AFF1's original container file format to
-ZIP64\cite{zipspecs}. There are many reasons for this decision:
+As described above, AFF4 volumes are only required to store and
+retrieve segments by their URN. For AFF4, we have changed the default
+volume container file format to ZIP64\cite{zipspecs}. There are many
+reasons for this decision:
 
 \begin{itemize}
 \item There is already wide support for the ZIP and ZIP64 formats. By
   migrating to these formats, we can take advantage of the rich number
-  of user and developer tools already available.
-\item ZIP64 includes a CRC32 and timestamp for each segment. We
-  believe that the additional integrity checks and timestamps will be
-  useful in a forensic environment.
+  of user and developer tools already available. The volume may be
+inspected using any number of commercial zip application (e.g. Windows
+Explorer natively supports Zip files).
+ 
+%% In not sure how this is relevant
+%\item ZIP64 includes a CRC32 and timestamp for each segment. We
+%  believe that the additional integrity checks and timestamps will be
+%  useful in a forensic environment.
+
 \item ZIP64 already includes support for the ``table of contents''
   envisioned but never implemented by Garfinkel; ZIP64 calls this
   table the ``Central Directory.'' It is written at the end of the
   ZIP64 volume.
+
+\item ZIP64 libraries are readily available making proprietary implementations of
+interfaces to the AFF4 volume format simple to write. For example a
+simple python program to dump out an Image stream is illustrated in
+Listing \ref{python_code}.
+
 \end{itemize}
+
+\begin{lstlisting}[
+	float=tb, label=python_code, caption=Sample Python code to
+	dump out an Image Stream. As can be seen the chunk index
+	segment is used to slice the data segment into chunks. The
+	chunks are decompressed and written to the output file.]
+volume=zipfile.ZipFile(FILE)
+outfd = open("dump.dd","w")
+bevy_count = 0
+
+while 1:
+    idx_segment = volume.read(STREAM + 
+		"%08d.idx" % bevy_count)
+    segment = volume.read(STREAM + 
+		"%08d" % bevy_count)
+    indexes = struct.unpack("<" + "l" * \
+	(len(idx_segment)/4),idx_segment)
+
+    for i in range(len(indexes)-1):
+	chunk = segment[indexes[i]:
+	                indexes[i+1]]
+        outfd.write(zlib.decompress(chunk))
+
+    bevy_count += 1
+\end{lstlisting}
+
 
 Figure~\ref{zip_structure} shows the basic structure of a Zip
 archive. As can be seen, the archive consists of a {\em Central Directory} (CD)
@@ -694,20 +748,23 @@ Where $mod$ is the modulus function and $floor$ signifies integer
 division. For example consider Figure~\ref{map}, which corresponds to a 3
 disk RAID-5 array.
 
-\begin{figure}
-\begin{Verbatim}[frame=single]
-stream_period=393216
-target_period=196608
+\begin{lstlisting}[
+	float=tb, caption=A Map stream that corresponds to a 3 disk
+	RAID-5 array. The targets are URNs for the respective
+        disks. Note that map coordinates are given in multiples of 
+	block size.,
+	label=ref, language=]
+aff4:block_size=64k 
+aff4:stream_period=6 
+aff4:target_period=3
 
-0,0,1
-65536,0,0
-131072,65536,2
-196608,65536,1
-262144,131072,0
-327680,131072,2
-\end{Verbatim}
-\caption{A Map stream that corresponds to a 3 disk RAID-5 array}\label{ref}
-\end{figure}
+0,0,disk1
+1,0,disk0
+2,1,disk2
+3,1,disk1
+4,2,disk0
+5,2,disk2
+\end{lstlisting}
 
 \subsection{The Overlay Stream}
 The Overlay Stream is a variant of the {\em Image} stream that
@@ -929,7 +986,12 @@ file formats, but often in a more awkward way.
 \subsubsection{Rapidly converting a set of DD images}
 Many hardware devices are available to acquire hard disks in the
 fields. These often produce a set of uncompressed images split at a
-certain size. If the images are split at exactly the same size its
+certain size. It is possible to construct a Map Stream which
+seamlessly reassembles the logical image from all the individual disk
+images. The new stream may be kept in its own volume and may be very
+small. 
+
+If the images are split at exactly the same size its
 possible to create a FIF archive consisting of a single Overlay
 Stream, with a chunk\_size set to the size of each of the images. The
 images can then be listed in order as external targets (e.g. {\em
