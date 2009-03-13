@@ -484,6 +484,9 @@ use an external resolver stored on a MySQL database to provide a
 Universal Resolver that shares information between different instances
 on the same network.
 
+Each URN within the AFF4 universe must have an ``\texttt{type}''
+attribute to denote the type of the Object.
+
 \begin{lstlisting}[
 	caption=Example properties files for several AFF4 objects (URNs are
 shortened for illustration).,
@@ -700,7 +703,11 @@ The Stream object provides random access to an abstract representation
 of a body of data. Our implementation allows the segments in a stream
 to be operated on as if they were a single file by supporting the
 traditional POSIX-like functionality of
-\texttt{open()}, \texttt{seek()}, \texttt{write()}, and \texttt{read()}.
+\texttt{open()}, \texttt{seek()}, \texttt{write()}, and
+\texttt{read()}. All streams must have the ``\texttt{size}'' attribute
+to denote the last bytes addressible within the stream. This is
+required in order to support the POSIX whence attribute which may
+require seeking from the end of the stream.
 
 The following describes a number of types of streams. It is important
 to note that clients of our implementation do not care how a
@@ -731,74 +738,86 @@ Stream - the data provided is the same.
 \label{image_stream}
 The AFF4 \emph{Image Stream} stores a single read-only forensic data
 set. For example, this stream might contains a hard disk image, a
-memory image or a network capture (in PCAP format).
+memory image or a network capture (in PCAP format). Image streams have
+an \texttt{aff2:type} attribute of \texttt{image}.
 
 Storage for the data is done by using multiple data segments stored on
 various volumes. Data segment URNs are derived by appending an 8
 digit, zero padded decimal integer representation of an incrementing
-id to the stream URN (e.g. ``urn:aff2:83a3d6db-85d5/00000032''). 
-
-
-Image streams must specify the
-\texttt{page\_size} attribute, as the number of image bytes each chunk
-contains. Pages may be compressed at the page level, or may be broken
-up into multiple chunks (typically 8KB), and individually
-compressed. In this case the beginning of the page segment will
-contain an offset table indicating the location of each compression
-chunk. This is similar to the technique used by the Expert Witness
-file format used by EnCase\cite{encase-3.0} and implemented by the
-open source libewf\cite{libewf} package.
-
-Pages can optionally be individually hashed, allowing for detection
-of modifications. The attribute \texttt{hash\_type} specifies the type of
-hash used (implementations will typically support md5,sha1 and sha256, but can
-define others). The hashes are stored in any number of segments within
-the stream, of arbitrary name. The hash segment names is provided by
-using the \texttt{hash\_name} stream attribute.
-
-Image streams must have at several attributes. First, they must have
-\texttt{type=image} to indicate that they are image streams. Streams
-must have a \texttt{size} attribute (specified in 8-bit bytes) to
-indicate the last addressable byte in the stream. Streams can have
-holes in them; in this case, attempts to read data from within the
-holes can generate an error or return NULLs.
-
-Hashes are calculated in an identical way to that defined by AFF1's
-crypto layer\cite{garfinkel:affcrypto}---that is, the full name of the
-segment (including stream component) is followed by a single NULL
-byte, followed by the (uncompressed) content of the chunk. The
-inclusion of the segment name ensure that even identical chunks in
-content will have a different hash and prevents reordering attacks.
-
-Each hash segment is a list of a chunk id encoded in 32 bit
-little endian integer format followed by the hash (the length of which
-depends on the hash itself). This approach is illustrated in Figure
-\ref{hash_index}. 
-
-Hash segments can contain any number of chunk hashes in them. It is
-recommended that a hash segment be created when a volume is closed to
-cover all the chunks within that volume. This allows for hashes to be
-verified even if some volumes are missing. The AFFLIB implementation
-may update a hash of a chunk previously set by an earlier hash
-segment---this would be required when a chunk is updated. The hash
-segment can then be signed to assure the integrity of the updated segment.
+id to the stream URN (e.g. ``urn:aff2:83a3d6db-85d5/00000032''). Each
+data segment is called a bevy and stores a number of compressed chunks
+back to back. The chunk index segment is a segment containing a list
+of relative offsets to the beginning of each chunks within the
+bevy. The chunk index segment URN is derived  by appending the bevy
+URN with ``.idx''. This is illustrated in Figure \ref{image_stream}.
 
 \begin{figure}[tb]
   \begin{center}
-  \mbox{\epsfxsize=0.6\columnwidth \epsffile{hash.eps}}
-  \caption{The structure of a hashing segment. The attributes {\em
-  hash} and {\em hash\_type} declare the hash segment. The segment
-  contains a list of integer encoded chunk id followed by an unencoded
-  hash for each chunk.}
-  \label{hash_index}
+  \mbox{\epsfxsize=0.6\columnwidth \epsffile{image_segments.eps}}
+  \caption{The structure of Image Stream Bevies. Each bevy is a
+collection of compressed chunks stored back to back. Relative chunk
+offsets are stored in the chunk index segment.}
+  \label{image_stream}
   \end{center}
 \end{figure}
 
-This design differs from AFF1, which creates a separate segment for
-each hash. AFF4 uses headers that are more verbose than the AFF
-segment headers. Therefore, creating a new segment for each hash value
-would result in too much overhead: Packing the hashes into a few
-segments it is possible to reduce this overhead to a minimum.
+Image streams specify the \texttt{chunk\_size} attribute, as the
+number of image bytes each chunk contains (typically chunk sizes are
+32kb). Also specified is the \texttt{chunks\_per\_segment} attribute
+which specifies how many chunks are stored in each bevy. Each chunk is
+compressed individually using the zlib compress algorithm. This
+general structure of storing chunks within larger segments similar to
+the technique used by the Expert Witness file format used by
+EnCase\cite{encase-3.0} and implemented by the open source
+libewf\cite{libewf} package. The advantages of keeping smaller sized
+chunks is the better match between requested size and the minimum size
+required for decompression. This means that less data is needed to be
+decompressed unnecessarily. 
+
+%% FIXME - hashing may apply to any segment not just bevies
+%Bevies can optionally be individually hashed, allowing for detection
+%of modifications. The attribute \texttt{hash\_type} specifies the type
+%of hash used (implementations will typically support md5,sha1 and
+%sha256, but can define others). The hashes are stored in any number of
+%segments within the stream, of arbitrary name. The hash segment names
+%is provided by using the \texttt{hash\_name} stream attribute.
+
+%Hashes are calculated in an identical way to that defined by AFF1's
+%crypto layer\cite{garfinkel:affcrypto}---that is, the full name of the
+%segment (including stream component) is followed by a single NULL
+%byte, followed by the (uncompressed) content of the chunk. The
+%inclusion of the segment name ensure that even identical chunks in
+%content will have a different hash and prevents reordering attacks.
+
+%Each hash segment is a list of a chunk id encoded in 32 bit
+%little endian integer format followed by the hash (the length of which
+%depends on the hash itself). This approach is illustrated in Figure
+%\ref{hash_index}. 
+
+%Hash segments can contain any number of chunk hashes in them. It is
+%recommended that a hash segment be created when a volume is closed to
+%cover all the chunks within that volume. This allows for hashes to be
+%verified even if some volumes are missing. The AFFLIB implementation
+%may update a hash of a chunk previously set by an earlier hash
+%segment---this would be required when a chunk is updated. The hash
+%segment can then be signed to assure the integrity of the updated segment.
+
+%\begin{figure}[tb]
+%  \begin{center}
+%  \mbox{\epsfxsize=0.6\columnwidth \epsffile{hash.eps}}
+%  \caption{The structure of a hashing segment. The attributes {\em
+%  hash} and {\em hash\_type} declare the hash segment. The segment
+%  contains a list of integer encoded chunk id followed by an unencoded
+%  hash for each chunk.}
+%  \label{hash_index}
+%  \end{center}
+%\end{figure}
+
+%This design differs from AFF1, which creates a separate segment for
+%each hash. AFF4 uses headers that are more verbose than the AFF
+%segment headers. Therefore, creating a new segment for each hash value
+%would result in too much overhead: Packing the hashes into a few
+%segments it is possible to reduce this overhead to a minimum.
 
 \subsection{The Map Stream}
 \label{map_stream}
@@ -812,24 +831,18 @@ mapping of the Physical Address Space through a page table
 transformation.  Zero Storage Carving \cite{Meijer2006} is a way of
 specifying carved files in terms of a sequence of blocks taken from
 the image; Cohen extended this concept to an arbitrary
-mapping function\cite{Cohen2007} . 
+mapping function\cite{Cohen2007} which can be used to describe
+arbitrary mappings of carved files within a single image. 
 
-AFF4 defines a common way in
-which the underlying storage system can apply transformations to
-existing data to produce transformed data. This transformation is
-performed using a \emph{map stream}.
+In this work we extend the mapping function concept to allow a single
+map to draw data from arbitrary streams (called {\em targets}). This
+transform is implemented via the {\em Map stream}.
 
-The Map stream defines a mapping function, as a piecewise continuous
-linear transform of one or more {\em target} streams to produce a new
-{\em stream}. Target streams are specified by using ``target''
-attribute, which may be used many times to provide a list of targets.
-
-The mapping function file consists of a series of lines, each
-containing three 64 bit integers separated by comma, and encoded using
-decimal notation. The integers represent stream offset, target offset
-and target number. Target numbers are an index to the list of targets
-given in the attribute section (list index starts at zero for the
-first entry).
+The mapping function is described in a segment named by appending a
+``/map'' to the stream URN. The segment data consists of a series of
+lines, each containing a stream offset, followed by a comma, and a
+target offset. Offsets are encoded using decimal notation, and are
+followed by a target URN.
 
 Denoting the stream offset by $x$, and the target offset by $y$, the
 Map specifies a set of points $(X_i,Y_i,T_i)$. Read requests for a
@@ -841,17 +854,18 @@ y = (x - X_i) + Y_i & &
 \end{eqnarray}
 
 For example, consider the following map:
-\begin{verbatim*}
-0,0,0
-4096,10000,0
-8192,5000,0
-\end{verbatim*}
+\begin{lstlisting}
+0,0,urn:aff2:83a3d6db-85d5
+4096,10000,urn:aff2:f901be8e-d4b2
+8192,5000,urn:aff2:83a3d6db-85d5
+\end{lstlisting}
 
 To read this stream we satisfy read requests of offsets between 0 and
-4095 in the stream from offset 0 in target 0. Requests for bytes
-between 4096 and 8191 are fetched from target 0 at offset
-10000. Finally bytes after 8192 (until the specified size of the
-stream) are fetched from offset 5000 in target 0.
+4095 in the stream from offset 0 to offset 4095 in
+\emph{urn:aff2:83a3d6db-85d5}. Requests for bytes between 4096 and 8191 are
+fetched from \emph{urn:aff2:f901be8e-d4b2} at offset 10000. Finally
+bytes after 8192 (until the specified size of the stream) are fetched
+from offset 5000 in \emph{urn:aff2:83a3d6db-85d5}.
 
 In order to efficiently express periodic maps such as those found in
 RAID arrays, the Map stream may be provided with two optional
@@ -864,7 +878,7 @@ y &:=& (x'-X_i) + Y_i + p \times T_p
 \end{eqnarray*}
 
 Where $mod$ is the modulus function and $floor$ signifies integer
-division. For example consider Figure~\ref{map}, which corresponds to a 3
+division. For example consider Listing~\ref{map}, which corresponds to a 3
 disk RAID-5 array.
 
 \begin{lstlisting}[
@@ -872,7 +886,7 @@ disk RAID-5 array.
 	RAID-5 array. The targets are URNs for the respective
         disks. Note that map coordinates are given in multiples of 
 	block size.,
-	label=ref, language=]
+	label=map, language=]
 aff4:block_size=64k 
 aff4:stream_period=6 
 aff4:target_period=3
@@ -885,78 +899,78 @@ aff4:target_period=3
 5,2,disk2
 \end{lstlisting}
 
-\subsection{The Overlay Stream}
-The Overlay Stream is a variant of the {\em Image} stream that
-provides a layer of indirection between requests made for specific
-bytes (or chunks or bevys) and the actual location where the requested
-information is stored. The main utility of the Overlay stream is in
-providing transparent access to legacy forensic formats, such as EWF.
+%\Subsection{The Overlay Stream}
+%The Overlay Stream Is A Variant Of The {\Em Image} Stream That
+%Provides A Layer Of Indirection Between Requests Made For Specific
+%Bytes (Or Chunks Or Bevys) And The Actual Location Where The Requested
+%Information Is Stored. The Main Utility Of The Overlay Stream Is In
+%Providing Transparent Access To Legacy Forensic Formats, Such As Ewf.
 
-To access these legacy file formats we only need to have an index of
-each chunk offset, and then directly use the overlayed files.  The {\em
-ewf2aff} tool provides such an overlay feature for EWF volumes by
-employing libewf to scan the internal data structures.
+%To Access These Legacy File Formats We Only Need To Have An Index Of
+%Each Chunk Offset, And Then Directly Use The Overlayed Files.  The {\Em
+%Ewf2aff} Tool Provides Such An Overlay Feature For Ewf Volumes By
+%Employing Libewf To Scan The Internal Data Structures.
 
-Overlay stream require that a \texttt{chunk\_size} attribute be specified. In
-addition the {\em compression\_type} attribute may be specified. The
-attribute should contain an integer corresponding to a suitable Zip
-compression scheme (e.g. DEFLATE). If not specified it is assumed
-that no compression is used.
+%Overlay Stream Require That A \Texttt{Chunk\_Size} Attribute Be Specified. In
+%Addition The {\Em Compression\_Type} Attribute May Be Specified. The
+%Attribute Should Contain An Integer Corresponding To A Suitable Zip
+%Compression Scheme (E.G. Deflate). If Not Specified It Is Assumed
+%That No Compression Is Used.
 
-The ``target'' stream attribute may be specified multiple times and
-refer to external files (See section \ref{target_reference}). There
-can be a number of overlay segments named ``stream name/overlay.00''
-which are all merged to a single overlay. If more than one overlay is
-present, the attribute {\em overlays} MUST be specify how many.
+%The ``Target'' Stream Attribute May Be Specified Multiple Times And
+%Refer To External Files (See Section \Ref{Target_Reference}). There
+%Can Be A Number Of Overlay Segments Named ``Stream Name/Overlay.00''
+%Which Are All Merged To A Single Overlay. If More Than One Overlay Is
+%Present, The Attribute {\Em Overlays} Must Be Specify How Many.
 
-The overlay segment contains a series of lines with comma delimited,
-decimal encoded, 64 bit integers representing chunk number, target
-offset, target length and target number. Target number is an index
-into the targets defined in the attributes (count starts with zero).
-Chunks are then fetched from the specified target and decompressed if
-necessary.
+%The Overlay Segment Contains A Series Of Lines With Comma Delimited,
+%Decimal Encoded, 64 Bit Integers Representing Chunk Number, Target
+%Offset, Target Length And Target Number. Target Number Is An Index
+%Into The Targets Defined In The Attributes (Count Starts With Zero).
+%Chunks Are Then Fetched From The Specified Target And Decompressed If
+%Necessary.
 
-It is possible to refer to the current file by providing a target of
-``file://.''. This can be useful for modifying an existing EWF file to
-be a AFF4 file. Since Zip files are normally read from the end of the
-file, but EWF are both read from the front of the file, it may be
-possible to append a AFF4 Central Directory to the end of an EWF file
-without interfering with the overlayed file. In this case the
-converted file can still be used as an EWF file without change, but
-could also be used as an AFF4 file.
+%It Is Possible To Refer To The Current File By Providing A Target Of
+%``File://.''. This Can Be Useful For Modifying An Existing Ewf File To
+%Be A Aff4 File. Since Zip Files Are Normally Read From The End Of The
+%File, But Ewf Are Both Read From The Front Of The File, It May Be
+%Possible To Append A Aff4 Central Directory To The End Of An Ewf File
+%Without Interfering With The Overlayed File. In This Case The
+%Converted File Can Still Be Used As An Ewf File Without Change, But
+%Could Also Be Used As An Aff4 File.
 
-In image streams some chunks may compress very well. In that case, the
-overheads introduced by the Zip File Header for each chunk in the
-Image stream may become unacceptably high. In that case its possible
-to use an {\em Overlay stream} to coalesce chunks into larger
-segments. This approach is illustrated in Figure \ref{overlay}.
+%In Image Streams Some Chunks May Compress Very Well. In That Case, The
+%Overheads Introduced By The Zip File Header For Each Chunk In The
+%Image Stream May Become Unacceptably High. In That Case Its Possible
+%To Use An {\Em Overlay Stream} To Coalesce Chunks Into Larger
+%Segments. This Approach Is Illustrated In Figure \Ref{Overlay}.
 
-\begin{figure}[tb]
-  \begin{center}
-  \mbox{\epsfxsize=0.6\columnwidth \epsffile{overlay.eps}}
-  \caption{The use of an Overlay Stream to overlay an image with
-coalesced chunks.}
-  \label{overlay}
-  \end{center}
-\end{figure}
+%\Begin{Figure}[Tb]
+%  \Begin{Center}
+%  \Mbox{\Epsfxsize=0.6\Columnwidth \Epsffile{Overlay.Eps}}
+%  \Caption{The Use Of An Overlay Stream To Overlay An Image With
+%Coalesced Chunks.}
+%  \Label{Overlay}
+%  \End{Center}
+%\End{Figure}
 
-In the above figure a segment is written to the AFF4 volume which
-contains a number of chunks back to back. An overlay stream then uses
-direct references to each compressed chunk within the coalesced
-segment. The target is then specified as the segment name. Although
-this technique is valid, it is generally discouraged since it breaks
-the appealing simplicity of the standard Image Stream.  It is no
-longer possible to simply unzip all the chunks and concatenate them
-together to recover the original image.
-
-
+%In The Above Figure A Segment Is Written To The Aff4 Volume Which
+%Contains A Number Of Chunks Back To Back. An Overlay Stream Then Uses
+%Direct References To Each Compressed Chunk Within The Coalesced
+%Segment. The Target Is Then Specified As The Segment Name. Although
+%This Technique Is Valid, It Is Generally Discouraged Since It Breaks
+%The Appealing Simplicity Of The Standard Image Stream.  It Is No
+%Longer Possible To Simply Unzip All The Chunks And Concatenate Them
+%Together To Recover The Original Image.
 
 \subsection{Encrypted Streams}
+\label{crypted_stream}
 Encryption is an important property in an evidence file format. In
 particular, multiple streams may be present in the file set, and often
 different access levels are desired. For example, for evidence set
 containing both network captures and disk images it may be desirable
-to limit access to streams based on legal authorizations.
+to limit access to streams based on legal authorizations, even though
+the same set is distributed to a number of people.
 
 Although the Zip64 standard specifies encryption, it is not suitable
 for our purposes since it encrypts each segment separately, and does
@@ -966,23 +980,29 @@ segments are compressed, as the uncompressed size of the segment may
 be deduced.
 
 AFF4 therefore introduces a new encryption scheme, the Encrypted
-Stream.  The Encrypted Stream is a stream that encapsulates other
-streams on a bevy-by-bevy basis. Each bevy transparently encrypted upon
-writing and decrypted on reading. The choice of algorithm and mode is declared in the
-Stream's \texttt{scheme} attribute. 
+Stream.  The Encrypted Stream provides transparent encryption and
+decryption onto a single target stream. The target stream actually
+stores the encrypted data, and read requests from the stream are
+satisfied by decrypting the relevant data from this backing
+stream. 
 
 The Encrypted Stream may contain any data at all. It is useful
 however, to store an actual AFF4 volume within the Encrypted
 stream. This provides block level encryption for the contained AFF4
-volume. It is recommended that Encrypted Streams containing a AFF
-volume set an attribute (\texttt{content-type=application/x-aff-volume})
-to allow implementations to automatically recognize volumes. This
-approach is illustrated in Figure~\ref{crypted_fif}.
+volume. It is recommended that Encrypted Streams containing an AFF4
+volume set an attribute \texttt{content-type=application/x-aff-volume}
+on the container stream, to allow implementations to automatically
+recognize volumes. This approach is illustrated in
+Figure~\ref{crypted_fif}.
 
 \begin{figure}[tb]
   \begin{center}
   \mbox{\epsfxsize=0.8\columnwidth \epsffile{crypted.eps}}
-  \caption{Embedding an encrypted AFF4 volume within an Encrypted Stream.}
+  \caption{Embedding an encrypted AFF4 volume within an Encrypted
+Stream. The container volume contains an encrypted stream backed by an
+image stream. Once the encrypted stream is opened, the volume stored
+on its image stream is accessible. Now it is possible to see the
+secret image stream stored within the volume.}
   \label{crypted_fif}
   \end{center}
 \end{figure}
@@ -999,8 +1019,7 @@ Encrypted scheme. This effectively allows arbitrary access policies to
 be implemented as only volumes which can be accessed can be merged.
 
 \subsection{Encryption Schemes}
-We specify a number of encryption schemes, but extra schemes may be
-defined by the implementation.
+Our implementation provides a number of encryption schemes.
 
 \subsubsection{Null Encryption}
 This scheme ({\em scheme=null}) specifies no encryption at all. This
@@ -1012,9 +1031,9 @@ This scheme ({\em scheme=aes-sha-psk}) uses AES for block level
 encryption, with the following SHA based ESSIV scheme, and Pre-Shared
 Key (passphrase).
 
-When creating a new volume, a master key is generated using the first
-128 bits of a SHA1 hash of the Pre-Shared-Key appended to a 64 bit
-random salt:
+When creating a new encryption stream, a master key is generated using
+the first 128 bits of a SHA1 hash of the Pre-Shared-Key appended to a
+64 bit random salt:
 \begin{eqnarray}
 Key_{Master} = \left | SHA1(salt + PSK) \right | _{128}
 \end{eqnarray}
@@ -1026,7 +1045,8 @@ integer, followed by the master key:
 IV = \left | SHA1(chunk\_id + Key_{Master}) \right | _{128}
 \end{eqnarray}
 
-The block is then encrypted or decrypted using AES with this IV.
+The block is then encrypted or decrypted using AES in CBC mode with
+this IV.
 
 Implementations MUST specify the salt as a stream attribute named {\em
 salt} in base 64 encoding. Implementations are free to specify any API
@@ -1051,7 +1071,6 @@ It is recommended that applications name their private segment
 sufficiently accurately so as not to be confused with other
 applications, or different versions of the same application
 (e.g. ``pyflag/0.87/cache/'').
-
 
 
 \section{Implementing AFF4 in AFFLIB}
@@ -1088,6 +1107,7 @@ hundreds of thousands) of segments in an efficient data structure.
   file and interleaving write operations. Managing simultaneous
   writers is simplified through our update strategy which only writes
   new segments to the file, never modifying old segments. 
+
 \item AFF4 ``properties'' have specific semantics above and beyond
   normal segments. For example, AFF4 calls for all of the property
   segments associated with a file to be merged together. Furthermore,
