@@ -9,7 +9,7 @@
 	frame=single,
 	captionpos=b,
 	frameround=tttt,
-	basicstyle=\small,          % print whole listing small
+	basicstyle=\scriptsize,
 	keywordstyle=\color{black}\bfseries,
                             % underlined bold black keywords
 	identifierstyle=,           % nothing happens
@@ -194,7 +194,7 @@ and Garfinkel's AFFLIB implementation:
   from its home-grown format to one of the existing standards. 
 \end{itemize}
 
-\subsection{Global Distributed Evidence Management}
+\section{Global Distributed Evidence Management}
 While Garfinkel designed AFF for use on a single machine that could
 both image evidence and perform analysis, the main use of AFF in
 practice has been in distributed environments in which imaging and
@@ -260,8 +260,6 @@ or the new format without modification.
 We call the result of our work effort AFF4.
 
 \section{Introducing AFF4}
-
-\subsection{New Concepts and Terminology}
 
 This section discusses the AFF4 terminology. 
 
@@ -430,36 +428,131 @@ location.
 %% for a single segment.
 %%\end{itemize}
 
-\subsection{Streams}
-As discussed above, individual segments in an AFF4 evidence set can be
-combined into a single logical object called a \emph{stream}. AFF4
-supports an arbitrary number of streams per volume. The AFFLIB library
-allows the segments in a stream to be operated on as if they were a
-single file inside a file system by supporting the traditional
-POSIX-like functionality of \texttt{open()}, \texttt{seek()} and
-\texttt{read()}.
+\section{Metadata and the Universal Resolver}
+The AFF4 model treats metadata as an abstract concept which may exists
+independently from the data itself. We term {\em metadata} to be a set
+of statements about objects, written in triple notations (Subject,
+Attribute, Value), where {\em Subject} is the URN of the object the
+statement is made about. Using this system we are able to store
+arbitrary attributes about any object in the AFF4 universe.
 
-AFFLIB also supports the \emph{writing} of streams, a feature that is
-used by Garfinkel's \texttt{aimage} disk imaging program. In general
-arbitrary writing to streams can be expensive, especially when writing
-is combined with seek operations. The current \texttt{aimage} program
-will create AFF files with gaps in them during its error recovery
-process (when \texttt{aimage} seeks to the end of a disk and reads it
-backwards in an attempt to get around media failures). We are working
-on a rewrite of \texttt{aimage} which performs imaging and recovery
-on bevy boundaries, rather than using the current arbitrary
-``high-water-mark'' and ``low-water-mark.''
+The AFF4 design extends beyond the management of a single volume,
+stream or image to a universal system for managing data of many
+types. This necessarily means that a single running instance is
+generally unable to have visibility of the entire AFF4 universe. For
+example, if a volume is opened which contains a Map Stream targeting a
+stream stored in a different volume, its not generally possible to
+tell in which volume the stream exists, and where that volume is
+actually stored.
 
-All streams within an Evidence Set \emph{must} have a properties segment. The
-properties segment describes what the stream contains and determines
-how the stream is processed. 
+To provide this global visibility of metadata we define a central
+metadata management entity, named the {\em Universal Resolver}. The
+Universal Resolver contains all the metadata about the AFF4 universe,
+that is to say it is able to resolve queries about any attribute about
+any URN in the universe.
 
+Although the resolver has complete visibility of all attributes, it is
+still useful to store metadata within the volume itself, particularly
+data pertaining to the volume itself. If we did not store the metadata
+within the volume itself, then the volume would not be accessible to
+implementations which do not have this metadata.
+
+To this end we define a way for serializing metadata statements (or
+triples) into a standard format which implementations can load into
+their respective resolvers when parsing the volume. Triples can be
+stored in segments having a URN ending with ``{\em properties}''. The
+AFFLIB implementation loads these segments automatically into the
+Universal Resolver. 
+
+Triples are stored within the properties segment one per line, with
+the subject URN (encoded according to RFC1737), followed by whitespace
+and the attribute name. This is then followed by the equal sign and
+the UTF8 encoding of the value. An example properties file for an
+Image Stream is shown in Listing \ref{image_metadata}.
+
+It is important to stress that the properties file is simply a
+serialization of statements into volume segments. The statements may
+exist without being stored in a volume (for example, being stored on
+an external SQL server). Alternatively, these statements may be stored
+in some other way inside or outside the volume (e.g. SQLite
+databases).
+
+When the volume is loaded, the AFFLIB implementation automatically
+loads any properties files and populates its Universal Resolver with
+the information it has visibility of. AFFLIB provides a mechanism to
+use an external resolver stored on a MySQL database to provide a
+Universal Resolver that shares information between different instances
+on the same network.
+
+\begin{lstlisting}[
+	caption=Example properties files for several AFF4 objects (URNs are
+shortened for illustration).,
+	label=image_metadata,
+	float=tb,
+	 ]
+Directory Volume:
+  urn:aff2:f901be8e-d4b2 aff2:stored=http://../case1/
+  urn:aff2:f901be8e-d4b2 aff2:type=directory
+
+ZipFile Volume:
+  urn:aff2:98a6dad6-4918 aff2:stored=file:///file.zip
+  urn:aff2:98a6dad6-4918 aff2:type=zip
+
+Image Stream:
+  urn:aff2:83a3d6db-85d5 aff2:stored=urn:aff2:f901be8e-d4b2
+  urn:aff2:83a3d6db-85d5 aff2:chunks_in_segment=256
+  urn:aff2:83a3d6db-85d5 aff2:chunk_size=32k
+  urn:aff2:83a3d6db-85d5 aff2:type=image
+  urn:aff2:83a3d6db-85d5 aff2:size=5242880
+
+Map Stream:
+  urn:aff2:ed8f1e7a-94aa aff2:target_period=3
+  urn:aff2:ed8f1e7a-94aa aff2:image_period=6
+  urn:aff2:ed8f1e7a-94aa aff2:blocksize=64k
+  urn:aff2:ed8f1e7a-94aa aff2:stored=urn:aff2:83a3d6db-85d5
+  urn:aff2:ed8f1e7a-94aa aff2:type=map
+  urn:aff2:ed8f1e7a-94aa aff2:size=0xA00000
+
+Link Object:
+  map aff2:target=urn:aff2:ed8f1e7a-94aa
+  map aff2:type=link
+\end{lstlisting}
+
+\section{Volumes}
+The volume object is responsible for providing storage for
+segments. Segments are stored and retrieved using their URNs. We
+describe two different implementations of volume objects, namely the
+{\em Directory Volume} and the {\em ZipFile Volume}. It is possible to
+convert from one implementation to another easily, without effecting
+any external references. This is because external references are to
+the Volume URN itself, so its safe to convert from one representation
+to another. In this way its possible for example, to unzip a Zip64
+volume into a directory and vice versa.
+
+\subsection{Directory Volumes}
+The Directory Volume is the simplest type of volume. It simply stores
+different segments based on their URNs in a single directory. Since
+some filesystems are unable to represent URNs accurately (e.g. Windows
+has many limitations on the types of characters allowed for a
+filename), the Directory Volume encodes URNs according to RFC1738
+\cite{RFC1738}; non-printable characters are escaped with a \%
+followed by the ASCII ordinal of the character.
+
+The Directory Volume uses the {\em aff2:stored} attribute to provide a
+base URL. The URL for each segment is then constructed by appending
+the escaped segment URN to the base URL. Note that there is no
+restriction on what type of URL this can be, so it may be a location
+on a filesystem (e.g. {\em file://some\_directory/}) or a location on a
+HTTP server (e.g. {\em http://intranet.server/some\_path}). In this
+way its possible to move the entire volume from a filesystem to a web
+server transparently.
+
+The Directory Volume stores its own URN in a special segment named
+``{\em \_\_URN\_\_}'' at the base of the directory.
 
 \subsection{ZIP64}
-As described above, AFF4 volumes are only required to store and
-retrieve segments by their URN. For AFF4, we have changed the default
-volume container file format to ZIP64\cite{zipspecs}. There are many
-reasons for this decision:
+For AFF4, we have changed the default volume container file format to
+ZIP64\cite{zipspecs}. There are many reasons for this decision:
 
 \begin{itemize}
 \item There is already wide support for the ZIP and ZIP64 formats. By
@@ -479,7 +572,7 @@ Explorer natively supports Zip files).
   ZIP64 volume.
 
 \item ZIP64 libraries are readily available making proprietary implementations of
-interfaces to the AFF4 volume format simple to write. For example a
+interfaces to the AFF4 volume format simple to write. For example, a
 simple python program to dump out an Image stream is illustrated in
 Listing \ref{python_code}.
 
@@ -490,24 +583,21 @@ Listing \ref{python_code}.
 	dump out an Image Stream. As can be seen the chunk index
 	segment is used to slice the data segment into chunks. The
 	chunks are decompressed and written to the output file.]
-volume=zipfile.ZipFile(FILE)
-outfd = open("dump.dd","w")
-bevy_count = 0
+volume=zipfile.ZipFile(INPUT_FILE)
+outfd = open(OUTPUT_FILE,"w")
+count = 0
 
 while 1:
-    idx_segment = volume.read(STREAM + 
-		"%08d.idx" % bevy_count)
-    segment = volume.read(STREAM + 
-		"%08d" % bevy_count)
-    indexes = struct.unpack("<" + "l" * \
-	(len(idx_segment)/4),idx_segment)
+    idx_segment = volume.read(STREAM+"/%08d.idx" % count)
+    bevy = volume.read(STREAM+"/%08d" % count)
+    indexes = struct.unpack("<" + "L" * 
+	(len(idx_segment)/4), idx_segment)
 
     for i in range(len(indexes)-1):
-	chunk = segment[indexes[i]:
-	                indexes[i+1]]
+	chunk = bevy[indexes[i]:indexes[i+1]]
         outfd.write(zlib.decompress(chunk))
 
-    bevy_count += 1
+    count += 1
 \end{lstlisting}
 
 
@@ -524,7 +614,7 @@ without needing to seek in the output file. This allows Zip files to
 be written to pipes for example, sending an image over the network
 using netcat or ssh.
 
-\begin{figure}[tb]
+\begin{figure}[]
   \begin{center}
   \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
   \caption{The basic structure of a Zip archive}
@@ -532,110 +622,132 @@ using netcat or ssh.
   \end{center}
 \end{figure}
 
-It is important to note that AFF4 only requires that the underlying storage mechanism
-be capable of storing multiple named segments of data. Although our
-AFF4 implementation will use the ZIP64 file format as an underlying storage
+It is important to note that AFF4 only requires that the volume be
+capable of storing multiple named segments of data. Although our AFF4
+implementation uses the ZIP64 file format as an underlying storage
 mechanism, our system also supports legacy AFF1 volumes as well as
 segments that are stored in other storage systems---for example,
 Amazon.com's Simple Storage System (S3)\cite{s2-aws-home-page-money}.
 
-\subsubsection{Unused ZIP64 Features}
-
+\subsection{Unused ZIP64 Features}
 There are a number of aspects in the Zip file format specifications
-which we do not utilize. 
+which we do not utilize.
 \begin{itemize}
 \item We ignore Zip64's built-in support for splitting
 archives into multiple ZIP files. Instead, our implementation treats
 each volume as complete and stand-alone ZIP file. The AFF4
-implementation then considers the segments contained within as 
-belonging to a larger collection. The reason behind this decision is that
-often it is needed to add new volumes to an existing set without
-modifying the existing set at all. Zip64's built-in support for
-splitting an archive renders each individual volume in the set
-unusable unless all are available. 
+implementation then considers the segments contained within as
+belonging to the universal collection. We provide the ability to split
+a stream across volumes automatically, as each segment may be stored
+in a different volume, and the Universal Resolver is used to find it.
 
 \item Although Zip64 also defines encryption and authentication
-extensions, we do not use them due to the
-restrictions imposed on their use and because they lack of functionality that is
-important for forensic user. Instead, we use AFF1's digital signature
-facilities for integrity and non-repudiation, and we introduce a new  stream based
-encryption scheme for ensuring data privacy (Section~\ref{crypted_stream}).
+extensions, we do not use them due to the restrictions imposed on
+their use and because they lack of functionality that is important for
+forensic user. Instead, we use AFF1's digital signature facilities for
+integrity and non-repudiation, and we introduce a new stream based
+encryption scheme for ensuring data privacy
+(Section~\ref{crypted_stream}).
 
 \end{itemize}
 
-\subsubsection{A Forensically Sound Strategy For Updating ZIP64 Files}
+%% Im not sure this is really that relevant here. Byte range updates
+%% can be achieved by an append and a map operation, which might be a
+%% better option for aimager working in dd_rescue mode.
 
-In many forensic applications, individual segments within the volume
-need to be updated. To this end, Garfinkel implemented several
-``update'' functions in AFF1\cite{garfinkel:aff}. 
+%\subsubsection{A Forensically Sound Strategy For Updating ZIP64 Files}
+%In many forensic applications, individual segments within the volume
+%need to be updated. To this end, Garfinkel implemented several
+%``update'' functions in AFF1\cite{garfinkel:aff}. 
 
-There were two problems with the original AFF updating approach:
-\begin{itemize}
-\item Updates can cause the volume to
-become fragmented as holes appear within the middle of the volume, and
-updated segments are added at the end.
-\item Updates could be performed silently, raising questions of
-  forensic soundness.
-\end{itemize}
+%There were two problems with the original AFF updating approach:
+%\begin{itemize}
+%\item Updates can cause the volume to
+%become fragmented as holes appear within the middle of the volume, and
+%updated segments are added at the end.
+%\item Updates could be performed silently, raising questions of
+%  forensic soundness.
+%\end{itemize}
 
-In AFF4, when a new segment is added to an existing volume, the new
-segment header overwrites the volume central directory, and the
-central directory should be rewritten including the new entry
-immediately after the last file in the archive. If it is not possible
-to overwrite the file, the new segment can be written at the end,
-followed by an updated copy of the central directory (in that case the
-old central directory remains in the file). This is illustrated in
-Figure \ref{zip_structure}. Implementations may delay
-writing the central directory until the file is closed; should the
-system crash before the central directory is written, it can be
-recovered by scanning the entire ZIP file.
+%In AFF4, when a new segment is added to an existing volume, the new
+%segment header overwrites the volume central directory, and the
+%central directory should be rewritten including the new entry
+%immediately after the last file in the archive. If it is not possible
+%to overwrite the file, the new segment can be written at the end,
+%followed by an updated copy of the central directory (in that case the
+%old central directory remains in the file). This is illustrated in
+%Figure \ref{zip_structure}. Implementations may delay
+%writing the central directory until the file is closed; should the
+%system crash before the central directory is written, it can be
+%recovered by scanning the entire ZIP file.
 
-A segment within the archive is considered to be updated when a new
-segment is added to the archive with the same name and a later
-timestamp. Implementations satisfy read requests for duplicate
-segment names with those segments with the later timestamp, or if the
-two timestamps are the same, the segment which appears at a later
-offset in the volume. This effectively allows for a segment to be
-updated without leading to internal volume fragmentation.
+%A segment within the archive is considered to be updated when a new
+%segment is added to the archive with the same name and a later
+%timestamp. Implementations satisfy read requests for duplicate
+%segment names with those segments with the later timestamp, or if the
+%two timestamps are the same, the segment which appears at a later
+%offset in the volume. This effectively allows for a segment to be
+%updated without leading to internal volume fragmentation.
 
-The fact that the older version of all updated segments remains intact
-within each volume can be used for auditing, or to allow a rollback to
-previous versions of the segment. We have created a new tool,
-\texttt{afrepack}, which can repack, split and manage AFF4 volumes by
-creating new volumes and redistributing segments among them.
+%The fact that the older version of all updated segments remains intact
+%within each volume can be used for auditing, or to allow a rollback to
+%previous versions of the segment. We have created a new tool,
+%\texttt{afrepack}, which can repack, split and manage AFF4 volumes by
+%creating new volumes and redistributing segments among them.
 
-\section{Standard AFF4 Streams}
-In this section we discuss specific stream types that we have created
-in our initial AFF4 implementation. 
+\section{Streams}
+The Stream object provides random access to an abstract representation
+of a body of data. Our implementation allows the segments in a stream
+to be operated on as if they were a single file by supporting the
+traditional POSIX-like functionality of
+\texttt{open()}, \texttt{seek()}, \texttt{write()}, and \texttt{read()}.
+
+The following describes a number of types of streams. It is important
+to note that clients of our implementation do not care how a
+particular stream is implemented. Streams are opened by their URNs,
+and the library itself ensure they provide the Stream interface. So
+for example, users do not care if a stream is a Map Stream or an Image
+Stream - the data provided is the same.
+
+%% Not sure how its relevant - maybe we can move it to a new section
+%% about randomly writing stream.
+
+%AFFLIB also supports the \emph{writing} of streams, a feature that is
+%used by Garfinkel's \texttt{aimage} disk imaging program. In general
+%arbitrary writing to streams can be expensive, especially when writing
+%is combined with seek operations. The current \texttt{aimage} program
+%will create AFF files with gaps in them during its error recovery
+%process (when \texttt{aimage} seeks to the end of a disk and reads it
+%backwards in an attempt to get around media failures). We are working
+%on a rewrite of \texttt{aimage} which performs imaging and recovery
+%on bevy boundaries, rather than using the current arbitrary
+%``high-water-mark'' and ``low-water-mark.''
+
+%All streams within an Evidence Set \emph{must} have a properties segment. The
+%properties segment describes what the stream contains and determines
+%how the stream is processed. 
 
 \subsection{The Image Stream}
 \label{image_stream}
-The AFF4 \emph{Image} stream contains a single read-only forensic data
-set. For example, this stream might contains a hard
-disk image, a memory image or a network capture (in PCAP
-format). Random read access into the stream is provided with
-AFFLIB. (AFFLIB also provided the ability to randomly \emph{write}
-into the evidence stream for sanitization purposes, although this
-feature may be removed at a later date.) 
+The AFF4 \emph{Image Stream} stores a single read-only forensic data
+set. For example, this stream might contains a hard disk image, a
+memory image or a network capture (in PCAP format).
 
-Image streams must have at several attributes. First, they must have
-\texttt{type=image} to indicate that they are image streams. Streams
-must have a \texttt{size} attribute (specified in 8-bit bytes) to
-indicate the last addressable byte in the stream. Streams can have
-holes in them; in this case, attempts to read data from within the
-holes can generate an error or return NULLs.
+Storage for the data is done by using multiple data segments stored on
+various volumes. Data segment URNs are derived by appending an 8
+digit, zero padded decimal integer representation of an incrementing
+id to the stream URN (e.g. ``urn:aff2:83a3d6db-85d5/00000032''). 
 
-The image itself is stored in \emph{pages} within the AFF4 file. Pages are
-segments named as an 8 digit, zero padded decimal integer
-representation of their chunk id (e.g. ``default/00000032''). Image
-streams must specify the \texttt{page\_size} attribute, as the number of
-image bytes each chunk contains. Pages may be compressed at the
-page level, or may be broken up into multiple chunks (typically 8KB),
-and individually compressed. In this case the beginning of the page
-segment will contain an offset table indicating the location of each
-compression chunk. This is similar to the technique used by the Expert
-Witness file format used by EnCase\cite{encase-3.0} and implemented by
-the open source libewf\cite{libewf} package.
+
+Image streams must specify the
+\texttt{page\_size} attribute, as the number of image bytes each chunk
+contains. Pages may be compressed at the page level, or may be broken
+up into multiple chunks (typically 8KB), and individually
+compressed. In this case the beginning of the page segment will
+contain an offset table indicating the location of each compression
+chunk. This is similar to the technique used by the Expert Witness
+file format used by EnCase\cite{encase-3.0} and implemented by the
+open source libewf\cite{libewf} package.
 
 Pages can optionally be individually hashed, allowing for detection
 of modifications. The attribute \texttt{hash\_type} specifies the type of
@@ -643,6 +755,13 @@ hash used (implementations will typically support md5,sha1 and sha256, but can
 define others). The hashes are stored in any number of segments within
 the stream, of arbitrary name. The hash segment names is provided by
 using the \texttt{hash\_name} stream attribute.
+
+Image streams must have at several attributes. First, they must have
+\texttt{type=image} to indicate that they are image streams. Streams
+must have a \texttt{size} attribute (specified in 8-bit bytes) to
+indicate the last addressable byte in the stream. Streams can have
+holes in them; in this case, attempts to read data from within the
+holes can generate an error or return NULLs.
 
 Hashes are calculated in an identical way to that defined by AFF1's
 crypto layer\cite{garfinkel:affcrypto}---that is, the full name of the
@@ -800,11 +919,11 @@ necessary.
 It is possible to refer to the current file by providing a target of
 ``file://.''. This can be useful for modifying an existing EWF file to
 be a AFF4 file. Since Zip files are normally read from the end of the
-file, but EWF are both read from the front of the file, it may
-be possible to append a AFF4 Central Directory to the end of an EWF file without
-interfering with the overlayed file. In this case the converted file
-can still be used as an EWF file without change, but could also be
-used as an AFF4 file.
+file, but EWF are both read from the front of the file, it may be
+possible to append a AFF4 Central Directory to the end of an EWF file
+without interfering with the overlayed file. In this case the
+converted file can still be used as an EWF file without change, but
+could also be used as an AFF4 file.
 
 In image streams some chunks may compress very well. In that case, the
 overheads introduced by the Zip File Header for each chunk in the
