@@ -152,6 +152,7 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 static void FileLikeObject_close(FileLikeObject self) {
   //talloc_free(self);
 };
+
 static void FileBackedObject_close(FileLikeObject self) {
   FileBackedObject this=(FileBackedObject)self;
 

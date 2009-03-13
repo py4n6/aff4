@@ -1103,51 +1103,26 @@ hundreds of thousands) of segments in an efficient data structure.
   directory from the File headers.
 
 \item Our implementation supports simultaneous access by multiple
-  readers and writers. Our system allows concurrency by locking the
-  file and interleaving write operations. Managing simultaneous
-  writers is simplified through our update strategy which only writes
-  new segments to the file, never modifying old segments. 
-
-\item AFF4 ``properties'' have specific semantics above and beyond
-  normal segments. For example, AFF4 calls for all of the property
-  segments associated with a file to be merged together. Furthermore,
-  when updating the properties in a multi-volume Set, it is useful to
-  write the same properties to each volume to ensure at least some of
-the stream can be used even if some volumes are lost. Such
-functionality is not present in standard ZIP64 implementations.
+  readers and writers. Since our system requires all metadata to be
+  shared through the Universal Resolver, this lends itself to
+  providing Universal Locking on a per Object basis. So for example,
+  if one process wants to add a new segment into a Zip volume, they
+  can lock it via the Resolver, add the segment and unlock the volume
+  object in the resolver.
 \end{itemize}
 
 \section{Usage Scenarios}
-In this section we describe how a FIF file format may be used in
-various situations. Many of those can be solved using other forensic
-file formats, but often in a more awkward way.
+In this section we describe how AFF4 may be used in various
+situations. Many of those can be solved using other forensic file
+formats, but often in a more awkward way.
 
 \subsubsection{Rapidly converting a set of DD images}
 Many hardware devices are available to acquire hard disks in the
 fields. These often produce a set of uncompressed images split at a
 certain size. It is possible to construct a Map Stream which
 seamlessly reassembles the logical image from all the individual disk
-images. The new stream may be kept in its own volume and may be very
-small. 
-
-If the images are split at exactly the same size its
-possible to create a FIF archive consisting of a single Overlay
-Stream, with a chunk\_size set to the size of each of the images. The
-images can then be listed in order as external targets (e.g. {\em
-target=file://disk1.dd}). This overlay can be created instantly
-without needing to re-compress any of the images. In addition, digital
-signatures can be generated for the whole stream or for each segment.
-
-\subsubsection{Rapid conversion of EWF file sets}
-Much existing evidence has been acquired using the EWF file
-format. This format, similarly, consists of a series of chunks which
-may be compressed, with interdispersed indexes. A tool such as
-``ewf2fif'' is able to utilize the libewf library to create an Overlay
-stream of the original image without the need to re-compress it. This
-conversion is very quick and the resulting FIF file is very small -
-each volume in the EWF file set is referenced through an external
-target reference, and the Overlay Stream is built as an index of each
-chunk location.
+images. The map stream may be kept in its own volume, or appended to
+one (or all) of the image fragments.
 
 \subsubsection{Acquisition of RAID disks}
 Often disks in a system are grouped into RAID devices, commonly RAID-5
@@ -1155,14 +1130,29 @@ or RAID-0. Previously, if disks were acquired independently, they
 would need to be analysed using a tool which was able to reassemble
 RAID devices.
 
-With the FIF format, each of the disks can be acquired as a separate
-Image Stream. Finally a tool such as PyFlag may be used to deduce the
-RAID map, which can be appended to the FIF file as a Map Stream. This
-Map Stream can then be opened by any tool without the tool needing to
-have explicit support for RAID reassembling.
+With the AFF4 format, each of the disks can be acquired as a separate
+Image Stream. Finally a tool such as PyFlag \cite{pyflag_raid} may be
+used to deduce the RAID map, which can be appended to the AFF4 file as
+a Map Stream. This Map Stream can then be opened by any tool to get a
+logical view of the RAID, without the tool needing to have explicit
+support for RAID reassembling.
+
+\subsubsection{In-place encryption of AFF4 volumes}
+With the large size of a typical forensic image it is often difficult
+to have to create a second copy of a volume which needs to be
+encrypted. It is usually more convenient to encrypt the file in place,
+overwriting the plain text data with the equivalent encrypted data.
+
+This can be achieved using the technique shown in
+Figure~\ref{inplace_crypto}. The first step is to encrypt the first
+block from the front of the file and add it to the end of the archive
+as a new encrypted segment. Then a ZipFile header is written to the
+front which encapsulates the rest of the plain text volume. The plain
+text volume is then encrypted in place. Finally a map stream is used
+to re-map the first and second fragments into place, and a 
 
 \subsubsection{Cryptographic management of evidence}
-A FIF archive may hold multiple encrypted volumes, each in its own
+An AFF4 archive may hold multiple encrypted volumes, each in its own
 Encrypted Stream. Each of those streams is encrypted using a different
 master key, and therefore can have different passphrases, and can be
 assigned to different users by encrypting the master key with

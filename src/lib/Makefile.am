@@ -16,3 +16,8 @@ if HAVE_LIBAFFLIB
 libaff2_la_LDFLAGS       += -lcurl
 libaff2_la_SOURCES       += http.c
 endif
+
+if HAVE_OPENSSL
+libaff2_la_LDFLAGS       += -lssl
+libaff2_la_SOURCES       += encrypt.c
+endif

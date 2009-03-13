@@ -275,7 +275,7 @@ extern char *_traceback;
 #define VMETHOD(method)				\
   (this)->method
 #define VATTR(attribute)			\
-  (this)->attribute
+  ((this)->attribute)
 
 #define INIT_CLASS(class)					\
   if(!__ ## class ## _initialised) { class ## _init(); }

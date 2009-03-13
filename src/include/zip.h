@@ -7,7 +7,7 @@
 #include <zlib.h>
 
 #define HASH_TABLE_SIZE 256
-#define CACHE_SIZE 5
+#define CACHE_SIZE 15
 
 // A helper to access the URN or an object.
 #define URNOF(x)  ((AFFObject)x)->urn
@@ -339,6 +339,26 @@ CLASS(MapDriver, FileLikeObject)
      void METHOD(MapDriver, save_map);
 END_CLASS
 
+/************************************************************
+  An implementation of the encrypted Stream.
+
+  This stream encrypts and decrypts data from a target stream in
+  blocks determined by the "block_size" attribute. The IV consists of
+  the block number (as 32 bit int in little endian) appended to an 8
+  byte salt.
+*************************************************************/
+CLASS(Encrypted, FileLikeObject)
+     StringIO block_buffer;
+     char *key;
+     char *salt;
+     char *target_urn;
+     // Our volume urn
+     char *volume;
+
+     // The block size for CBC mode
+     int block_size;
+END_CLASS
+
 // A blob is a single lump of data
 CLASS(Blob, AFFObject)
      char *data;
@@ -467,5 +487,7 @@ END_CLASS
 // This is the main FIF class - it manages the Zip archive
 CLASS(FIFFile, ZipFile)
 END_CLASS
+
+void dump_stream_properties(FileLikeObject self, char *volume);
 
 #endif

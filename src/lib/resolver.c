@@ -15,6 +15,7 @@ static struct dispatch_t dispatch[] = {
   { "link", (AFFObject)&__Link },
   { "image", (AFFObject)&__Image },
   { "map", (AFFObject)&__MapDriver},
+  { "encrypted", (AFFObject)&__Encrypted},
   { "file://", (AFFObject)&__FileBackedObject },
   // All handled by libcurl
   { "http://", (AFFObject)&__HTTPObject },
@@ -39,6 +40,7 @@ void AFF2_Init(void) {
   Resolver_init();
   Link_init();
   HTTPObject_init();
+  Encrypted_init();
 
   init_luts();
 
@@ -290,7 +292,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
-  //  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
+  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
   
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {
@@ -470,7 +472,7 @@ static AFFObject AFFObject_Con(AFFObject self, char *uri) {
 
 
 static void AFFObject_set_property(AFFObject self, char *attribute, char *value) {
-  CALL(oracle, add,
+  CALL(oracle, set,
        self->urn,
        attribute, value);
 };

@@ -421,6 +421,83 @@ void test_http_handle() {
 
 };
 
+void test_encrypted(char *filename) {
+  ZipFile container = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  FileLikeObject encrypted_stream, embedded_stream;
+  ZipFile embedded_volume;
+  char *container_urn = talloc_strdup(NULL, URNOF(container));
+  char *encrypted_stream_uri, *embedded_stream_uri, *embedded_volume_uri;
+
+  CALL((AFFObject)container, set_property, "aff2:stored", "file://" TEST_FILE);
+
+  if(!CALL((AFFObject)container, finish))
+    return;
+
+  // Create an encrypted stream:
+  encrypted_stream = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Encrypted);
+  // The encrypted stream is in the container
+  CALL((AFFObject)encrypted_stream, set_property, "aff2:stored", URNOF(container));
+
+  // Create an embedded Image stream inside the encrypted stream:
+  embedded_stream = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
+  CALL((AFFObject)embedded_stream, set_property, "aff2:stored", URNOF(container));
+  CALL((AFFObject)encrypted_stream, set_property, "aff2:target", URNOF(embedded_stream));
+
+  if(!CALL((AFFObject)encrypted_stream, finish)) {
+    CALL(oracle, cache_return, (AFFObject)container);
+    return;
+  };
+
+  if(!CALL((AFFObject)embedded_stream, finish)) {
+    CALL(oracle, cache_return, (AFFObject)encrypted_stream);
+    CALL(oracle, cache_return, (AFFObject)container);
+    return;
+  };
+
+  // Finished with those
+  CALL(oracle, cache_return, (AFFObject)container);
+  CALL(oracle, cache_return, (AFFObject)embedded_stream);
+  CALL(oracle, cache_return, (AFFObject)encrypted_stream);
+
+  // Create a new volume inside the embedded stream
+  embedded_volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  CALL((AFFObject)embedded_volume, set_property, "aff2:stored", URNOF(encrypted_stream));
+
+  if(!CALL((AFFObject)embedded_volume, finish)) {
+    CALL(oracle, cache_return, (AFFObject)embedded_stream);
+    CALL(oracle, cache_return, (AFFObject)encrypted_stream);
+    CALL(oracle, cache_return, (AFFObject)container);
+    return;
+  };
+
+  encrypted_stream_uri = talloc_strdup(container_urn, URNOF(encrypted_stream));
+  embedded_volume_uri = talloc_strdup(container_urn, URNOF(embedded_volume));
+  embedded_stream_uri = talloc_strdup(container_urn, URNOF(embedded_stream));
+
+  CALL(oracle, cache_return, (AFFObject)embedded_volume);
+
+  // Now put the image on it:
+  create_image(embedded_volume_uri, "/bin/ls", "encrypted");
+
+  embedded_volume = CALL(oracle, open, NULL, embedded_volume_uri);
+  CALL(embedded_volume, close);
+  CALL(oracle, cache_return, (AFFObject)embedded_volume);
+
+  encrypted_stream = CALL(oracle, open, NULL, encrypted_stream_uri);
+  CALL(encrypted_stream, close);
+  CALL(oracle, cache_return, (AFFObject)encrypted_stream);
+
+  /*
+  embedded_stream = CALL(oracle, open, NULL, embedded_stream_uri);
+  CALL(embedded_stream, close);
+  CALL(oracle, cache_return, (AFFObject)embedded_stream);
+  */
+
+  container = CALL(oracle, open, NULL, container_urn);
+  CALL(container, close);
+  CALL(oracle, cache_return, (AFFObject)container);
+};
+
 int main() {
   //  talloc_enable_leak_report_full();
   /*
@@ -454,12 +531,16 @@ int main() {
   ClearError();
   test_map_read( "file://" TEST_FILE);
   PrintError();
- */
 
   AFF2_Init();
   ClearError();
   test_map_read("http://127.0.0.1/" TEST_FILE);
   PrintError();
-
+  */
+  AFF2_Init();
+  ClearError();
+  test_encrypted(TEST_FILE);
+  PrintError();
+  
   return 0;
 };

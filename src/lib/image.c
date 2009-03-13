@@ -227,29 +227,10 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
 static void Image_close(FileLikeObject self) {
   Image this = (Image)self;
-  char tmp[BUFF_SIZE];
-  char *properties;
 
   // Write the last chunk
   dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
-
-  // Set the stream size
-  snprintf(tmp, BUFF_SIZE, "%lld", self->size);
-  CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
-
-  // Write out a properties file
-  properties = CALL(oracle, export, URNOF(self));
-  if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, this->parent_urn);
-
-    snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
-    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
-	 NULL, 0, ZIP_STORED);
-
-    talloc_free(properties);
-    // Done with zipfile
-    CALL(oracle, cache_return, (AFFObject)zipfile);
-  };
+  dump_stream_properties(self, this->parent_urn);
 
   this->__super__->close(self);
 };
@@ -425,6 +406,30 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
 
   return len;
 };
+
+void dump_stream_properties(FileLikeObject self, char *volume) {
+  char tmp[BUFF_SIZE];
+  char *properties;
+
+  // Set the stream size
+  snprintf(tmp, BUFF_SIZE, "%lld", self->size);
+  CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
+
+  // Write out a properties file
+  properties = CALL(oracle, export, URNOF(self));
+  if(properties) {
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume);
+
+    snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
+    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
+	 NULL, 0, ZIP_STORED);
+
+    talloc_free(properties);
+    // Done with zipfile
+    CALL(oracle, cache_return, (AFFObject)zipfile);
+  };
+};
+
 
 VIRTUAL(Image, FileLikeObject)
      VMETHOD(super.super.Con) = Image_Con;

@@ -110,6 +110,27 @@ fi
 #curl support
 LIBCURL_CHECK_CONFIG([yes], [], have_libcurl=yes, have_libcurl=no)
 
+################################################################
+################################################################
+## Crypto (must follow S3)
+###
+AC_CHECK_LIB([ssl],[ssl3_new], have_openssl=yes, have_openssl=no)
+
+AC_CHECK_HEADERS([openssl/aes.h openssl/bio.h openssl/evp.h openssl/hmac.h openssl/md5.h openssl/rand.h openssl/rsa.h openssl/sha.h openssl/pem.h])
+
+AC_CHECK_FUNCS([MD5 SHA1 AES_encrypt RAND_pseudo_bytes des_read_pw_string EVP_read_pw_string])
+AC_CHECK_LIB([md],[MD5])                # if libmd is available, get it
+
+### SHA256 insanity. 
+### Some sha.h include files have sha256 defined and some do not
+### Some systems put it in a different location.
+### the whole thing is really disturbing
+AC_CHECK_HEADERS([sha256.h])            # on some system
+AC_CHECK_HEADERS([openssl/fips_sha.h])  # on other systems
+AC_CHECK_FUNCS([SHA256_Init])           # try to figure out what it's called
+AC_CHECK_FUNCS([EVP_sha256],[evp_sha256=yes],[evp_sha256="no "])
+AC_CHECK_FUNCS([PEM_read_bio_RSA_PUBKEY])
+
 ## Conditionals for automake
 AM_CONDITIONAL(HAVE_LIBAFFLIB, test "$have_libafflib" = yes)
 AM_CONDITIONAL(HAVE_LIBEWF, test "$have_libewf" = yes)
@@ -117,7 +138,7 @@ AM_CONDITIONAL(HAVE_GEOIP, test "$have_geoip" = yes)
 AM_CONDITIONAL(HAVE_LIBJPEG, test "$have_libjpeg" = yes)
 AM_CONDITIONAL(HAVE_WINDOWS, test "$have_windows" = yes)
 AM_CONDITIONAL(HAVE_LIBCURL, test "$have_libcurl" = yes)
-
+AM_CONDITIONAL(HAVE_OPENSSL, test "$have_openssl" = yes)
 # defines and output
 AC_DEFINE([__DEBUG__], [], [Debuging enabled])
 
@@ -140,5 +161,6 @@ AC_MSG_NOTICE([FIFLib ${PACKAGE} ${VERSION} configuration])
 AC_MSG_NOTICE([EWF Support:             $have_libewf ])
 AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
 AC_MSG_NOTICE([CURL Support:            $have_libcurl ])
+AC_MSG_NOTICE([Encryption Support:      $have_openssl ])
 AC_MSG_NOTICE([*****************************************])
 AC_MSG_NOTICE([])
