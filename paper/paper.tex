@@ -94,6 +94,7 @@ preserve its existence and integrity. As a result, preserving digital
 evidence is an important part of most digital
 investigations\cite{carrier:event-based}.
 
+\subsection{Prior Work}
 In recent years there has been a steady and growing interest in the
 actual file formats and containers used to store this digital
 evidence. Early practitioners created exact bit-for-bit copies
@@ -124,6 +125,12 @@ of evidence and arbitrary evidence related information, through a
 simple data model and globally unique referencing
 scheme\cite{schatz:sdeb}. 
 
+Recently the open source AFF implementation library (AFFLIB) was
+expanded to support both encryption and digital signatures of digital
+evidence\cite{garfinkel:affcrypto}. Clearly, the implementation of
+encryption and authentication is critical for forensic file formats.
+
+\subsection{This paper}
 The AFF4 metadata model described in this work, is based on (subject,
 property, value) statements. An explicitly defined subject (identified
 by an AFF4 URN) allows one to not only associate traditional EWF style
@@ -133,11 +140,6 @@ the matter. For example, an AFF4 compliant hard disk acquisition tool
 should, in addition to storing an image, store entities representing
 and describing the tool itself, the operator of the tool, the user
 supplied parameters supplied to the tool, and the drive being imaged.
-
-Recently the open source AFF implementation library (AFFLIB) was
-expanded to support both encryption and digital signatures of digital
-evidence\cite{garfinkel:affcrypto}. Clearly, the implementation of
-encryption and authentication is critical for forensic file formats.
 
 This paper extends the previous work by adapting AFF to the multiple
 heterogeneous data types that might arise in a modern digital

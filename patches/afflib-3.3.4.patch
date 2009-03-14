@@ -1,0 +1,6640 @@
+--- afflib-3.3.4/configure.ac	2008-09-30 05:45:05.000000000 +1000
++++ afflib-3.3.4_AFF2/configure.ac	2009-03-09 19:58:24.000000000 +1100
+@@ -30,7 +30,8 @@ ACX_PTHREAD()
+ # AC_PROG_RANLIB not needed if you are using AC_PROG_LIBTOOL
+ # AC_PROG_RANLIB
+ AC_CONFIG_FILES([Makefile lib/Makefile tools/Makefile lzma443/Makefile win32/Makefile 
+-			  tests/Makefile doc/Makefile pyaff/Makefile])
++			  tests/Makefile doc/Makefile pyaff/Makefile \
++	lib/libaff2/Makefile])
+ dnl Have configure make distribution specific files
+ AC_CONFIG_FILES([debian/changelog])
+ AC_CONFIG_FILES([debian/shlibs.local.ex])
+--- afflib-3.3.4/lib/afflib.cpp	2008-09-12 09:49:39.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/afflib.cpp	2009-03-09 19:44:58.000000000 +1100
+@@ -55,6 +55,7 @@
+ #include "vnode_aff.h"
+ #include "vnode_afd.h"
+ #include "vnode_ewf.h"
++#include "vnode_aff2.h"
+ 
+ #ifdef USE_QEMU
+ #include "vnode_qemu.h"
+@@ -78,6 +79,7 @@ struct af_vnode *af_vnode_array[] = {
+ #ifdef USE_S3
+     &vnode_s3,				// must be first for s3:// interpertation
+ #endif
++    &vnode_aff2,
+     &vnode_afd, 
+     &vnode_afm,				// must be before aff
+     &vnode_aff,
+--- afflib-3.3.4/lib/afflib_i.h	2008-09-24 18:00:39.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/afflib_i.h	2009-03-09 19:48:35.000000000 +1100
+@@ -494,14 +494,14 @@ const char *af_identify_file_name(const 
+ #define AF_IDENTIFY_RAW 0		// file is a raw file
+ #define AF_IDENTIFY_AFF 1		// file is an AFF file
+ #define AF_IDENTIFY_AFD 2		// file is a directory of AFF files
+-#define AF_IDENTIFY_EVF 3		// file is an EnCase file
++#define AF_IDENTI1FY_EVF 3		// file is an EnCase file
+ #define AF_IDENTIFY_EVD 4		// file is a .E01 file when there are more files following
+ #define AF_IDENTIFY_SPLIT_RAW 5		// file is a split raw file
+ #define AF_IDENTIFY_AFM 6               // file is raw file with metadata
+ #define AF_IDENTIFY_EWF 7		// libewf
+ #define AF_IDENTIFY_S3  8		// is an s3:/// file
+ #define AF_IDENTIFY_QEMU 9		// is this a file that the QEMU image system can handle?
+-
++#define AF_IDENTIFY_AFF2 10             // AFF version 2 file.
+ 
+ #define AF_IDENTIFY_ERR -1		// error encountered on identify
+ #define AF_IDENTIFY_NOEXIST -2		// file does not exist
+--- afflib-3.3.4/lib/libaff2/blob.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/blob.c	2009-03-08 20:25:28.000000000 +1100
+@@ -0,0 +1,44 @@
++#include "zip.h"
++
++/** This is the implementation for the blob AFFObject */
++AFFObject Blob_Con(AFFObject self, char *urn) {
++  Blob this = (Blob)self;
++
++  /** If urn was provided it means we need to go get ourselves */
++  if(urn) {
++    ZipFile zipfile;
++    char *url;
++
++    // First step - we need to ask the oracle about where the blob is
++    // actually stored:
++    url = CALL(oracle, resolve, urn, "aff2:location");
++    if(!url) {
++      RaiseError(ERuntimeError, "Unable to resolve volume storing blob %s", urn);
++      goto error;
++    }
++
++    // Now we ask the oracle to open the volume:
++    zipfile = (ZipFile)CALL(oracle, open, self, url);
++    if(!zipfile) {
++      goto error;
++    };
++
++    // Keep a copy of the data
++    this->data = zipfile->read_member((ZipFile)zipfile, this, urn, &this->length);
++    CALL(oracle, cache_return, (AFFObject)zipfile);
++
++    self->urn = talloc_strdup(self, urn);
++  } else {
++    this->__super__->Con(self, urn);
++  };
++
++  return self;
++
++ error:
++  talloc_free(self);
++  return NULL;
++};
++
++VIRTUAL(Blob, AFFObject)
++     VMETHOD(super.Con) = Blob_Con;
++END_VIRTUAL
+--- afflib-3.3.4/lib/libaff2/class.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/class.c	2009-03-10 00:02:06.000000000 +1100
+@@ -0,0 +1,80 @@
++/******************************************************
++# Copyright 2004: Commonwealth of Australia.
++#
++# Developed by the Computer Network Vulnerability Team,
++# Information Security Group.
++# Department of Defence.
++#
++# Michael Cohen <scudette@users.sourceforge.net>
++#
++# ******************************************************
++#  Version: FLAG  $Version: 0.87-pre1 Date: Thu Jun 12 00:48:38 EST 2008$
++# ******************************************************
++#
++# * This program is free software; you can redistribute it and/or
++# * modify it under the terms of the GNU General Public License
++# * as published by the Free Software Foundation; either version 2
++# * of the License, or (at your option) any later version.
++# *
++# * This program is distributed in the hope that it will be useful,
++# * but WITHOUT ANY WARRANTY; without even the implied warranty of
++# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# * GNU General Public License for more details.
++# *
++# * You should have received a copy of the GNU General Public License
++# * along with this program; if not, write to the Free Software
++# * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
++# ******************************************************/
++#include "class.h"
++
++/** This is used for error reporting.
++ */
++char *__error_str;
++enum _error_type _global_error;
++char *_traceback=NULL;
++
++void *raise_errors(enum _error_type t, char *reason, ...) {
++  if(reason) {
++    va_list ap;
++    va_start(ap, reason);
++    _traceback = talloc_vasprintf_append(_traceback, reason,ap);
++    va_end(ap);
++  };
++
++  _global_error = t;
++
++  return NULL;
++};
++
++// Noone should instantiate Object directly. this should be already
++// allocated therefore:
++
++inline void Object_Alloc(Object this) {
++  this->__class__ = &__Object;
++  this->__super__ = NULL;
++};
++
++inline void Object_init() {
++  Object_Alloc(&__Object);
++};
++
++struct Object_t __Object = {
++  .__class__ = &__Object,
++  .__super__ = &__Object,
++  .__size = sizeof(struct Object_t)
++};
++
++int issubclass(Object obj, Object class, void (init)()) {
++  init();
++
++  obj = obj->__class__;
++  while(1) {
++    if(obj == class->__class__)
++      return 1;
++
++    obj=obj->__super__;
++
++    if(obj == &__Object || obj==NULL) 
++      return 0;
++  };
++};
+--- afflib-3.3.4/lib/libaff2/image.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/image.c	2009-03-09 21:03:17.000000000 +1100
+@@ -0,0 +1,436 @@
++#include "zip.h"
++
++/*************************************************************
++  The Image stream works by collecting chunks into segments. Chunks
++  are compressed seperately using zlib's compress function.
++
++  Defined attributes:
++
++  aff2:type                "image"
++  aff2:chunk_size          The size of the chunk in bytes (32k)
++  aff2:chunks_in_segment   The number of chunks in each segment (2048)
++  aff2:stored              The URN of the object which stores this
++                           stream - This must be a "volume" object
++  aff2:size                The size of this stream in bytes (0)
++
++  Note that segments are "blob" objects with an implied URN of:
++
++  "%s/%08d" % (Image.urn, segment_number)
++
++**************************************************************/
++
++
++// The segments created by the Image stream are named by segment
++// number with this format.
++#define IMAGE_SEGMENT_NAME_FORMAT "%s/%08d"  /** Stream URN, segment_id */
++
++/** This specialised hashing is for integer keys */
++static unsigned int cache_hash_int(Cache self, void *key) {
++  uint32_t int_key = *(uint32_t *)key;
++
++  return int_key % self->hash_table_width;
++};
++
++static int cache_cmp_int(Cache self, void *other) {
++  uint32_t int_key = *(uint32_t *)self->key;
++  uint32_t int_other = *(uint32_t *)other;  
++
++  return int_key != int_other;
++};
++
++int Image_destructor(void *this) {
++  Image self = (Image)this;
++
++  CALL((FileLikeObject)self, close);
++
++  return 0;
++};
++
++static AFFObject Image_Con(AFFObject self, char *uri) {
++  Image this=(Image)self;
++  char *value;
++
++  if(uri) {
++    self->urn = talloc_strdup(self, uri);
++
++    // These are the essential properties:
++    value = resolver_get_with_default(oracle, self->urn, "aff2:chunk_size", "32k");
++    this->chunk_size = parse_int(value);
++    
++    value = resolver_get_with_default(oracle, self->urn, "aff2:chunks_in_segment", "2048");
++    this->chunks_in_segment = parse_int(value);
++
++    value = resolver_get_with_default(oracle, self->urn, "aff2:size", "0");
++    this->super.size = parse_int(value);
++
++    this->parent_urn = CALL(oracle, resolve, URNOF(this), "aff2:stored");
++    if(this->parent_urn)
++      this->parent_urn = talloc_strdup(self, this->parent_urn);
++
++    // Make sure the oracle knows we are an image
++    CALL(oracle, set, self->urn, "aff2:type", "image");
++
++    this->chunk_buffer = talloc_size(self, this->chunk_size);
++
++    this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
++    // This is a hack to make us pre-allocate the buffer
++    CALL(this->segment_buffer, seek, this->chunk_size * this->chunks_in_segment, SEEK_SET);
++    CALL(this->segment_buffer, seek, 0, SEEK_SET);
++
++    this->chunk_count = 0;
++    this->segment_count =0;
++    
++    this->chunk_indexes = talloc_array(self, int32_t, this->chunks_in_segment + 2);
++    // Fill it with -1 to indicate an invalid pointer
++    memset(this->chunk_indexes, 0xff, sizeof(int32_t) * this->chunks_in_segment);
++
++    // Initialise the chunk cache:
++    this->chunk_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, CACHE_SIZE);
++
++    // We need to use slightly different hashing and cmp operations as
++    // we will be using the chunk_id (int) as a key:
++    this->chunk_cache->hash = cache_hash_int;
++    this->chunk_cache->cmp = cache_cmp_int;
++  } else {
++    // Call our baseclass
++    this->__super__->super.Con(self, uri);
++  };
++
++  // NOTE - its a really bad idea to set destructors which call
++  // close() because they might try to reaccess the cache, which may
++  // be invalid while we get free (basically a reference cycle).  The
++  // downside is that we insist people call close() explicitely.
++  // talloc_set_destructor(self, Image_destructor);
++  return self;
++};
++  
++AFFObject Image_finish(AFFObject self) {
++  return CALL(self, Con, self->urn);
++};
++
++/** This is how we implement the Image stream writer:
++
++As new data is written we append it to the chunk buffer, then we
++remove chunk sized buffers from it and push them to the segment. When
++the segment is full we dump it to the parent container set.
++**/
++static int dump_chunk(Image this, char *data, uint32_t length, int force) {
++  // We just use compress() to get the compressed buffer.
++  char cbuffer[2*compressBound(length)];
++  int clength=2*compressBound(length);
++
++  // Should we offer to store chunks uncompressed?
++  if(0) {
++    memcpy(cbuffer, data, length);
++    clength = length;
++  } else {
++    if(compress((unsigned char *)cbuffer, (unsigned long int *)&clength, 
++		(unsigned char *)data, (unsigned long int)length) != Z_OK) {
++      RaiseError(ERuntimeError, "Compression error");
++      return -1;
++    };
++  };
++  
++  // Update the index to point at the current segment stream buffer
++  // offset
++  this->chunk_indexes[this->chunk_count] = this->segment_buffer->readptr;
++  
++  // Now write the buffer to the stream buffer
++  CALL(this->segment_buffer, write, cbuffer, clength);
++  this->chunk_count ++;
++  
++  // Is the segment buffer full? If it has enough chunks in it we
++  // can flush it out. We need to find out where our storage is and
++  // open a ZipFile on it:
++  if(this->chunk_count >= this->chunks_in_segment || force) {
++    char tmp[BUFF_SIZE];
++    ZipFile parent;
++
++    if(!this->parent_urn) {
++      RaiseError(ERuntimeError, "No storage for Image stream?");
++      goto error;
++    }
++
++    parent  = (ZipFile)CALL(oracle, open, this, this->parent_urn);
++    // Format the segment name
++    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
++	     this->segment_count);
++
++    // Push one more offset to the index to cover the last chunk
++    this->chunk_indexes[this->chunk_count + 1] = this->segment_buffer->readptr;
++
++    printf("Dumping segment %s\n", tmp);
++
++    // Store the entire segment in the zip file
++    CALL((ZipFile)parent, writestr,
++	 tmp, this->segment_buffer->data, 
++	 this->segment_buffer->readptr, 
++	 NULL, 0,
++	 // No compression for segments
++	 ZIP_STORED
++	 );
++
++    // Now write the index file which accompanies the segment
++    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
++	     ((AFFObject)this)->urn, 
++	     this->segment_count);
++
++    CALL((ZipFile)parent, writestr,
++	 tmp, (char *)this->chunk_indexes,
++	 (this->chunk_count + 1) * sizeof(uint32_t),
++	 NULL, 0,
++	 ZIP_STORED
++	 );
++
++    // Done with parent
++    CALL(oracle, cache_return, (AFFObject)parent);
++	 
++    // Reset everything to the start
++    CALL(this->segment_buffer, truncate, 0);
++    memset(this->chunk_indexes, -1, sizeof(int32_t) * this->chunks_in_segment);
++    this->chunk_count =0;
++    // Next segment
++    this->segment_count ++;
++  };
++  
++  return clength;
++ error:
++  return -1;
++};
++
++static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
++  Image this = (Image)self;
++  int available_to_read;
++  int buffer_readptr=0;
++
++  while(buffer_readptr < length) {
++    available_to_read = min(this->chunk_size - this->chunk_buffer_readptr, 
++			    length - buffer_readptr);
++    memcpy(this->chunk_buffer + this->chunk_buffer_readptr,
++	   buffer + buffer_readptr, available_to_read);
++    this->chunk_buffer_readptr += available_to_read;
++
++    if(this->chunk_buffer_readptr == this->chunk_size) {
++      if(dump_chunk(this, this->chunk_buffer, this->chunk_size, 0)<0)
++	return -1;
++      this->chunk_buffer_readptr = 0;
++    };
++
++    buffer_readptr += available_to_read;
++    self->readptr += available_to_read;
++  };
++  
++  self->size = max(self->readptr, self->size);
++
++  return length;
++};
++
++static void Image_close(FileLikeObject self) {
++  Image this = (Image)self;
++  char tmp[BUFF_SIZE];
++  char *properties;
++
++  // Write the last chunk
++  dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
++
++  // Set the stream size
++  snprintf(tmp, BUFF_SIZE, "%lld", self->size);
++  CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
++
++  // Write out a properties file
++  properties = CALL(oracle, export_uri, URNOF(self));
++  if(properties) {
++    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, this->parent_urn);
++
++    snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
++    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
++	 NULL, 0, ZIP_STORED);
++
++    talloc_free(properties);
++    // Done with zipfile
++    CALL(oracle, cache_return, (AFFObject)zipfile);
++  };
++
++  this->__super__->close(self);
++};
++
++/** Reads at most a single chunk and write to result. Return how much
++    data was actually read.
++*/
++static int partial_read(FileLikeObject self, StringIO result, int length) {
++  Image this = (Image)self;
++
++  // which segment is it?
++  uint32_t chunk_id = self->readptr / this->chunk_size;
++  int segment_id = chunk_id / this->chunks_in_segment;
++  int chunk_index_in_segment = chunk_id % this->chunks_in_segment;
++  int chunk_offset = self->readptr % this->chunk_size;
++  int available_to_read = min(this->chunk_size - chunk_offset, length);
++
++  /* Temporary storage for the compressed chunk */
++  char compressed_chunk[this->chunk_size + 1024];
++  unsigned int compressed_length;
++
++  /* Temporary storage for the uncompressed chunk */
++  char *uncompressed_chunk;
++  unsigned int uncompressed_length=this->chunk_size + 1024;
++
++  /** Now we need to figure out where the segment is */
++  char buffer[BUFF_SIZE];
++  ZipFile parent;
++  FileLikeObject fd;
++  int32_t chunk_offset_in_segment;
++
++  /** Fast path - check if the chunk is already cached.  If it is - we
++  can just copy a subset of it on the result and get out of here....
++  Note that we maintain a seperate cache of chunks because if we
++  cached the entire segment (which could be very large) we would
++  exhaust our cache memory very quickly.
++  */
++  Cache chunk_cache = CALL(this->chunk_cache, get, &chunk_id);
++  if(chunk_cache) {
++    available_to_read = min(available_to_read, chunk_cache->data_len);
++
++    // Copy it on the result stream
++    length = CALL(result, write, chunk_cache->data + chunk_offset, 
++		  available_to_read);
++    
++    self->readptr += length;
++
++    return length;
++  };
++
++  // Make some memory on the heap - it will be stolen by the cache
++  uncompressed_chunk = talloc_size(self, uncompressed_length);
++  
++  /** First we need to locate the chunk indexes */
++  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
++	   ((AFFObject)this)->urn, 
++	   segment_id);
++
++  // Now we work out the offsets on the chunk in the segment - we read
++  // the segment index which is a blob:
++  {
++    Blob temp_blob = (Blob)CALL(oracle, open, self, buffer);
++    int32_t *chunk_index;
++    int chunks_in_segment;
++
++    if(!temp_blob) {
++      RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
++      goto error;
++    };
++    
++    /** This holds the index into the segment of all the chunks.
++	It is an array of chunks_in_segment ints long.
++    */
++    chunk_index = (int32_t *)temp_blob->data;
++    chunks_in_segment = temp_blob->length / sizeof(int32_t);
++    
++    /** By here we have the chunk_index which is an array of offsets
++	into the segment where the chunks begin. We work out the size of
++	the chunk by subtracting the next chunk offset from the current
++	one. It seems to be ok to over read here so if the numbers dont
++	make too much sense we just choose to overread.
++    */
++    compressed_length = min((uint32_t)chunk_index[chunk_index_in_segment+1] -
++			    (uint32_t)chunk_index[chunk_index_in_segment], 
++			    this->chunk_size + 1024);
++    
++    /** Now obtain a handler directly into the segment */
++    snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
++	     ((AFFObject)this)->urn, 
++	     segment_id);
++    
++    chunk_offset_in_segment = (uint32_t)chunk_index[chunk_index_in_segment];
++    CALL(oracle, cache_return, (AFFObject)temp_blob);
++  };
++
++  // Now we need to read the ZipFile directly
++  parent = (ZipFile)CALL(oracle, open, self, this->parent_urn);
++  if(!parent) {
++    RaiseError(ERuntimeError, "No storage for Image stream?");
++    goto error;
++  }
++  
++  fd = CALL((ZipFile)parent, open_member, buffer, 'r', NULL, 0, ZIP_STORED);
++
++  // Fetch the compressed chunk
++  CALL(fd, seek, chunk_offset_in_segment, SEEK_SET);
++
++  //  printf("compressed_length %d %d ", compressed_length, uncompressed_length);
++  CALL(fd, read, compressed_chunk, compressed_length);
++
++  // Done with parent and blob
++  CALL(oracle, cache_return, (AFFObject)parent);
++  CALL(fd, close);
++  talloc_free(fd);
++
++  // Try to decompress it:
++  if(uncompress((unsigned char *)uncompressed_chunk, 
++		(unsigned long int *)&uncompressed_length, 
++		(unsigned char *)compressed_chunk,
++		(unsigned long int)compressed_length) != Z_OK ) {
++    RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
++    goto error;
++  };
++  
++  //  printf("%d\n", uncompressed_length);
++  // Copy it on the output stream
++  length = CALL(result, write, uncompressed_chunk + chunk_offset, 
++		available_to_read);
++
++  self->readptr += available_to_read;
++
++  // OK - now cache the uncompressed_chunk (this will steal it so we
++  // dont need to free it):
++  CALL(this->chunk_cache, put, talloc_memdup(NULL, &chunk_id, sizeof(chunk_id)),
++       uncompressed_chunk,
++       uncompressed_length);
++
++  return length;
++
++  error: {
++    char pad[available_to_read];
++
++    memset(pad,0, this->chunk_size);
++    length = CALL(result, write, pad, available_to_read);
++
++    self->readptr += available_to_read;
++    talloc_free(uncompressed_chunk);
++    return length;
++  };
++};
++
++// Reads from the image stream
++static int Image_read(FileLikeObject self, char *buffer, unsigned long int length) {
++  StringIO result = CONSTRUCT(StringIO, StringIO, Con, self);
++  int read_length;
++  int len = 0;
++
++  // Clip the read to the stream size
++  length = min(length, self->size - self->readptr);
++
++  // Just execute as many partial reads as are needed to satisfy the
++  // length requested
++  while(len < length ) {
++    read_length = partial_read(self, result, length - len);
++    if(read_length <=0) break;
++    len += read_length;
++  };
++
++  CALL(result, seek, 0, SEEK_SET);
++  read_length = CALL(result, read, buffer, length);
++
++  talloc_free(result);
++
++  return len;
++};
++
++VIRTUAL(Image, FileLikeObject)
++     VMETHOD(super.super.Con) = Image_Con;
++     VMETHOD(super.super.finish) = Image_finish;
++     VMETHOD(super.read) = Image_read;
++     VMETHOD(super.write) = Image_write;
++     VMETHOD(super.close) = Image_close;
++END_VIRTUAL
++
+--- afflib-3.3.4/lib/libaff2/include/class.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/class.h	2009-03-10 00:02:29.000000000 +1100
+@@ -0,0 +1,436 @@
++/***************************************************
++  Classes and objects in C
++
++  This file makes it easy to implement classes and objects in C. To
++  define a class we need to perform three steps:
++
++  Define the class prototype. This is suitable to go in a .h file for
++  general use by other code.
++
++  Note all classes extend Object.
++
++  Example::
++
++CLASS(Foo, Object)
++    int x;
++    int y;
++
++    //This declares a method of a class Foo, called Con returning a
++    //Foo object. In other words it is a constructor.
++    Foo METHOD(Foo, Con, int x, int y);
++    int METHOD(Foo, add);
++
++END_CLASS
++
++Now we need to define some functions for the constructor and
++methods. Note that the constuctor is using ALLOCATE_CLASS to allocate
++space for the class structures. Callers may call with self==NULL to
++force allocation of a new class. Note that we do not call the
++constructor of our superclass implicitly here. (Calling the sperclass
++constructor is optional, but ALLOCATE_CLASS is not.).
++
++Foo Foo_Con(Foo self,int x,int y) {
++  self->x = x;
++  self->y = y;
++
++  return self;
++};
++
++int Foo_add(Foo this) {
++  return (this->x + this->y);
++};
++
++Now we need to define the Virtual function table - These are those
++functions and attributes which are defined in this class (over its
++superclass). Basically these are all those things in the class
++definition above, with real function names binding them. (Note that by
++convention we preceed the name of the method with the name of the
++class):
++
++VIRTUAL(Foo,Object)
++   VMETHOD(Con) = Foo_Con;
++   VMETHOD(add) = Foo_add;
++END_VIRTUAL
++
++We can use inheritance too:
++
++CLASS(Bar, Foo)
++   Bar METHOD(Bar, Con, char *something)
++END_CLASS
++
++Here Bar extends Foo and defines a new constructor with a different prototype:
++
++VIRTUAL(Bar,Foo)
++   VMETHOD(Con) = Bar_Con
++END_VIRTUAL
++
++If there is a function which expects a Foo, we will need to over ride
++the Foo constructor in the Bar, so the function will not see the
++difference between the Foo and Bar:
++
++CLASS(Bar,Foo)
++  int bar_attr;
++END_CLASS
++
++Foo Bar_Con(Foo self, int x, int y) {
++...
++}
++
++VIRTUAL(Bar, Foo)
++  VMETHOD(super.Con) = Bar_Con
++END_VIRTUAL
++
++Note that in this case we are over riding the Con method defined in
++Foo while creating derived Bar classes. The notation in the VIRTUAL
++table is to use super.Con, because Foo's Con method (the one we are
++over riding), can be located by using super.Con inside a Bar object.
++
++Imagine now that in Bar_Con we wish to use methods and attributes
++defined in Bar. Since Bar_Con over rides Bar's base class (Foo) it
++must have the prototype described above. Since self is of type Foo its
++impossible to use self->bar_attr (There is no bar_attr in Foo - its in
++Bar).
++
++In this case, we need to make a type cast to convice C that self is
++actually a Bar not a Foo:
++
++Foo Bar_Con(Foo self, int x, int y) {
++   Bar this = (Bar)self;
++
++   this->bar_attr=1
++};
++
++This allows us to access bars attributes.
++
++This is a general oddity with C style classes, which C++ and Java
++hide. In C we must always know which class defines which method and
++attribute and reference the right class's method. So for example if we
++want to call a Bar's add method:
++
++Bar a;
++
++a->super.add()
++
++because add is defined in Bar's super class (Foo). Constract this with
++C++ or Java which hide where methods are defined and simply make all
++methods appear like they were defined inside the derived class. This
++takes a while to get used to but the compiler will ensure that the
++references are correct - otherwise things will generally not compile
++properly.
++
++This difference can be used for good and bad. It is possible in C to
++call the base class's version of the method at any time (despite the
++fact it was over ridden). 
++
++For example:
++
++CLASS(Derived, Foo)
++      int METHOD(Derived, add);
++END_CLASS
++
++VIRTUAL(Derived, Foo)
++   VMETHOD(add) = Derived_add
++END_VIRTUAL
++
++If d is a Derived object, we can call Foo's version like this:
++d->super.add()
++
++But Derived's version is accessed by:
++d->add()
++
++Sometimes a derived class may want to over ride the base class's
++methods as well, in this case the VIRTUAL section should over ride
++super.add as well.
++
++*/
++/******************************************************
++# Copyright 2004: Commonwealth of Australia.
++#
++# Developed by the Computer Network Vulnerability Team,
++# Information Security Group.
++# Department of Defence.
++#
++# Michael Cohen <scudette@users.sourceforge.net>
++#
++# ******************************************************
++#  Version: FLAG  $Version: 0.87-pre1 Date: Thu Jun 12 00:48:38 EST 2008$
++# ******************************************************
++#
++# * This program is free software; you can redistribute it and/or
++# * modify it under the terms of the GNU General Public License
++# * as published by the Free Software Foundation; either version 2
++# * of the License, or (at your option) any later version.
++# *
++# * This program is distributed in the hope that it will be useful,
++# * but WITHOUT ANY WARRANTY; without even the implied warranty of
++# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# * GNU General Public License for more details.
++# *
++# * You should have received a copy of the GNU General Public License
++# * along with this program; if not, write to the Free Software
++# * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
++# ******************************************************/
++#ifndef __CLASS_H__
++#define __CLASS_H__
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++#ifdef min
++#undef min
++#endif
++#define min(X, Y)  ((X) < (Y) ? (X) : (Y))
++
++extern char *_traceback;
++
++#ifdef max
++#undef max
++#endif
++#define max(X, Y)  ((X) > (Y) ? (X) : (Y))
++
++
++#include "talloc.h"
++
++#define CLASS(class,super_class)			\
++  typedef struct class ## _t *class;				\
++  inline void class ## _init(void);				\
++  void class ## _Alloc(class self);			\
++  extern int __ ## class ## _initialised;		\
++  extern struct class ## _t __ ## class;			\
++  struct class ## _t { struct super_class ## _t super;		 \
++    class __class__;					 \
++    super_class __super__;
++
++#define METHOD(class,name, ... )		\
++  (* name)(class self, ## __VA_ARGS__ )
++
++/***************************************************
++   This is a convenience macro which may be used if x if really large
++
++***************************************************/
++#define CALL(x, method, ... )			\
++  (x)->method((x), ## __VA_ARGS__)
++
++#define END_CLASS };
++
++/***************************************************
++   This is used to set the classes up for use:
++
++   class_init = checks the class template (__class) to see if it has
++   been allocated. otherwise allocates it in the global context.
++
++   class_Alloc = Allocates new memory for an instance of the
++   class. This is a recursive function calling each super class in
++   turn and setting the currently over ridden defaults. So for eample
++   suppose this class (foo) derives from bar, we first fill the
++   template with bars methods, and attributes. Then we over write
++   those with foos methods and attributes.
++
++**********************************************************/
++#define __DEBUG__ 1
++
++#ifdef __DEBUG__
++
++#define VIRTUAL(class,superclass)				\
++  struct class ## _t __ ## class;					\
++  inline void class ## _Alloc(class self);				\
++  inline void class ## _init(void) {					\
++    if(!__ ## class ## _initialised) {					\
++      class ## _Alloc(&__ ## class);					\
++      __ ## class ## _initialised = 1;					\
++    };									\
++  };									\
++  int __ ## class ## _initialised=0;					\
++  inline void class ## _Alloc(class self) {					\
++    superclass ## _init();						\
++    superclass ##_Alloc((superclass)self);				\
++    ((Object)self)->__class__ = (Object)&__ ## class;			\
++    self->__class__ = &__ ## class;					\
++    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
++    self->__super__ = &__ ## superclass;				\
++    ((Object)self)->__size = sizeof(struct class ## _t);			\
++    ((Object)self)->__name__ = #class;
++
++#else
++
++#define VIRTUAL(class,superclass)				\
++  struct class ## _t __ ## class;					\
++  inline void class ## _Alloc(class self);				\
++  inline void class ## _init(void) {					\
++    if(!__ ## class ## _initialised) {					\
++      class ## _Alloc(&__ ## class);					\
++      __ ## class ## _initialised = 1;					\
++    };									\
++  };									\
++  int __ ## class ## _initialised=0;					\
++  inline void class ## _Alloc(class self) {					\
++    superclass ## _init();						\
++    superclass ##_Alloc((superclass)self);				\
++    ((Object)self)->__class__ = (Object)&__ ## class;			\
++    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
++    ((Object)self)->__size = sizeof(struct class ## _t);
++
++#endif
++
++#define SET_DOCSTRING(string)			\
++  ((Object)self)->__doc__ = string
++
++#define END_VIRTUAL };
++
++#define VMETHOD(method)				\
++  (self)->method
++#define VATTR(attribute)			\
++  (self)->attribute
++
++#define INIT_CLASS(class)					\
++  if(!__ ## class ## _initialised) { class ## _init(); }
++
++#define NAMEOF(obj)				\
++  ((Object)obj)->__name__
++
++#define DOCSTRING(obj)				\
++  ((Object)obj)->__doc__
++
++/*************************************************************
++   This MACRO is used to construct a new Class using a constructor.
++
++    This is done to try and hide the bare (unbound) method names in
++    order to prevent name space pollution. (Bare methods may be
++    defined as static within the implementation file). This macro
++    ensures that class structures are initialised properly before
++    calling their constructors.
++
++   We require the following args:
++    class - the type of class to make
++    virt_class - The class where the method was defined
++    constructors - The constructor method to use
++    context - a talloc context to use.
++
++
++    Note that the class and virt_class do not have to be the same if
++    the method was not defined in the current class. For example
++    suppose Foo extends Bar, but method is defined in Bar but
++    inherited in Foo:
++
++    CONSTRUCT(Foo, Bar, super.method, context)
++
++    virt_class is Bar because thats where method was defined.
++*************************************************************/
++
++#ifdef __DEBUG__
++#define CONSTRUCT(class, virt_class, constructor, context, ... )		\
++  (class)( class ## _init(), virt_class ## _init(),			\
++	   __ ## class.constructor(					\
++				   (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
++				   ## __VA_ARGS__) )
++
++/** This variant is useful when all we have is a class reference
++    (GETCLASS(Foo)) or &__Foo
++*/
++#define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
++  ( class->constructor(						\
++		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
++		      ## __VA_ARGS__) )
++
++#else
++#define CONSTRUCT(class, virt_class, constructor, context, ... )		\
++  (class)( class ## _init(), virt_class ## _init(),			\
++	   __ ## class.constructor(					\
++				   (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class ## _t)), \
++				   ## __VA_ARGS__) )
++
++#define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
++  ( class->constructor(							\
++		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
++		      ## __VA_ARGS__) )
++
++#endif
++
++/** Finds the size of the class in x */
++#define CLASS_SIZE(class)			\
++  ((Object)class)->__size
++
++typedef struct Object_t *Object;
++
++struct Object_t {
++  //A reference to a class instance - this is useful to be able to
++  //tell which class an object really belongs to:
++  Object __class__;
++
++  //And its super class:
++  Object __super__;
++
++  char *__name__;
++
++  /** Objects may have a doc string associated with them. */
++  char *__doc__;
++
++  //How large the class is:
++  int __size;
++};
++
++#define GETCLASS(class)				\
++  (Object)&__ ## class
++
++// Returns true if the obj belongs to the class
++#define ISINSTANCE(obj,class)			\
++  (((Object)obj)->__class__ == GETCLASS(class))
++
++// This is a string comparison version of ISINSTANCE which works
++// across different shared objects.
++#define ISNAMEINSTANCE(obj, class)		\
++  (obj && !strcmp(class, NAMEOF(obj)))
++
++// We need to ensure that class was properly initialised:
++#define ISSUBCLASS(obj,class)			\
++  issubclass((Object)obj, (Object)&__ ## class, &class ## _init)
++
++#define CLASSOF(obj)				\
++  ((Object)obj)->__class__
++
++inline void Object_init(void);
++inline void Object_Alloc(Object);
++
++extern struct Object_t __Object;
++
++int issubclass(Object, Object, void (init)());
++
++/** This is used for error reporting. This is similar to the way
++    python does it, i.e. we set the error flag and return NULL.
++*/
++enum _error_type {
++  EZero,EGeneric,EOverflow,
++  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError
++};
++
++extern char _error_buff[];
++extern enum _error_type _global_error;
++
++void *raise_errors(enum _error_type t, char *string,  ...);
++
++// Some helpful little things
++#define ERROR_BUFFER_SIZE 1024
++
++#define ZSTRING_NO_NULL(str) str , (strlen(str))
++#define ZSTRING(str) str , (strlen(str)+1)
++#define RaiseError(t, ...)			\
++  do {									\
++    _traceback = (char *)talloc_asprintf_append(_traceback, "%s:%d - %s: ", __FILE__, \
++						__LINE__, __FUNCTION__); \
++    raise_errors(t, __VA_ARGS__);					\
++    _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
++  } while(0);								
++
++#define ClearError()				\
++  do {_global_error = EZero; if(_traceback) {talloc_free(_traceback); _traceback=NULL;}; } while(0);
++
++#define PrintError()				\
++  do {if(_global_error) printf("%s",_traceback); fflush(stdout); }while(0);
++
++#endif
++
++#ifdef __cplusplus
++} /* closing brace for extern "C" */
++#endif
+--- afflib-3.3.4/lib/libaff2/include/error.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/error.h	2009-02-22 16:51:12.000000000 +1100
+@@ -0,0 +1,18 @@
++/** This file allows global exceptions to be raised...
++
++Note this is not multithreaded yet.
++**/
++#ifndef EXCEPT_H
++#define EXCEPT_H
++
++enum exception_state {
++  EXCEPT_ALL_OK, EXCEPT_RUNTIME_ERROR,
++  EXCEPT_PARAMETER_ERROR
++};
++
++#define EXCEPTION_STRING_LENGTH 1024
++extern char exception_reason[EXCEPTION_STRING_LENGTH];
++
++void *RaiseError(enum exception_state reason, char *format, 
++
++#endif
+--- afflib-3.3.4/lib/libaff2/include/list.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/list.h	2009-03-09 21:00:59.000000000 +1100
+@@ -0,0 +1,276 @@
++#ifndef __LIST_H
++#define __LIST_H
++
++/* This file is from Linux Kernel (include/linux/list.h) 
++ * and modified by simply removing hardware prefetching of list items. 
++ * Here by copyright, credits attributed to wherever they belong.
++ * Kulesh Shanmugasundaram (kulesh [squiggly] isis.poly.edu)
++ */
++
++/*
++ * Simple doubly linked list implementation.
++ *
++ * Some of the internal functions ("__xxx") are useful when
++ * manipulating whole lists rather than single entries, as
++ * sometimes we already know the next/prev entries and we can
++ * generate better code by using them directly rather than
++ * using the generic single-entry routines.
++ */
++
++struct list_head {
++	struct list_head *next, *prev;
++};
++
++#define LIST_HEAD_INIT(name) { &(name), &(name) }
++
++#define LIST_HEAD(name) \
++	struct list_head name = LIST_HEAD_INIT(name)
++
++#define INIT_LIST_HEAD(ptr) do { \
++	(ptr)->next = (ptr); (ptr)->prev = (ptr); \
++} while (0)
++
++/*
++ * Insert a new entry between two known consecutive entries. 
++ *
++ * This is only for internal list manipulation where we know
++ * the prev/next entries already!
++ */
++static inline void __list_add(struct list_head *_new,
++			      struct list_head *prev,
++			      struct list_head *next)
++{
++	next->prev = _new;
++	_new->next = next;
++	_new->prev = prev;
++	prev->next = _new;
++}
++
++/**
++ * list_add - add a new entry
++ * @new: new entry to be added
++ * @head: list head to add it after
++ *
++ * Insert a new entry after the specified head.
++ * This is good for implementing stacks.
++ */
++static inline void list_add(struct list_head *_new, struct list_head *head)
++{
++	__list_add(_new, head, head->next);
++}
++
++/**
++ * list_add_tail - add a _new entry
++ * @_new: _new entry to be added
++ * @head: list head to add it before
++ *
++ * Insert a _new entry before the specified head.
++ * This is useful for implementing queues.
++ */
++static inline void list_add_tail(struct list_head *_new, struct list_head *head)
++{
++	__list_add(_new, head->prev, head);
++}
++
++/*
++ * Delete a list entry by making the prev/next entries
++ * point to each other.
++ *
++ * This is only for internal list manipulation where we know
++ * the prev/next entries already!
++ */
++static inline void __list_del(struct list_head *prev, struct list_head *next)
++{
++	next->prev = prev;
++	prev->next = next;
++}
++
++/**
++ * list_del - deletes entry from list.
++ * @entry: the element to delete from the list.
++ * Note: list_empty on entry does not return true after this, the entry is in an undefined state.
++ */
++static inline void list_del(struct list_head *entry)
++{
++	__list_del(entry->prev, entry->next);
++	entry->next = NULL;
++	entry->prev = NULL;
++}
++
++/**
++ * list_del_init - deletes entry from list and reinitialize it.
++ * @entry: the element to delete from the list.
++ */
++static inline void list_del_init(struct list_head *entry)
++{
++	__list_del(entry->prev, entry->next);
++	INIT_LIST_HEAD(entry); 
++}
++
++/**
++ * list_move - delete from one list and add as another's head
++ * @list: the entry to move
++ * @head: the head that will precede our entry
++ */
++static inline void list_move(struct list_head *list, struct list_head *head)
++{
++        __list_del(list->prev, list->next);
++        list_add(list, head);
++}
++
++/**
++ * list_move_tail - delete from one list and add as another's tail
++ * @list: the entry to move
++ * @head: the head that will follow our entry
++ */
++static inline void list_move_tail(struct list_head *list,
++				  struct list_head *head)
++{
++        __list_del(list->prev, list->next);
++        list_add_tail(list, head);
++}
++
++/**
++ * list_empty - tests whether a list is empty
++ * @head: the list to test.
++ */
++static inline int list_empty(struct list_head *head)
++{
++	return head->next == head;
++}
++
++static inline void __list_splice(struct list_head *list,
++				 struct list_head *head)
++{
++	struct list_head *first = list->next;
++	struct list_head *last = list->prev;
++	struct list_head *at = head->next;
++
++	first->prev = head;
++	head->next = first;
++
++	last->next = at;
++	at->prev = last;
++}
++
++/**
++ * list_splice - join two lists
++ * @list: the _new list to add.
++ * @head: the place to add it in the first list.
++ */
++static inline void list_splice(struct list_head *list, struct list_head *head)
++{
++	if (!list_empty(list))
++		__list_splice(list, head);
++}
++
++/**
++ * list_splice_init - join two lists and reinitialise the emptied list.
++ * @list: the _ne list to add.
++ * @head: the place to add it in the first list.
++ *
++ * The list at @list is reinitialised
++ */
++static inline void list_splice_init(struct list_head *list,
++				    struct list_head *head)
++{
++	if (!list_empty(list)) {
++		__list_splice(list, head);
++		INIT_LIST_HEAD(list);
++	}
++}
++
++/**
++ * list_entry - get the struct for this entry
++ * @ptr:	the &struct list_head pointer.
++ * @type:	the type of the struct this is embedded in.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_entry(ptr, type, member) \
++	((type *)((char *)(ptr)-(unsigned long)(&((type *)0)->member)))
++
++/**
++ * list_for_each	-	iterate over a list
++ * @pos:	the &struct list_head to use as a loop counter.
++ * @head:	the head for your list.
++ */
++#define list_for_each(pos, head) \
++	for (pos = (head)->next; pos != (head); \
++        	pos = pos->next)
++/**
++ * list_for_each_prev	-	iterate over a list backwards
++ * @pos:	the &struct list_head to use as a loop counter.
++ * @head:	the head for your list.
++ */
++#define list_for_each_prev(pos, head) \
++	for (pos = (head)->prev; pos != (head); \
++        	pos = pos->prev)
++        	
++/**
++ * list_for_each_safe	-	iterate over a list safe against removal of list entry
++ * @pos:	the &struct list_head to use as a loop counter.
++ * @n:		another &struct list_head to use as temporary storage
++ * @head:	the head for your list.
++ */
++#define list_for_each_safe(pos, n, head) \
++	for (pos = (head)->next, n = pos->next; pos != (head); \
++		pos = n, n = pos->next)
++
++/**
++ * list_for_each_entry	-	iterate over list of given type
++ * @pos:	the type * to use as a loop counter.
++ * @head:	the head for your list.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_for_each_entry(pos, head, member)				\
++	for (pos = list_entry((head)->next, typeof(*pos), member);	\
++	     &pos->member != (head); 					\
++	     pos = list_entry(pos->member.next, typeof(*pos), member))
++
++#define list_for_each_entry_prev(pos, head, member)				\
++	for (pos = list_entry((head)->prev, typeof(*pos), member);	\
++	     &pos->member != (head); 					\
++	     pos = list_entry(pos->member.prev, typeof(*pos), member))
++
++/**
++ * list_for_each_entry_safe - iterate over list of given type safe against removal of list entry
++ * @pos:	the type * to use as a loop counter.
++ * @n:		another type * to use as temporary storage
++ * @head:	the head for your list.
++ * @member:	the name of the list_struct within the struct.
++ */
++#define list_for_each_entry_safe(pos, n, head, member)			\
++	for (pos = list_entry((head)->next, typeof(*pos), member),	\
++		n = list_entry(pos->member.next, typeof(*pos), member);	\
++	     &pos->member != (head); 					\
++	     pos = n, n = list_entry(n->member.next, typeof(*n), member))
++
++#define list_for_each_entry_safe_prev(pos, n, head, member)			\
++	for (pos = list_entry((head)->prev, typeof(*pos), member),	\
++		n = list_entry(pos->member.prev, typeof(*pos), member);	\
++	     &pos->member != (head); 					\
++	     pos = n, n = list_entry(n->member.prev, typeof(*n), member))
++
++
++/**
++ * list_count - count number of entries in list
++ * @head: head of the list to count
++ */
++static inline int list_count(struct list_head *head) 
++{
++  int count=0;
++  struct list_head *tmp;
++  list_for_each(tmp, head) {
++    count++;
++  }
++  return count;
++}
++
++/** Given a list head, returns the first entry and assigns to i */
++#define list_next(first, head, member)			\
++  do { first=list_entry((head)->next, typeof(*first), member); } while(0)
++
++#define list_prev(first, head, member)			\
++  do { first=list_entry((head)->prev, typeof(*first), member); } while(0)
++
++#endif
+--- afflib-3.3.4/lib/libaff2/include/misc.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/misc.h	2009-03-09 20:15:53.000000000 +1100
+@@ -0,0 +1,14 @@
++#ifndef MISC_H
++#define MISC_H
++
++#ifdef HAVE_INTTYPES_H
++#include <inttypes.h>
++#endif
++
++#ifndef O_BINARY
++#define O_BINARY 0
++#endif
++
++#define BUFF_SIZE 4096
++
++#endif
+--- afflib-3.3.4/lib/libaff2/include/stringio.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/stringio.h	2009-03-09 20:43:34.000000000 +1100
+@@ -0,0 +1,69 @@
++#ifndef _STRINGIO_H
++#define _STRINGIO_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include "class.h"
++#include <sys/types.h>
++#include <stdint.h>
++
++CLASS(StringIO,Object)
++  /** This is the size of the internal buffer */
++  int size;
++  /** Current readptr */
++  uint64_t readptr;
++  char *data;
++  
++  /** constructor */
++  StringIO METHOD(StringIO, Con);
++
++  /** Writes data into the string_io at the current offset, growing the
++    string_io if needed **/
++  int METHOD(StringIO, write, char *data, unsigned int len);
++
++  /** Write a format string into the stringio **/
++  int METHOD(StringIO, sprintf, char *fmt, ...);
++
++  /** Reads data from the current string location into the buffer (We
++      presume it is large enough. We return how much data was actually
++      read */
++  int METHOD(StringIO, read, char *data, int len);
++
++  /** These allow us to read and write to StringIOs rather than direct
++    buffers */
++  int METHOD(StringIO, write_stream, StringIO stream, int length);
++  int METHOD(StringIO, read_stream, StringIO stream, int length);
++
++  /** The seek method */
++  uint64_t METHOD(StringIO, seek, int64_t offset, int whence);
++
++  /** get_buffer: Returns a pointer/length to the buffer (relative to readptr) */
++  void METHOD(StringIO, get_buffer, char **data, int *len);
++
++  /** Return true if we are at the end of the file */
++  int METHOD(StringIO, eof);
++
++  /** Truncates the end of the stream to this size */
++  void METHOD(StringIO, truncate, int len);
++
++  /** Removes the first len bytes from the start of the stream. The
++      stream is repositioned at its start */
++  void METHOD(StringIO, skip, int len);
++
++  /** find a substring, returns a pointer inside data */
++  char *METHOD(StringIO, find, char *string);
++
++  /** case insensitive version of find */
++  char *METHOD(StringIO, ifind, char *string);
++
++  /** Destructor */
++  void METHOD(StringIO, destroy);
++END_CLASS
++
++#ifdef __cplusplus
++} /* closing brace for extern "C" */
++#endif
++
++#endif
+--- afflib-3.3.4/lib/libaff2/include/talloc.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/talloc.h	2009-03-09 23:23:53.000000000 +1100
+@@ -0,0 +1,205 @@
++#ifndef _TALLOC_H_
++#define _TALLOC_H_
++/* 
++   Unix SMB/CIFS implementation.
++   Samba temporary memory allocation functions
++
++   Copyright (C) Andrew Tridgell 2004-2005
++   Copyright (C) Stefan Metzmacher 2006
++   
++     ** NOTE! The following LGPL license applies to the talloc
++     ** library. This does NOT imply that all of Samba is released
++     ** under the LGPL
++   
++   This library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 3 of the License, or (at your option) any later version.
++
++   This library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with this library; if not, see <http://www.gnu.org/licenses/>.
++*/
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++#include <stdlib.h>
++#include <stdio.h>
++#include <stdarg.h>
++
++/* this is only needed for compatibility with the old talloc */
++typedef void TALLOC_CTX;
++#include <sys/types.h>
++#include <stdarg.h>
++#include <stdlib.h>
++#include <string.h>
++#include <malloc.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#ifndef MIN
++#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
++#endif
++
++/*
++  this uses a little trick to allow __LINE__ to be stringified
++*/
++#ifndef __location__
++#define __TALLOC_STRING_LINE1__(s)    #s
++#define __TALLOC_STRING_LINE2__(s)   __TALLOC_STRING_LINE1__(s)
++#define __TALLOC_STRING_LINE3__  __TALLOC_STRING_LINE2__(__LINE__)
++#define __location__ __FILE__ ":" __TALLOC_STRING_LINE3__
++#endif
++
++#ifndef TALLOC_DEPRECATED
++#define TALLOC_DEPRECATED 0
++#endif
++
++#ifndef PRINTF_ATTRIBUTE
++#if (__GNUC__ >= 3)
++/** Use gcc attribute to check printf fns.  a1 is the 1-based index of
++ * the parameter containing the format, and a2 the index of the first
++ * argument. Note that some gcc 2.x versions don't handle this
++ * properly **/
++#define PRINTF_ATTRIBUTE(a1, a2) __attribute__ ((format (__printf__, a1, a2)))
++#else
++#define PRINTF_ATTRIBUTE(a1, a2)
++#endif
++#endif
++
++/* try to make talloc_set_destructor() and talloc_steal() type safe,
++   if we have a recent gcc */
++#if (__GNUC__ >= 3)
++#define _TALLOC_TYPEOF(ptr) __typeof__(ptr)
++#define talloc_set_destructor(ptr, function)				      \
++	do {								      \
++		int (*_talloc_destructor_fn)(_TALLOC_TYPEOF(ptr)) = (function);	      \
++		_talloc_set_destructor((ptr), (int (*)(void *))_talloc_destructor_fn); \
++	} while(0)
++/* this extremely strange macro is to avoid some braindamaged warning
++   stupidity in gcc 4.1.x */
++#define talloc_steal(ctx, ptr) ({ _TALLOC_TYPEOF(ptr) __talloc_steal_ret = (_TALLOC_TYPEOF(ptr))_talloc_steal((ctx),(ptr)); __talloc_steal_ret; })
++#else
++#define talloc_set_destructor(ptr, function) \
++	_talloc_set_destructor((ptr), (int (*)(void *))(function))
++#define _TALLOC_TYPEOF(ptr) void *
++#define talloc_steal(ctx, ptr) (_TALLOC_TYPEOF(ptr))_talloc_steal((ctx),(ptr))
++#endif
++
++#define talloc_reference(ctx, ptr) (_TALLOC_TYPEOF(ptr))_talloc_reference((ctx),(ptr))
++#define talloc_move(ctx, ptr) (_TALLOC_TYPEOF(*(ptr)))_talloc_move((ctx),(void *)(ptr))
++
++/* useful macros for creating type checked pointers */
++#define talloc(ctx, type) (type *)talloc_named_const(ctx, sizeof(type), #type)
++#define talloc_size(ctx, size) talloc_named_const(ctx, size, __location__)
++#define talloc_ptrtype(ctx, ptr) (_TALLOC_TYPEOF(ptr))talloc_size(ctx, sizeof(*(ptr)))
++
++#define talloc_new(ctx) talloc_named_const(ctx, 0, "talloc_new: " __location__)
++
++#define talloc_zero(ctx, type) (type *)_talloc_zero(ctx, sizeof(type), #type)
++#define talloc_zero_size(ctx, size) _talloc_zero(ctx, size, __location__)
++
++#define talloc_zero_array(ctx, type, count) (type *)_talloc_zero_array(ctx, sizeof(type), count, #type)
++#define talloc_array(ctx, type, count) (type *)_talloc_array(ctx, sizeof(type), count, #type)
++#define talloc_array_size(ctx, size, count) _talloc_array(ctx, size, count, __location__)
++#define talloc_array_ptrtype(ctx, ptr, count) (_TALLOC_TYPEOF(ptr))talloc_array_size(ctx, sizeof(*(ptr)), count)
++
++#define talloc_realloc(ctx, p, type, count) (type *)_talloc_realloc_array(ctx, p, sizeof(type), count, #type)
++#define talloc_realloc_size(ctx, ptr, size) _talloc_realloc(ctx, ptr, size, __location__)
++
++#define talloc_memdup(t, p, size) _talloc_memdup(t, p, size, __location__)
++
++#define talloc_set_type(ptr, type) talloc_set_name_const(ptr, #type)
++#define talloc_get_type(ptr, type) (type *)talloc_check_name(ptr, #type)
++
++#define talloc_find_parent_bytype(ptr, type) (type *)talloc_find_parent_byname(ptr, #type)
++
++#if TALLOC_DEPRECATED
++#define talloc_zero_p(ctx, type) talloc_zero(ctx, type)
++#define talloc_p(ctx, type) talloc(ctx, type)
++#define talloc_array_p(ctx, type, count) talloc_array(ctx, type, count)
++#define talloc_realloc_p(ctx, p, type, count) talloc_realloc(ctx, p, type, count)
++#define talloc_destroy(ctx) talloc_free(ctx)
++#define talloc_append_string(c, s, a) (s?talloc_strdup_append(s,a):talloc_strdup(c, a))
++#endif
++
++/* The following definitions come from talloc.c  */
++void *_talloc(const void *context, size_t size);
++void *talloc_pool(const void *context, size_t size);
++void _talloc_set_destructor(const void *ptr, int (*destructor)(void *));
++int talloc_increase_ref_count(const void *ptr);
++size_t talloc_reference_count(const void *ptr);
++void *_talloc_reference(const void *context, const void *ptr);
++int talloc_unlink(const void *context, void *ptr);
++const char *talloc_set_name(const void *ptr, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
++void talloc_set_name_const(const void *ptr, const char *name);
++void *talloc_named(const void *context, size_t size, 
++		   const char *fmt, ...) PRINTF_ATTRIBUTE(3,4);
++void *talloc_named_const(const void *context, size_t size, const char *name);
++const char *talloc_get_name(const void *ptr);
++void *talloc_check_name(const void *ptr, const char *name);
++void *talloc_parent(const void *ptr);
++const char *talloc_parent_name(const void *ptr);
++void *talloc_init(const char *fmt, ...) PRINTF_ATTRIBUTE(1,2);
++int talloc_free(void *ptr);
++void talloc_free_children(void *ptr);
++void *_talloc_realloc(const void *context, void *ptr, size_t size, const char *name);
++void *_talloc_steal(const void *new_ctx, const void *ptr);
++void *_talloc_move(const void *new_ctx, const void *pptr);
++size_t talloc_total_size(const void *ptr);
++size_t talloc_total_blocks(const void *ptr);
++void talloc_report_depth_cb(const void *ptr, int depth, int max_depth,
++			    void (*callback)(const void *ptr,
++			  		     int depth, int max_depth,
++					     int is_ref,
++					     void *private_data),
++			    void *private_data);
++void talloc_report_depth_file(const void *ptr, int depth, int max_depth, FILE *f);
++void talloc_report_full(const void *ptr, FILE *f);
++void talloc_report(const void *ptr, FILE *f);
++void talloc_enable_null_tracking(void);
++void talloc_disable_null_tracking(void);
++void talloc_enable_leak_report(void);
++void talloc_enable_leak_report_full(void);
++void *_talloc_zero(const void *ctx, size_t size, const char *name);
++void *_talloc_memdup(const void *t, const void *p, size_t size, const char *name);
++void *_talloc_array(const void *ctx, size_t el_size, unsigned count, const char *name);
++void *_talloc_zero_array(const void *ctx, size_t el_size, unsigned count, const char *name);
++void *_talloc_realloc_array(const void *ctx, void *ptr, size_t el_size, unsigned count, const char *name);
++void *talloc_realloc_fn(const void *context, void *ptr, size_t size);
++void *talloc_autofree_context(void);
++size_t talloc_get_size(const void *ctx);
++void *talloc_find_parent_byname(const void *ctx, const char *name);
++void talloc_show_parents(const void *context, FILE *file);
++int talloc_is_parent(const void *context, const void *ptr);
++
++char *talloc_strdup(const void *t, const char *p);
++char *talloc_strdup_append(char *s, const char *a);
++char *talloc_strdup_append_buffer(char *s, const char *a);
++
++char *talloc_strndup(const void *t, const char *p, size_t n);
++char *talloc_strndup_append(char *s, const char *a, size_t n);
++char *talloc_strndup_append_buffer(char *s, const char *a, size_t n);
++
++char *talloc_vasprintf(const void *t, const char *fmt, va_list ap) PRINTF_ATTRIBUTE(2,0);
++char *talloc_vasprintf_append(char *s, const char *fmt, va_list ap) PRINTF_ATTRIBUTE(2,0);
++char *talloc_vasprintf_append_buffer(char *s, const char *fmt, va_list ap) PRINTF_ATTRIBUTE(2,0);
++
++char *talloc_asprintf(const void *t, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
++char *talloc_asprintf_append(char *s, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
++char *talloc_asprintf_append_buffer(char *s, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
++
++#ifdef __cplusplus
++} /* closing brace for extern "C" */
++#endif
++
++#endif
++
+--- afflib-3.3.4/lib/libaff2/include/zip.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/include/zip.h	2009-03-09 23:52:52.000000000 +1100
+@@ -0,0 +1,463 @@
++#ifndef __ZIP_H
++#define __ZIP_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++#include "misc.h"
++#include "stringio.h"
++#include "list.h"
++#include <zlib.h>
++
++#define HASH_TABLE_SIZE 256
++#define CACHE_SIZE 5
++
++// A helper to access the URN or an object.
++#define URNOF(x)  ((AFFObject)x)->urn
++
++/** Some helper functions used to serialize int to and from URN
++    attributes
++*/
++uint64_t parse_int(char *string);
++char *from_int(uint64_t arg);
++char *escape_filename(char *filename);
++char *unescape_filename(char *filename);
++
++/** A cache is an object which automatically expires data which is
++    least used - that is the data which is most used is put at the end
++    of the list, and when memory pressure increases we expire data
++    from the front of the list.
++*/
++CLASS(Cache, Object)
++// The key which is used to access the data
++     void *key;
++
++     // An opaque data object and its length. The object will be
++     // talloc_stealed into the cache object as we will be manging its
++     // memory.
++     void *data;
++     int data_len;
++
++     // Cache objects are put into two lists - the cache_list contains
++     // all the cache objects currently managed by us in order of
++     // least used to most used at the tail of the list. The same
++     // objects are also present on one of the hash lists which hang
++     // off the respective hash table. The hash_list should be shorter
++     // to search linearly as it only contains objects with the same hash.
++     struct list_head cache_list;
++     struct list_head hash_list;
++
++     // This is a pointer to the head of the cache
++     struct Cache_t *cache_head;
++
++     // The current number of objects managed by this cache
++     int cache_size;
++
++     // The maximum number of objects which should be managed
++     int max_cache_size;
++
++     // A hash table of the keys
++     int hash_table_width;
++     Cache *hash_table;
++
++     // These functions can be tuned to manage the hash table. The
++     // default implementation assumes key is a null terminated
++     // string.
++     unsigned int METHOD(Cache, hash, void *key);
++     int METHOD(Cache, cmp, void *other);
++
++     Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
++
++// Return a cache object or NULL if its not there. Callers do not own
++// the cache object. If they want to steal the data, they can but they
++// must call talloc_free on the Cache object so it can be removed from
++// the cache.
++// (i.e. talloc_steal(result->data); talloc_free(result); )
++     Cache METHOD(Cache, get, void *key);
++
++// A shorthand for getting the actual data itself rather than the
++// Cache object itself:
++     void *METHOD(Cache, get_item, char *key);
++
++// Store the key, data in a new Cache object. The key and data will be
++// stolen.
++     Cache METHOD(Cache, put, void *key, void *data, int data_len);
++END_CLASS
++
++/** All AFF Objects inherit from this one. The URI must be set to
++    represent the globally unique URI of this object. */
++CLASS(AFFObject, Object)
++     char *urn;
++
++     // This is the type of this object
++     char *type;
++     
++     /** Any object may be asked to be constructed from its URI */
++     AFFObject METHOD(AFFObject, Con, char *uri);
++
++     /** The is called to set properties on the object */
++     void METHOD(AFFObject, set_property, char *attribute, char *value);
++
++     /** Finally the object may be ready for use. We return the ready
++	 object or NULL if something went wrong.
++     */
++     AFFObject METHOD(AFFObject, finish);
++
++/** This is how an AFFObject can be created. First the oracle is asked
++    to create new instance of that object:
++
++    FileLikeObject fd = CALL(oracle, create, CLASSOF(FileLikeObject));
++
++    Now properties can be set on the object:
++    CALL(fd, set_property, "aff2:location", "file://hello.txt")
++
++    Finally we make the object ready for use:
++    CALL(fd, finish)
++
++    and CALL(fd, write, ZSTRING_NO_NULL("foobar"))
++*/
++
++END_CLASS
++
++// Base class for file like objects
++CLASS(FileLikeObject, AFFObject)
++     int64_t readptr;
++     uint64_t size;
++     
++     uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
++     int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
++     int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
++     uint64_t METHOD(FileLikeObject, tell);
++
++// This method is just like the standard ftruncate call
++     int METHOD(FileLikeObject, truncate, uint64_t offset);
++
++// This closes the FileLikeObject and also frees it - it is not valid
++// to use the FileLikeObject after calling this.
++     void METHOD(FileLikeObject, close);
++END_CLASS
++
++// This file like object is backed by a real disk file:
++CLASS(FileBackedObject, FileLikeObject)
++     int fd;
++
++     FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
++END_CLASS
++
++
++     /** The resolver is at the heart of the AFF2 specification - its
++	 responsible with returning various objects from a globally
++	 unique identifier (URI).
++     */
++CLASS(Resolver, Object)
++// This is a global cache of URN and their values - we try to only
++// have small URNs here and keep everything in memory.
++     Cache urn;
++
++     // This is a cache of AFFObject objects (keyed by URI) which have
++     // been constructed previously. This cache is quite small and can
++     // expire objects at any time. All clients of the open() method
++     // get references back from this cache. They do not own any of
++     // the objects and must not maintain references to them. Clients
++     // may keep references to each object's urn and re-fetch the
++     // object from the open method each time they want to use
++     // it. This implies that clients do not need to generally do any
++     // caching at all.
++     Cache cache;
++
++     Resolver METHOD(Resolver, Con);
++
++/* This method tries to resolve the provided uri and returns an
++ instance of whatever the URI refers to (As an AFFObject which is the
++ common base class. You should check to see that what you get back is
++ actually what you need. For example:
++
++ FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);
++ if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;
++ 
++ Once the resolver provides the object it is attached to the context
++ ctx and removed from the cache. This ensures that the object can not
++ expire from the cache while callers are holding it. For efficiency
++ you must return the object to the cache as soon as possible by
++ calling cache_return.
++*/
++      AFFObject METHOD(Resolver, open, void *ctx, char *uri);
++      void METHOD(Resolver, cache_return, AFFObject obj);
++
++/* This create a new object of the specified type. */
++     AFFObject METHOD(Resolver, create, AFFObject *class_reference);
++
++/* Returns an attribute about a particular uri if know. This may
++     consult an external data source.
++*/
++     char *METHOD(Resolver, resolve, char *uri, char *attribute);
++
++//Stores the uri and the value in the resolver. The value will be
++//stolen, but the uri will be copied.
++     void METHOD(Resolver, add, char *uri, char *attribute, char *value);
++
++     // Exports all the properties to do with uri - user owns the buffer.
++     char *METHOD(Resolver, export_uri, char *uri);
++
++// Deletes the attribute from the resolver
++     void METHOD(Resolver, del, char *uri, char *attribute);
++
++// This updates the value or adds it if needed
++     void METHOD(Resolver, set, char *uri, char *attribute, char *value);
++
++     // Parses the properties file
++     void METHOD(Resolver, parse, char *context, char *text, int len);
++END_CLASS
++
++// This is a global instance of the oracle. All AFFObjects must
++// communicate with the oracle rather than instantiate their own.
++extern Resolver oracle;
++
++// This function must be called to initialise the library - we prepare
++// all the classes and intantiate an oracle.
++void AFF2_Init();
++
++// A link simply returns the URI its pointing to
++CLASS(Link, AFFObject)
++     void METHOD(Link, link, Resolver resolver, char *storage_urn, 
++		 char *target, char *friendly_name);
++END_CLASS
++
++/** The Image Stream represents an Image in chunks */
++CLASS(Image, FileLikeObject)
++// Data is divided into segments, when a segment is completed (it
++// contains chunks_in_segment chunks) we dump it to the archive. These
++// are stream attributes
++     int chunks_in_segment;   // Default 2048
++     int chunk_size;          // Default 32kb   
++                              // -> Default segment size 64Mb
++
++     // Writes get queued here until full chunks are available
++     char *chunk_buffer;
++     int chunk_buffer_readptr;
++     int chunk_buffer_size;
++
++     // The segment is written here until its complete and then it
++     // gets flushed
++     StringIO segment_buffer;
++     int chunk_count;
++
++     // Chunks are cached here. We cant use the main zip file cache
++     // because the zip file holds the full segment
++     Cache chunk_cache;
++
++     int segment_count;
++
++     // An array of indexes into the segment where chunks are stored
++     int32_t *chunk_indexes;
++     char *parent_urn;
++
++END_CLASS
++
++/** The map stream driver maps an existing stream using a
++    transformation.
++
++
++    We require the stream properties to specify a 'target'. This can
++    either be a plain stream name or can begin with 'file://'. In the
++    latter case this indicates that we should be opening an external
++    file of the specified filename.
++
++    We expect to find a component in the archive called 'map' which
++    contains a mapping function. The file should be of the format:
++
++    - lines starting with # are ignored
++    
++    - other lines have 2 integers seperated by white space. The first
++    column is the current stream offset, while the second offset if
++    the target stream offset.
++
++    For example:
++    0     1000
++    1000  4000
++
++    This means that when the current stream is accessed in the range
++    0-1000 we fetch bytes 1000-2000 from the target stream, and after
++    that we fetch bytes from offset 4000.
++
++    Required properties:
++    
++    - target%d starts with 0 the number of target (may be specified as
++      a URL). e.g. target0, target1, target2
++
++    Optional properties:
++
++    - file_period - number of bytes in the file offset which this map
++      repreats on. (Useful for RAID)
++
++    - image_period - number of bytes in the target image each period
++      will advance by. (Useful for RAID)
++*/
++struct map_point {
++  // The offset in the target
++  uint64_t target_offset;
++  // This logical offset this represents
++  uint64_t image_offset;
++  char *target_urn;
++};
++
++CLASS(MapDriver, FileLikeObject)
++// An array of our targets
++     struct map_point *points;
++     int number_of_points;
++     
++     // The period offsets repeat within each target
++     uint64_t target_period;
++     // The period offsets repear within the logical image
++     uint64_t image_period;
++     
++     char *parent_urn;
++
++     // Deletes the point at the specified file offset
++     void METHOD(MapDriver, del, uint64_t target_pos);
++
++     // Adds a new point ot the file offset table
++     void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,
++		 char *target);
++
++     void METHOD(MapDriver, save_map);
++END_CLASS
++
++// A blob is a single lump of data
++CLASS(Blob, AFFObject)
++     char *data;
++     int length;
++END_CLASS
++
++ char *resolver_get_with_default(Resolver self, char *urn, 
++				 char *attribute, char *default_value);
++
++/** These are ZipFile structures */
++struct EndCentralDirectory {
++  uint32_t magic;
++  uint16_t number_of_this_disk;
++  uint16_t disk_with_cd;
++  uint16_t total_entries_in_cd_on_disk;
++  uint16_t total_entries_in_cd;
++  uint32_t size_of_cd;
++  uint32_t offset_of_cd;
++  uint16_t comment_len;
++}__attribute__((packed));
++
++/** As we parse these fields we populate the oracle */
++struct CDFileHeader {
++  uint32_t magic;
++  uint16_t version_made_by;
++  uint16_t version_needed;
++  uint16_t flags;
++  uint16_t compression_method;	/* aff2volatile:compression */
++  uint16_t dostime;		/* aff2volatile:timestamp */
++  uint16_t dosdate;
++  uint32_t crc32;
++  uint32_t compress_size;	/* aff2volatile:compress_size */
++  uint32_t file_size;		/* aff2volatile:file_size */
++  uint16_t file_name_length;
++  uint16_t extra_field_len;
++  uint16_t file_comment_length;
++  uint16_t disk_number_start;
++  uint16_t internal_file_attr;
++  uint32_t external_file_attr;
++  uint32_t relative_offset_local_header; /* aff2volatile:header_offset */
++}__attribute__((packed));
++
++struct ZipFileHeader {
++  uint32_t magic;
++  uint16_t version;
++  uint16_t flags;
++  uint16_t compression_method;
++  uint16_t lastmodtime;
++  uint16_t lastmoddate;
++  uint32_t crc32;
++  uint32_t compress_size;
++  uint32_t file_size;
++  uint16_t file_name_length;
++  uint16_t extra_field_len;
++}__attribute__((packed));
++
++/** This represents a Zip file */
++CLASS(ZipFile, AFFObject)
++     // This keeps the end of central directory struct so we can
++     // recopy it when we update the CD.
++     struct EndCentralDirectory *end;
++
++     // This is our own current URN - new files will be appended to
++     // that
++     char *parent_urn;
++
++     /** A zip file is opened on a file like object */
++     ZipFile METHOD(ZipFile, Con, char *file_urn);
++
++// Fetch a member as a string - this is suitable for small memebrs
++// only as we allocate memory for it. The buffer callers receive will
++// owned by ctx. 
++     char *METHOD(ZipFile, read_member, void *ctx,
++		  char *filename, int *len);
++
++// This method is called to specify a new volume for us to use. If we
++// already have an existing volume, we will automatically call close
++// on it. The volume parent_urn must already exist (it can be newly
++// created).
++     int METHOD(ZipFile, create_new_volume, char *parent_urn);
++
++// This method opens an existing member or creates a new one. We
++// return a file like object which may be used to read and write the
++// member. If we open a member for writing the zip file will be locked
++// (so another attempt to open a new member for writing will raise,
++// until this member is promptly closed). The ZipFile must have been
++// called with create_new_volume or append_volume before.
++     FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
++			   char *extra, uint16_t extra_field_len,
++			   int compression);
++
++// This method flushes the central directory and finalises the
++// file. The file may still be accessed for reading after this.
++     void METHOD(ZipFile, close);
++
++// A convenience function for storing a string as a new file (it
++// basically calls open_member, writes the string then closes it).
++     void METHOD(ZipFile, writestr, char *filename, char *data, int len,
++		 char *extra, int extra_field_len,
++		 int compression);
++END_CLASS
++
++#define ZIP_STORED 0
++#define ZIP_DEFLATE 8
++
++// This is a FileLikeObject which is used from within the Zip file:
++CLASS(ZipFileStream, FileLikeObject)
++     z_stream strm;
++     uint64_t file_offset;
++     char *container_urn;
++     char *parent_urn;
++     uint32_t crc32;
++     uint32_t compress_size;
++     uint32_t compression;
++     char mode;
++
++// This is the constructor for the file like object. Note that we
++// steal the underlying file pointer which should be the underlying
++// zip file and should be given to us already seeked to the right
++// place.
++     ZipFileStream METHOD(ZipFileStream, Con, char *filename, 
++			  char *parent_urn, char *container_urn,
++			  char mode);
++END_CLASS
++
++// This is the main FIF class - it manages the Zip archive
++CLASS(FIFFile, ZipFile)
++END_CLASS
++
++#ifdef __cplusplus
++} /* closing brace for extern "C" */
++#endif
++
++
++#endif
++
+--- afflib-3.3.4/lib/libaff2/link.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/link.c	2009-03-09 21:03:27.000000000 +1100
+@@ -0,0 +1,66 @@
++#include "zip.h"
++
++AFFObject Link_Con(AFFObject self, char *urn) {
++  Link this = (Link)self;
++
++  if(urn) {
++    char *target = CALL(oracle, resolve, urn, "aff2:target");
++    if(!target) {
++      RaiseError(ERuntimeError, "%s unable to resolve the aff2:link_to property?", urn);
++      goto error;
++    };
++
++    return CALL(oracle, open, self, target);
++  } else {
++    this->__super__->Con(self, urn);
++  };
++
++  return self;
++ error:
++  talloc_free(self);
++  return NULL;
++};
++
++AFFObject Link_finish(AFFObject self) {
++  return self;
++};
++
++// A convenience function to set up a link between a target urn to a
++// friendly name.
++void Link_link(Link self, Resolver oracle, char *storage_urn,
++	       char *target, char *friendly_name) {
++  AFFObject this = (AFFObject)self;
++  if(storage_urn) {
++    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, storage_urn);
++    char tmp[BUFF_SIZE];
++    FileLikeObject fd;
++    char *properties;
++
++    if(!zipfile) {
++      RaiseError(ERuntimeError, "Unable to get storage container %s", storage_urn);
++      return;
++    };
++
++    // Add a reverse connection (The link urn is obviously not unique).
++    CALL(oracle, add, friendly_name, "aff2:target", target);
++    CALL(oracle, add, friendly_name, "aff2:type", "link");
++
++    snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);
++
++    fd = CALL((ZipFile)zipfile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
++    if(fd) {
++      properties = CALL(oracle, export_uri, friendly_name);
++      CALL(fd, write, ZSTRING_NO_NULL(properties));
++      talloc_free(properties);
++
++      CALL(fd, close);
++    };
++    CALL(oracle, cache_return, (AFFObject)zipfile);
++  };
++};
++
++VIRTUAL(Link, AFFObject)
++     VMETHOD(super.Con) = Link_Con;
++     VMETHOD(super.finish) = Link_finish;
++     VMETHOD(link) = Link_link;
++END_VIRTUAL
+--- afflib-3.3.4/lib/libaff2/Makefile.am	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/Makefile.am	2009-03-09 20:13:09.000000000 +1100
+@@ -0,0 +1,15 @@
++bin_PROGRAMS            = unittests
++noinst_LTLIBRARIES       = libaff2.la liboo.la
++
++liboo_la_SOURCES	= class.c talloc.c
++liboo_la_CPPFLAGS 	= -DHAVE_VA_COPY -Iinclude/
++
++# specifics (bins)
++unittests_LDADD           = libaff2.la
++unittests_SOURCES         = unittests.c
++unittests_CPPFLAGS	  = -Iinclude/
++
++libaff2_la_SOURCES       = misc.c zip.c stringio.c resolver.c blob.c image.c link.c map.c
++libaff2_la_LIBADD	= liboo.la 
++libaff2_la_LDFLAGS       = -lz -luuid
++libaff2_la_CPPFLAGS	= -Iinclude/
+\ No newline at end of file
+--- afflib-3.3.4/lib/libaff2/map.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/map.c	2009-03-09 21:03:34.000000000 +1100
+@@ -0,0 +1,291 @@
++#include "zip.h"
++
++AFFObject MapDriver_finish(AFFObject self) {
++  char *stored = CALL(oracle, resolve, URNOF(self), "aff2:stored");
++  MapDriver this = (MapDriver)self;
++
++  if(!stored) {
++    RaiseError(ERuntimeError, "Map object does not have a stored attribute?");
++    goto error;
++  };
++
++  self = CALL((AFFObject)this, Con, URNOF(self));
++
++  // Check that we have a stored property
++  return self;
++ error:
++  talloc_free(self);
++  return NULL;
++};
++
++/*** This is the implementation of the MapDriver */
++AFFObject MapDriver_Con(AFFObject self, char *uri){ 
++  MapDriver this = (MapDriver)self;
++
++  // Try to parse existing map object
++  if(uri) {
++    Blob blob;
++    char buff[BUFF_SIZE];
++    int blocksize;
++
++    URNOF(self) = talloc_strdup(self, uri);
++    this->parent_urn = CALL(oracle, resolve, uri, "aff2:stored");
++    if(!this->parent_urn) {
++      RaiseError(ERuntimeError, "No storage for map %s?", uri);
++      goto error;
++    };
++
++    CALL(oracle, set, URNOF(self), "aff2:type", "map");
++    blocksize = parse_int(resolver_get_with_default(oracle, 
++				     URNOF(self), "aff2:blocksize", "1"));
++    
++    // Load some parameters
++    this->image_period = blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
++						   "aff2:image_period"));
++    
++    this->target_period =  blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
++						     "aff2:target_period"));
++    if(!this->target_period) this->target_period=-1;
++    if(!this->image_period) this->image_period=-1;
++    
++    ((FileLikeObject)self)->size = parse_int(CALL(oracle, resolve, URNOF(self),
++						  "aff2:size"));
++
++    /** Try to load the map from the stream */
++    snprintf(buff, BUFF_SIZE, "%s/map", uri);
++    blob = (Blob)CALL(oracle, open, NULL, buff);
++    if(blob) {
++      char *map = talloc_strdup(self, blob->data);
++      char *x=map, *y;
++      struct map_point point;
++      char target[1024];
++
++      while(strlen(x)>0) {
++	// Look for the end of line and null terminate it:
++	y= x + strcspn(x, "\r\n");
++	*y=0;
++	if(sscanf(x,"%lld,%lld,%1000s", &point.image_offset, 
++		  &point.target_offset, target)==3) {
++	  CALL(this, add, point.target_offset*blocksize, 
++	       point.image_offset*blocksize, target);
++	};
++	x=y+1;
++      };      
++    };
++  } else {
++    this->__super__->super.Con(self, NULL);
++  };
++
++  return self;
++ error:
++  talloc_free(self);
++  return NULL;
++};
++  
++static int compare_points(const void *X, const void *Y) {
++  struct map_point *x=(struct map_point *)X;
++  struct map_point *y=(struct map_point *)Y;
++
++  return x->target_offset - y->target_offset;
++};
++
++void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
++		   char *target_urn) {
++  int i,found=0;
++  struct map_point new_point;
++  MapDriver this=self;
++
++  new_point.target_offset = target_offset;
++  new_point.image_offset = image_offset;
++  new_point.target_urn = talloc_strdup(this->points, target_urn);
++
++  // Now append the new point to our struct:
++  this->points = talloc_realloc(self, this->points, 
++				struct map_point, 
++				(this->number_of_points + 1) * sizeof(*this->points));
++  memcpy(&this->points[this->number_of_points], &new_point, sizeof(new_point));
++
++  // Now sort the array
++  qsort(this->points, this->number_of_points, sizeof(*this->points),
++	compare_points);
++  this->number_of_points ++;
++};
++
++// This writes out the map to the stream
++void MapDriver_save_map(MapDriver self) {
++  char buff[BUFF_SIZE];
++  struct map_point *point;
++  int i;
++  FileLikeObject fd;
++  ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, self->parent_urn);
++
++  if(!zipfile) return;
++  snprintf(buff, BUFF_SIZE, "%s/map", URNOF(self));
++
++  fd = CALL(zipfile, open_member, buff, 'w', NULL, 0, ZIP_DEFLATE);
++  for(i=0;i<self->number_of_points;i++) {
++    point = &self->points[i];
++    snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->target_offset, 
++	     point->image_offset, point->target_urn);
++    CALL(fd, write, ZSTRING_NO_NULL(buff));
++  };
++
++  CALL(fd, close);
++};
++
++void MapDriver_close(FileLikeObject self) {
++  MapDriver this = (MapDriver)self;
++
++  // Write out a properties file
++  char *properties = CALL(oracle, export_uri, URNOF(self));
++  if(properties) {
++    ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn);
++    char tmp[BUFF_SIZE];
++
++    snprintf(tmp, BUFF_SIZE, "%s/properties", URNOF(self));
++    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
++	 NULL, 0, ZIP_STORED);
++
++    talloc_free(properties);
++    // Done with zipfile
++    CALL(oracle, cache_return, (AFFObject)zipfile);
++  };
++};
++
++
++
++
++// searches the array of map points and returns the offset in the
++// array such that array[result].file_offset > offset
++static int bisect_left(uint64_t offset, struct map_point *array, int hi) {
++  uint64_t lo=0;
++  uint64_t mid;
++
++  while(lo < hi) {
++    mid = (lo+hi)/2;
++    if (array[mid].image_offset <= offset) {
++      lo = mid+1;
++    } else {
++      hi = mid;
++    };
++  };
++  return lo;
++};
++
++static int bisect_right(uint64_t offset, struct map_point *array, int hi) {
++  uint64_t lo=0;
++  uint64_t mid;
++
++  while(lo < hi) {
++    mid = (lo+hi)/2;
++    if (offset < array[mid].image_offset) {
++      hi = mid;
++    } else {
++      lo = mid+1;
++    };
++  };
++
++  return lo-1;
++};
++
++// Read as much as possible and return how much was read
++static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
++				  unsigned long int length) {
++  MapDriver this = (MapDriver)self;
++
++  // How many periods we are from the start
++  uint64_t period_number = self->readptr / this->image_period;
++
++  // How far into this period we are within the image
++  uint64_t image_period_offset = self->readptr % this->image_period;
++  char direction = 'f';
++  
++  // The offset within the target we ultimately need
++  uint64_t target_offset;
++  uint64_t available_to_read = self->size - self->readptr;
++  FileLikeObject target;
++  int read_bytes;
++  int l;
++
++  // We can't interpolate forward before the first point - must
++  // interpolate backwards.
++  if(image_period_offset < this->points[0].image_offset) {
++    direction = 'r';
++  };
++
++  /** Interpolate forward */
++  if(direction=='f') {
++    l = bisect_right(image_period_offset, this->points, this->number_of_points);
++    
++    // Here this->points[l].image_offset < image_period_offset
++    target_offset = this->points[l].target_offset +			\
++      image_period_offset - this->points[l].image_offset + period_number * this->target_period;
++    
++    if(l < this->number_of_points-1) {
++      available_to_read = this->points[l+1].image_offset - image_period_offset;
++    } else {
++      available_to_read = min(available_to_read, this->image_period - image_period_offset);
++    };
++
++    /*
++    printf("%lld %lld %d ", self->readptr, image_period_offset, l);
++    printf(" target %lld available %d\n", target_offset, available_to_read);
++    */
++
++    /** Interpolate in reverse */
++  } else {
++    l = bisect_left(image_period_offset, this->points, this->number_of_points);
++    target_offset = this->points[l].target_offset -	\
++      (this->points[l].image_offset - image_period_offset) + \
++      period_number * this->target_period;
++    
++    if(l<this->number_of_points) {
++      available_to_read = this->points[l].image_offset - image_period_offset;
++    };
++  };
++
++  available_to_read = min(available_to_read, length);
++
++  // Now do the read:
++  target = (FileLikeObject)CALL(oracle, open, NULL, this->points[l].target_urn);
++  if(!target) return -1;
++
++  CALL(target, seek, target_offset, SEEK_SET);
++  read_bytes = CALL(target, read, buffer, available_to_read);
++
++  CALL(oracle, cache_return, (AFFObject)target);
++
++  if(read_bytes >0) {
++    ((FileLikeObject)self)->readptr += read_bytes;
++  };
++
++  return read_bytes;
++};
++
++static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int length) {
++  int i=0;
++  int read_length;
++
++  // Clip the read to the stream size
++  length = min(length, self->size - self->readptr);
++
++  // Just execute as many partial reads as are needed to satisfy the
++  // length requested
++  while(i < length ) {
++    read_length = MapDriver_partial_read(self, buffer + i, length - i);
++    if(read_length <=0) break;
++    i += read_length;
++  };
++
++  return i;
++};
++
++
++VIRTUAL(MapDriver, FileLikeObject)
++     VMETHOD(super.super.Con) = MapDriver_Con;
++     VMETHOD(super.super.finish) = MapDriver_finish;
++     VMETHOD(add) = MapDriver_add;
++     VMETHOD(save_map) = MapDriver_save_map;
++     VMETHOD(super.read) = MapDriver_read;  
++     VMETHOD(super.close) = MapDriver_close;
++END_VIRTUAL
+--- afflib-3.3.4/lib/libaff2/misc.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/misc.c	2009-03-09 01:19:34.000000000 +1100
+@@ -0,0 +1,99 @@
++#include "zip.h"
++#include "time.h"
++#include <uuid/uuid.h>
++#include <libgen.h>
++
++uint64_t parse_int(char *string) {
++  char *endptr;
++  uint64_t result;
++
++  if(!string) return 0;
++
++  result = strtoll(string, &endptr, 0);
++  switch(*endptr) {
++  case 's':
++    result *= 512;
++    break;
++  case 'K':
++  case 'k':
++    result *= 1024;
++    break;
++  case 'm':
++  case 'M':
++    result *= 1024*1024;
++    break;
++  case 'g':
++  case 'G':
++    result *= 1024*1024*1024;
++    break;
++  default:
++    break;
++  };
++
++  return result;
++};
++
++char *from_int(uint64_t arg) {
++  static char buffer[BUFF_SIZE];
++
++  snprintf(buffer, BUFF_SIZE, "0x%02llX", arg);
++  return buffer;
++};
++
++
++static char *illegal_filename_chars = "|?[]\\=+<>:;\'\",*";
++static char illegal_filename_lut[128];
++void init_luts() {
++  char *i;
++  
++  memset(illegal_filename_lut, 0, 
++	 sizeof(illegal_filename_lut));
++
++  for(i=illegal_filename_chars;*i;i++) 
++    illegal_filename_lut[*i]=1;
++};
++
++char *escape_filename(char *filename) {
++  static char buffer[BUFF_SIZE];
++
++  int i,j=0;
++  int length = strlen(filename)+1;
++  
++  for(i=0;i<length;i++) {
++    char x=filename[i];
++    if(illegal_filename_lut[x] || x>128) {
++      sprintf(buffer+j, "%%%02X", x);
++      j+=3;
++      if(j>BUFF_SIZE-10) break;
++    } else {
++      buffer[j]=x;
++      j++;
++    };
++  };
++
++  return buffer;
++};
++
++char *unescape_filename(char *filename) {
++  static char buffer[BUFF_SIZE];
++
++  int i,j=0;
++  int length = strlen(filename)+1;
++  
++  for(i=0;i<min(length, BUFF_SIZE-10);i++) {
++    if(filename[i]=='%') {
++      char tmp[10];
++      memcpy(tmp+1,filename+i,3);
++      tmp[0]='0';
++      tmp[1]='x';
++      tmp[4]=0;
++      buffer[j]=parse_int(tmp);
++      i+=2;
++      j++;
++    } else {
++      buffer[j]=filename[i];
++      j++;
++    };
++  };
++  return buffer;
++};
+--- afflib-3.3.4/lib/libaff2/resolver.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/resolver.c	2009-03-10 01:19:02.000000000 +1100
+@@ -0,0 +1,492 @@
++/** This file implemnts the resolver */
++#include "zip.h"
++#include <uuid/uuid.h>
++
++/** This is a dispatcher of stream classes depending on their name.
++*/
++struct dispatch_t {
++  char *type;
++  AFFObject class_ptr;
++};
++
++static struct dispatch_t dispatch[] = {
++  { "blob", (AFFObject)&__Blob },
++  { "volume", (AFFObject)&__ZipFile },
++  { "link", (AFFObject)&__Link },
++  { "image", (AFFObject)&__Image },
++  { "map", (AFFObject)&__MapDriver},
++  { "file://", (AFFObject)&__FileBackedObject },
++  { NULL, NULL}
++};
++
++/** This is the global oracle - it knows everything about everyone. */
++Resolver oracle = NULL;
++
++/** We need to call these initialisers explicitely or the class
++    references wont work.
++*/
++void AFF2_Init(void) {
++  FileLikeObject_init();
++  FileBackedObject_init();
++  ZipFile_init();
++  Image_init();
++  MapDriver_init();
++  Blob_init();
++  Resolver_init();
++  Link_init();
++
++  init_luts();
++
++  // Make a global oracle
++  if(oracle) {
++    fprintf(stderr, "detroying the existing oracle\n");
++    talloc_free(oracle);
++  };
++
++  oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
++};
++
++
++/** Implementation of Caches */
++
++/** A destructor on the cache object to automatically unlink us from
++    the lists.
++*/
++static int Cache_destructor(void *this) {
++  Cache self = (Cache) this;
++  list_del(&self->cache_list);
++  list_del(&self->hash_list);
++
++  // We can automatically maintain a tally of elements in the cache
++  // because we have a reference to the main cache object here.
++  if(self->cache_head)
++    self->cache_head->cache_size--;
++  return 0;
++};
++
++/** A max_cache_size of 0 means we never expire anything */
++static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
++  self->hash_table_width = hash_table_width;
++  self->max_cache_size = max_cache_size;
++
++  INIT_LIST_HEAD(&self->cache_list);
++  INIT_LIST_HEAD(&self->hash_list);
++
++  // Install our destructor
++  talloc_set_destructor((void *)self, Cache_destructor);
++  return self;
++};
++
++/** Quick and simple */
++static unsigned int Cache_hash(Cache self, void *key) {
++  char *name = (char *)key;
++  int len = strlen(name);
++  char result = 0;
++  int i;
++  for(i=0; i<len; i++) 
++    result ^= name[i];
++
++  return result % self->hash_table_width;
++};
++
++static int Cache_cmp(Cache self, void *other) {
++  return strcmp((char *)self->key, (char *)other);
++};
++
++static Cache Cache_put(Cache self, void *key, void *data, int data_len) {
++  unsigned int hash;
++  Cache hash_list_head;
++  Cache new_cache;
++  Cache i;
++
++  // Check to see if we need to expire something else. We do this
++  // first to avoid the possibility that we might expire the same key
++  // we are about to add.
++  while(self->max_cache_size > 0 && self->cache_size >= self->max_cache_size) {
++    list_for_each_entry(i, &self->cache_list, cache_list) {
++      talloc_free(i);
++      break;
++    };
++  };
++
++  if(!self->hash_table)
++    self->hash_table = talloc_array(self, Cache, self->hash_table_width);
++
++  hash = CALL(self, hash, key);
++  hash_list_head = self->hash_table[hash];
++  new_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
++  // Make sure the new cache member knows where the list head is. We
++  // only keep stats about the cache here.
++  new_cache->cache_head = self;
++
++  // Take over the data
++  new_cache->key = key;
++  new_cache->data = data;
++  new_cache->data_len = data_len;
++  talloc_steal(new_cache, key);
++  talloc_steal(new_cache, data);
++
++  if(!hash_list_head) {
++    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 
++							HASH_TABLE_SIZE, -10);
++    talloc_set_name_const(hash_list_head, "Hash Head");
++  };
++
++  //  printf("Adding %p\n", new_cache);
++  list_add_tail(&new_cache->hash_list, &self->hash_table[hash]->hash_list);
++  list_add_tail(&new_cache->cache_list, &self->cache_list);
++  self->cache_size ++;
++ 
++  return new_cache;
++};
++
++static Cache Cache_get(Cache self, void *key) {
++  int hash;
++  Cache hash_list_head;
++  Cache i;
++
++  hash = CALL(self, hash, key);
++  if(!self->hash_table) return NULL;
++
++  hash_list_head = self->hash_table[hash];
++
++  // There are 2 lists each Cache object is on - the hash list is a
++  // shorter list at the end of each hash table slot, while the cache
++  // list is a big list of all objects in the cache. We find the
++  // object using the hash list, but expire the object based on the
++  // cache list which includes all objects in the case.
++  if(!hash_list_head) return NULL;
++  list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
++    if(!CALL(i, cmp, key)) {
++      // Thats it - we remove it from where its in and put it on the
++      // tail:
++      list_move(&i->cache_list, &self->cache_list);
++      list_move(&i->hash_list, &hash_list_head->hash_list);
++      //printf("Getting %p\n", i);
++      return i;
++    };
++  };
++  
++  return NULL;
++};
++
++static void *Cache_get_item(Cache self, char *key) {
++  Cache tmp = CALL(self, get, key);
++
++  if(tmp && tmp->data)
++    return tmp->data;
++
++  return NULL;
++};
++
++VIRTUAL(Cache, Object)
++     VMETHOD(Con) = Cache_Con;
++     VMETHOD(put) = Cache_put;
++     VMETHOD(cmp) = Cache_cmp;
++     VMETHOD(hash) = Cache_hash;
++     VMETHOD(get) = Cache_get;
++     VMETHOD(get_item) = Cache_get_item;
++END_VIRTUAL
++
++/***********************************************************
++   This is the implementation of the resolver.
++***********************************************************/
++
++static Resolver Resolver_Con(Resolver self) {
++  self->urn = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
++  talloc_set_name_const(self->urn, "Main Resolver");
++
++  // This is a cache for frequently used objects
++  self->cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
++  talloc_set_name_const(self->cache, "Temporary Cache");
++  return self;
++};
++
++static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
++  Cache i=CALL(self->urn, get_item, urn);
++
++  if(!i) {
++    RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
++	       attribute, urn);
++    return NULL;
++  };
++
++  return CALL(i, get_item, attribute);
++};
++
++static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
++  int i;
++  char *stream_type;
++  struct dispatch_t *dispatch_ptr=NULL;
++  AFFObject result;
++  Cache tmp;
++
++  if(!urn) return NULL;
++
++  // Is this object cached?
++  tmp = CALL(self->cache, get, urn);
++  if(tmp) {
++    result = (AFFObject)tmp->data;
++    talloc_steal(ctx, result);
++    talloc_free(tmp);
++    return result;
++  };
++
++  // OK Maybe the type is encoded into the URN:
++  for(i=0; dispatch[i].type !=NULL; i++) {
++    if(strlen(urn)>7 && !memcmp(urn, ZSTRING_NO_NULL(dispatch[i].type))) {
++      dispatch_ptr = &dispatch[i];
++      break;
++    };
++  };
++
++  // Nope - maybe its stated explicitely
++  if(!dispatch_ptr) {
++    stream_type = CALL(self, resolve, urn, "aff2:type");
++    if(stream_type) {
++      // Find it in the dispatcher struct and instantiate it
++      for(i=0; dispatch[i].type !=NULL; i++) {
++	if(!strcmp(dispatch[i].type, stream_type)) {
++	  dispatch_ptr = &dispatch[i];
++	  break;
++	};
++      };
++    };
++  };
++
++  // Gee no idea what this is
++  if(!dispatch_ptr) {
++    if(stream_type) {
++      RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn, stream_type);
++    } else {
++      RaiseError(ERuntimeError, "Unable to open %s - protocol not supported?", urn);
++    };
++    return NULL;
++  };
++  
++  // A special constructor from a class reference
++  result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
++				    Con, ctx, urn);
++  
++  return result; 
++};
++
++/** Return the object to the cache. Callers may not make a reference
++    to it after that.
++*/
++static void Resolver_return(Resolver self, AFFObject obj) {
++  // Cache it
++  if(obj)
++    CALL(self->cache, put, talloc_strdup(self, obj->urn),
++	 obj, sizeof(*obj));
++};
++
++static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
++  Cache tmp;
++  //  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
++  
++  tmp = CALL(self->urn, get_item, uri);
++  if(!tmp) {
++    // Create a new URI
++    tmp = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
++    CALL(self->urn, put, talloc_strdup(NULL, uri),
++	 tmp, sizeof(*tmp));
++  };
++  
++  // Make a copy for us to keep
++  value = talloc_strdup(NULL, value);
++  CALL(tmp, put, talloc_strdup(NULL, attribute), 
++       ZSTRING_NO_NULL(value));
++};
++
++/** Format all the attributes of the object specified by urn */
++static char *Resolver_export_uri(Resolver self, char *urn) {
++  char *result=talloc_strdup(NULL, "");
++  Cache i = CALL(self->urn, get_item, urn);
++  Cache j;
++
++  if(!i) return result;
++
++  list_for_each_entry(j, &i->cache_list, cache_list) {
++    char *attribute = (char *)j->key;
++    char *value = (char *)j->data;
++
++    // Do not write volatile data
++    if(memcmp(attribute, ZSTRING_NO_NULL("aff2volatile:"))) {
++      result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
++				      attribute, value);
++    };
++  };
++
++  return result;
++};
++
++static char *Resolver_export_all(Resolver self) {
++  Cache i;
++  char *result=talloc_strdup(NULL, "");  
++
++  list_for_each_entry(i, &self->urn->cache_list, cache_list) {
++    char *urn = (char *)i->key;
++    char *tmp =Resolver_export_uri(self, urn);
++
++    result = talloc_asprintf_append(result, "%s\n", tmp);
++    talloc_free(tmp);
++  };
++  return result;
++};
++
++static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
++  AFFObject result;
++  if(!class_reference || !*class_reference) return NULL;
++
++  result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL);
++
++  return result;
++};
++
++static void Resolver_del(Resolver self, char *uri, char *attribute) {
++  Cache tmp,j;
++  tmp = CALL(self->urn, get_item, uri);
++  if(!tmp) return;
++
++  while(1) {
++    j = CALL(tmp, get, attribute);
++    if(!j) break;
++    //    printf("Removing %s %s\n",uri, attribute);
++    talloc_free(j);
++  };
++};
++
++static void Resolver_set(Resolver self, char *uri, char *attribute, char *value) {
++  CALL(self, del, uri, attribute);
++  CALL(self, add, uri, attribute, value);
++};
++
++// Parse a properties file (implicit context is context - if the file
++// does not specify a subject URN we use context instead).
++static void Resolver_parse(Resolver self, char *context_urn, char *text, int len) {
++  int i,j,k;
++  // Make our own local copy so we can modify it (the original is
++  // cached and doesnt belong to us).
++  char *tmp;
++  char *tmp_text;
++  char *source;
++  char *attribute;
++  char *value;
++  
++  tmp = talloc_memdup(self, text, len+1);
++  tmp[len]=0;
++  tmp_text = tmp;
++  
++  // Find the next line:
++  while((i=strcspn(tmp_text, "\r\n"))) {
++    tmp_text[i]=0;
++    
++    // Locate the =
++    j=strcspn(tmp_text,"=");
++    if(j==i) goto exit;
++    
++    tmp_text[j]=0;
++    value = tmp_text + j + 1;
++    
++    // Locate the space
++    k=strcspn(tmp_text," ");
++    if(k==j) {
++      // No absolute URN specified, we use the current filename:
++      source = talloc_strdup(tmp, context_urn);
++      attribute = tmp_text;
++    } else {
++      source = tmp_text;
++      attribute = tmp_text + k+1;
++    };
++    tmp_text[k]=0;
++    
++    /*
++      if(strlen(attribute)<4 || memcmp(attribute, ZSTRING_NO_NULL("aff2:"))) {
++      attribute = talloc_asprintf(tmp, "aff2:%s",attribute);
++      }
++    */
++        
++    // Now add to the global resolver (These will all be possibly
++    // stolen).
++    CALL(self, add, 
++	 talloc_strdup(tmp, source),
++	 talloc_strdup(tmp, attribute),
++	 talloc_strdup(tmp, value));
++    
++    // Move to the next line
++    tmp_text = tmp_text + i+1;
++  };
++  
++ exit:
++  talloc_free(tmp);
++};
++
++/** Here we implement the resolver */
++VIRTUAL(Resolver, Object)
++     VMETHOD(Con) = Resolver_Con;
++     VMETHOD(create) = Resolver_create;
++
++     VMETHOD(resolve) = Resolver_resolve;
++     VMETHOD(add)  = Resolver_add;
++     VMETHOD(export_uri) = Resolver_export_uri;
++     VMETHOD(open) = Resolver_open;
++     VMETHOD(cache_return) = Resolver_return;
++     VMETHOD(set) = Resolver_set;
++     VMETHOD(del) = Resolver_del;
++     VMETHOD(parse) = Resolver_parse;
++END_VIRTUAL
++
++/************************************************************
++  AFFObject - This is the base class for all other objects
++************************************************************/
++static AFFObject AFFObject_Con(AFFObject self, char *uri) {
++  uuid_t uuid;
++  char *uuid_str;
++  
++  if(!uri) {
++    // This function creates a new stream from scratch so the stream
++    // name will be a new UUID
++    uuid_generate(uuid);
++    uuid_str = talloc_size(self, 40);
++    uuid_unparse(uuid, uuid_str);
++
++    uri = talloc_asprintf(self, "urn:aff2:%s", uuid_str);
++  };
++
++  if(!self->urn)
++    self->urn = uri;
++
++  return self;
++};
++
++
++static void AFFObject_set_property(AFFObject self, char *attribute, char *value) {
++  CALL(oracle, add,
++       self->urn,
++       attribute, value);
++};
++
++// Prepares an object to be used
++static AFFObject AFFObject_finish(AFFObject self) {
++  return self;
++};
++
++VIRTUAL(AFFObject, Object)
++     VMETHOD(finish) = AFFObject_finish;
++     VMETHOD(set_property) = AFFObject_set_property;
++
++     VMETHOD(Con) = AFFObject_Con;
++END_VIRTUAL
++
++/** Some useful helper functions */
++char *resolver_get_with_default(Resolver self, char *urn, char *attribute, char *default_value) {
++  char *result = CALL(self, resolve, urn, attribute);
++
++  if(!result) {
++    CALL(self, add, urn, attribute, default_value);
++    result = default_value;
++  };
++  return result;
++};
++
+--- afflib-3.3.4/lib/libaff2/stringio.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/stringio.c	2009-02-27 11:40:50.000000000 +1100
+@@ -0,0 +1,201 @@
++#include "stringio.h"
++#include "misc.h"
++
++StringIO StringIO_constructor(StringIO self) {
++  //Create a valid buffer to hold the data:
++  self->data = talloc(self,char);
++  self->size = 0;
++  self->readptr=0;
++  
++  return self;
++};
++
++int StringIO_write(StringIO self,char *data, unsigned int len) {
++  if(self->readptr+len > self->size) {
++    self->size = self->readptr + len;
++    
++    self->data = talloc_realloc_size(self,self->data,self->size + 10);
++  };
++  
++  memcpy(self->data+self->readptr,data,len);
++  self->readptr+=len;
++  
++  return len;
++};
++
++int StringIO_sprintf(StringIO self, char *fmt, ...) {
++  va_list ap;
++  char *data;
++  int len;
++  
++  va_start(ap, fmt);
++  data = talloc_vasprintf(self, fmt, ap);
++  va_end(ap);
++  len = strlen(data);
++  
++  if(self->readptr+len > self->size) {
++    self->size = self->readptr + len;    
++    self->data = talloc_realloc_size(self,self->data,self->size+1);
++  };
++  
++  memcpy(self->data+self->readptr,data,len);
++  self->readptr+=len;
++  talloc_free(data);
++  return len;
++};
++
++int StringIO_read(StringIO self,char *data,int len) {
++  if(self->readptr+len > self->size) {
++    len = self->size-self->readptr;
++  };
++
++  memcpy(data,self->data+self->readptr,len);
++  self->readptr+=len;
++  return(len);
++};
++
++/** Writes into ourselves from a stream */
++int StringIO_read_stream(StringIO self, StringIO stream, int length) {
++  int len;
++  char buff[BUFF_SIZE];
++
++  while(length > 0) {
++    len = CALL(stream, read, buff, min(length, BUFF_SIZE));
++    if(len==0) break;
++
++    CALL(self, write, buff, len);
++    length -= len;
++  };
++
++  return length;
++
++  // This is too error prone if we have complex stringio classes.
++#if 0  
++  stream->get_buffer(stream,&data,&len);
++
++  //Only write whats available:
++  if(length>len) length=len;
++
++  self->write(self,data,length);
++
++  //Move the input stream by that many bytes:
++  stream->seek(stream,length,SEEK_CUR);
++
++  return length;
++#endif
++};
++
++/** Write into a stream from ourself */
++int StringIO_write_stream(StringIO self, StringIO stream, int length) {
++  return stream->read_stream(stream,self,length);
++};
++
++uint64_t StringIO_seek(StringIO self, int64_t offset,int whence) {
++  switch(whence) {
++    // Set the readptr:
++  case SEEK_SET:
++    self->readptr = offset;
++    break;
++  case SEEK_CUR:
++    self->readptr += offset;
++    break;
++  case SEEK_END:
++    self->readptr = self->size+offset;
++    break;
++  default:
++    RaiseError(EInvalidParameter, "Unknown Whence %d", whence);
++    return 0;
++  };
++
++  if(self->readptr>self->size) {
++    self->data=talloc_realloc_size(self->data,self->data,self->readptr);
++    self->size=self->readptr;
++  };
++
++  return self->readptr;
++};
++
++int StringIO_eof(StringIO self) {
++  return (self->readptr==self->size);
++};
++
++void StringIO_get_buffer(StringIO self,char **data, int *len) {
++  *data = self->data+self->readptr;
++  *len = self->size - self->readptr;
++};
++
++void StringIO_truncate(StringIO self,int len) {
++  if(self->readptr>len) self->readptr=len;
++  self->size=len;
++  if(self->readptr > self->size) 
++    self->readptr=self->size;
++};
++
++void StringIO_skip(StringIO self, int len) {
++  if(len > self->size) 
++    len=self->size;
++
++  memmove(self->data, self->data+len, self->size-len);
++  self->size -= len;
++  self->readptr=0;
++};
++
++/* locate a substring. This returns a pointer inside the data
++   buffer... */
++char *StringIO_find(StringIO self, char *needle) {
++  char *i;
++  int needle_size = strlen(needle);
++
++  if(self->size < needle_size)
++    return NULL;
++
++  for(i=self->data; i<=self->data + self->size - needle_size; i++) {
++    if(memcmp(i, needle, needle_size)==0) {
++      return i;
++    };
++  };
++
++  return NULL;
++};
++
++/* case insensitive version of find */
++char *StringIO_ifind(StringIO self, char *needle) {
++  int i;
++  if(self->size < strlen(needle))
++    return NULL;
++  for(i=0; i<=self->size-strlen(needle); i++) {
++    if(strncasecmp(self->data+i, needle, strlen(needle)) == 0)
++      return self->data+i;
++  }
++  return NULL;
++};
++
++void StringIO_destroy(StringIO self) {
++  //First free our buffer:
++  talloc_free(self->data);
++  
++  //Now free ourselves:
++  talloc_free(self);
++};
++
++VIRTUAL(StringIO,Object)
++  VMETHOD(Con) = StringIO_constructor;
++  VMETHOD(write) = StringIO_write;
++  VMETHOD(sprintf) = StringIO_sprintf;
++  VMETHOD(read) = StringIO_read;
++  VMETHOD(read_stream) = StringIO_read_stream;
++  VMETHOD(write_stream) = StringIO_write_stream;
++  VMETHOD(seek) = StringIO_seek;
++  VMETHOD(get_buffer) = StringIO_get_buffer;
++  VMETHOD(eof) = StringIO_eof;
++  VMETHOD(truncate) = StringIO_truncate;
++  VMETHOD(skip) = StringIO_skip;
++  VMETHOD(find) = StringIO_find;
++  VMETHOD(ifind) = StringIO_ifind;
++  VMETHOD(destroy) = StringIO_destroy;
++
++//These are class attributes - all instantiated objects will have
++//these set
++  VATTR(size) = 0;
++  VATTR(readptr) = 0;
++END_VIRTUAL
+--- afflib-3.3.4/lib/libaff2/talloc.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/talloc.c	2009-02-27 13:22:06.000000000 +1100
+@@ -0,0 +1,1767 @@
++/* 
++   Samba Unix SMB/CIFS implementation.
++
++   Samba trivial allocation library - new interface
++
++   NOTE: Please read talloc_guide.txt for full documentation
++
++   Copyright (C) Andrew Tridgell 2004
++   Copyright (C) Stefan Metzmacher 2006
++   
++     ** NOTE! The following LGPL license applies to the talloc
++     ** library. This does NOT imply that all of Samba is released
++     ** under the LGPL
++   
++   This library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2 of the License, or (at your option) any later version.
++
++   This library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with this library; if not, write to the Free Software
++   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++*/
++
++/*
++  inspired by http://swapped.cc/halloc/
++*/
++
++#ifdef _SAMBA_BUILD_
++#include "version.h"
++#if (SAMBA_VERSION_MAJOR<4)
++#include "includes.h"
++/* This is to circumvent SAMBA3's paranoid malloc checker. Here in this file
++ * we trust ourselves... */
++#ifdef malloc
++#undef malloc
++#endif
++#ifdef realloc
++#undef realloc
++#endif
++#define _TALLOC_SAMBA3
++#endif /* (SAMBA_VERSION_MAJOR<4) */
++#endif /* _SAMBA_BUILD_ */
++
++#ifndef _TALLOC_SAMBA3
++//#include "replace.h"
++#include "talloc.h"
++#endif /* not _TALLOC_SAMBA3 */
++
++/* use this to force every realloc to change the pointer, to stress test
++   code that might not cope */
++#define ALWAYS_REALLOC 0
++
++
++#define MAX_TALLOC_SIZE 0x10000000
++#define TALLOC_MAGIC 0xe814ec70
++#define TALLOC_FLAG_FREE 0x01
++#define TALLOC_FLAG_LOOP 0x02
++#define TALLOC_FLAG_POOL 0x04		/* This is a talloc pool */
++#define TALLOC_FLAG_POOLMEM 0x08	/* This is allocated in a pool */
++#define TALLOC_MAGIC_REFERENCE ((const char *)1)
++
++/* by default we abort when given a bad pointer (such as when talloc_free() is called 
++   on a pointer that came from malloc() */
++#ifndef TALLOC_ABORT
++#define TALLOC_ABORT(reason) abort()
++#endif
++
++#ifndef discard_const_p
++#if defined(__intptr_t_defined) || defined(HAVE_INTPTR_T)
++# define discard_const_p(type, ptr) ((type *)((intptr_t)(ptr)))
++#else
++# define discard_const_p(type, ptr) ((type *)(ptr))
++#endif
++#endif
++
++/* these macros gain us a few percent of speed on gcc */
++#if (__GNUC__ >= 3)
++/* the strange !! is to ensure that __builtin_expect() takes either 0 or 1
++   as its first argument */
++#ifndef likely
++#define likely(x)   __builtin_expect(!!(x), 1)
++#endif
++#ifndef unlikely
++#define unlikely(x) __builtin_expect(!!(x), 0)
++#endif
++#else
++#ifndef likely
++#define likely(x) (x)
++#endif
++#ifndef unlikely
++#define unlikely(x) (x)
++#endif
++#endif
++
++/* this null_context is only used if talloc_enable_leak_report() or
++   talloc_enable_leak_report_full() is called, otherwise it remains
++   NULL
++*/
++static void *null_context;
++static void *autofree_context;
++
++struct talloc_reference_handle {
++	struct talloc_reference_handle *next, *prev;
++	void *ptr;
++};
++
++typedef int (*talloc_destructor_t)(void *);
++
++struct talloc_chunk {
++	struct talloc_chunk *next, *prev;
++	struct talloc_chunk *parent, *child;
++	struct talloc_reference_handle *refs;
++	talloc_destructor_t destructor;
++	const char *name;
++	size_t size;
++	unsigned flags;
++	/*
++	 * "pool" has dual use:
++	 *
++	 * For the talloc pool itself (i.e. TALLOC_FLAG_POOL is set), "pool"
++	 * marks the end of the currently allocated area.
++	 *
++	 * For members of the pool (i.e. TALLOC_FLAG_POOLMEM is set), "pool"
++	 * is a pointer to the struct talloc_chunk of the pool that it was
++	 * allocated from. This way children can quickly find the pool to chew
++	 * from.
++	 */
++	void *pool;
++};
++
++/* 16 byte alignment seems to keep everyone happy */
++#define TC_HDR_SIZE ((sizeof(struct talloc_chunk)+15)&~15)
++#define TC_PTR_FROM_CHUNK(tc) ((void *)(TC_HDR_SIZE + (char*)tc))
++static void talloc_abort_double_free(void)
++{
++	TALLOC_ABORT("Bad talloc magic value - double free"); 
++}
++
++static void talloc_abort_unknown_value(void)
++{
++	TALLOC_ABORT("Bad talloc magic value - unknown value"); 
++}
++
++/* panic if we get a bad magic value */
++static inline struct talloc_chunk *talloc_chunk_from_ptr(const void *ptr)
++{
++	const char *pp = (const char *)ptr;
++	struct talloc_chunk *tc = discard_const_p(struct talloc_chunk, pp - TC_HDR_SIZE);
++	if (unlikely((tc->flags & (TALLOC_FLAG_FREE | ~0xF)) != TALLOC_MAGIC)) { 
++		if (tc->flags & TALLOC_FLAG_FREE) {
++			talloc_abort_double_free();
++		} else {
++			talloc_abort_unknown_value();
++		}
++	}
++	return tc;
++}
++
++/* hook into the front of the list */
++#define _TLIST_ADD(list, p) \
++do { \
++        if (!(list)) { \
++		(list) = (p); \
++		(p)->next = (p)->prev = NULL; \
++	} else { \
++		(list)->prev = (p); \
++		(p)->next = (list); \
++		(p)->prev = NULL; \
++		(list) = (p); \
++	}\
++} while (0)
++
++/* remove an element from a list - element doesn't have to be in list. */
++#define _TLIST_REMOVE(list, p) \
++do { \
++	if ((p) == (list)) { \
++		(list) = (p)->next; \
++		if (list) (list)->prev = NULL; \
++	} else { \
++		if ((p)->prev) (p)->prev->next = (p)->next; \
++		if ((p)->next) (p)->next->prev = (p)->prev; \
++	} \
++	if ((p) && ((p) != (list))) (p)->next = (p)->prev = NULL; \
++} while (0)
++
++
++/*
++  return the parent chunk of a pointer
++*/
++static inline struct talloc_chunk *talloc_parent_chunk(const void *ptr)
++{
++	struct talloc_chunk *tc;
++
++	if (unlikely(ptr == NULL)) {
++		return NULL;
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++	while (tc->prev) tc=tc->prev;
++
++	return tc->parent;
++}
++
++void *talloc_parent(const void *ptr)
++{
++	struct talloc_chunk *tc = talloc_parent_chunk(ptr);
++	return tc? TC_PTR_FROM_CHUNK(tc) : NULL;
++}
++
++/*
++  find parents name
++*/
++const char *talloc_parent_name(const void *ptr)
++{
++	struct talloc_chunk *tc = talloc_parent_chunk(ptr);
++	return tc? tc->name : NULL;
++}
++
++/*
++  A pool carries an in-pool object count count in the first 16 bytes.
++  bytes. This is done to support talloc_steal() to a parent outside of the
++  pool. The count includes the pool itself, so a talloc_free() on a pool will
++  only destroy the pool if the count has dropped to zero. A talloc_free() of a
++  pool member will reduce the count, and eventually also call free(3) on the
++  pool memory.
++
++  The object count is not put into "struct talloc_chunk" because it is only
++  relevant for talloc pools and the alignment to 16 bytes would increase the
++  memory footprint of each talloc chunk by those 16 bytes.
++*/
++
++#define TALLOC_POOL_HDR_SIZE 16
++
++static unsigned int *talloc_pool_objectcount(struct talloc_chunk *tc)
++{
++	return (unsigned int *)((char *)tc + sizeof(struct talloc_chunk));
++}
++
++/*
++  Allocate from a pool
++*/
++
++static struct talloc_chunk *talloc_alloc_pool(struct talloc_chunk *parent,
++					      size_t size)
++{
++	struct talloc_chunk *pool_ctx = NULL;
++	size_t space_left;
++	struct talloc_chunk *result;
++	size_t chunk_size;
++
++	if (parent == NULL) {
++		return NULL;
++	}
++
++	if (parent->flags & TALLOC_FLAG_POOL) {
++		pool_ctx = parent;
++	}
++	else if (parent->flags & TALLOC_FLAG_POOLMEM) {
++		pool_ctx = (struct talloc_chunk *)parent->pool;
++	}
++
++	if (pool_ctx == NULL) {
++		return NULL;
++	}
++
++	space_left = ((char *)pool_ctx + TC_HDR_SIZE + pool_ctx->size)
++		- ((char *)pool_ctx->pool);
++
++	/*
++	 * Align size to 16 bytes
++	 */
++	chunk_size = ((size + 15) & ~15);
++
++	if (space_left < chunk_size) {
++		return NULL;
++	}
++
++	result = (struct talloc_chunk *)pool_ctx->pool;
++
++#if defined(DEVELOPER) && defined(VALGRIND_MAKE_MEM_UNDEFINED)
++	VALGRIND_MAKE_MEM_UNDEFINED(result, size);
++#endif
++
++	pool_ctx->pool = (void *)((char *)result + chunk_size);
++
++	result->flags = TALLOC_MAGIC | TALLOC_FLAG_POOLMEM;
++	result->pool = pool_ctx;
++
++	*talloc_pool_objectcount(pool_ctx) += 1;
++
++	return result;
++}
++
++/* 
++   Allocate a bit of memory as a child of an existing pointer
++*/
++static inline void *__talloc(const void *context, size_t size)
++{
++	struct talloc_chunk *tc = NULL;
++
++	if (unlikely(context == NULL)) {
++		context = null_context;
++	}
++
++	if (unlikely(size >= MAX_TALLOC_SIZE)) {
++		return NULL;
++	}
++
++	if (context != NULL) {
++		tc = talloc_alloc_pool(talloc_chunk_from_ptr(context),
++				       TC_HDR_SIZE+size);
++	}
++
++	if (tc == NULL) {
++		tc = (struct talloc_chunk *)malloc(TC_HDR_SIZE+size);
++		if (unlikely(tc == NULL)) return NULL;
++		memset(tc,0,TC_HDR_SIZE+size);
++		tc->flags = TALLOC_MAGIC;
++		tc->pool  = NULL;
++	}
++
++	tc->size = size;
++	tc->destructor = NULL;
++	tc->child = NULL;
++	tc->name = NULL;
++	tc->refs = NULL;
++
++	if (likely(context)) {
++		struct talloc_chunk *parent = talloc_chunk_from_ptr(context);
++
++		if (parent->child) {
++			parent->child->parent = NULL;
++			tc->next = parent->child;
++			tc->next->prev = tc;
++		} else {
++			tc->next = NULL;
++		}
++		tc->parent = parent;
++		tc->prev = NULL;
++		parent->child = tc;
++	} else {
++		tc->next = tc->prev = tc->parent = NULL;
++	}
++
++	return TC_PTR_FROM_CHUNK(tc);
++}
++
++/*
++ * Create a talloc pool
++ */
++
++void *talloc_pool(const void *context, size_t size)
++{
++	void *result = __talloc(context, size + TALLOC_POOL_HDR_SIZE);
++	struct talloc_chunk *tc;
++
++	if (unlikely(result == NULL)) {
++		return NULL;
++	}
++
++	tc = talloc_chunk_from_ptr(result);
++
++	tc->flags |= TALLOC_FLAG_POOL;
++	tc->pool = (char *)result + TALLOC_POOL_HDR_SIZE;
++
++	*talloc_pool_objectcount(tc) = 1;
++
++#if defined(DEVELOPER) && defined(VALGRIND_MAKE_MEM_NOACCESS)
++	VALGRIND_MAKE_MEM_NOACCESS(tc->pool, size);
++#endif
++
++	return result;
++}
++
++/*
++  setup a destructor to be called on free of a pointer
++  the destructor should return 0 on success, or -1 on failure.
++  if the destructor fails then the free is failed, and the memory can
++  be continued to be used
++*/
++void _talloc_set_destructor(const void *ptr, int (*destructor)(void *))
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	tc->destructor = destructor;
++}
++
++/*
++  increase the reference count on a piece of memory. 
++*/
++int talloc_increase_ref_count(const void *ptr)
++{
++	if (unlikely(!talloc_reference(null_context, ptr))) {
++		return -1;
++	}
++	return 0;
++}
++
++/*
++  helper for talloc_reference()
++
++  this is referenced by a function pointer and should not be inline
++*/
++static int talloc_reference_destructor(struct talloc_reference_handle *handle)
++{
++	struct talloc_chunk *ptr_tc = talloc_chunk_from_ptr(handle->ptr);
++	_TLIST_REMOVE(ptr_tc->refs, handle);
++	return 0;
++}
++
++/*
++   more efficient way to add a name to a pointer - the name must point to a 
++   true string constant
++*/
++static inline void _talloc_set_name_const(const void *ptr, const char *name)
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	tc->name = name;
++}
++
++/*
++  internal talloc_named_const()
++*/
++static inline void *_talloc_named_const(const void *context, size_t size, const char *name)
++{
++	void *ptr;
++
++	ptr = __talloc(context, size);
++	if (unlikely(ptr == NULL)) {
++		return NULL;
++	}
++
++	_talloc_set_name_const(ptr, name);
++
++	return ptr;
++}
++
++/*
++  make a secondary reference to a pointer, hanging off the given context.
++  the pointer remains valid until both the original caller and this given
++  context are freed.
++  
++  the major use for this is when two different structures need to reference the 
++  same underlying data, and you want to be able to free the two instances separately,
++  and in either order
++*/
++void *_talloc_reference(const void *context, const void *ptr)
++{
++	struct talloc_chunk *tc;
++	struct talloc_reference_handle *handle;
++	if (unlikely(ptr == NULL)) return NULL;
++
++	tc = talloc_chunk_from_ptr(ptr);
++	handle = (struct talloc_reference_handle *)_talloc_named_const(context,
++						   sizeof(struct talloc_reference_handle),
++						   TALLOC_MAGIC_REFERENCE);
++	if (unlikely(handle == NULL)) return NULL;
++
++	/* note that we hang the destructor off the handle, not the
++	   main context as that allows the caller to still setup their
++	   own destructor on the context if they want to */
++	talloc_set_destructor(handle, talloc_reference_destructor);
++	handle->ptr = discard_const_p(void, ptr);
++	_TLIST_ADD(tc->refs, handle);
++	return handle->ptr;
++}
++
++
++/* 
++   internal talloc_free call
++*/
++static inline int _talloc_free(void *ptr)
++{
++	struct talloc_chunk *tc;
++
++	if (unlikely(ptr == NULL)) {
++		return -1;
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	if (unlikely(tc->refs)) {
++		int is_child;
++		/* check this is a reference from a child or grantchild
++		 * back to it's parent or grantparent
++		 *
++		 * in that case we need to remove the reference and
++		 * call another instance of talloc_free() on the current
++		 * pointer.
++		 */
++		is_child = talloc_is_parent(tc->refs, ptr);
++		_talloc_free(tc->refs);
++		if (is_child) {
++			return _talloc_free(ptr);
++		}
++		return -1;
++	}
++
++	if (unlikely(tc->flags & TALLOC_FLAG_LOOP)) {
++		/* we have a free loop - stop looping */
++		return 0;
++	}
++
++	if (unlikely(tc->destructor)) {
++		talloc_destructor_t d = tc->destructor;
++		if (d == (talloc_destructor_t)-1) {
++			return -1;
++		}
++		tc->destructor = (talloc_destructor_t)-1;
++		if (d(ptr) == -1) {
++			tc->destructor = d;
++			return -1;
++		}
++		tc->destructor = NULL;
++	}
++
++	if (tc->parent) {
++		_TLIST_REMOVE(tc->parent->child, tc);
++		if (tc->parent->child) {
++			tc->parent->child->parent = tc->parent;
++		}
++	} else {
++		if (tc->prev) tc->prev->next = tc->next;
++		if (tc->next) tc->next->prev = tc->prev;
++	}
++
++	tc->flags |= TALLOC_FLAG_LOOP;
++
++	while (tc->child) {
++		/* we need to work out who will own an abandoned child
++		   if it cannot be freed. In priority order, the first
++		   choice is owner of any remaining reference to this
++		   pointer, the second choice is our parent, and the
++		   final choice is the null context. */
++		void *child = TC_PTR_FROM_CHUNK(tc->child);
++		const void *new_parent = null_context;
++		if (unlikely(tc->child->refs)) {
++			struct talloc_chunk *p = talloc_parent_chunk(tc->child->refs);
++			if (p) new_parent = TC_PTR_FROM_CHUNK(p);
++		}
++		if (unlikely(_talloc_free(child) == -1)) {
++			if (new_parent == null_context) {
++				struct talloc_chunk *p = talloc_parent_chunk(ptr);
++				if (p) new_parent = TC_PTR_FROM_CHUNK(p);
++			}
++			talloc_steal(new_parent, child);
++		}
++	}
++
++	tc->flags |= TALLOC_FLAG_FREE;
++
++	if (tc->flags & (TALLOC_FLAG_POOL|TALLOC_FLAG_POOLMEM)) {
++		struct talloc_chunk *pool;
++		unsigned int *pool_object_count;
++
++		pool = (tc->flags & TALLOC_FLAG_POOL)
++			? tc : (struct talloc_chunk *)tc->pool;
++
++		pool_object_count = talloc_pool_objectcount(pool);
++
++		if (*pool_object_count == 0) {
++			TALLOC_ABORT("Pool object count zero!");
++		}
++
++		*pool_object_count -= 1;
++
++		if (*pool_object_count == 0) {
++			free(pool);
++		}
++	}
++	else {
++		free(tc);
++	}
++	return 0;
++}
++
++/* 
++   move a lump of memory from one talloc context to another return the
++   ptr on success, or NULL if it could not be transferred.
++   passing NULL as ptr will always return NULL with no side effects.
++*/
++void *_talloc_steal(const void *new_ctx, const void *ptr)
++{
++	struct talloc_chunk *tc, *new_tc;
++
++	if (unlikely(!ptr)) {
++		return NULL;
++	}
++
++	if (unlikely(new_ctx == NULL)) {
++		new_ctx = null_context;
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	if (unlikely(new_ctx == NULL)) {
++		if (tc->parent) {
++			_TLIST_REMOVE(tc->parent->child, tc);
++			if (tc->parent->child) {
++				tc->parent->child->parent = tc->parent;
++			}
++		} else {
++			if (tc->prev) tc->prev->next = tc->next;
++			if (tc->next) tc->next->prev = tc->prev;
++		}
++		
++		tc->parent = tc->next = tc->prev = NULL;
++		return discard_const_p(void, ptr);
++	}
++
++	new_tc = talloc_chunk_from_ptr(new_ctx);
++
++	if (unlikely(tc == new_tc || tc->parent == new_tc)) {
++		return discard_const_p(void, ptr);
++	}
++
++	if (tc->parent) {
++		_TLIST_REMOVE(tc->parent->child, tc);
++		if (tc->parent->child) {
++			tc->parent->child->parent = tc->parent;
++		}
++	} else {
++		if (tc->prev) tc->prev->next = tc->next;
++		if (tc->next) tc->next->prev = tc->prev;
++	}
++
++	tc->parent = new_tc;
++	if (new_tc->child) new_tc->child->parent = NULL;
++	_TLIST_ADD(new_tc->child, tc);
++
++	return discard_const_p(void, ptr);
++}
++
++
++
++/*
++  remove a secondary reference to a pointer. This undo's what
++  talloc_reference() has done. The context and pointer arguments
++  must match those given to a talloc_reference()
++*/
++static inline int talloc_unreference(const void *context, const void *ptr)
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	struct talloc_reference_handle *h;
++
++	if (unlikely(context == NULL)) {
++		context = null_context;
++	}
++
++	for (h=tc->refs;h;h=h->next) {
++		struct talloc_chunk *p = talloc_parent_chunk(h);
++		if (p == NULL) {
++			if (context == NULL) break;
++		} else if (TC_PTR_FROM_CHUNK(p) == context) {
++			break;
++		}
++	}
++	if (h == NULL) {
++		return -1;
++	}
++
++	return _talloc_free(h);
++}
++
++/*
++  remove a specific parent context from a pointer. This is a more
++  controlled varient of talloc_free()
++*/
++int talloc_unlink(const void *context, void *ptr)
++{
++	struct talloc_chunk *tc_p, *new_p;
++	void *new_parent;
++
++	if (ptr == NULL) {
++		return -1;
++	}
++
++	if (context == NULL) {
++		context = null_context;
++	}
++
++	if (talloc_unreference(context, ptr) == 0) {
++		return 0;
++	}
++
++	if (context == NULL) {
++		if (talloc_parent_chunk(ptr) != NULL) {
++			return -1;
++		}
++	} else {
++		if (talloc_chunk_from_ptr(context) != talloc_parent_chunk(ptr)) {
++			return -1;
++		}
++	}
++	
++	tc_p = talloc_chunk_from_ptr(ptr);
++
++	if (tc_p->refs == NULL) {
++		return _talloc_free(ptr);
++	}
++
++	new_p = talloc_parent_chunk(tc_p->refs);
++	if (new_p) {
++		new_parent = TC_PTR_FROM_CHUNK(new_p);
++	} else {
++		new_parent = NULL;
++	}
++
++	if (talloc_unreference(new_parent, ptr) != 0) {
++		return -1;
++	}
++
++	talloc_steal(new_parent, ptr);
++
++	return 0;
++}
++
++/*
++  add a name to an existing pointer - va_list version
++*/
++static inline const char *talloc_set_name_v(const void *ptr, const char *fmt, va_list ap) PRINTF_ATTRIBUTE(2,0);
++
++static inline const char *talloc_set_name_v(const void *ptr, const char *fmt, va_list ap)
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	tc->name = talloc_vasprintf(ptr, fmt, ap);
++	if (likely(tc->name)) {
++		_talloc_set_name_const(tc->name, ".name");
++	}
++	return tc->name;
++}
++
++/*
++  add a name to an existing pointer
++*/
++const char *talloc_set_name(const void *ptr, const char *fmt, ...)
++{
++	const char *name;
++	va_list ap;
++	va_start(ap, fmt);
++	name = talloc_set_name_v(ptr, fmt, ap);
++	va_end(ap);
++	return name;
++}
++
++
++/*
++  create a named talloc pointer. Any talloc pointer can be named, and
++  talloc_named() operates just like talloc() except that it allows you
++  to name the pointer.
++*/
++void *talloc_named(const void *context, size_t size, const char *fmt, ...)
++{
++	va_list ap;
++	void *ptr;
++	const char *name;
++
++	ptr = __talloc(context, size);
++	if (unlikely(ptr == NULL)) return NULL;
++
++	va_start(ap, fmt);
++	name = talloc_set_name_v(ptr, fmt, ap);
++	va_end(ap);
++
++	if (unlikely(name == NULL)) {
++		_talloc_free(ptr);
++		return NULL;
++	}
++
++	return ptr;
++}
++
++/*
++  return the name of a talloc ptr, or "UNNAMED"
++*/
++const char *talloc_get_name(const void *ptr)
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	if (unlikely(tc->name == TALLOC_MAGIC_REFERENCE)) {
++		return ".reference";
++	}
++	if (likely(tc->name)) {
++		return tc->name;
++	}
++	return "UNNAMED";
++}
++
++
++/*
++  check if a pointer has the given name. If it does, return the pointer,
++  otherwise return NULL
++*/
++void *talloc_check_name(const void *ptr, const char *name)
++{
++	const char *pname;
++	if (unlikely(ptr == NULL)) return NULL;
++	pname = talloc_get_name(ptr);
++	if (likely(pname == name || strcmp(pname, name) == 0)) {
++		return discard_const_p(void, ptr);
++	}
++	return NULL;
++}
++
++
++/*
++  this is for compatibility with older versions of talloc
++*/
++void *talloc_init(const char *fmt, ...)
++{
++	va_list ap;
++	void *ptr;
++	const char *name;
++
++	/*
++	 * samba3 expects talloc_report_depth_cb(NULL, ...)
++	 * reports all talloc'ed memory, so we need to enable
++	 * null_tracking
++	 */
++	talloc_enable_null_tracking();
++
++	ptr = __talloc(NULL, 0);
++	if (unlikely(ptr == NULL)) return NULL;
++
++	va_start(ap, fmt);
++	name = talloc_set_name_v(ptr, fmt, ap);
++	va_end(ap);
++
++	if (unlikely(name == NULL)) {
++		_talloc_free(ptr);
++		return NULL;
++	}
++
++	return ptr;
++}
++
++/*
++  this is a replacement for the Samba3 talloc_destroy_pool functionality. It
++  should probably not be used in new code. It's in here to keep the talloc
++  code consistent across Samba 3 and 4.
++*/
++void talloc_free_children(void *ptr)
++{
++	struct talloc_chunk *tc;
++
++	if (unlikely(ptr == NULL)) {
++		return;
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	while (tc->child) {
++		/* we need to work out who will own an abandoned child
++		   if it cannot be freed. In priority order, the first
++		   choice is owner of any remaining reference to this
++		   pointer, the second choice is our parent, and the
++		   final choice is the null context. */
++		void *child = TC_PTR_FROM_CHUNK(tc->child);
++		const void *new_parent = null_context;
++		if (unlikely(tc->child->refs)) {
++			struct talloc_chunk *p = talloc_parent_chunk(tc->child->refs);
++			if (p) new_parent = TC_PTR_FROM_CHUNK(p);
++		}
++		if (unlikely(_talloc_free(child) == -1)) {
++			if (new_parent == null_context) {
++				struct talloc_chunk *p = talloc_parent_chunk(ptr);
++				if (p) new_parent = TC_PTR_FROM_CHUNK(p);
++			}
++			talloc_steal(new_parent, child);
++		}
++	}
++
++	if ((tc->flags & TALLOC_FLAG_POOL)
++	    && (*talloc_pool_objectcount(tc) == 1)) {
++		tc->pool = ((char *)tc + TC_HDR_SIZE + TALLOC_POOL_HDR_SIZE);
++#if defined(DEVELOPER) && defined(VALGRIND_MAKE_MEM_NOACCESS)
++		VALGRIND_MAKE_MEM_NOACCESS(
++			tc->pool, tc->size - TALLOC_POOL_HDR_SIZE);
++#endif
++	}
++}
++
++/* 
++   Allocate a bit of memory as a child of an existing pointer
++*/
++void *_talloc(const void *context, size_t size)
++{
++	return __talloc(context, size);
++}
++
++/*
++  externally callable talloc_set_name_const()
++*/
++void talloc_set_name_const(const void *ptr, const char *name)
++{
++	_talloc_set_name_const(ptr, name);
++}
++
++/*
++  create a named talloc pointer. Any talloc pointer can be named, and
++  talloc_named() operates just like talloc() except that it allows you
++  to name the pointer.
++*/
++void *talloc_named_const(const void *context, size_t size, const char *name)
++{
++	return _talloc_named_const(context, size, name);
++}
++
++/* 
++   free a talloc pointer. This also frees all child pointers of this 
++   pointer recursively
++
++   return 0 if the memory is actually freed, otherwise -1. The memory
++   will not be freed if the ref_count is > 1 or the destructor (if
++   any) returns non-zero
++*/
++int talloc_free(void *ptr)
++{
++	return _talloc_free(ptr);
++}
++
++
++
++/*
++  A talloc version of realloc. The context argument is only used if
++  ptr is NULL
++*/
++void *_talloc_realloc(const void *context, void *ptr, size_t size, const char *name)
++{
++	struct talloc_chunk *tc;
++	void *new_ptr;
++	int malloced = 0;
++
++	/* size zero is equivalent to free() */
++	if (unlikely(size == 0)) {
++		_talloc_free(ptr);
++		return NULL;
++	}
++
++	if (unlikely(size >= MAX_TALLOC_SIZE)) {
++		return NULL;
++	}
++
++	/* realloc(NULL) is equivalent to malloc() */
++	if (ptr == NULL) {
++		return _talloc_named_const(context, size, name);
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	/* don't allow realloc on referenced pointers */
++	if (unlikely(tc->refs)) {
++		return NULL;
++	}
++
++	/* don't shrink if we have less than 1k to gain */
++	if ((size < tc->size) && ((tc->size - size) < 1024)) {
++		tc->size = size;
++		return ptr;
++	}
++
++	/* by resetting magic we catch users of the old memory */
++	tc->flags |= TALLOC_FLAG_FREE;
++
++#if ALWAYS_REALLOC
++	new_ptr = malloc(size + TC_HDR_SIZE);
++	if (new_ptr) {
++		memcpy(new_ptr, tc, tc->size + TC_HDR_SIZE);
++		free(tc);
++	}
++#else
++	if (tc->flags & TALLOC_FLAG_POOLMEM) {
++
++		new_ptr = talloc_alloc_pool(tc, size + TC_HDR_SIZE);
++		*talloc_pool_objectcount((struct talloc_chunk *)
++					 (tc->pool)) -= 1;
++
++		if (new_ptr == NULL) {
++			new_ptr = malloc(TC_HDR_SIZE+size);
++			malloced = 1;
++		}
++
++		if (new_ptr) {
++			memcpy(new_ptr, tc, MIN(tc->size,size) + TC_HDR_SIZE);
++		}
++	}
++	else {
++		new_ptr = realloc(tc, size + TC_HDR_SIZE);
++	}
++#endif
++	if (unlikely(!new_ptr)) {	
++		tc->flags &= ~TALLOC_FLAG_FREE; 
++		return NULL; 
++	}
++
++	tc = (struct talloc_chunk *)new_ptr;
++	tc->flags &= ~TALLOC_FLAG_FREE;
++	if (malloced) {
++		tc->flags &= ~TALLOC_FLAG_POOLMEM;
++	}
++	if (tc->parent) {
++		tc->parent->child = tc;
++	}
++	if (tc->child) {
++		tc->child->parent = tc;
++	}
++
++	if (tc->prev) {
++		tc->prev->next = tc;
++	}
++	if (tc->next) {
++		tc->next->prev = tc;
++	}
++
++	tc->size = size;
++	_talloc_set_name_const(TC_PTR_FROM_CHUNK(tc), name);
++
++	return TC_PTR_FROM_CHUNK(tc);
++}
++
++/*
++  a wrapper around talloc_steal() for situations where you are moving a pointer
++  between two structures, and want the old pointer to be set to NULL
++*/
++void *_talloc_move(const void *new_ctx, const void *_pptr)
++{
++	const void **pptr = discard_const_p(const void *,_pptr);
++	void *ret = _talloc_steal(new_ctx, *pptr);
++	(*pptr) = NULL;
++	return ret;
++}
++
++/*
++  return the total size of a talloc pool (subtree)
++*/
++size_t talloc_total_size(const void *ptr)
++{
++	size_t total = 0;
++	struct talloc_chunk *c, *tc;
++
++	if (ptr == NULL) {
++		ptr = null_context;
++	}
++	if (ptr == NULL) {
++		return 0;
++	}
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	if (tc->flags & TALLOC_FLAG_LOOP) {
++		return 0;
++	}
++
++	tc->flags |= TALLOC_FLAG_LOOP;
++
++	total = tc->size;
++	for (c=tc->child;c;c=c->next) {
++		total += talloc_total_size(TC_PTR_FROM_CHUNK(c));
++	}
++
++	tc->flags &= ~TALLOC_FLAG_LOOP;
++
++	return total;
++}
++
++/*
++  return the total number of blocks in a talloc pool (subtree)
++*/
++size_t talloc_total_blocks(const void *ptr)
++{
++	size_t total = 0;
++	struct talloc_chunk *c, *tc = talloc_chunk_from_ptr(ptr);
++
++	if (tc->flags & TALLOC_FLAG_LOOP) {
++		return 0;
++	}
++
++	tc->flags |= TALLOC_FLAG_LOOP;
++
++	total++;
++	for (c=tc->child;c;c=c->next) {
++		total += talloc_total_blocks(TC_PTR_FROM_CHUNK(c));
++	}
++
++	tc->flags &= ~TALLOC_FLAG_LOOP;
++
++	return total;
++}
++
++/*
++  return the number of external references to a pointer
++*/
++size_t talloc_reference_count(const void *ptr)
++{
++	struct talloc_chunk *tc = talloc_chunk_from_ptr(ptr);
++	struct talloc_reference_handle *h;
++	size_t ret = 0;
++
++	for (h=tc->refs;h;h=h->next) {
++		ret++;
++	}
++	return ret;
++}
++
++/*
++  report on memory usage by all children of a pointer, giving a full tree view
++*/
++void talloc_report_depth_cb(const void *ptr, int depth, int max_depth,
++			    void (*callback)(const void *ptr,
++			  		     int depth, int max_depth,
++					     int is_ref,
++					     void *private_data),
++			    void *private_data)
++{
++	struct talloc_chunk *c, *tc;
++
++	if (ptr == NULL) {
++		ptr = null_context;
++	}
++	if (ptr == NULL) return;
++
++	tc = talloc_chunk_from_ptr(ptr);
++
++	if (tc->flags & TALLOC_FLAG_LOOP) {
++		return;
++	}
++
++	callback(ptr, depth, max_depth, 0, private_data);
++
++	if (max_depth >= 0 && depth >= max_depth) {
++		return;
++	}
++
++	tc->flags |= TALLOC_FLAG_LOOP;
++	for (c=tc->child;c;c=c->next) {
++		if (c->name == TALLOC_MAGIC_REFERENCE) {
++			struct talloc_reference_handle *h = (struct talloc_reference_handle *)TC_PTR_FROM_CHUNK(c);
++			callback(h->ptr, depth + 1, max_depth, 1, private_data);
++		} else {
++			talloc_report_depth_cb(TC_PTR_FROM_CHUNK(c), depth + 1, max_depth, callback, private_data);
++		}
++	}
++	tc->flags &= ~TALLOC_FLAG_LOOP;
++}
++
++static void talloc_report_depth_FILE_helper(const void *ptr, int depth, int max_depth, int is_ref, void *_f)
++{
++	const char *name = talloc_get_name(ptr);
++	FILE *f = (FILE *)_f;
++
++	if (is_ref) {
++	  fprintf(f, "%*sreference to: %s %p\n", depth*4, "", name, ptr);
++		return;
++	}
++
++	if (depth == 0) {
++		fprintf(f,"%stalloc report on '%s' (total %6lu bytes in %3lu blocks)\n", 
++			(max_depth < 0 ? "full " :""), name,
++			(unsigned long)talloc_total_size(ptr),
++			(unsigned long)talloc_total_blocks(ptr));
++		return;
++	}
++
++	fprintf(f, "%*s%-30s contains %6lu bytes in %3lu blocks (ref %d) %p\n", 
++		depth*4, "",
++		name,
++		(unsigned long)talloc_total_size(ptr),
++		(unsigned long)talloc_total_blocks(ptr),
++		(int)talloc_reference_count(ptr), ptr);
++
++#if 0
++	fprintf(f, "content: ");
++	if (talloc_total_size(ptr)) {
++		int tot = talloc_total_size(ptr);
++		int i;
++
++		for (i = 0; i < tot; i++) {
++			if ((((char *)ptr)[i] > 31) && (((char *)ptr)[i] < 126)) {
++				fprintf(f, "%c", ((char *)ptr)[i]);
++			} else {
++				fprintf(f, "~%02x", ((char *)ptr)[i]);
++			}
++		}
++	}
++	fprintf(f, "\n");
++#endif
++}
++
++/*
++  report on memory usage by all children of a pointer, giving a full tree view
++*/
++void talloc_report_depth_file(const void *ptr, int depth, int max_depth, FILE *f)
++{
++	talloc_report_depth_cb(ptr, depth, max_depth, talloc_report_depth_FILE_helper, f);
++	fflush(f);
++}
++
++/*
++  report on memory usage by all children of a pointer, giving a full tree view
++*/
++void talloc_report_full(const void *ptr, FILE *f)
++{
++	talloc_report_depth_file(ptr, 0, -1, f);
++}
++
++/*
++  report on memory usage by all children of a pointer
++*/
++void talloc_report(const void *ptr, FILE *f)
++{
++	talloc_report_depth_file(ptr, 0, 1, f);
++}
++
++/*
++  report on any memory hanging off the null context
++*/
++static void talloc_report_null(void)
++{
++	if (talloc_total_size(null_context) != 0) {
++		talloc_report(null_context, stderr);
++	}
++}
++
++/*
++  report on any memory hanging off the null context
++*/
++void talloc_report_null_full(void)
++{
++	if (talloc_total_size(null_context) != 0) {
++		talloc_report_full(null_context, stderr);
++	}
++}
++
++void talloc_report_null_full_to_tmpfile(void) {
++  FILE *fd = fopen("/tmp/talloc_debug.txt","w");
++  if(fd && talloc_total_size(null_context) != 0) {
++    talloc_report_full(null_context, fd);
++  }
++  fclose(fd);
++}; 
++
++/*
++  enable tracking of the NULL context
++*/
++void talloc_enable_null_tracking(void)
++{
++	if (null_context == NULL) {
++		null_context = _talloc_named_const(NULL, 0, "null_context");
++	}
++}
++
++/*
++  disable tracking of the NULL context
++*/
++void talloc_disable_null_tracking(void)
++{
++	_talloc_free(null_context);
++	null_context = NULL;
++}
++
++/*
++  enable leak reporting on exit
++*/
++void talloc_enable_leak_report(void)
++{
++	talloc_enable_null_tracking();
++	atexit(talloc_report_null);
++}
++
++/*
++  enable full leak reporting on exit
++*/
++void talloc_enable_leak_report_full(void)
++{
++	talloc_enable_null_tracking();
++	atexit(talloc_report_null_full);
++}
++
++/* 
++   talloc and zero memory. 
++*/
++void *_talloc_zero(const void *ctx, size_t size, const char *name)
++{
++	void *p = _talloc_named_const(ctx, size, name);
++
++	if (p) {
++		memset(p, '\0', size);
++	}
++
++	return p;
++}
++
++
++/*
++  memdup with a talloc. 
++*/
++void *_talloc_memdup(const void *t, const void *p, size_t size, const char *name)
++{
++	void *newp = _talloc_named_const(t, size, name);
++
++	if (likely(newp)) {
++		memcpy(newp, p, size);
++	}
++
++	return newp;
++}
++
++static inline char *__talloc_strlendup(const void *t, const char *p, size_t len)
++{
++	char *ret;
++
++	ret = (char *)__talloc(t, len + 1);
++	if (unlikely(!ret)) return NULL;
++
++	memcpy(ret, p, len);
++	ret[len] = 0;
++	_talloc_set_name_const(ret, ret);
++	return ret;
++}
++
++/*
++  strdup with a talloc
++*/
++char *talloc_strdup(const void *t, const char *p)
++{
++	if (unlikely(!p)) return NULL;
++	return __talloc_strlendup(t, p, strlen(p));
++}
++
++/*
++  strndup with a talloc
++*/
++char *talloc_strndup(const void *t, const char *p, size_t n)
++{
++	if (unlikely(!p)) return NULL;
++	return __talloc_strlendup(t, p, strnlen(p, n));
++}
++
++static inline char *__talloc_strlendup_append(char *s, size_t slen,
++					      const char *a, size_t alen)
++{
++	char *ret;
++
++	ret = talloc_realloc(NULL, s, char, slen + alen + 1);
++	if (unlikely(!ret)) return NULL;
++
++	/* append the string and the trailing \0 */
++	memcpy(&ret[slen], a, alen);
++	ret[slen+alen] = 0;
++
++	_talloc_set_name_const(ret, ret);
++	return ret;
++}
++
++/*
++ * Appends at the end of the string.
++ */
++char *talloc_strdup_append(char *s, const char *a)
++{
++	if (unlikely(!s)) {
++		return talloc_strdup(NULL, a);
++	}
++
++	if (unlikely(!a)) {
++		return s;
++	}
++
++	return __talloc_strlendup_append(s, strlen(s), a, strlen(a));
++}
++
++/*
++ * Appends at the end of the talloc'ed buffer,
++ * not the end of the string.
++ */
++char *talloc_strdup_append_buffer(char *s, const char *a)
++{
++	size_t slen;
++
++	if (unlikely(!s)) {
++		return talloc_strdup(NULL, a);
++	}
++
++	if (unlikely(!a)) {
++		return s;
++	}
++
++	slen = talloc_get_size(s);
++	if (likely(slen > 0)) {
++		slen--;
++	}
++
++	return __talloc_strlendup_append(s, slen, a, strlen(a));
++}
++
++/*
++ * Appends at the end of the string.
++ */
++char *talloc_strndup_append(char *s, const char *a, size_t n)
++{
++	if (unlikely(!s)) {
++		return talloc_strdup(NULL, a);
++	}
++
++	if (unlikely(!a)) {
++		return s;
++	}
++
++	return __talloc_strlendup_append(s, strlen(s), a, strnlen(a, n));
++}
++
++/*
++ * Appends at the end of the talloc'ed buffer,
++ * not the end of the string.
++ */
++char *talloc_strndup_append_buffer(char *s, const char *a, size_t n)
++{
++	size_t slen;
++
++	if (unlikely(!s)) {
++		return talloc_strdup(NULL, a);
++	}
++
++	if (unlikely(!a)) {
++		return s;
++	}
++
++	slen = talloc_get_size(s);
++	if (likely(slen > 0)) {
++		slen--;
++	}
++
++	return __talloc_strlendup_append(s, slen, a, strnlen(a, n));
++}
++
++#ifndef HAVE_VA_COPY
++#ifdef HAVE___VA_COPY
++#define va_copy(dest, src) __va_copy(dest, src)
++#else
++#define va_copy(dest, src) (dest) = (src)
++#endif
++#endif
++
++char *talloc_vasprintf(const void *t, const char *fmt, va_list ap)
++{
++	int len;
++	char *ret;
++	va_list ap2;
++	char c;
++	/* this call looks strange, but it makes it work on older solaris boxes */
++	va_copy(ap2, ap);
++#ifdef __WIN32__
++        /** Windows implementation is braindead in that it does not
++            return the number of characters needed, so we need to
++            guess (no wonder windows needs so much memory).
++
++            There is a weird function _vscprintf which does the right
++            thing but it needs some weird runtime stuff which we dont
++            want to depend on. (Why have an api function start with
++            _????).
++	*/
++        {
++          int result;
++          len=256;
++
++          ret = _talloc(t, len);
++          while(1) {
++            va_copy(ap2, ap);
++            
++            result = vsnprintf(ret, len, fmt, ap2);
++            if(result==-1) {
++              len+=256;
++              ret = _talloc_realloc(NULL, ret, len, NULL);
++            } else break;
++          }
++          ret = talloc_realloc(NULL, ret, char, result+1);
++          talloc_set_name_const(ret, ret);
++        }
++#else
++	len = vsnprintf(&c, 1, fmt, ap2);
++	va_end(ap2);
++	if (unlikely(len < 0)) {
++		return NULL;
++	}
++
++	ret = (char *)__talloc(t, len+1);
++	if (unlikely(!ret)) return NULL;
++
++	va_copy(ap2, ap);
++	vsnprintf(ret, len+1, fmt, ap2);
++	va_end(ap2);
++#endif
++	_talloc_set_name_const(ret, ret);
++	return ret;
++}
++
++
++/*
++  Perform string formatting, and return a pointer to newly allocated
++  memory holding the result, inside a memory pool.
++ */
++char *talloc_asprintf(const void *t, const char *fmt, ...)
++{
++	va_list ap;
++	char *ret;
++
++	va_start(ap, fmt);
++	ret = talloc_vasprintf(t, fmt, ap);
++	va_end(ap);
++	return ret;
++}
++
++static inline char *__talloc_vaslenprintf_append(char *s, size_t slen,
++						 const char *fmt, va_list ap)
++						 PRINTF_ATTRIBUTE(3,0);
++
++static inline char *__talloc_vaslenprintf_append(char *s, size_t slen,
++						 const char *fmt, va_list ap)
++{
++	ssize_t alen;
++	va_list ap2;
++	char c;
++
++	va_copy(ap2, ap);
++	alen = vsnprintf(&c, 1, fmt, ap2);
++	va_end(ap2);
++
++	if (alen <= 0) {
++		/* Either the vsnprintf failed or the format resulted in
++		 * no characters being formatted. In the former case, we
++		 * ought to return NULL, in the latter we ought to return
++		 * the original string. Most current callers of this
++		 * function expect it to never return NULL.
++		 */
++		return s;
++	}
++
++	s = talloc_realloc(NULL, s, char, slen + alen + 1);
++	if (!s) return NULL;
++
++	va_copy(ap2, ap);
++	vsnprintf(s + slen, alen + 1, fmt, ap2);
++	va_end(ap2);
++
++	_talloc_set_name_const(s, s);
++	return s;
++}
++
++/**
++ * Realloc @p s to append the formatted result of @p fmt and @p ap,
++ * and return @p s, which may have moved.  Good for gradually
++ * accumulating output into a string buffer. Appends at the end
++ * of the string.
++ **/
++char *talloc_vasprintf_append(char *s, const char *fmt, va_list ap)
++{
++	if (unlikely(!s)) {
++		return talloc_vasprintf(NULL, fmt, ap);
++	}
++
++	return __talloc_vaslenprintf_append(s, strlen(s), fmt, ap);
++}
++
++/**
++ * Realloc @p s to append the formatted result of @p fmt and @p ap,
++ * and return @p s, which may have moved. Always appends at the
++ * end of the talloc'ed buffer, not the end of the string.
++ **/
++char *talloc_vasprintf_append_buffer(char *s, const char *fmt, va_list ap)
++{
++	size_t slen;
++
++	if (unlikely(!s)) {
++		return talloc_vasprintf(NULL, fmt, ap);
++	}
++
++	slen = talloc_get_size(s);
++	if (likely(slen > 0)) {
++		slen--;
++	}
++
++	return __talloc_vaslenprintf_append(s, slen, fmt, ap);
++}
++
++/*
++  Realloc @p s to append the formatted result of @p fmt and return @p
++  s, which may have moved.  Good for gradually accumulating output
++  into a string buffer.
++ */
++char *talloc_asprintf_append(char *s, const char *fmt, ...)
++{
++	va_list ap;
++
++	va_start(ap, fmt);
++	s = talloc_vasprintf_append(s, fmt, ap);
++	va_end(ap);
++	return s;
++}
++
++/*
++  Realloc @p s to append the formatted result of @p fmt and return @p
++  s, which may have moved.  Good for gradually accumulating output
++  into a buffer.
++ */
++char *talloc_asprintf_append_buffer(char *s, const char *fmt, ...)
++{
++	va_list ap;
++
++	va_start(ap, fmt);
++	s = talloc_vasprintf_append_buffer(s, fmt, ap);
++	va_end(ap);
++	return s;
++}
++
++/*
++  alloc an array, checking for integer overflow in the array size
++*/
++void *_talloc_array(const void *ctx, size_t el_size, unsigned count, const char *name)
++{
++	if (count >= MAX_TALLOC_SIZE/el_size) {
++		return NULL;
++	}
++	return _talloc_named_const(ctx, el_size * count, name);
++}
++
++/*
++  alloc an zero array, checking for integer overflow in the array size
++*/
++void *_talloc_zero_array(const void *ctx, size_t el_size, unsigned count, const char *name)
++{
++	if (count >= MAX_TALLOC_SIZE/el_size) {
++		return NULL;
++	}
++	return _talloc_zero(ctx, el_size * count, name);
++}
++
++/*
++  realloc an array, checking for integer overflow in the array size
++*/
++void *_talloc_realloc_array(const void *ctx, void *ptr, size_t el_size, unsigned count, const char *name)
++{
++	if (count >= MAX_TALLOC_SIZE/el_size) {
++		return NULL;
++	}
++	return _talloc_realloc(ctx, ptr, el_size * count, name);
++}
++
++/*
++  a function version of talloc_realloc(), so it can be passed as a function pointer
++  to libraries that want a realloc function (a realloc function encapsulates
++  all the basic capabilities of an allocation library, which is why this is useful)
++*/
++void *talloc_realloc_fn(const void *context, void *ptr, size_t size)
++{
++	return _talloc_realloc(context, ptr, size, NULL);
++}
++
++
++static int talloc_autofree_destructor(void *ptr)
++{
++	autofree_context = NULL;
++	return 0;
++}
++
++static void talloc_autofree(void)
++{
++	_talloc_free(autofree_context);
++}
++
++/*
++  return a context which will be auto-freed on exit
++  this is useful for reducing the noise in leak reports
++*/
++void *talloc_autofree_context(void)
++{
++	if (autofree_context == NULL) {
++		autofree_context = _talloc_named_const(NULL, 0, "autofree_context");
++		talloc_set_destructor(autofree_context, talloc_autofree_destructor);
++		atexit(talloc_autofree);
++	}
++	return autofree_context;
++}
++
++size_t talloc_get_size(const void *context)
++{
++	struct talloc_chunk *tc;
++
++	if (context == NULL)
++		return 0;
++
++	tc = talloc_chunk_from_ptr(context);
++
++	return tc->size;
++}
++
++/*
++  find a parent of this context that has the given name, if any
++*/
++void *talloc_find_parent_byname(const void *context, const char *name)
++{
++	struct talloc_chunk *tc;
++
++	if (context == NULL) {
++		return NULL;
++	}
++
++	tc = talloc_chunk_from_ptr(context);
++	while (tc) {
++		if (tc->name && strcmp(tc->name, name) == 0) {
++			return TC_PTR_FROM_CHUNK(tc);
++		}
++		while (tc && tc->prev) tc = tc->prev;
++		if (tc) {
++			tc = tc->parent;
++		}
++	}
++	return NULL;
++}
++
++/*
++  show the parentage of a context
++*/
++void talloc_show_parents(const void *context, FILE *file)
++{
++	struct talloc_chunk *tc;
++
++	if (context == NULL) {
++		fprintf(file, "talloc no parents for NULL\n");
++		return;
++	}
++
++	tc = talloc_chunk_from_ptr(context);
++	fprintf(file, "talloc parents of '%s'\n", talloc_get_name(context));
++	while (tc) {
++		fprintf(file, "\t'%s'\n", talloc_get_name(TC_PTR_FROM_CHUNK(tc)));
++		while (tc && tc->prev) tc = tc->prev;
++		if (tc) {
++			tc = tc->parent;
++		}
++	}
++	fflush(file);
++}
++
++/*
++  return 1 if ptr is a parent of context
++*/
++int talloc_is_parent(const void *context, const void *ptr)
++{
++	struct talloc_chunk *tc;
++
++	if (context == NULL) {
++		return 0;
++	}
++
++	tc = talloc_chunk_from_ptr(context);
++	while (tc) {
++		if (TC_PTR_FROM_CHUNK(tc) == ptr) return 1;
++		while (tc && tc->prev) tc = tc->prev;
++		if (tc) {
++			tc = tc->parent;
++		}
++	}
++	return 0;
++}
+--- afflib-3.3.4/lib/libaff2/unittests.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/unittests.c	2009-03-09 18:57:45.000000000 +1100
+@@ -0,0 +1,452 @@
++#include "zip.h"
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <sys/time.h>
++#include <time.h>
++
++
++#define TEST_FILE "test.zip"
++
++/** First test builds a new zip file from /bin/ls */
++void test1() {
++  // Make a new zip file
++  ZipFile zip = (ZipFile)CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
++
++  // Make a new file
++  FileLikeObject out_fd;
++
++  // Create a new Zip volume for writing
++  CALL(zip, create_new_volume, TEST_FILE);
++
++  CALL(zip, writestr, "hello", ZSTRING_NO_NULL("hello world"), NULL, 0, 0);
++
++  // Open the member foobar for writing
++  out_fd = CALL(zip, open_member, "foobar", 'w', NULL, 0,
++		ZIP_DEFLATE);
++  
++  // It worked - now copy /bin/ls into it
++  if(out_fd) {
++    char buffer[BUFF_SIZE];
++    int fd=open("/bin/ls",O_RDONLY);
++    int length;
++    while(1) {
++      length = read(fd, buffer, BUFF_SIZE);
++      if(length == 0) break;
++
++      CALL(out_fd, write, buffer, length);
++    };
++
++    // Close the member (finalises the member)
++    CALL(out_fd, close);
++    // Close the archive
++    CALL(zip, close);
++  };
++
++  talloc_free(zip);
++};
++
++#define TIMES 1000
++
++/** Try to create a new ZipFile.
++
++When creating a new AFFObject we:
++
++1) Ask the oracle to create it (prividing the class pointer).
++
++2) Set all the required and optional parameters.
++
++3) Call the finish method. If it succeeds we have a fully operational
++object. If it fails (returns NULL), we may have failed to set some
++parameters.
++
++*/
++void test1_5() {
++  ZipFile zipfile;
++
++  // Now create a new AFF2 file on top of it
++  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
++  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
++
++  if(CALL((AFFObject)zipfile, finish)) {
++    char buffer[BUFF_SIZE];
++    int fd=open("/bin/ls",O_RDONLY);
++    int length;
++    FileLikeObject out_fd = CALL((ZipFile)zipfile, 
++				 open_member, "foobar", 'w', NULL, 0, 
++				 ZIP_DEFLATE);
++
++    if(!out_fd) return;
++
++    while(1) {
++      length = read(fd, buffer, BUFF_SIZE);
++      if(length == 0) break;
++      
++      CALL(out_fd, write, buffer, length);
++    };
++    CALL(out_fd,close);
++
++    CALL((ZipFile)zipfile, writestr, "hello",
++	 ZSTRING("hello world"), NULL, 0, 0);
++
++    CALL((ZipFile)zipfile,close);
++  };
++
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++};
++
++/** This tests the cache for reading zip members.
++
++There are two steps: 
++
++1) We open the zip file directly to populate the oracle.
++
++2) We ask the oracle to open anything it knows about.
++
++If you have a persistent oracle you dont need to use step 1 at all
++since the information is already present.
++
++*/
++void test2() {
++  int i;
++  struct timeval epoch_time;
++  struct timeval new_time;
++  int diff;
++  Blob blob;
++  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
++
++  // This is only needed to populate the oracle  
++  if(!zipfile) return;
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++
++  // Now ask the resolver for the different files
++  gettimeofday(&epoch_time, NULL);
++
++  for(i=0;i<TIMES;i++) {
++    blob = (Blob)CALL(oracle, open, NULL, "hello");
++    if(!blob) {
++      RaiseError(ERuntimeError, "Error reading member");
++      return;
++    };
++
++    CALL(oracle, cache_return, (AFFObject)blob);
++  };
++
++  gettimeofday(&new_time, NULL);
++  printf("Resolving foobar produced **************\n%s\n******************\n", blob->data);
++  diff = (new_time.tv_sec * 1000 + new_time.tv_usec/1000) -
++    (epoch_time.tv_sec * 1000 + epoch_time.tv_usec/1000);
++  printf("Decompressed foobar %d times in %d mseconds (%f)\n", 
++	 TIMES,  diff,
++	 ((float)diff)/TIMES);
++};
++
++/** This test writes a two part AFF2 file.
++
++First we ask the oracle to create a FileBackedObject then attach that
++to a ZipFile volume. We then create an Image stream and attach that to
++the ZipFile volume.
++
++*/
++void test_image_create() {
++  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
++  Image image;
++  char buffer[BUFF_SIZE];
++  int in_fd;
++  int length;
++  Link link;
++  char zipfile_urn[BUFF_SIZE];
++
++  if(!zipfile) goto error;
++
++  // Make local copy of zipfile's URN
++  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
++
++  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
++
++  // Is it ok?
++  if(!CALL((AFFObject)zipfile, finish))
++    goto error;
++  
++  // Finished with it for the moment
++  //  CALL(oracle, cache_return, (AFFObject)zipfile);
++
++  // Now we need to create an Image stream
++  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
++  
++  // Tell the image that it should be stored in the volume
++  CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
++  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "2");
++
++  // Is it ok?
++  if(!CALL((AFFObject)image, finish))
++    goto error;
++
++  in_fd=open("/bin/ls",O_RDONLY);
++  while(in_fd >= 0) {
++    length = read(in_fd, buffer, BUFF_SIZE);
++    if(length == 0) break;
++    
++    CALL((FileLikeObject)image, write, buffer, length);
++  };
++
++  CALL((FileLikeObject)image, close);
++
++  // We want to make it easy to locate this image so we set up a link
++  // to it:
++  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
++  // The link will be stored in this zipfile
++  CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
++  CALL(link, link, oracle, image->parent_urn, URNOF(image), "default");
++  CALL((AFFObject)link, finish);
++  CALL(oracle, cache_return, (AFFObject)link);
++
++  // Close the zipfile - get it back
++  //  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn); 
++  CALL((ZipFile)zipfile, close);
++  
++ error:
++  // We are done with that now
++  CALL(oracle, cache_return, (AFFObject)image);
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++  
++};
++
++/** Test reading of the Image stream.
++
++We need to open the aff file in order to populate the oracle.
++*/
++void test_image_read() {
++  char *link_name = "default";
++  FileBackedObject fd = CONSTRUCT(FileBackedObject, FileBackedObject, Con, NULL, TEST_FILE, 'r');
++  Image image;
++  int outfd;
++  char buff[BUFF_SIZE];
++  int length;
++  ZipFile zipfile;
++
++  if(!fd) {
++    RaiseError(ERuntimeError, "Unable to open file %s", TEST_FILE);
++    return;
++  };
++
++  zipfile =CONSTRUCT(ZipFile, ZipFile, Con, fd, URNOF(fd));
++  if(!zipfile) {
++    RaiseError(ERuntimeError, "%s is not a zip file?", TEST_FILE);
++    talloc_free(fd);
++    return;
++  };
++
++  // We just put it in the cache anyway
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++
++  image = (Image)CALL(oracle, open, NULL, link_name);
++  if(!image) {
++    RaiseError(ERuntimeError, "Unable to find stream %s", link_name);
++    goto error;
++  };
++
++  outfd = creat("output.dd", 0644);
++  if(outfd<0) goto error;
++
++  while(1) {
++    length = CALL((FileLikeObject)image, read, buff, BUFF_SIZE);
++    if(length<=0) break;
++
++    write(outfd, buff, length);
++  };
++
++  close(outfd);
++
++ error:
++  CALL(oracle, cache_return, (AFFObject)image);
++  return;
++};
++
++/** A little helper that copies a file into a volume */
++char *create_image(char *volume, char *filename, char *friendly_name) {
++  Image image;
++  int in_fd;
++  char buffer[BUFF_SIZE * 10];
++  int length;
++  Link link;
++
++  // Now we need to create an Image stream
++  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
++  if(!image) return NULL;
++
++  // Tell the image that it should be stored in the volume
++  CALL((AFFObject)image, set_property, "aff2:stored", volume);
++  CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "256");
++
++  // Is it ok?
++  if(!CALL((AFFObject)image, finish))
++    return NULL;
++
++  in_fd=open(filename, O_RDONLY);
++  while(in_fd >= 0) {
++    length = read(in_fd, buffer, BUFF_SIZE);
++    if(length == 0) break;
++    
++    CALL((FileLikeObject)image, write, buffer, length);
++  };
++
++  CALL((FileLikeObject)image, close);
++
++  // We want to make it easy to locate this image so we set up a link
++  // to it:
++  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
++  // The link will be stored in this zipfile
++  CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
++  CALL(link, link, oracle, image->parent_urn, URNOF(image), friendly_name);
++  CALL((AFFObject)link, finish);
++  CALL(oracle, cache_return, (AFFObject)link);
++  
++  return URNOF(image);
++};
++
++#define CHUNK_SIZE 32*1024
++
++/** This tests the Map Image - we create an AFF file containing 3
++    seperate streams and build a map. Then we read the map off and
++    copy it into the output.
++*/
++#define IMAGES "images/"
++#define D0  "d1.dd"
++#define D1  "d2.dd"
++#define D2  "d3.dd"
++
++void test_map_create() {
++  MapDriver map;
++  FileLikeObject fd;
++  char *d0;
++  char *d1;
++  char *d2;
++  char *volume;
++  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
++  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
++  
++  if(!CALL((AFFObject)zipfile, finish))
++    return;
++
++  volume = URNOF(zipfile);
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++
++  d0=create_image(volume, IMAGES D0, D0);
++  d1=create_image(volume, IMAGES D1, D1);
++  d2=create_image(volume, IMAGES D2, D2);
++
++  // Now create a map stream:
++  map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
++  if(map) {
++    CALL((AFFObject)map, set_property, "aff2:stored", volume);
++    CALL((AFFObject)map, set_property, "aff2:target_period", "3");
++    CALL((AFFObject)map, set_property, "aff2:image_period", "6");
++    CALL((AFFObject)map, set_property, "aff2:blocksize", "64k");
++    map = (MapDriver)CALL((AFFObject)map, finish);
++  };
++
++  if(!map) {
++    RaiseError(ERuntimeError, "Unable to create a map stream?");
++    goto exit;
++  };
++
++  // Create the raid reassembly map
++  CALL(map, add, 0, 0, D1);
++  CALL(map, add, 1, 0, D0);
++  CALL(map, add, 2, 1, D2);
++  CALL(map, add, 3, 1, D1);
++  CALL(map, add, 4, 2, D0);
++  CALL(map, add, 5, 2, D2);
++
++  fd = (FileLikeObject)CALL(oracle, open, NULL, D1);
++  CALL((AFFObject)map, set_property, "aff2:size", from_int(fd->size * 2));
++  CALL(oracle, cache_return, (AFFObject)fd);
++
++  CALL(map, save_map);
++  CALL((FileLikeObject)map, close);
++  CALL(oracle, cache_return, (AFFObject)map);
++
++  // Make a link to the map:
++  {
++    Link link;
++    
++    link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
++    // The link will be stored in this zipfile
++    CALL(link, link, oracle, volume, URNOF(map), "map");
++    CALL((AFFObject)link, finish);
++    CALL(oracle, cache_return, (AFFObject)link);
++  };
++
++ exit:
++  zipfile = (ZipFile)CALL(oracle, open, NULL, volume);
++  CALL(zipfile, close);
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++};
++
++#define TEST_BUFF_SIZE 63*1024
++void test_map_read() {
++  MapDriver map;
++  int outfd, length;
++  char buff[TEST_BUFF_SIZE];
++  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
++
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++  map  = (MapDriver)CALL(oracle, open, NULL, "map");
++  if(!map) return;
++
++  outfd = creat("output.dd", 0644);
++  if(outfd<0) goto error;
++
++  while(1) {
++    length = CALL((FileLikeObject)map, read, buff, TEST_BUFF_SIZE);
++    if(length<=0) break;
++
++    write(outfd, buff, length);
++  };
++
++  close(outfd);
++
++ error:
++  CALL(oracle, cache_return, (AFFObject)map);
++  return;
++};
++
++int main() {
++  //  talloc_enable_leak_report_full();
++  /*
++  AFF2_Init();
++  ClearError();
++  test1_5();
++  PrintError();
++
++  AFF2_Init();
++  ClearError();
++  test2();
++  PrintError();
++
++  AFF2_Init();
++  ClearError();
++  test_image_create();
++  PrintError();
++
++  AFF2_Init();
++  ClearError();
++  test_image_read();
++  PrintError();
++ 
++  AFF2_Init();
++  ClearError();
++  printf("\n*******************\ntest 5\n********************\n");
++  test_map_create();
++  PrintError();
++ */
++
++  AFF2_Init();
++  ClearError();
++  test_map_read();
++  PrintError();
++
++  return 0;
++};
+--- afflib-3.3.4/lib/libaff2/zip.c	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/libaff2/zip.c	2009-03-10 01:19:33.000000000 +1100
+@@ -0,0 +1,949 @@
++/** This file implements the basic Zip handling code. We allow
++    concurrent read/write.
++
++    FIXME: The FileBackedObject needs to be tailored for windows.
++*/
++#include "zip.h"
++#include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include "list.h"
++#include <unistd.h>
++#include <zlib.h>
++#include <time.h>
++#include <libgen.h>
++
++/** Implementation of FileBackedObject.
++
++FileBackedObject is a FileLikeObject which uses a real file to back
++itself.
++*/
++static int close_fd(void *self) {
++  FileBackedObject this = (FileBackedObject)self;
++  close(this->fd);
++  return 0;
++};
++
++static FileBackedObject FileBackedObject_Con(FileBackedObject self, 
++				      char *filename, char mode) {
++  int flags;
++
++  switch(mode) {
++  case 'w':
++    flags =  O_CREAT|O_RDWR|O_TRUNC|O_BINARY;
++    break;
++  case 'a':
++    flags =  O_CREAT|O_RDWR|O_APPEND|O_BINARY;
++    break;
++  case 'r':
++    flags = O_BINARY | O_RDONLY;
++    break;
++  default:
++    RaiseError(EInvalidParameter, "Unknown mode '%c'", mode);
++    return NULL;
++  };
++
++  flags = O_CREAT | O_RDWR | O_BINARY;
++  self->fd = open(filename, flags, S_IRWXU | S_IRWXG | S_IRWXO);
++  if(self->fd<0){
++    RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
++    return NULL;
++  };
++
++  // Make sure that we close the file when we free ourselves - we dont
++  // want to leak file handles
++  talloc_set_destructor((void *)self, close_fd);
++
++  // Work out what the file size is:
++  self->super.size = lseek(self->fd, 0, SEEK_END);
++
++  // Set our uri
++  self->super.super.urn = talloc_asprintf(self, "file://%s", filename);
++
++  return self;
++};
++
++// This is the low level constructor for FileBackedObject.
++static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
++  FileBackedObject this = (FileBackedObject)self;
++
++  if(urn) {
++    // If the urn starts with file:// we open the filename, otherwise
++    // we try to open the actual file itself:
++    if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
++      this->Con(this, urn + strlen("file://"), 'r');
++    } else {
++      this->Con(this, urn, 'r');
++    };
++  } else {
++    this->__super__->super.Con((AFFObject)this, urn);
++  };
++
++  return self;
++};
++
++static int FileLikeObject_truncate(FileLikeObject self, uint64_t offset) {
++  self->size = offset;
++  return offset;
++};
++
++static uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
++  if(whence==SEEK_SET) {
++    self->readptr = offset;
++  } else if(whence==SEEK_CUR) {
++    self->readptr += offset;
++    if(self->readptr<0) self->readptr=0;
++  } else if(whence==SEEK_END) {
++    self->readptr = self->size + offset;
++  };
++
++  if(self->readptr < 0) {
++    self->readptr=0;
++
++  } else if(self->readptr > self->size) {
++    self->readptr = self->size;
++  };
++
++  return self->readptr;
++};
++  
++/** 
++    read some data from our file into the buffer (which is assumed to
++    be large enough).
++**/
++static int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int length) {
++  FileBackedObject this = (FileBackedObject)self;
++  int result;
++
++  lseek(this->fd,self->readptr,0);
++  result = read(this->fd, buffer, length);
++  if(result < 0) {
++    RaiseError(EIOError, "Unable to read from %s (%s)", URNOF(self), strerror(errno));
++    return -1;
++  };
++
++  self->readptr += result;
++
++  return result;
++};
++
++static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int length) {
++  FileBackedObject this = (FileBackedObject)self;
++  int result;
++
++  lseek(this->fd,self->readptr,0);
++  result = write(this->fd, buffer, length);
++  if(result < 0) {
++    RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self), strerror(errno));
++  };
++
++  self->readptr += result;
++
++  self->size = max(self->size, self->readptr);
++
++  return result;
++};
++
++static uint64_t FileLikeObject_tell(FileLikeObject self) {
++  return self->readptr;
++};
++
++static void FileLikeObject_close(FileLikeObject self) {
++  //talloc_free(self);
++};
++static void FileBackedObject_close(FileLikeObject self) {
++  FileBackedObject this=(FileBackedObject)self;
++
++  close(this->fd);
++  talloc_free(self);
++};
++
++static AFFObject FileBackedObject_finish(AFFObject self) {
++  FileBackedObject this = (FileBackedObject)self;
++  char *urn = self->urn;
++ 
++  if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
++    return (AFFObject)this->Con(this, urn + strlen("file://"), 'w');
++  } else {
++    return (AFFObject)this->Con(this, urn, 'w');
++  };
++};
++
++VIRTUAL(FileLikeObject, AFFObject)
++     VMETHOD(seek) = FileLikeObject_seek;
++     VMETHOD(tell) = FileLikeObject_tell;
++     VMETHOD(close) = FileLikeObject_close;
++     VMETHOD(truncate) = FileLikeObject_truncate;
++END_VIRTUAL
++
++int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
++  FileBackedObject this=(FileBackedObject)self;
++
++  ftruncate(this->fd, offset);
++  return this->__super__->truncate(self, offset);
++};
++
++/** A file backed object extends FileLikeObject */
++VIRTUAL(FileBackedObject, FileLikeObject)
++     VMETHOD(Con) = FileBackedObject_Con;
++     VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
++     VMETHOD(super.super.finish) = FileBackedObject_finish;
++
++     VMETHOD(super.read) = FileBackedObject_read;
++     VMETHOD(super.write) = FileBackedObject_write;
++     VMETHOD(super.close) = FileBackedObject_close;
++     VMETHOD(super.truncate) = FileBackedObject_truncate;
++END_VIRTUAL;
++
++/** This is the constructor which will be used when we get
++    instantiated as an AFFObject.
++*/
++AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn) {
++  ZipFile this = (ZipFile)self;
++
++  if(urn) {
++    // Ok, we need to create ourselves from a URN. We need a
++    // FileLikeObject first. We ask the oracle what object should be
++    // used as our underlying FileLikeObject:
++    char *url = CALL(oracle, resolve, urn, "aff2:stored");
++    // We have no idea where we are stored:
++    if(!url) {
++      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
++      goto error;
++    };
++
++    self->urn = talloc_strdup(self, urn);
++    // Call our other constructor to actually read this file:
++    self = (AFFObject)this->Con((ZipFile)this, url);
++  } else {
++    // Call ZipFile's AFFObject constructor.
++    this->__super__->Con(self, urn);
++  };
++
++  return self;
++ error:
++  talloc_free(self);
++  return NULL;
++};
++
++static AFFObject ZipFile_finish(AFFObject self) {
++  ZipFile this = (ZipFile)self;
++  char *file_urn = CALL(oracle, resolve, self->urn, "aff2:stored");
++  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, NULL, file_urn);
++
++  if(!file_urn || !fd) {
++    RaiseError(ERuntimeError, "Volume %s has no aff2:stored property?", self->urn);
++    return NULL;
++  };
++
++  // Do we need to truncate it?
++  if(!CALL(oracle, resolve, self->urn, "aff2volatile:append")) {
++    CALL(fd, truncate, 0);
++  };
++
++  CALL(oracle, set, 
++       URNOF(self), 	       /* Source URI */
++       "aff2:type",            /* Attributte */
++       "volume");              /* Value */
++    
++  CALL((ZipFile)this, Con, file_urn);
++  return self;
++};
++
++
++static int ZipFile_destructor(void *self) {
++  ZipFile this = (ZipFile)self;
++  CALL(this, close);
++
++  return 0;
++};
++
++static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
++  char buffer[BUFF_SIZE+1];
++  int length,i;
++  FileLikeObject fd;
++
++  //talloc_set_destructor((void *)self, ZipFile_destructor);
++  memset(buffer,0,BUFF_SIZE+1);
++
++  // Make sure we have a URN
++  CALL((AFFObject)self, Con, NULL);
++
++  // Is there a file we need to read?
++  fd = (FileLikeObject)CALL(oracle, open, self, fd_urn);
++  if(!fd) return self;
++
++  self->parent_urn = talloc_strdup(self, fd_urn);
++
++  // Find the End of Central Directory Record - We read about 4k of
++  // data and scan for the header from the end, just in case there is
++  // an archive comment appended to the end
++  CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END);
++  length = CALL(fd, read, buffer, BUFF_SIZE);
++  // Error occured
++  if(length<0) 
++    goto error;
++
++  // Scan the buffer backwards for an End of Central Directory magic
++  for(i=length; i>0; i--) {
++    if(*(uint32_t *)(buffer+i) == 0x6054b50) {
++      break;
++    };
++  };
++  
++  if(i==0) {
++    // We could not find the CD - we assume its a new file and we
++    // stick ourselves on the end of it.
++    CALL(oracle, set, URNOF(self), "aff2:directory_offset", from_int(fd->size));
++  } else {
++    self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i, 
++							    sizeof(*self->end));
++    int j=0;
++
++    // Is there a comment field? We expect the comment field to be
++    // exactly a URN. If it is we can update our notion of the URN to
++    // be the same as that.
++    if(self->end->comment_len == strlen(URNOF(self))) {
++      char *comment = buffer + i + sizeof(*self->end);
++      if(!memcmp(comment, ZSTRING_NO_NULL("urn:aff2:"))) {
++	// Update our URN from the comment.
++	memcpy(URNOF(self),comment, strlen(URNOF(self)));
++      };
++    };
++
++    // Make sure that the oracle knows about this volume:
++    CALL(oracle, set, URNOF(self), "aff2:stored", URNOF(fd));
++    CALL(oracle, set, URNOF(self), "aff2:type", "volume");
++
++    // Find the CD
++    CALL(fd, seek, self->end->offset_of_cd, SEEK_SET);
++
++    while(j<self->end->total_entries_in_cd_on_disk) {
++      struct CDFileHeader cd_header;
++      char *filename;
++      char *escaped_filename;
++
++      // The length of the struct up to the filename
++
++      // Only read up to the filename member
++      if(sizeof(cd_header) != 
++	 CALL(fd, read, (char *)&cd_header, sizeof(cd_header)))
++	goto error_reason;
++
++      // Does the magic match?
++      if(cd_header.magic != 0x2014b50)
++	goto error_reason;
++
++      // Now read the filename
++      escaped_filename = talloc_array(self, char, cd_header.file_name_length+1);
++						
++      if(CALL(fd, read, escaped_filename, cd_header.file_name_length) != 
++	 cd_header.file_name_length)
++	goto error_reason;
++
++      // Unescape the filename
++      filename = unescape_filename(escaped_filename);
++
++      // Tell the oracle about this new member
++      CALL(oracle, set, filename, "aff2:location", URNOF(self));
++      CALL(oracle, set, filename, "aff2:type", "blob");
++      CALL(oracle, set, URNOF(self), "aff2volatile:contains", filename);
++
++      CALL(oracle, set, filename, "aff2volatile:file_size", 
++	   from_int(cd_header.file_size));
++
++      CALL(oracle, set, filename, "aff2volatile:compression", 
++	   from_int(cd_header.compression_method));
++
++      CALL(oracle, set, filename, "aff2volatile:crc32", 
++	   from_int(cd_header.crc32));
++
++      CALL(oracle, set, filename, "aff2volatile:compress_size", 
++	   from_int(cd_header.compress_size));
++
++      // Skip the comments - we dont care about them
++      CALL(fd, seek, cd_header.extra_field_len + 
++	   cd_header.file_comment_length, SEEK_CUR);
++
++      // Read the zip file itself
++      {
++	uint64_t current_offset = CALL(fd, tell);
++	struct ZipFileHeader file_header;
++	uint32_t file_offset;
++
++	CALL(fd,seek, cd_header.relative_offset_local_header, SEEK_SET);
++	CALL(fd, read, (char *)&file_header, sizeof(file_header));
++
++	file_offset = cd_header.relative_offset_local_header +
++	  sizeof(file_header) +
++	  file_header.file_name_length + file_header.extra_field_len;
++
++	CALL(oracle, set, filename, "aff2volatile:file_offset", 
++	     from_int(file_offset));
++
++	CALL(fd, seek, current_offset, SEEK_SET);
++      };
++
++      // Is this file a properties file?
++      {
++	int filename_length = strlen(filename);
++	int properties_length = strlen("properties");
++	int len;
++
++	// We identify streams by their filename ending with "properties"
++	// and parse out their properties:
++	if(filename_length >= properties_length && 
++	   !strcmp("properties", filename + filename_length - properties_length)) {
++	  char *text = CALL(self, read_member, self, filename, &len);
++	  char *context = dirname(filename);
++
++	  //printf("Found property file %s\n%s", filename, text);
++
++	  if(text) {
++	    CALL(oracle, parse, context, text, len);
++	    talloc_free(text);
++	  };
++	};
++      };
++
++      // Do we have as many CDFileHeaders as we expect?
++      j++;
++    };   
++  };
++
++  CALL(oracle, cache_return, (AFFObject)fd);
++  return self;
++
++ error_reason:
++  RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
++ error:
++    CALL(oracle, cache_return, (AFFObject)fd);
++    talloc_free(self);
++    return NULL;
++};
++
++/*** NOTE - The buffer callers receive will not be owned by the
++     callers. Callers should never free it nor steal it. The buffer is
++     owned by the cache system and callers merely borrow a reference
++     to it. length will be adjusted to the size of the buffer.
++*/
++static char *ZipFile_read_member(ZipFile self, void *ctx,
++				 char *filename, 
++				 int *length) {
++  char *buffer;
++  FileLikeObject fd;
++  uint32_t file_size = parse_int(CALL(oracle, resolve, filename, 
++				      "aff2volatile:file_size"));
++  
++  int compression_method = parse_int(CALL(oracle, resolve, filename, 
++					  "aff2volatile:compression"));
++  
++  uint64_t file_offset = parse_int(CALL(oracle, resolve, filename,
++					"aff2volatile:file_offset"));
++  
++
++  // This is the volume the filename is stored in
++  char *volume_urn = CALL(oracle, resolve, filename, "aff2:location");
++
++  // This is the file that backs this volume
++  char *fd_urn = CALL(oracle, resolve, volume_urn, "aff2:stored");
++  
++  fd = (FileLikeObject)CALL(oracle, open, self, fd_urn);
++  if(!fd) return NULL;
++
++  // We know how large we would like the buffer so we make it that big
++  // (bit extra for null termination).
++  buffer = talloc_size(ctx, file_size + 2);
++  *length = file_size;
++
++  // Go to the start of the file
++  CALL(fd, seek, file_offset, SEEK_SET);
++
++  if(compression_method == ZIP_DEFLATE) {
++    int compressed_length = parse_int(CALL(oracle, resolve, filename, 
++					   "aff2volatile:compress_size"));
++    int uncompressed_length = *length;
++    char *tmp = talloc_size(buffer, compressed_length);
++    z_stream strm;
++
++    memset(&strm, 0, sizeof(strm));
++
++    //Now read the data in
++    if(CALL(fd, read, tmp, compressed_length) != compressed_length)
++      goto error;
++
++    // Decompress it
++    /** Set up our decompressor */
++    strm.next_in = (unsigned char *)tmp;
++    strm.avail_in = compressed_length;
++    strm.next_out = (unsigned char *)buffer;
++    strm.avail_out = uncompressed_length;
++    strm.zalloc = Z_NULL;
++    strm.zfree = Z_NULL;
++
++    if(inflateInit2(&strm, -15) != Z_OK) {
++      RaiseError(ERuntimeError, "Failed to initialise zlib");
++      goto error;
++    };
++
++    if(inflate(&strm, Z_FINISH) !=Z_STREAM_END || \
++       strm.total_out != uncompressed_length) {
++      RaiseError(ERuntimeError, "Failed to fully decompress chunk (%s)", strm.msg);
++      goto error;
++    };
++
++    inflateEnd(&strm);
++  } else if(compression_method == ZIP_STORED) {
++    if(CALL(fd, read, buffer, *length) != *length) {
++      RaiseError(EIOError, "Unable to read %d bytes from %s@%lld", *length, 
++		 URNOF(fd), fd->readptr);
++      goto error;
++    };
++
++  } else {
++    RaiseError(EInvalidParameter, "Compression type %X unknown", compression_method);
++    goto error;
++  };
++
++  // Here we have a good buffer - now calculate the crc32
++  if(1){
++    uLong crc = crc32(0L, Z_NULL, 0);
++    uLong file_crc = parse_int(CALL(oracle, resolve, filename, "aff2volatile:crc32"));
++    crc = crc32(crc, (unsigned char *)buffer,
++		file_size);
++
++    if(crc != file_crc) {
++      RaiseError(EIOError, 
++		 "CRC not matched on decompressed file %s", filename);
++      goto error;
++    };
++  };
++
++  CALL(oracle, cache_return, (AFFObject)fd);
++  return buffer;
++ error:
++  CALL(oracle, cache_return, (AFFObject)fd);
++  talloc_free(buffer);
++  return NULL;
++};
++
++static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
++				   char *extra, uint16_t extra_field_len,
++				   int compression) {
++  FileLikeObject result;
++
++  switch(mode) {
++  case 'w': {
++    struct ZipFileHeader header;
++    char *writer =CALL(oracle, resolve, URNOF(self),
++		       "aff2volatile:write_lock");
++    FileLikeObject fd;
++    // We start writing new files at this point
++    uint64_t directory_offset = parse_int(CALL(oracle, resolve, 
++					       URNOF(self), 
++					       "aff2volatile:directory_offset"));
++    char *escaped_filename = escape_filename(filename);
++
++    // Check to see if this zip file is already open - a global lock
++    // (Note if the resolver is external this will lock all other
++    // writers).
++    if(writer) {
++      RaiseError(ERuntimeError, "Unable to create a new member for writing '%s', when one is already writing '%s'", filename, writer);
++      return NULL;
++    };
++
++    // Put a lock on the file now:
++    CALL(oracle, set, URNOF(self), "aff2volatile:write_lock", "1");
++
++    // Indicate that the file is dirty - This means we will be writing
++    // a new CD on it
++    CALL(oracle, set, URNOF(self), "aff2volatile:dirty", "1");
++
++    // Open our current volume:
++    fd = (FileLikeObject)CALL(oracle, open, self, self->parent_urn);
++    if(!fd) return NULL;
++
++    // Go to the start of the directory_offset
++    CALL(fd, seek, directory_offset, SEEK_SET);
++
++    // Write a file header on
++    memset(&header, 0, sizeof(header));
++    header.magic = 0x4034b50;
++    header.version = 0x14;
++    // We prefer to write trailing directory structures
++    header.flags = 0x08;
++    header.compression_method = compression;
++    header.file_name_length = strlen(escaped_filename);
++    header.extra_field_len = extra_field_len;
++    
++    CALL(fd, write,(char *)&header, sizeof(header));
++    CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
++    //    CALL(fd, write, ZSTRING_NO_NULL("AF"));
++    //    CALL(fd, write, (char *)&extra_field_len, sizeof(extra_field_len));
++    //    CALL(fd, write, extra, extra_field_len);
++
++    CALL(oracle, add, filename, "aff2volatile:compression", 
++	 from_int(compression));
++    CALL(oracle, add, filename, "aff2volatile:file_offset", 
++	 from_int(fd->tell(fd)));
++    CALL(oracle, add, filename, "aff2volatile:relative_offset_local_header", 
++	 from_int(directory_offset));
++
++    result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
++				       ZipFileStream, Con, self, 
++				       filename, self->parent_urn, 
++				       URNOF(self),
++				       'w');
++    CALL(oracle, cache_return, (AFFObject)fd);
++    break;
++  };
++  case 'r': {
++    if(compression != ZIP_STORED) {
++      RaiseError(ERuntimeError, "Unable to open seekable member for compressed members.");
++      break;
++    };
++
++    result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
++				       ZipFileStream, Con, self, 
++				       filename, self->parent_urn,
++				       URNOF(self),
++				       'r');
++    break;
++  };
++  default:
++    RaiseError(ERuntimeError, "Unsupported mode '%c'", mode);
++    return NULL;
++  };
++
++  return result;
++};
++
++static void ZipFile_close(ZipFile self) {
++  // Dump the current CD. We expect our fd is seeked to the right
++  // place:
++  int k=0;
++  char *_didModify = CALL(oracle, resolve, URNOF(self), "aff2volatile:dirty");
++
++  // We iterate over all the items which are contained in the
++  // volume. We then write them into the CD.
++  if(_didModify) {
++    struct EndCentralDirectory end;
++    FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self ,self->parent_urn);
++    uint64_t directory_offset = parse_int(CALL(oracle, resolve, 
++					       URNOF(self), 
++					       "aff2volatile:directory_offset"));
++
++    if(!fd) return;
++    CALL(fd, seek, directory_offset, SEEK_SET);
++    
++    // Dump the central directory for this volume
++    {
++      Cache volume_dict = CALL(oracle->urn, get_item, URNOF(self));
++      Cache i;
++  
++      // Now we search all the tuples with URNOF(self)
++      // aff2volatile:contains *
++      list_for_each_entry(i, &volume_dict->cache_list, cache_list) {
++	char *attribute = (char *)i->key;
++	char *value = (char *)i->data;
++	
++	// This is a zip member
++	if(!strcmp(attribute, "aff2volatile:contains")) {
++	  struct CDFileHeader cd;
++	  time_t epoch_time = parse_int(CALL(oracle, resolve, value, 
++					     "aff2volatile:timestamp"));
++	  struct tm *now = localtime(&epoch_time);
++	  char *escaped_filename =  escape_filename(value);
++
++	  memset(&cd, 0, sizeof(cd));
++
++	  cd.magic = 0x2014b50;
++	  cd.version_made_by = 0x317;
++	  cd.version_needed = 0x14;
++	  cd.compression_method = parse_int(CALL(oracle, resolve, value, 
++						 "aff2volatile:compression"));
++	  
++	  cd.crc32 = parse_int(CALL(oracle, resolve, value, 
++				     "aff2volatile:crc32"));
++
++	  cd.dosdate = (now->tm_year + 1900 - 1980) << 9 | 
++	    (now->tm_mon + 1) << 5 | now->tm_mday;
++	  cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
++	    now->tm_sec / 2;
++
++	  cd.file_name_length = strlen(escaped_filename);
++	  cd.relative_offset_local_header = parse_int(CALL(oracle, resolve, value, 
++			      "aff2volatile:relative_offset_local_header"));
++	  cd.file_size = parse_int(CALL(oracle, resolve, value, 
++					 "aff2volatile:file_size"));;
++	  cd.compress_size = parse_int(CALL(oracle, resolve, value, 
++					     "aff2volatile:compress_size"));;
++	  
++	  CALL(fd, write, (char *)&cd, sizeof(cd));
++	  CALL(fd, write, (char *)ZSTRING_NO_NULL(escaped_filename));
++	  k++;
++	};
++      };
++    };
++
++    // Now write an end of central directory record
++    memset(&end, 0, sizeof(end));
++    end.magic = 0x6054b50;
++    end.offset_of_cd = directory_offset;
++    end.total_entries_in_cd_on_disk = k;
++    end.total_entries_in_cd = k;
++    end.size_of_cd = CALL(fd, tell) - directory_offset;
++    end.comment_len = strlen(URNOF(self));
++
++    // Make sure to add our URN to the comment field in the end
++    CALL(fd, write, (char *)&end, sizeof(end));
++    CALL(fd, write, ZSTRING_NO_NULL(URNOF(self)));
++
++    CALL(oracle, cache_return, (AFFObject)fd);
++
++    // Make sure the lock is removed from this volume now:
++    CALL(oracle, del, URNOF(self), "aff2volatile:write_lock");
++  };
++};
++
++/** This is just a convenience function - real simple now */
++static void ZipFile_writestr(ZipFile self, char *filename, 
++		      char *data, int len, char *extra, int extra_len, 
++		      int compression) {
++  FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
++			   compression);
++  if(fd) {
++    CALL(fd, write, data, len);
++    CALL(fd, close);
++  };
++};
++
++// FIXME - implement appending to volumes
++int ZipFile_create_volume(ZipFile self, char *volume_urn) {
++  // We do this to make check if the volume already exists
++  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, volume_urn);
++
++  if(fd) {
++    // Yes it already exists - we need to parse it
++    // CALL(self, Con, fd);
++    if(self->parent_urn) {
++      CALL(self, close);
++      talloc_free(self->parent_urn);
++    } else {
++      self->parent_urn = talloc_strdup(self, volume_urn);
++    };
++  } else {
++    return -1;
++  };
++
++  CALL(oracle, cache_return, (AFFObject)fd);
++  return 1;
++}
++
++VIRTUAL(ZipFile, AFFObject)
++     VMETHOD(Con) = ZipFile_Con;
++     VMETHOD(read_member) = ZipFile_read_member;
++     VMETHOD(open_member) = ZipFile_open_member;
++     VMETHOD(close) = ZipFile_close;
++     VMETHOD(writestr) = ZipFile_writestr;
++     VMETHOD(super.Con) = ZipFile_AFFObject_Con;
++     VMETHOD(super.finish) = ZipFile_finish;
++END_VIRTUAL
++
++/** container_urn is the URN of the ZipFile container which holds this
++    member, parent_urn is the URN of the backing FileLikeObject which
++    the zip file is written on. filename is the filename of this new
++    zip member.
++*/
++static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename, 
++				       char *parent_urn, char *container_urn,
++				       char mode) {
++  self->mode = mode;
++  self->container_urn = talloc_strdup(self, container_urn);
++  self->compression = parse_int(CALL(oracle, resolve, 
++				     filename, 
++				     "aff2volatile:compression"));
++  
++  self->file_offset = parse_int(CALL(oracle, resolve, 
++				     filename, 
++				     "aff2volatile:file_offset"));
++    
++  URNOF(self) = talloc_strdup(self, filename);
++  self->parent_urn = talloc_strdup(self, parent_urn);
++  self->super.size = parse_int(CALL(oracle, resolve,
++				    filename,
++				    "aff2volatile:file_size"));
++
++  if(mode=='w' && self->compression == ZIP_DEFLATE) {
++    // Initialise the stream compressor
++    memset(&self->strm, 0, sizeof(self->strm));
++    self->strm.next_in = talloc_size(self, BUFF_SIZE);
++    self->strm.next_out = talloc_size(self, BUFF_SIZE);
++
++    if(deflateInit2(&self->strm, 9, Z_DEFLATED, -15,
++		    9, Z_DEFAULT_STRATEGY) != Z_OK) {
++      RaiseError(ERuntimeError, "Unable to initialise zlib (%s)", self->strm.msg);
++      goto error;
++    };
++  };
++
++
++  // Set important parameters in the zinfo
++  return self;
++
++ error:
++  talloc_free(self);
++  return NULL;
++};
++
++/**
++   This zlib trickery comes from http://www.zlib.net/zlib_how.html
++**/
++static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
++  ZipFileStream this = (ZipFileStream)self;
++  int result=0;
++  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn);
++
++  // Update the crc:
++  this->crc32 = crc32(this->crc32, 
++		      (unsigned char*)buffer,
++		      length);
++
++  /** Position our write pointer */
++  CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
++
++  // Is this compressed?
++  if(this->compression == ZIP_DEFLATE) {
++    unsigned char compressed[BUFF_SIZE];
++
++    /** Give the buffer to zlib */
++    this->strm.next_in = (unsigned char *)buffer;
++    this->strm.avail_in = length;
++
++    /** We spin here until zlib consumed all the data */
++    do {
++      int ret;
++
++      this->strm.avail_out = BUFF_SIZE;
++      this->strm.next_out = compressed;
++      
++      ret = deflate(&this->strm, Z_NO_FLUSH);
++      ret = CALL(fd, write, (char *)compressed, 
++		 BUFF_SIZE - this->strm.avail_out);
++      if(ret<0) return ret;
++      result += ret;
++    } while(this->strm.avail_out == 0);
++
++  } else {
++    /** Without compression, we just write the buffer right away */
++    result = CALL(fd, write, buffer, length);
++    if(result<0) 
++      goto exit;
++  }; 
++
++  /** Update our compressed size here */
++  this->compress_size += result;
++
++  /** The readptr and the size are advanced by the uncompressed amount
++   */
++  self->readptr += length;
++  self->size = max(self->size, self->readptr);
++  
++  exit:
++  CALL(oracle, cache_return, (AFFObject)fd);
++  return result;
++};
++
++static int ZipFileStream_read(FileLikeObject self, char *buffer,
++			      unsigned long int length) {
++  ZipFileStream this = (ZipFileStream)self;
++  int len;
++  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn);
++
++  /** Position our write pointer */
++  CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
++  len = CALL(fd, read, buffer, length);
++  self->readptr += len;
++
++  CALL(oracle, cache_return, (AFFObject)fd);
++  return len;
++};
++
++static void ZipFileStream_close(FileLikeObject self) {
++  ZipFileStream this = (ZipFileStream)self;
++  FileLikeObject fd;
++  
++  if(this->mode == 'r') return;
++  
++  fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn);
++  if(!fd) {
++    RaiseError(ERuntimeError, "Unable to open file %s", this->parent_urn);
++    return;
++  };
++
++  if(this->compression == ZIP_DEFLATE) {
++    unsigned char compressed[BUFF_SIZE];
++
++    do {
++      int ret;
++
++      this->strm.avail_out = BUFF_SIZE;
++      this->strm.next_out = compressed;
++      
++      ret = deflate(&this->strm, Z_FINISH);
++      CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
++      ret = CALL(fd, write, (char *)compressed, 
++		 BUFF_SIZE - this->strm.avail_out);
++      self->readptr += ret;
++
++      this->compress_size += ret;
++    } while(this->strm.avail_out == 0);
++    
++    (void)deflateEnd(&this->strm);
++ };
++
++  // Store important information about this file
++  CALL(oracle, add, this->parent_urn, "aff2volatile:contains", URNOF(self));
++  CALL(oracle, add, URNOF(self), "aff2volatile:stored", this->parent_urn);
++  CALL(oracle, add, URNOF(self), "aff2volatile:timestamp", from_int(time(NULL)));
++  CALL(oracle, add, URNOF(self), "aff2volatile:file_size", from_int(self->size));
++  CALL(oracle, add, URNOF(self), "aff2volatile:compress_size", from_int(this->compress_size));
++  CALL(oracle, add, URNOF(self), "aff2volatile:crc32", from_int(this->crc32));
++
++  // Put the description header on
++  CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
++  CALL(fd, write, (char *)&this->crc32,
++       sizeof(this->crc32));
++  CALL(fd, write, (char *)&this->compress_size,
++       sizeof(uint32_t));
++  CALL(fd, write, (char *)&self->size,
++       sizeof(uint32_t));
++
++  // This is the point where we will be writing the next file.
++  CALL(oracle, set, this->container_urn, "aff2volatile:directory_offset",
++       from_int(fd->tell(fd)));
++
++  CALL(oracle, add, this->container_urn, "aff2volatile:contains",
++       URNOF(self));
++ 
++  // Make sure the lock is removed from this volume now:
++  CALL(oracle, del, this->container_urn, "aff2volatile:write_lock");
++  CALL(oracle, cache_return, (AFFObject)fd);
++  talloc_free(self);
++};
++
++VIRTUAL(ZipFileStream, FileLikeObject)
++     VMETHOD(Con) = ZipFileStream_Con;
++     VMETHOD(super.write) = ZipFileStream_write;
++     VMETHOD(super.read) = ZipFileStream_read;
++     VMETHOD(super.close) = ZipFileStream_close;
++END_VIRTUAL
++
++void print_cache(Cache self) {
++  Cache i;
++
++  list_for_each_entry(i, &self->cache_list, cache_list) {
++    printf("%s %p %s\n",(char *) i->key,i->data, (char *)i->data);
++  };
++};
+--- afflib-3.3.4/lib/Makefile.am	2008-09-04 11:43:02.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/Makefile.am	2009-03-09 21:13:12.000000000 +1100
+@@ -1,6 +1,8 @@
+ bin_PROGRAMS = aftest
+ aftest_SOURCES = aftest.cpp
+-aftest_LDADD = libafflib.la  
++aftest_LDADD = libafflib.la
++
++SUBDIRS = libaff2
+ 
+ TESTS = aftest 
+ 
+@@ -15,6 +17,7 @@ AFFLIB_SOURCES = aff_db.cpp aff_db.h aff
+ 	vnode_afd.cpp vnode_afd.h \
+ 	vnode_afm.cpp vnode_afm.h \
+ 	vnode_ewf.cpp vnode_ewf.h \
++	vnode_aff2.cpp \
+ 	vnode_raw.cpp vnode_raw.h \
+ 	vnode_split_raw.cpp vnode_split_raw.h \
+ 	aftimer.cpp aftimer.h \
+@@ -114,3 +117,4 @@ LZMA_SOURCES =  \
+ # Unfortunately, when we specify lib_, things don't build. I can't figure it out.
+ lib_LTLIBRARIES = libafflib.la
+ libafflib_la_SOURCES += $(LZMA_SOURCES)
++libafflib_la_LIBADD   = libaff2/libaff2.la
+\ No newline at end of file
+--- afflib-3.3.4/lib/vnode_aff2.cpp	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/vnode_aff2.cpp	2009-03-10 01:25:05.000000000 +1100
+@@ -0,0 +1,127 @@
++#include "affconfig.h"
++#include "afflib.h"
++#include "afflib_i.h"
++#include <ctype.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "vnode_aff2.h"
++#include "libaff2/include/talloc.h"
++#include "libaff2/include/zip.h"
++
++/* Return 1 if a file is a ewf file... */
++static int aff2_identify_file(const char *filename,int exists)
++{
++  char *file=talloc_strdup(NULL, filename);
++  int i = strcspn(filename,":");
++  file[i]=0;
++
++  i=(access(filename, R_OK)!=0);
++  talloc_free(file);
++  return i;
++}
++
++static int aff2_open(AFFILE *af) {
++  char *filename = talloc_asprintf(NULL, "file://%s", af->fname);
++  int i;
++  char *streamname;
++  ZipFile zipfile;
++  FileLikeObject stream;
++  
++  i = strcspn(af->fname,":") + strlen("file://");
++  filename[i]=0;
++  streamname = filename+i+1;
++
++  AFF2_Init();
++
++  // Start off by parsing the file
++  zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, filename);
++  if(!zipfile) {
++    warn("Unable to open file %s", _traceback);
++    goto error;
++  };
++  
++  // We dont need it any more
++  CALL(oracle, cache_return, (AFFObject)zipfile);
++
++  // Record the stream name
++  af->vnodeprivate = talloc_strdup(NULL, streamname);
++  // Try to open the stream
++  stream = (FileLikeObject)CALL(oracle, open, NULL, streamname);
++  if(!stream) {
++    warn("Unable to find stream %s", _traceback);
++    goto error;
++  };
++
++  // Dont need it now
++  CALL(oracle, cache_return, (AFFObject)stream);
++  talloc_free(filename);
++  return 0;
++ error:  
++  talloc_free(filename);
++  return -1;
++};
++
++static int aff2_read(AFFILE *af, unsigned char *buf, uint64_t pos,size_t count)
++{
++  char *stream_urn = (char *)af->vnodeprivate;
++  FileLikeObject stream = (FileLikeObject)CALL(oracle, open, NULL, stream_urn);
++  int length;
++
++  CALL(stream, seek, pos, SEEK_SET);
++  length = CALL(stream, read, (char *)buf, count);
++
++  CALL(oracle, cache_return, (AFFObject)stream);
++
++  return length;
++}
++
++static int aff2_close(AFFILE *af) {
++  talloc_free(af->vnodeprivate);
++  // Should we dispose of the cache?
++  return 0;
++};
++
++static int aff2_vstat(AFFILE *af,struct af_vnode_info *vni) {
++  char *stream_urn = (char *)af->vnodeprivate;
++  FileLikeObject stream = (FileLikeObject)CALL(oracle, open, NULL, stream_urn);
++
++  vni->imagesize = stream->size;
++  CALL(oracle, cache_return, (AFFObject)stream);
++  vni->pagesize = 0;
++  vni->supports_metadata = 1;
++  vni->changable_pagesize = 0;
++  vni->changable_sectorsize = 0;
++  vni->supports_compression = 0;
++  vni->has_pages = 0;			// debatable
++  return 0;
++};
++
++struct af_vnode vnode_aff2 = {
++    AF_IDENTIFY_AFF2,
++    AF_VNODE_TYPE_PRIMITIVE|AF_VNODE_NO_SIGNING|AF_VNODE_NO_SEALING,
++    "LIBAFF2",
++    aff2_identify_file,
++    aff2_open,
++    aff2_close,
++    aff2_vstat,
++    0,
++    0,
++    0,
++    0,
++    0,
++    aff2_read,
++    0
++    /*
++    ewf_open,
++    ewf_close,
++    ewf_vstat,
++    ewf_get_seg,			// get seg
++    ewf_get_next_seg,			// get_next_seg
++    ewf_rewind_seg,			// rewind_seg
++    0,					// update_seg
++    0,					// del_seg
++    ewf_read,				// read
++    ewf_write				// write
++    */
++};
+--- afflib-3.3.4/lib/vnode_aff2.h	1970-01-01 10:00:00.000000000 +1000
++++ afflib-3.3.4_AFF2/lib/vnode_aff2.h	2009-03-09 19:44:44.000000000 +1100
+@@ -0,0 +1 @@
++extern struct af_vnode vnode_aff2;	/* vnode_ewf.cpp */
