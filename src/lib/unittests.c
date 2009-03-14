@@ -441,6 +441,7 @@ void test_encrypted(char *filename) {
   // Create an embedded Image stream inside the encrypted stream:
   embedded_stream = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
   CALL((AFFObject)embedded_stream, set_property, "aff2:stored", URNOF(container));
+  CALL((AFFObject)embedded_stream, set_property, "aff2:compression", "0");
   CALL((AFFObject)encrypted_stream, set_property, "aff2:target", URNOF(embedded_stream));
 
   if(!CALL((AFFObject)encrypted_stream, finish)) {

@@ -268,6 +268,9 @@ CLASS(Image, FileLikeObject)
      int32_t *chunk_indexes;
      char *parent_urn;
 
+     // This is the compression type
+     int compression;
+
 END_CLASS
 
 /** The map stream driver maps an existing stream using a

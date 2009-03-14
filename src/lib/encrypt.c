@@ -3,7 +3,7 @@
 
 AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
   Encrypted this = (Encrypted)self;
-  int value;
+  char *value;
 
   if(urn) {
     URNOF(self) = talloc_strdup(self, urn);

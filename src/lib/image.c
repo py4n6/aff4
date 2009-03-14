@@ -56,6 +56,9 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
     // These are the essential properties:
     value = resolver_get_with_default(oracle, self->urn, "aff2:chunk_size", "32k");
     this->chunk_size = parse_int(value);
+
+    value = resolver_get_with_default(oracle, self->urn, "aff2:compression", "8");
+    this->compression = parse_int(value);
     
     value = resolver_get_with_default(oracle, self->urn, "aff2:chunks_in_segment", "2048");
     this->chunks_in_segment = parse_int(value);
@@ -120,7 +123,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
   int clength=2*compressBound(length);
 
   // Should we offer to store chunks uncompressed?
-  if(0) {
+  if(this->compression == 0) {
     memcpy(cbuffer, data, length);
     clength = length;
   } else {
@@ -346,13 +349,19 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   CALL(fd, close);
   talloc_free(fd);
 
-  // Try to decompress it:
-  if(uncompress((unsigned char *)uncompressed_chunk, 
-		(unsigned long int *)&uncompressed_length, 
-		(unsigned char *)compressed_chunk,
-		(unsigned long int)compressed_length) != Z_OK ) {
-    RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
-    goto error;
+
+  if(this->compression == 8) {
+    // Try to decompress it:
+    if(uncompress((unsigned char *)uncompressed_chunk, 
+		  (unsigned long int *)&uncompressed_length, 
+		  (unsigned char *)compressed_chunk,
+		  (unsigned long int)compressed_length) != Z_OK ) {
+      RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
+      goto error;
+    };
+  } else {
+    memcpy(uncompressed_chunk, compressed_chunk, compressed_length);
+    uncompressed_length = compressed_length;
   };
   
   //  printf("%d\n", uncompressed_length);
