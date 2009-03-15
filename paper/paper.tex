@@ -141,6 +141,16 @@ should, in addition to storing an image, store entities representing
 and describing the tool itself, the operator of the tool, the user
 supplied parameters supplied to the tool, and the drive being imaged.
 
+An important advance of this work is the introduction of storage transformation
+functions to the forensic storage container. Prior works simply focused
+on forensically sound storage of bitstreams, leaving the necessary activities
+of translating low level storage into higher level abstractions at the 
+aggregate block (ie. RAID), volume, and filesystem layers in the domain of 
+analysis tools, as transiently constructed artifacts. AFF4, through its introduction 
+of Map Streams, enables artefacts at all these layers to be stored at zero cost within
+the forensic container, which is an important enabler for interoperable 
+forensic tools.
+
 This paper extends the previous work by adapting AFF to the multiple
 heterogeneous data types that might arise in a modern digital
 investigation, including data from multiple data storage devices, new
@@ -148,7 +158,7 @@ data types (including network packets and memory images), extracted
 logical evidence, and forensic workflow. We do this in a manner that
 is at once upwards compatible with AFF while adopting the AFF
 bit-level specification so that AFF files can be processed using
-standard non-forensic tools.  We call the new system AFF4, and use the
+standard non-forensic tools. The  We call the new system AFF4, and use the
 phrase AFF1 to refer to the legacy system developed by
 Garfinkel.\footnote{Although Garfinkel never changed the AFF bit-level
 specification, Garfinkel released AFFLIB implementations with major
@@ -184,8 +194,8 @@ read individual files stored in a disk image.
 \end{figure}
 \section{The Need for an Improved Forensic Format}
 
-AFF1's flexibility came from the fact that forensic data and metadata
-is stored as arbitrary name/value pairs called \emph{segments}. For
+AFF1's flexibility came from a data model of forensic data and metadata
+stored as arbitrary name/value pairs called \emph{segments}. For
 example, the first 16MB of a disk image is stored in a segment called
 \texttt{page0}, the second 16MB in a segment called \texttt{page1},
 \emph{etc.} Because of this flexibility, it was relatively easy for
@@ -397,20 +407,23 @@ name collisions.
 
 The AFF4 design adopts a scheme of globally unique identifiers for
 identifying and referring to all evidence. We define an AFF4 specific
-URN namespace\cite{RFC1737} for our naming scheme (\emph{urn:aff4}).
-URNs can then be made unique by use of a unique identifier generated
+URN scheme, which we call the AFF4 URN. URN's of this scheme use the
+namespace\cite{RFC1737} \emph{\'aff4\'} and therefore begin with the 
+string(\emph{urn:aff4}). AFF4 URNs are then be made unique by use of 
+a unique identifier generated
 as per RFC4122\cite{RFC4122}. For example, an AFF4 URN might be
 \emph{urn:aff4:bcc02ea5-eeb3-40ce-90cf-7315daf2505e}
 
 In this way we can identify uniquely any evidence without the change
 for name collisions. Once a universal identification regime is
 created, it is now possible to collect metadata about each object. The
-AFF4 model treats metadata as an abstract concept which may exists
+AFF4 model treats metadata as an abstract concept which may exist
 independently from the data itself. We term {\em metadata} to be a set
 of statements about objects, written in triple notations (Subject,
 Attribute, Value), where {\em Subject} is the URN of the object the
 statement is made about. Using this system we are able to store
-arbitrary attributes about any object in the AFF4 universe.
+arbitrary attributes about any object in the AFF4 universe. Additionally,
+as these statements are universally scoped, they may be stored anywhere.
 
 The AFF4 design extends beyond the management of a single volume,
 stream or image to a universal system for managing data of many
@@ -1190,9 +1203,11 @@ image, they will specify the path and filename of the volume which
 contains it. The library will then open the volume and retrieve the
 stream.
 
-The AFF4 model is different however. In AFF4 metadata is managed
-through a Universal Resolver (perhaps implemented in a database) and
-does not really need to exist within a volume. This means that in the
+The AFF4 model is different however. In AFF4 metadata is managed in a location
+independant manner 
+through a Universal Resolver (perhaps implemented in a database). Relevant information
+is found not only in Volumes, but may additionally come from other sources.
+This means that in the
 above example, the user will query the resolver about the location of
 the volume. The resolver returns a URL to the current location of the
 volume. The user's library will then open a HTTP Stream instance to
