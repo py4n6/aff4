@@ -61,7 +61,7 @@ char *escape_filename(char *filename) {
   
   for(i=0;i<length;i++) {
     char x=filename[i];
-    if(illegal_filename_lut[x] || x>128) {
+    if(x<0 || illegal_filename_lut[x]) {
       sprintf(buffer+j, "%%%02X", x);
       j+=3;
       if(j>BUFF_SIZE-10) break;

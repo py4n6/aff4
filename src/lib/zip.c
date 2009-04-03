@@ -705,6 +705,9 @@ static void ZipFile_close(ZipFile self) {
 
     // Make sure the lock is removed from this volume now:
     CALL(oracle, del, URNOF(self), "aff2volatile:write_lock");
+
+    // Close the fd
+    CALL(fd, close);
   };
 };
 

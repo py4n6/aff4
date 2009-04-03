@@ -11,12 +11,15 @@ struct dispatch_t {
 
 static struct dispatch_t dispatch[] = {
   { "blob", (AFFObject)&__Blob },
+
   { "volume", (AFFObject)&__ZipFile },
+  { "directory", (AFFObject)&__DirVolume },
   { "link", (AFFObject)&__Link },
   { "image", (AFFObject)&__Image },
   { "map", (AFFObject)&__MapDriver},
   { "encrypted", (AFFObject)&__Encrypted},
   { "file://", (AFFObject)&__FileBackedObject },
+
   // All handled by libcurl
   { "http://", (AFFObject)&__HTTPObject },
   { "https://", (AFFObject)&__HTTPObject },
