@@ -248,8 +248,7 @@ static AFFObject ZipFile_finish(AFFObject self) {
        "aff2:type",            /* Attributte */
        "volume");              /* Value */
     
-  CALL((ZipFile)this, Con, file_urn);
-  return self;
+  return (AFFObject)CALL((ZipFile)this, Con, file_urn);
 };
 
 

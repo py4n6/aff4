@@ -155,6 +155,11 @@ CLASS(HTTPObject, FileLikeObject)
      CURL *curl;
      StringIO buffer;
 
+     CURL *send_handle;
+     StringIO send_buffer;
+
+     CURLM *multi_handle;
+
      HTTPObject METHOD(HTTPObject, Con, char *url);
 END_CLASS
 
@@ -487,8 +492,9 @@ CLASS(ZipFileStream, FileLikeObject)
 			  char mode);
 END_CLASS
 
-// This is the main FIF class - it manages the Zip archive
-CLASS(FIFFile, ZipFile)
+// A directory volume implementation - all elements live in a single
+// directory structure
+CLASS(DirVolume, ZipFile)
 END_CLASS
 
 void dump_stream_properties(FileLikeObject self, char *volume);

@@ -44,8 +44,8 @@
 
 
 % Make sure we know its a draft for now
-\usepackage{draftwatermark}
-\SetWatermarkFontSize{3cm}
+%\usepackage{draftwatermark}
+%\SetWatermarkFontSize{3cm}
 \usepackage{fancyvrb}
 %\documentclass[12pt]{article}
 \usepackage{epsfig}
@@ -1111,7 +1111,7 @@ formats, but often in a more awkward way.
 
 \subsection{Rapidly converting a set of DD images}
 Many hardware devices are available to acquire hard disks in the
-fields. These often produce a set of uncompressed images split at a
+field. These often produce a set of uncompressed images split at a
 certain size. It is possible to construct a Map Stream which
 seamlessly reassembles the logical image from all the individual disk
 images. The map stream may be kept in its own volume, or appended to
@@ -1178,7 +1178,7 @@ Encrypted Stream. Each of those streams is encrypted using a different
 master key, and therefore can have different passphrases, and can be
 assigned to different users by encrypting the master key with
 different X509 certificates. Its is also possible for users to create
-non-encrypted volumes within the FIF file.
+non-encrypted volumes within the AFF4 volume.
 
 This can be used to enforce access controls in line with current
 legislative requirements. For example, within the same investigation

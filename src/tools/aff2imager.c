@@ -196,7 +196,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 	       char *append,
 	       char *source) {
   ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  char *output = talloc_strdup(zipfile, output_file);
+  char *output;
   Image image;
   char buffer[BUFF_SIZE];
   int in_fd;
@@ -207,13 +207,18 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 
   if(!zipfile) goto error;
 
+  output = talloc_strdup(zipfile, output_file);
   in_fd=open(source,O_RDONLY);
   if(in_fd<0) {
     RaiseError(ERuntimeError, "Could not open source: %s", strerror(errno));
     goto error;
   };
 
-  if(strstr(output_file, "file://") != output_file) {
+  // We assume that if the name does not contain a : its a filename
+  // and append a file:// reference to it. Of course we expect a fully
+  // qualified URI (e.g. http://foobar/), but this is a user friendly
+  // feature.
+  if(!strstr(output_file, ":")) {
     output = talloc_asprintf(zipfile, "file://%s", output_file);
   };
 
@@ -227,8 +232,9 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   };
 
   // Is it ok?
-  if(!CALL((AFFObject)zipfile, finish))
+  if(!CALL((AFFObject)zipfile, finish)) {
     goto error;
+  };
 
   // Done with that now
   CALL(oracle, cache_return, (AFFObject)zipfile);
@@ -301,8 +307,6 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   return 0;
 
  error:
-  if(zipfile)
-    talloc_free(zipfile);
   PrintError();
   return -1;
 };

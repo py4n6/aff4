@@ -44,6 +44,7 @@ void AFF2_Init(void) {
   Link_init();
   HTTPObject_init();
   Encrypted_init();
+  DirVolume_init();
 
   init_luts();
 

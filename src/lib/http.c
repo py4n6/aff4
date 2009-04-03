@@ -7,18 +7,24 @@ We basically use libcurl to do the heavy lifting so we might actually
 get to use ftp://, http://, https:// and more all for free.
 
 ******************************************************************/
-static int close_fd(void *self) {
-  HTTPObject this = (HTTPObject)self;
-  curl_easy_cleanup(this->curl);
-
-  return 0;
-};
-
 static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
   HTTPObject this = (HTTPObject)self;
 
   CALL(this->buffer, write, ptr, size*nmemb);
   return size*nmemb;
+};
+
+static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
+  HTTPObject this = (HTTPObject)self;
+
+  int len;
+  CALL(this->send_buffer, seek, 0, 0);
+
+  len = CALL(this->send_buffer, read, ptr, size*nmemb);
+  CALL(this->send_buffer, skip, len);
+  CALL(this->send_buffer, seek, 0, 2);
+  //  if(len==0) return CURL_READFUNC_PAUSE;
+  return len;
 };
 
 // We want to get this header, Content-Range: bytes 0-100/3388
@@ -55,6 +61,7 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
 				 char *url) {
   // Parse out the url
   CURL *handle = self->curl = curl_easy_init();
+
   self->buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   URNOF(self) = talloc_strdup(self, url);
 
@@ -65,11 +72,6 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
   curl_easy_setopt( handle, CURLOPT_WRITEDATA, self );
   curl_easy_setopt( handle, CURLOPT_HEADERFUNCTION, parse_header_callback);
   curl_easy_setopt( handle, CURLOPT_HEADERDATA, self);
-
-  /*
-  curl_easy_setopt( handle, CURLOPT_SEEKFUNCTION, noop_seek_callback );
-  curl_easy_setopt( handle, CURLOPT_SEEKDATA, NULL );  
-  */
 
   if(!self->curl) {
     RaiseError(ERuntimeError, "Unable to initialise curl");
@@ -109,14 +111,69 @@ static int HTTPObject_read(FileLikeObject self, char *buffer,
 
 static int HTTPObject_write(FileLikeObject self, char *buffer,
 			    unsigned long int length) {
-  RaiseError(ERuntimeError,"Writing not supported on HTTPObject");
-  return -1;
+  HTTPObject this = (HTTPObject)self;
+
+  if(!this->send_handle) {
+    CURL *send_handle = this->send_handle = curl_easy_init();
+    this->multi_handle = curl_multi_init();
+
+    this->send_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
+
+    /** Set up the upload handle */
+    curl_easy_setopt( send_handle, CURLOPT_URL, URNOF(self));
+    curl_easy_setopt( send_handle, CURLOPT_INFILESIZE_LARGE, -1);
+    curl_easy_setopt( send_handle, CURLOPT_UPLOAD, 1);
+    curl_easy_setopt( send_handle, CURLOPT_READFUNCTION, read_callback );
+    curl_easy_setopt( send_handle, CURLOPT_READDATA, self );  
+
+    // Ok tell libcurl to upload the buffer. Because this has no
+    // data we expect it to pause right away.
+    curl_multi_add_handle(this->multi_handle, this->send_handle);
+  };
+
+  // Write the buffer on the end
+  CALL(this->send_buffer, seek, 0, SEEK_END);
+  CALL(this->send_buffer, write, buffer, length);
+  // Unpause the connection
+  {
+    int handle_count;
+    while(curl_multi_perform( this->multi_handle, &handle_count)==CURLM_CALL_MULTI_PERFORM);
+  };
+
+  self->readptr += length;
+  self->size = max(self->size, self->readptr);
+
+  return length;
 };
 
+void HTTPObject_close(FileLikeObject self) {
+  HTTPObject this = (HTTPObject)self;
+
+  // Call our base class
+  this->__super__->close(self);
+
+  curl_easy_cleanup(this->curl);
+
+  if(this->send_handle) {
+    int handle_count;
+
+    while(this->send_buffer->size > 0) {
+      int handle_count;
+      int result = curl_multi_perform(this->multi_handle, &handle_count);
+    };
+
+    curl_multi_remove_handle(this->multi_handle, this->send_handle);
+    curl_easy_cleanup(this->send_handle);
+    curl_multi_cleanup(this->multi_handle);
+    this->send_handle = NULL;
+    this->multi_handle = NULL;
+  };
+};
 
 VIRTUAL(HTTPObject, FileLikeObject)
      VMETHOD(super.read) = HTTPObject_read;
      VMETHOD(super.write) = HTTPObject_write;
+     VMETHOD(super.close) = HTTPObject_close;
      VMETHOD(Con) = HTTPObject_Con;
      VMETHOD(super.super.Con) = HTTPObject_AFFObject_Con;
 // This should only be called once:
