@@ -25,27 +25,22 @@ static int close_fd(void *self) {
   return 0;
 };
 
+/** Note that files we create will always be escaped using standard
+    URN encoding.
+*/
 static FileBackedObject FileBackedObject_Con(FileBackedObject self, 
 				      char *filename, char mode) {
   int flags;
-
-  switch(mode) {
-  case 'w':
-    flags =  O_CREAT|O_RDWR|O_TRUNC|O_BINARY;
-    break;
-  case 'a':
-    flags =  O_CREAT|O_RDWR|O_APPEND|O_BINARY;
-    break;
-  case 'r':
-    flags = O_BINARY | O_RDONLY;
-    break;
-  default:
-    RaiseError(EInvalidParameter, "Unknown mode '%c'", mode);
-    return NULL;
-  };
+  char *buffer;
 
   flags = O_CREAT | O_RDWR | O_BINARY;
-  self->fd = open(filename, flags, S_IRWXU | S_IRWXG | S_IRWXO);
+  // Try to create leading directories
+  buffer = escape_filename(filename);
+  _mkdir(dirname(buffer));
+
+  // Now try to create the file within the new directory
+  buffer = escape_filename(filename);
+  self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
   if(self->fd<0){
     RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
     return NULL;
@@ -85,6 +80,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
 
 static int FileLikeObject_truncate(FileLikeObject self, uint64_t offset) {
   self->size = offset;
+  self->readptr = min(self->size, self->readptr);
   return offset;
 };
 
@@ -231,17 +227,19 @@ AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn) {
 static AFFObject ZipFile_finish(AFFObject self) {
   ZipFile this = (ZipFile)self;
   char *file_urn = CALL(oracle, resolve, self->urn, "aff2:stored");
-  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, NULL, file_urn);
+  // FileLikeObject fd = (FileLikeObject)CALL(oracle, open, NULL, file_urn);
 
-  if(!file_urn || !fd) {
+  if(!file_urn) {
     RaiseError(ERuntimeError, "Volume %s has no aff2:stored property?", self->urn);
     return NULL;
   };
 
+#if 0
   // Do we need to truncate it?
   if(!CALL(oracle, resolve, self->urn, "aff2volatile:append")) {
     CALL(fd, truncate, 0);
   };
+#endif
 
   CALL(oracle, set, 
        URNOF(self), 	       /* Source URI */
@@ -272,7 +270,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
 
   // Is there a file we need to read?
   fd = (FileLikeObject)CALL(oracle, open, self, fd_urn);
-  if(!fd) return self;
+  if(!fd) goto error;
 
   self->parent_urn = talloc_strdup(self, fd_urn);
 
@@ -418,9 +416,9 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
  error_reason:
   RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
  error:
-    CALL(oracle, cache_return, (AFFObject)fd);
-    talloc_free(self);
-    return NULL;
+  //    CALL(oracle, cache_return, (AFFObject)fd);
+  talloc_free(self);
+  return NULL;
 };
 
 /*** NOTE - The buffer callers receive will not be owned by the

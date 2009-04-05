@@ -1,5 +1,7 @@
 #include "zip.h"
 
+static char CURL_ERROR[CURL_ERROR_SIZE];
+
 /******************************************************************
    This is an implementation of a simple HTTP File Like Object.
 
@@ -7,6 +9,9 @@ We basically use libcurl to do the heavy lifting so we might actually
 get to use ftp://, http://, https:// and more all for free.
 
 ******************************************************************/
+static size_t null_write_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
+  return size*nmemb;
+};
 static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
   HTTPObject this = (HTTPObject)self;
 
@@ -14,6 +19,7 @@ static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *self){
   return size*nmemb;
 };
 
+/** Read as much as we can from the send buffer and rotate it along */
 static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
   HTTPObject this = (HTTPObject)self;
 
@@ -23,7 +29,7 @@ static size_t read_callback(void *ptr, size_t size, size_t nmemb, void *self){
   len = CALL(this->send_buffer, read, ptr, size*nmemb);
   CALL(this->send_buffer, skip, len);
   CALL(this->send_buffer, seek, 0, 2);
-  //  if(len==0) return CURL_READFUNC_PAUSE;
+
   return len;
 };
 
@@ -50,6 +56,36 @@ static size_t parse_header_callback(void *ptr, size_t size, size_t nmemb, void *
   return length;
 };
 
+/** This function ensures that the directories all exist up to the
+    current directory.
+*/
+static int webdav_recurse_dir_check(HTTPObject self, char *url) {
+  char buff[BUFF_SIZE];
+  int len;
+  int res;
+  strncpy(buff, url, BUFF_SIZE);
+
+  dirname(buff);
+  len = strlen(buff);
+  buff[len]='/';
+  buff[len+1] =0;
+  if(len < 10) return -1;
+
+  // Check that the directory exists
+  curl_easy_setopt(self->send_handle, CURLOPT_URL, buff);
+  curl_easy_setopt(self->send_handle, CURLOPT_CUSTOMREQUEST, "PROPFIND");
+  res = curl_easy_perform(self->send_handle);
+  if(res != 0) {
+    // The present directory does not exist - make sure the parent
+    // directory exists, and then create the current directory within
+    // it:
+    webdav_recurse_dir_check(self, buff);
+    curl_easy_setopt(self->send_handle, CURLOPT_URL, buff);
+    curl_easy_setopt(self->send_handle, CURLOPT_CUSTOMREQUEST, "MKCOL");
+    curl_easy_perform(self->send_handle);
+  };
+};
+
 static AFFObject HTTPObject_AFFObject_Con(AFFObject self, char *uri) {
   HTTPObject this = (HTTPObject)self;
 
@@ -65,8 +101,10 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
   self->buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   URNOF(self) = talloc_strdup(self, url);
 
-  //  curl_easy_setopt( handle, CURLOPT_VERBOSE, 1L ); 
+  curl_easy_setopt( handle, CURLOPT_VERBOSE, 0L); 
   curl_easy_setopt( handle, CURLOPT_URL, url);
+  curl_easy_setopt( handle, CURLOPT_FAILONERROR , 1L);
+  curl_easy_setopt( handle, CURLOPT_ERRORBUFFER , CURL_ERROR);
 
   curl_easy_setopt( handle, CURLOPT_WRITEFUNCTION, write_callback );
   curl_easy_setopt( handle, CURLOPT_WRITEDATA, self );
@@ -100,7 +138,10 @@ static int HTTPObject_read(FileLikeObject self, char *buffer,
   snprintf(range, BUFF_SIZE, "%lld-%lld", self->readptr, 
 	   self->readptr + length);
   curl_easy_setopt( this->curl, CURLOPT_RANGE, range ); 
-  curl_easy_perform( this->curl ); 
+  if(curl_easy_perform( this->curl ) != 0) {
+    // Error occured:
+    return -1;
+  };
 
   length = min(length, this->buffer->readptr);
   memcpy(buffer, this->buffer->data, length);
@@ -119,7 +160,18 @@ static int HTTPObject_write(FileLikeObject self, char *buffer,
 
     this->send_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
 
+    // Make sure the present directory exists on the server:
+    curl_easy_setopt( send_handle, CURLOPT_ERRORBUFFER , CURL_ERROR);
+    curl_easy_setopt( send_handle, CURLOPT_FAILONERROR , 1L);
+    curl_easy_setopt( send_handle, CURLOPT_WRITEFUNCTION, null_write_callback );
+    webdav_recurse_dir_check(this, URNOF(self));
+
     /** Set up the upload handle */
+    curl_easy_reset( send_handle);
+    curl_easy_setopt( send_handle, CURLOPT_WRITEFUNCTION, null_write_callback );
+    curl_easy_setopt( send_handle, CURLOPT_VERBOSE, 0L); 
+    curl_easy_setopt( send_handle, CURLOPT_ERRORBUFFER , CURL_ERROR);
+    curl_easy_setopt( send_handle, CURLOPT_FAILONERROR , 1L);
     curl_easy_setopt( send_handle, CURLOPT_URL, URNOF(self));
     curl_easy_setopt( send_handle, CURLOPT_INFILESIZE_LARGE, -1);
     curl_easy_setopt( send_handle, CURLOPT_UPLOAD, 1);

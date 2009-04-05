@@ -22,20 +22,31 @@ void list_info() {
   talloc_free(result);
 };
 
+ZipFile open_volume(char *urn) {
+  ZipFile result;
+  char *filename;
+
+  if(!strstr(urn, ":")) {
+    filename = talloc_asprintf(NULL, "file://%s",urn);
+  } else {
+    filename = talloc_strdup(NULL, urn);
+  }
+
+  ClearError();
+  result =(ZipFile)CONSTRUCT(DirVolume, ZipFile, super.Con, NULL, filename);
+  if(!result)
+    result = CONSTRUCT(ZipFile, ZipFile, Con, NULL, filename);
+
+  PrintError();
+
+  return result;
+};
+
 void aff2_open_volume(char *urn) {
   // Try the different volume implementations in turn until one works:
   ZipFile volume;
-  char *filename;
 
-  ClearError();
-  volume = CONSTRUCT(ZipFile, ZipFile, Con, NULL, urn);
-  if(CheckError(ERuntimeError)) {
-    ClearError();
-    RaiseError(ERuntimeError, "Could not open %s - will try to use file protocol.", urn);
-    volume = CONSTRUCT(ZipFile, ZipFile, Con, NULL, talloc_asprintf(NULL, "file://%s",urn));    
-  };
-
-  PrintError();
+  volume = open_volume(urn);
 
   CALL(oracle, cache_return, (AFFObject)volume);
 };
@@ -191,11 +202,22 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   return -1;
 };
 
+ZipFile create_volume(char *driver) {
+  if(!strcmp(driver, "volume")) {
+    return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  } else if(!strcmp(driver, "directory")) {
+    return (ZipFile)CALL(oracle, create, (AFFObject *)&__DirVolume);
+  } else {
+    RaiseError(ERuntimeError, "Unknown driver %s", driver);
+    return NULL;
+  };
+};
+
 int aff2_image(char *driver, char *output_file, char *stream_name, 
 	       char *chunks_in_segment,
 	       char *append,
 	       char *source) {
-  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  ZipFile zipfile = create_volume(driver);
   char *output;
   Image image;
   char buffer[BUFF_SIZE];
@@ -222,9 +244,6 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
     output = talloc_asprintf(zipfile, "file://%s", output_file);
   };
 
-  // Make local copy of zipfile's URN
-  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
-
   CALL((AFFObject)zipfile, set_property, "aff2:stored", output);
   if(append) {
     printf("Will append to volume %s\n", URNOF(zipfile));
@@ -235,6 +254,9 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   if(!CALL((AFFObject)zipfile, finish)) {
     goto error;
   };
+
+  // Make local copy of zipfile's URN
+  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
 
   // Done with that now
   CALL(oracle, cache_return, (AFFObject)zipfile);

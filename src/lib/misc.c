@@ -2,6 +2,8 @@
 #include "time.h"
 #include <uuid/uuid.h>
 #include <libgen.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 uint64_t parse_int(char *string) {
   char *endptr;
@@ -50,7 +52,7 @@ void init_luts() {
 	 sizeof(illegal_filename_lut));
 
   for(i=illegal_filename_chars;*i;i++) 
-    illegal_filename_lut[*i]=1;
+    illegal_filename_lut[(int)*i]=1;
 };
 
 char *escape_filename(char *filename) {
@@ -61,7 +63,7 @@ char *escape_filename(char *filename) {
   
   for(i=0;i<length;i++) {
     char x=filename[i];
-    if(x<0 || illegal_filename_lut[x]) {
+    if(x<0 || illegal_filename_lut[(int)x]) {
       sprintf(buffer+j, "%%%02X", x);
       j+=3;
       if(j>BUFF_SIZE-10) break;
@@ -97,3 +99,29 @@ char *unescape_filename(char *filename) {
   };
   return buffer;
 };
+
+int _mkdir(const char *path)
+{
+  char opath[256];
+  char *p;
+  size_t len;
+
+  strncpy(opath, path, sizeof(opath));
+  len = strlen(opath);
+  if(opath[len - 1] == '/')
+    opath[len - 1] = '\0';
+  for(p = opath; *p; p++)
+    if(*p == '/') {
+      *p = '\0';
+      if(access(opath, F_OK))
+	mkdir(opath, S_IRWXU);
+      *p = '/';
+    }
+  if(access(opath, F_OK))         /* if path is not terminated with /
+				   */
+    mkdir(opath, S_IRWXU);
+  else
+    return 0;
+
+  return 1;
+}
