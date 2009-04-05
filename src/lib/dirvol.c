@@ -160,7 +160,10 @@ static char *DirVolume_read_member(ZipFile self, void *ctx,
   };
 
   CALL(oracle, cache_return, (AFFObject)fd);
-  *length = result->size;
+  // NULL terminate the buffer
+  buff[0]=0;
+  CALL(result, write, buff, 1);
+  *length = result->size-1;
   return result->data;
 
  error:

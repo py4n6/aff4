@@ -5,14 +5,32 @@
 #include <fcntl.h>
 #include <errno.h>
 
-void help() {
-  printf("aff2imager tool\n\n"
-	 "--open, -o \tOpen this file to pre-populate the resolver \n"
-	 "           \t(Can be specified multiple times).\n"
-	 "--image, -i \tImaging mode\n"
-	 "--extract, -e stream_name\tExtract stream to output (set using --output or stdout)\n"
-	 "--passphrase, -p password\tUse this passphrase to encrypt/decrypt the image\n"
-	 );
+void print_help(struct option *opts) {
+  struct option *i;
+
+  printf("The following options are supported\n");
+
+  for(i=opts; i->name; i++) {
+    char *description = i->name + strlen(i->name) +1;
+    char short_opt[BUFF_SIZE];
+    char *prefix="\t";
+
+    if(description[0]=='*') {
+      prefix="\n";
+      description++;
+    };
+
+    if(i->val) 
+      snprintf(short_opt, BUFF_SIZE, ", -%c", i->val);
+    else
+      short_opt[0]=0;
+
+    if(i->has_arg) {
+      printf("%s--%s%s [ARG]\t%s\n", prefix, i->name, short_opt, description);
+    } else {
+      printf("%s--%s%s\t\t%s\n", prefix,i->name, short_opt, description);
+    };
+  };
 };
 
 void list_info() {
@@ -20,6 +38,17 @@ void list_info() {
   printf("%s", result);
 
   talloc_free(result);
+};
+
+ZipFile create_volume(char *driver) {
+  if(!strcmp(driver, "volume")) {
+    return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  } else if(!strcmp(driver, "directory")) {
+    return (ZipFile)CALL(oracle, create, (AFFObject *)&__DirVolume);
+  } else {
+    RaiseError(ERuntimeError, "Unknown driver %s", driver);
+    return NULL;
+  };
 };
 
 ZipFile open_volume(char *urn) {
@@ -106,19 +135,19 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     goto error;
   };
 
-  // Normalise this to include the full url
-  if(strstr(output_file, "file://") != output_file) {
+  zipfile = create_volume(driver);
+  if(!zipfile) goto error;
+
+  if(!strstr(output_file, ":")) {
     output = talloc_asprintf(zipfile, "file://%s", output_file);
   };
 
-  // Make local copy of zipfile's URN
-  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  if(!zipfile) goto error;
-
-  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
   CALL((AFFObject)zipfile, set_property, "aff2:stored", output);
   if(!CALL((AFFObject)zipfile, finish))
     goto error;
+
+  // Make local copy of zipfile's URN
+  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
   CALL(oracle, cache_return, (AFFObject)zipfile);
   
   // Now we need to create an Image stream
@@ -159,7 +188,6 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Done with that now
   CALL(oracle, cache_return, (AFFObject)volume);
   
-
   // Now we create a new image stream inside the encrypted volume:
   image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
   // Tell the image that it should be stored in the volume with no
@@ -200,17 +228,6 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     talloc_free(zipfile);
   PrintError();
   return -1;
-};
-
-ZipFile create_volume(char *driver) {
-  if(!strcmp(driver, "volume")) {
-    return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  } else if(!strcmp(driver, "directory")) {
-    return (ZipFile)CALL(oracle, create, (AFFObject *)&__DirVolume);
-  } else {
-    RaiseError(ERuntimeError, "Unknown driver %s", driver);
-    return NULL;
-  };
 };
 
 int aff2_image(char *driver, char *output_file, char *stream_name, 
@@ -385,24 +402,38 @@ int main(int argc, char **argv)
   // Initialise the library
   AFF2_Init();
 
+  talloc_enable_leak_report_full();
+
   while (1) {
     int this_option_optind = optind ? optind : 1;
     int option_index = 0;
+    // Note that we use an extension to long_options to allow the
+    // helpful descriptions to be included with the long names. This
+    // keeps everything well synchronised in the same place.
     static struct option long_options[] = {
-      {"load", 1, 0, 'l'},
-      {"append", 0, 0, 0},
-      {"image", 0, 0, 'i'},
-      {"driver", 1, 0, 'd'},
-      {"help", 0, 0, 0},
-      {"info", 0, 0, 'I'},
-      {"output", 1, 0, 'o'},
-      {"stream", 1, 0, 's'},
-      {"chunks_per_segment", 1, 0, 0},
-      {"verbose", 0, 0, 'v'},
-      {"create", 1, 0, 'c'},
-      {"extract", 1, 0, 'e'},
-      {"passphrase", 1, 0, 'p'},
-      {"file", 1, 0, 0},
+      {"help\0"
+       "*This message", 0, 0, 0},
+      {"verbose\0"
+       "*Verbose (can be specified more than once)", 0, 0, 'v'},
+
+      {"image\0"
+       "*Imaging mode (Image each argv as a new stream)", 0, 0, 'i'},
+      {"driver\0"
+       "Which driver to use - 'directory' or 'volume' (Zip archive, default)", 1, 0, 'd'},
+      {"output\0"
+       "Create the output volume on this file or URL (using webdav)", 1, 0, 'o'},
+      {"chunks_per_segment\0"
+       "How many chunks in each segment of the image (default 2048)", 1, 0, 0},
+
+      {"info\0"
+       "*Information mode (print information on all objects in this volume)", 0, 0, 'I'},
+      {"load\0"
+       "Open this file and populate the resolver (can be provided multiple times)", 1, 0, 'l'},
+
+      {"extract\0"
+       "*Extract mode (dump the content of the stream to --output or stdout)", 1, 0, 'e'},
+      {"stream\0"
+       "Stream name to extract", 1, 0, 's'},
       {0, 0, 0, 0}
     };
 
@@ -462,7 +493,8 @@ int main(int argc, char **argv)
 
     case '?':
     case 'h':
-      help();
+      printf("%s - an AFF4 general purpose imager.\n", argv[0]);
+      print_help(long_options);
       exit(0);
 
     default:

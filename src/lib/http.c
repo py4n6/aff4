@@ -8,10 +8,36 @@ static char CURL_ERROR[CURL_ERROR_SIZE];
 We basically use libcurl to do the heavy lifting so we might actually
 get to use ftp://, http://, https:// and more all for free.
 
+This implementation uses webdav to write the image on the server as
+needed. You can use a Zip volume or a directory volume as needed. The
+following is a show example of how to set up apache to support
+webdav. Basically add this to the default host configuration file:
+
+<Directory "/var/www/webdav/" >
+     DAV On
+     AuthType Basic
+     AuthName "test"
+     AuthUserFile /etc/apache2/passwd.dav
+
+     <Limit PUT POST DELETE PROPPATCH MKCOL COPY BCOPY MOVE LOCK \
+     UNLOCK>
+        Allow from 127.0.0.0/255.0.0.0
+        Require user mic
+        Satisfy Any
+     </Limit>
+</Directory>
+
+This allows all access from 127.0.0.1 but requires an authenticated
+user to modify things from anywhere else. Read only is allowed from
+anywhere.
+
 ******************************************************************/
+// A do nothing write callback to ignore the body
 static size_t null_write_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
   return size*nmemb;
 };
+
+// We use this to write to our own buffers
 static size_t write_callback(void *ptr, size_t size, size_t nmemb, void *self){ 
   HTTPObject this = (HTTPObject)self;
 
@@ -133,7 +159,7 @@ static int HTTPObject_read(FileLikeObject self, char *buffer,
   HTTPObject this = (HTTPObject)self;
   char range[BUFF_SIZE];
 
-  CALL(this->buffer, truncate,0 );
+  CALL(this->buffer, truncate, 0);
   // Tell the server we only want a range
   snprintf(range, BUFF_SIZE, "%lld-%lld", self->readptr, 
 	   self->readptr + length);
@@ -178,15 +204,14 @@ static int HTTPObject_write(FileLikeObject self, char *buffer,
     curl_easy_setopt( send_handle, CURLOPT_READFUNCTION, read_callback );
     curl_easy_setopt( send_handle, CURLOPT_READDATA, self );  
 
-    // Ok tell libcurl to upload the buffer. Because this has no
-    // data we expect it to pause right away.
+    // Uploads are done via the multi interface:
     curl_multi_add_handle(this->multi_handle, this->send_handle);
   };
 
   // Write the buffer on the end
   CALL(this->send_buffer, seek, 0, SEEK_END);
   CALL(this->send_buffer, write, buffer, length);
-  // Unpause the connection
+  // Send as much as we can right now:
   {
     int handle_count;
     while(curl_multi_perform( this->multi_handle, &handle_count)==CURLM_CALL_MULTI_PERFORM);
@@ -212,6 +237,11 @@ void HTTPObject_close(FileLikeObject self) {
     while(this->send_buffer->size > 0) {
       int handle_count;
       int result = curl_multi_perform(this->multi_handle, &handle_count);
+      // An error occured
+      if(!handle_count || result !=0) {
+	RaiseError(ERuntimeError, "Curl error: %s", CURL_ERROR);
+	break;
+      };
     };
 
     curl_multi_remove_handle(this->multi_handle, this->send_handle);

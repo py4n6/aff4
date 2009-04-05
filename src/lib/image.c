@@ -77,8 +77,8 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
 
     this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
     // This is a hack to make us pre-allocate the buffer
-    CALL(this->segment_buffer, seek, this->chunk_size * this->chunks_in_segment, SEEK_SET);
-    CALL(this->segment_buffer, seek, 0, SEEK_SET);
+    //CALL(this->segment_buffer, seek, this->chunk_size * this->chunks_in_segment, SEEK_SET);
+    //CALL(this->segment_buffer, seek, 0, SEEK_SET);
 
     this->chunk_count = 0;
     this->segment_count =0;
@@ -162,7 +162,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
     // Push one more offset to the index to cover the last chunk
     this->chunk_indexes[this->chunk_count + 1] = this->segment_buffer->readptr;
 
-    printf("Dumping segment %s (%d bytes)\n", tmp, this->segment_buffer->readptr);
+    printf("Dumping segment %s (%lld bytes)\n", tmp, this->segment_buffer->readptr);
 
     // Store the entire segment in the zip file
     CALL((ZipFile)parent, writestr,
