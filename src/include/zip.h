@@ -464,7 +464,7 @@ CLASS(ZipFile, AFFObject)
 
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).
-     void METHOD(ZipFile, writestr, char *filename, char *data, int len,
+     int METHOD(ZipFile, writestr, char *filename, char *data, int len,
 		 char *extra, int extra_field_len,
 		 int compression);
 END_CLASS

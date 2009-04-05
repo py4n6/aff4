@@ -412,7 +412,7 @@ int main(int argc, char **argv)
     // keeps everything well synchronised in the same place.
     static struct option long_options[] = {
       {"help\0"
-       "*This message", 0, 0, 0},
+       "*This message", 0, 0, 'h'},
       {"verbose\0"
        "*Verbose (can be specified more than once)", 0, 0, 'v'},
 

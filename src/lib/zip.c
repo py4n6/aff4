@@ -43,7 +43,7 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
   self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
   if(self->fd<0){
     RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
-    return NULL;
+    goto error;
   };
 
   // Make sure that we close the file when we free ourselves - we dont
@@ -57,6 +57,9 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
   self->super.super.urn = talloc_asprintf(self, "file://%s", filename);
 
   return self;
+ error:
+  talloc_free(self);
+  return NULL;
 };
 
 // This is the low level constructor for FileBackedObject.
@@ -67,12 +70,12 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn) {
     // If the urn starts with file:// we open the filename, otherwise
     // we try to open the actual file itself:
     if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
-      this->Con(this, urn + strlen("file://"), 'r');
+      self = this->Con(this, urn + strlen("file://"), 'r');
     } else {
-      this->Con(this, urn, 'r');
+      self = this->Con(this, urn, 'r');
     };
   } else {
-    this->__super__->super.Con((AFFObject)this, urn);
+    self = this->__super__->super.Con((AFFObject)this, urn);
   };
 
   return self;
@@ -709,15 +712,16 @@ static void ZipFile_close(ZipFile self) {
 };
 
 /** This is just a convenience function - real simple now */
-static void ZipFile_writestr(ZipFile self, char *filename, 
+static int ZipFile_writestr(ZipFile self, char *filename, 
 		      char *data, int len, char *extra, int extra_len, 
 		      int compression) {
   FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
 			   compression);
   if(fd) {
-    CALL(fd, write, data, len);
+    int len = CALL(fd, write, data, len);
     CALL(fd, close);
-  };
+    return len;
+  } else return -1;
 };
 
 // FIXME - implement appending to volumes

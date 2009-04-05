@@ -37,8 +37,9 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
   if(text && len>0) {
     URNOF(self) = talloc_strdup(self, text);
   } else {
-    CALL(self, writestr, "__URN__", ZSTRING_NO_NULL(URNOF(self)),
-	 NULL, 0, 0);
+    if(CALL(self, writestr, "__URN__", ZSTRING_NO_NULL(URNOF(self)),
+	    NULL, 0, 0)<0) 
+      goto error;
   };
 
   /** Ok - now parse all the properties files. We do this by first
@@ -122,7 +123,7 @@ static void DirVolume_close(ZipFile self) {
   talloc_free(properties);
 };
 
-static void DirVolume_writestr(ZipFile self, char *filename, 
+static int DirVolume_writestr(ZipFile self, char *filename, 
 		      char *data, int len, char *extra, int extra_len, 
 		      int compression) {
   char buff[BUFF_SIZE];
@@ -132,10 +133,12 @@ static void DirVolume_writestr(ZipFile self, char *filename,
   CALL(oracle, add, URNOF(self), "aff2:contains", filename);
 
   fd = CALL(oracle, open, NULL, buff);
-  if(!fd) return;
+  if(!fd) return -1;
   CALL(fd, truncate, 0);
-  CALL(fd, write, data, len);
+  len = CALL(fd, write, data, len);
   CALL(fd, close);
+
+  return len;
 };
 
 static char *DirVolume_read_member(ZipFile self, void *ctx,
