@@ -173,6 +173,11 @@ super.add as well.
 #ifndef __CLASS_H__
 #define __CLASS_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #ifdef min
 #undef min
 #endif
@@ -189,17 +194,17 @@ extern char *_traceback;
 #include "talloc.h"
 
 #define CLASS(class,super_class)			\
-  typedef struct class *class;				\
+  typedef struct class ## _t *class;				\
   inline void class ## _init(void);				\
-  void class ## _Alloc(class this);			\
+  void class ## _Alloc(class self);			\
   extern int __ ## class ## _initialised;		\
-  extern struct class __ ## class;			\
-  struct class { struct super_class super;		 \
+  extern struct class ## _t __ ## class;			\
+  struct class ## _t { struct super_class ## _t super;		 \
     class __class__;					 \
     super_class __super__;
 
 #define METHOD(class,name, ... )		\
-  (* name)(class this, ## __VA_ARGS__ )
+  (* name)(class self, ## __VA_ARGS__ )
 
 /***************************************************
    This is a convenience macro which may be used if x if really large
@@ -227,8 +232,8 @@ extern char *_traceback;
 #ifdef __DEBUG__
 
 #define VIRTUAL(class,superclass)				\
-  struct class __ ## class;					\
-  inline void class ## _Alloc(class this);				\
+  struct class ## _t __ ## class;					\
+  inline void class ## _Alloc(class self);				\
   inline void class ## _init(void) {					\
     if(!__ ## class ## _initialised) {					\
       class ## _Alloc(&__ ## class);					\
@@ -236,21 +241,21 @@ extern char *_traceback;
     };									\
   };									\
   int __ ## class ## _initialised=0;					\
-  inline void class ## _Alloc(class this) {					\
+  inline void class ## _Alloc(class self) {					\
     superclass ## _init();						\
-    superclass ##_Alloc((superclass)this);				\
-    ((Object)this)->__class__ = (Object)&__ ## class;			\
-    this->__class__ = &__ ## class;					\
-    ((Object)this)->__super__ = (Object)&__ ## superclass;		\
-    this->__super__ = &__ ## superclass;				\
-    ((Object)this)->__size = sizeof(struct class);			\
-    ((Object)this)->__name__ = #class;
+    superclass ##_Alloc((superclass)self);				\
+    ((Object)self)->__class__ = (Object)&__ ## class;			\
+    self->__class__ = &__ ## class;					\
+    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
+    self->__super__ = &__ ## superclass;				\
+    ((Object)self)->__size = sizeof(struct class ## _t);			\
+    ((Object)self)->__name__ = #class;
 
 #else
 
 #define VIRTUAL(class,superclass)				\
-  struct class __ ## class;					\
-  inline void class ## _Alloc(class this);				\
+  struct class ## _t __ ## class;					\
+  inline void class ## _Alloc(class self);				\
   inline void class ## _init(void) {					\
     if(!__ ## class ## _initialised) {					\
       class ## _Alloc(&__ ## class);					\
@@ -258,24 +263,24 @@ extern char *_traceback;
     };									\
   };									\
   int __ ## class ## _initialised=0;					\
-  inline void class ## _Alloc(class this) {					\
+  inline void class ## _Alloc(class self) {					\
     superclass ## _init();						\
-    superclass ##_Alloc((superclass)this);				\
-    ((Object)this)->__class__ = (Object)&__ ## class;			\
-    ((Object)this)->__super__ = (Object)&__ ## superclass;		\
-    ((Object)this)->__size = sizeof(struct class);
+    superclass ##_Alloc((superclass)self);				\
+    ((Object)self)->__class__ = (Object)&__ ## class;			\
+    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
+    ((Object)self)->__size = sizeof(struct class ## _t);
 
 #endif
 
 #define SET_DOCSTRING(string)			\
-  ((Object)this)->__doc__ = string
+  ((Object)self)->__doc__ = string
 
 #define END_VIRTUAL };
 
 #define VMETHOD(method)				\
-  (this)->method
+  (self)->method
 #define VATTR(attribute)			\
-  ((this)->attribute)
+  (self)->attribute
 
 #define INIT_CLASS(class)					\
   if(!__ ## class ## _initialised) { class ## _init(); }
@@ -316,7 +321,7 @@ extern char *_traceback;
 #define CONSTRUCT(class, virt_class, constructor, context, ... )		\
   (class)( class ## _init(), virt_class ## _init(),			\
 	   __ ## class.constructor(					\
-				   (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class),  __location__ "(" #class ")"), \
+				   (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
 
 /** This variant is useful when all we have is a class reference
@@ -331,7 +336,7 @@ extern char *_traceback;
 #define CONSTRUCT(class, virt_class, constructor, context, ... )		\
   (class)( class ## _init(), virt_class ## _init(),			\
 	   __ ## class.constructor(					\
-				   (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class)), \
+				   (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class ## _t)), \
 				   ## __VA_ARGS__) )
 
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
@@ -345,9 +350,9 @@ extern char *_traceback;
 #define CLASS_SIZE(class)			\
   ((Object)class)->__size
 
-typedef struct Object *Object;
+typedef struct Object_t *Object;
 
-struct Object {
+struct Object_t {
   //A reference to a class instance - this is useful to be able to
   //tell which class an object really belongs to:
   Object __class__;
@@ -384,11 +389,11 @@ struct Object {
   ((Object)obj)->__class__
 
 inline void Object_init(void);
-inline void Object_Alloc(Object this);
+inline void Object_Alloc(Object);
 
-extern struct Object __Object;
+extern struct Object_t __Object;
 
-int issubclass(Object obj, Object class, void (init)());
+int issubclass(Object, Object, void (init)());
 
 /** This is used for error reporting. This is similar to the way
     python does it, i.e. we set the error flag and return NULL.
@@ -426,4 +431,7 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   (_global_error == error)
 
 
+#endif
+#ifdef __cplusplus
+} /* closing brace for extern "C" */
 #endif

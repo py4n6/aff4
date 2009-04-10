@@ -19,12 +19,6 @@
 FileBackedObject is a FileLikeObject which uses a real file to back
 itself.
 */
-static int close_fd(void *self) {
-  FileBackedObject this = (FileBackedObject)self;
-  close(this->fd);
-  return 0;
-};
-
 /** Note that files we create will always be escaped using standard
     URN encoding.
 */
@@ -45,10 +39,6 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
     RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
     goto error;
   };
-
-  // Make sure that we close the file when we free ourselves - we dont
-  // want to leak file handles
-  talloc_set_destructor((void *)self, close_fd);
 
   // Work out what the file size is:
   self->super.size = lseek(self->fd, 0, SEEK_END);
@@ -177,7 +167,7 @@ VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(truncate) = FileLikeObject_truncate;
 END_VIRTUAL
 
-int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
+static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
   FileBackedObject this=(FileBackedObject)self;
 
   ftruncate(this->fd, offset);
@@ -199,7 +189,7 @@ END_VIRTUAL;
 /** This is the constructor which will be used when we get
     instantiated as an AFFObject.
 */
-AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn) {
+static AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn) {
   ZipFile this = (ZipFile)self;
 
   if(urn) {
@@ -282,9 +272,9 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
   // an archive comment appended to the end
   CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END);
   length = CALL(fd, read, buffer, BUFF_SIZE);
-  // Error occured
+  // Non fatal Error occured
   if(length<0) 
-    goto error;
+    goto exit;
 
   // Scan the buffer backwards for an End of Central Directory magic
   for(i=length; i>0; i--) {
@@ -413,6 +403,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn) {
     };   
   };
 
+ exit:
   CALL(oracle, cache_return, (AFFObject)fd);
   return self;
 
@@ -718,14 +709,14 @@ static int ZipFile_writestr(ZipFile self, char *filename,
   FileLikeObject fd = CALL(self, open_member, filename, 'w', extra, extra_len,
 			   compression);
   if(fd) {
-    int len = CALL(fd, write, data, len);
+    len = CALL(fd, write, data, len);
     CALL(fd, close);
     return len;
   } else return -1;
 };
 
 // FIXME - implement appending to volumes
-int ZipFile_create_volume(ZipFile self, char *volume_urn) {
+static int ZipFile_create_volume(ZipFile self, char *volume_urn) {
   // We do this to make check if the volume already exists
   FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, volume_urn);
 

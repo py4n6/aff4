@@ -4,14 +4,14 @@ AC_INIT()
 # Store the configuration in this header
 AC_CONFIG_HEADER([include/config.h])
 AC_CONFIG_AUX_DIR(config)
-AM_INIT_AUTOMAKE(fiflib, 0.01)
+AM_INIT_AUTOMAKE(aff4, 0.01)
 
 # check standard stuff
 AC_PROG_LIBTOOL
 AC_PROG_CC
 
 # check headers
-AC_CHECK_HEADER(zlib.h,,AC_MSG_ERROR([You Must install zlib-dev to build fiflib]))
+AC_CHECK_HEADER(zlib.h,,AC_MSG_ERROR([You Must install zlib-dev to build libaff4]))
 
 ## Are we running on windows?
 AC_CHECK_HEADER(windows.h,have_windows=yes,have_windows=no)
@@ -134,8 +134,6 @@ AC_CHECK_FUNCS([PEM_read_bio_RSA_PUBKEY])
 ## Conditionals for automake
 AM_CONDITIONAL(HAVE_LIBAFFLIB, test "$have_libafflib" = yes)
 AM_CONDITIONAL(HAVE_LIBEWF, test "$have_libewf" = yes)
-AM_CONDITIONAL(HAVE_GEOIP, test "$have_geoip" = yes)
-AM_CONDITIONAL(HAVE_LIBJPEG, test "$have_libjpeg" = yes)
 AM_CONDITIONAL(HAVE_WINDOWS, test "$have_windows" = yes)
 AM_CONDITIONAL(HAVE_LIBCURL, test "$have_libcurl" = yes)
 AM_CONDITIONAL(HAVE_OPENSSL, test "$have_openssl" = yes)

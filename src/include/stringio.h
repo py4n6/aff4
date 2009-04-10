@@ -1,6 +1,9 @@
 #ifndef _STRINGIO_H
 #define _STRINGIO_H
-#include "config.h"			       
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "class.h"
 #include <sys/types.h>
 #include <stdint.h>
@@ -57,5 +60,9 @@ CLASS(StringIO,Object)
   /** Destructor */
   void METHOD(StringIO, destroy);
 END_CLASS
+
+#ifdef __cplusplus
+} /* closing brace for extern "C" */
+#endif
 
 #endif

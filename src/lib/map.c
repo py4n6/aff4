@@ -1,6 +1,6 @@
 #include "zip.h"
 
-AFFObject MapDriver_finish(AFFObject self) {
+static AFFObject MapDriver_finish(AFFObject self) {
   char *stored = CALL(oracle, resolve, URNOF(self), "aff2:stored");
   MapDriver this = (MapDriver)self;
 
@@ -19,7 +19,7 @@ AFFObject MapDriver_finish(AFFObject self) {
 };
 
 /*** This is the implementation of the MapDriver */
-AFFObject MapDriver_Con(AFFObject self, char *uri){ 
+static AFFObject MapDriver_Con(AFFObject self, char *uri){ 
   MapDriver this = (MapDriver)self;
 
   // Try to parse existing map object
@@ -89,7 +89,7 @@ static int compare_points(const void *X, const void *Y) {
   return x->target_offset - y->target_offset;
 };
 
-void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
+static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
 		   char *target_urn) {
   int i,found=0;
   struct map_point new_point;
@@ -112,7 +112,7 @@ void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset
 };
 
 // This writes out the map to the stream
-void MapDriver_save_map(MapDriver self) {
+static void MapDriver_save_map(MapDriver self) {
   char buff[BUFF_SIZE];
   struct map_point *point;
   int i;
@@ -133,11 +133,11 @@ void MapDriver_save_map(MapDriver self) {
   CALL(fd, close);
 };
 
-void MapDriver_close(FileLikeObject self) {
+static void MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
 
   // Write out a properties file
-  char *properties = CALL(oracle, export, URNOF(self));
+  char *properties = CALL(oracle, export_urn, URNOF(self));
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn);
     char tmp[BUFF_SIZE];

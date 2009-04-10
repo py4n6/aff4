@@ -11,7 +11,6 @@ struct dispatch_t {
 
 static struct dispatch_t dispatch[] = {
   { "blob", (AFFObject)&__Blob },
-
   { "volume", (AFFObject)&__ZipFile },
   { "directory", (AFFObject)&__DirVolume },
   { "link", (AFFObject)&__Link },
@@ -19,7 +18,6 @@ static struct dispatch_t dispatch[] = {
   { "map", (AFFObject)&__MapDriver},
   { "encrypted", (AFFObject)&__Encrypted},
   { "file://", (AFFObject)&__FileBackedObject },
-
   // All handled by libcurl
   { "http://", (AFFObject)&__HTTPObject },
   { "https://", (AFFObject)&__HTTPObject },
@@ -50,7 +48,7 @@ void AFF2_Init(void) {
 
   // Make a global oracle
   if(oracle) {
-    printf("detroying the existing oracle\n");
+    fprintf(stderr, "detroying the existing oracle\n");
     talloc_free(oracle);
   };
 
@@ -313,7 +311,7 @@ static void Resolver_add(Resolver self, char *uri, char *attribute, char *value)
 };
 
 /** Format all the attributes of the object specified by urn */
-static char *Resolver_export(Resolver self, char *urn) {
+static char *Resolver_export_urn(Resolver self, char *urn) {
   char *result=talloc_strdup(NULL, "");
   Cache i = CALL(self->urn, get_item, urn);
   Cache j;
@@ -340,7 +338,7 @@ static char *Resolver_export_all(Resolver self) {
 
   list_for_each_entry(i, &self->urn->cache_list, cache_list) {
     char *urn = (char *)i->key;
-    char *tmp =Resolver_export(self, urn);
+    char *tmp =Resolver_export_urn(self, urn);
 
     result = talloc_asprintf_append(result, "%s\n", tmp);
     talloc_free(tmp);
@@ -442,7 +440,7 @@ VIRTUAL(Resolver, Object)
 
      VMETHOD(resolve) = Resolver_resolve;
      VMETHOD(add)  = Resolver_add;
-     VMETHOD(export) = Resolver_export;
+     VMETHOD(export_urn) = Resolver_export_urn;
      VMETHOD(export_all) = Resolver_export_all;
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_return;

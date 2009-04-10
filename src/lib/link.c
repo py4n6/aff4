@@ -1,6 +1,6 @@
 #include "zip.h"
 
-AFFObject Link_Con(AFFObject self, char *urn) {
+static AFFObject Link_Con(AFFObject self, char *urn) {
   Link this = (Link)self;
 
   if(urn) {
@@ -21,13 +21,13 @@ AFFObject Link_Con(AFFObject self, char *urn) {
   return NULL;
 };
 
-AFFObject Link_finish(AFFObject self) {
+static AFFObject Link_finish(AFFObject self) {
   return self;
 };
 
 // A convenience function to set up a link between a target urn to a
 // friendly name.
-void Link_link(Link self, Resolver oracle, char *storage_urn,
+static void Link_link(Link self, Resolver oracle, char *storage_urn,
 	       char *target, char *friendly_name) {
   AFFObject this = (AFFObject)self;
   if(storage_urn) {
@@ -49,7 +49,7 @@ void Link_link(Link self, Resolver oracle, char *storage_urn,
 
     fd = CALL((ZipFile)zipfile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
     if(fd) {
-      properties = CALL(oracle, export, friendly_name);
+      properties = CALL(oracle, export_urn, friendly_name);
       CALL(fd, write, ZSTRING_NO_NULL(properties));
       talloc_free(properties);
 

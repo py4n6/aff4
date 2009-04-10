@@ -51,26 +51,6 @@ ZipFile create_volume(char *driver) {
   };
 };
 
-ZipFile open_volume(char *urn) {
-  ZipFile result;
-  char *filename;
-
-  if(!strstr(urn, ":")) {
-    filename = talloc_asprintf(NULL, "file://%s",urn);
-  } else {
-    filename = talloc_strdup(NULL, urn);
-  }
-
-  ClearError();
-  result =(ZipFile)CONSTRUCT(DirVolume, ZipFile, super.Con, NULL, filename);
-  if(!result)
-    result = CONSTRUCT(ZipFile, ZipFile, Con, NULL, filename);
-
-  PrintError();
-
-  return result;
-};
-
 void aff2_open_volume(char *urn) {
   // Try the different volume implementations in turn until one works:
   ZipFile volume;
@@ -424,6 +404,8 @@ int main(int argc, char **argv)
        "Create the output volume on this file or URL (using webdav)", 1, 0, 'o'},
       {"chunks_per_segment\0"
        "How many chunks in each segment of the image (default 2048)", 1, 0, 0},
+      {"stream\0"
+       "If specified a link will be added with this name to the new stream", 1, 0, 's'},
 
       {"info\0"
        "*Information mode (print information on all objects in this volume)", 0, 0, 'I'},
@@ -431,9 +413,7 @@ int main(int argc, char **argv)
        "Open this file and populate the resolver (can be provided multiple times)", 1, 0, 'l'},
 
       {"extract\0"
-       "*Extract mode (dump the content of the stream to --output or stdout)", 1, 0, 'e'},
-      {"stream\0"
-       "Stream name to extract", 1, 0, 's'},
+       "*Extract mode (dump the content of stream)", 1, 0, 'e'},
       {0, 0, 0, 0}
     };
 

@@ -1,9 +1,6 @@
 /** This is an implementation of the directory volume - all blobs are
     stored as files here.
 
-    You can always get the curl options required:
-
-    curl --libcurl /tmp/test.c -X MKCOL http://localhost/webdav/test/
 */
 #include "zip.h"
 
@@ -61,8 +58,7 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
   if(first) {
     Cache i;
 
-
-    list_for_each_entry(i, &first->cache_list, cache_list) {
+    list_for_each_entry(i, &first->hash_list, hash_list) {
       char *filename = (char *)i->data;
       int filename_length;
       int properties_length;
@@ -72,6 +68,10 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
 
       filename_length = strlen(filename);
       properties_length = strlen("properties");
+
+      // Record the blob objects:
+      CALL(oracle, set, filename, "aff2:type", "blob");
+      CALL(oracle, set, filename, "aff2:location", URNOF(self));
 
       // We identify streams by their filename ending with "properties"
       // and parse out their properties:
@@ -114,7 +114,7 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
 
 // When we close we dump out the properties file of this directory
 static void DirVolume_close(ZipFile self) {
-  char *properties = CALL(oracle, export, URNOF(self));
+  char *properties = CALL(oracle, export_urn, URNOF(self));
   char buff[BUFF_SIZE];
 
   // We check that there is no URN there already:

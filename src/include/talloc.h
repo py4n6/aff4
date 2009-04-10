@@ -24,6 +24,12 @@
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, see <http://www.gnu.org/licenses/>.
 */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -190,6 +196,10 @@ char *talloc_vasprintf_append_buffer(char *s, const char *fmt, va_list ap) PRINT
 char *talloc_asprintf(const void *t, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
 char *talloc_asprintf_append(char *s, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
 char *talloc_asprintf_append_buffer(char *s, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
+
+#ifdef __cplusplus
+} /* closing brace for extern "C" */
+#endif
 
 #endif
 

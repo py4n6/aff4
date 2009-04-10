@@ -38,7 +38,7 @@ static int cache_cmp_int(Cache self, void *other) {
   return int_key != int_other;
 };
 
-int Image_destructor(void *this) {
+static int Image_destructor(void *this) {
   Image self = (Image)this;
 
   CALL((FileLikeObject)self, close);
@@ -107,7 +107,7 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
   return self;
 };
   
-AFFObject Image_finish(AFFObject self) {
+static AFFObject Image_finish(AFFObject self) {
   return CALL(self, Con, self->urn);
 };
 
@@ -335,7 +335,10 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     RaiseError(ERuntimeError, "No storage for Image stream?");
     goto error;
   }
-  
+
+  // We want to open a direct filehandle to the segment because we do
+  // not want to cache it - it will invalidate the cache too much if
+  // we do.
   fd = CALL((ZipFile)parent, open_member, buffer, 'r', NULL, 0, ZIP_STORED);
 
   // Fetch the compressed chunk
@@ -347,8 +350,6 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   // Done with parent and blob
   CALL(oracle, cache_return, (AFFObject)parent);
   CALL(fd, close);
-  talloc_free(fd);
-
 
   if(this->compression == 8) {
     // Try to decompress it:
@@ -425,7 +426,7 @@ void dump_stream_properties(FileLikeObject self, char *volume) {
   CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
 
   // Write out a properties file
-  properties = CALL(oracle, export, URNOF(self));
+  properties = CALL(oracle, export_urn, URNOF(self));
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume);
 

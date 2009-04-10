@@ -1,7 +1,7 @@
 #include "stringio.h"
 #include "misc.h"
 
-StringIO StringIO_constructor(StringIO self) {
+static StringIO StringIO_constructor(StringIO self) {
   //Create a valid buffer to hold the data:
   self->data = talloc(self,char);
   self->size = 0;
@@ -10,7 +10,7 @@ StringIO StringIO_constructor(StringIO self) {
   return self;
 };
 
-int StringIO_write(StringIO self,char *data, unsigned int len) {
+static int StringIO_write(StringIO self,char *data, unsigned int len) {
   if(self->readptr+len > self->size) {
     self->size = self->readptr + len;
     
@@ -23,7 +23,7 @@ int StringIO_write(StringIO self,char *data, unsigned int len) {
   return len;
 };
 
-int StringIO_sprintf(StringIO self, char *fmt, ...) {
+static int StringIO_sprintf(StringIO self, char *fmt, ...) {
   va_list ap;
   char *data;
   int len;
@@ -44,7 +44,7 @@ int StringIO_sprintf(StringIO self, char *fmt, ...) {
   return len;
 };
 
-int StringIO_read(StringIO self,char *data,int len) {
+static int StringIO_read(StringIO self,char *data,int len) {
   if(self->readptr+len > self->size) {
     len = self->size-self->readptr;
   };
@@ -55,7 +55,7 @@ int StringIO_read(StringIO self,char *data,int len) {
 };
 
 /** Writes into ourselves from a stream */
-int StringIO_read_stream(StringIO self, StringIO stream, int length) {
+static int StringIO_read_stream(StringIO self, StringIO stream, int length) {
   int len;
   char buff[BUFF_SIZE];
 
@@ -86,11 +86,11 @@ int StringIO_read_stream(StringIO self, StringIO stream, int length) {
 };
 
 /** Write into a stream from ourself */
-int StringIO_write_stream(StringIO self, StringIO stream, int length) {
+static int StringIO_write_stream(StringIO self, StringIO stream, int length) {
   return stream->read_stream(stream,self,length);
 };
 
-uint64_t StringIO_seek(StringIO self, int64_t offset,int whence) {
+static uint64_t StringIO_seek(StringIO self, int64_t offset,int whence) {
   switch(whence) {
     // Set the readptr:
   case SEEK_SET:
@@ -115,23 +115,23 @@ uint64_t StringIO_seek(StringIO self, int64_t offset,int whence) {
   return self->readptr;
 };
 
-int StringIO_eof(StringIO self) {
+static int StringIO_eof(StringIO self) {
   return (self->readptr==self->size);
 };
 
-void StringIO_get_buffer(StringIO self,char **data, int *len) {
+static void StringIO_get_buffer(StringIO self,char **data, int *len) {
   *data = self->data+self->readptr;
   *len = self->size - self->readptr;
 };
 
-void StringIO_truncate(StringIO self,int len) {
+static void StringIO_truncate(StringIO self,int len) {
   if(self->readptr>len) self->readptr=len;
   self->size=len;
   if(self->readptr > self->size) 
     self->readptr=self->size;
 };
 
-void StringIO_skip(StringIO self, int len) {
+static void StringIO_skip(StringIO self, int len) {
   if(len > self->size) 
     len=self->size;
 
@@ -142,7 +142,7 @@ void StringIO_skip(StringIO self, int len) {
 
 /* locate a substring. This returns a pointer inside the data
    buffer... */
-char *StringIO_find(StringIO self, char *needle) {
+static char *StringIO_find(StringIO self, char *needle) {
   char *i;
   int needle_size = strlen(needle);
 
@@ -159,7 +159,7 @@ char *StringIO_find(StringIO self, char *needle) {
 };
 
 /* case insensitive version of find */
-char *StringIO_ifind(StringIO self, char *needle) {
+static char *StringIO_ifind(StringIO self, char *needle) {
   int i;
   if(self->size < strlen(needle))
     return NULL;
@@ -170,7 +170,7 @@ char *StringIO_ifind(StringIO self, char *needle) {
   return NULL;
 };
 
-void StringIO_destroy(StringIO self) {
+static void StringIO_destroy(StringIO self) {
   //First free our buffer:
   talloc_free(self->data);
   

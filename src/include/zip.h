@@ -1,6 +1,11 @@
 #ifndef __ZIP_H
 #define __ZIP_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include "misc.h"
 #include "stringio.h"
 #include "list.h"
@@ -50,7 +55,7 @@ CLASS(Cache, Object)
      struct list_head hash_list;
 
      // This is a pointer to the head of the cache
-     struct Cache *cache_head;
+     struct Cache_t *cache_head;
      enum Cache_policy policy;
 
      // The current number of objects managed by this cache
@@ -215,7 +220,7 @@ CLASS(Resolver, Object)
      void METHOD(Resolver, add, char *uri, char *attribute, char *value);
 
      // Exports all the properties to do with uri - user owns the buffer.
-     char *METHOD(Resolver, export, char *uri);
+     char *METHOD(Resolver, export_urn, char *uri);
 
      // Exports all the properties to do with uri - user owns the buffer.
      char *METHOD(Resolver, export_all);
@@ -498,5 +503,8 @@ CLASS(DirVolume, ZipFile)
 END_CLASS
 
 void dump_stream_properties(FileLikeObject self, char *volume);
-
+#ifdef __cplusplus
+} /* closing brace for extern "C" */
 #endif
+#endif
+

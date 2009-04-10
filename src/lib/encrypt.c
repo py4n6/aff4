@@ -1,7 +1,7 @@
 #include "openssl/aes.h"
 #include "zip.h"
 
-AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
+static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
   Encrypted this = (Encrypted)self;
   char *value;
 
@@ -39,11 +39,11 @@ AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
   return NULL;
 };
 
-AFFObject Encrypted_finish(AFFObject self) {
+static AFFObject Encrypted_finish(AFFObject self) {
   return self->Con(self, URNOF(self));
 };
 
-int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) {
+static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
   FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn);
   int result;
@@ -56,7 +56,7 @@ int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) 
   return result;
 };
 
-int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
+static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
   FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn);
   int result;
@@ -69,7 +69,7 @@ int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length)
   return result;
 };
 
-void Encrypted_close(FileLikeObject self) {
+static void Encrypted_close(FileLikeObject self) {
   Encrypted this = (Encrypted)self;
   FileLikeObject target = CALL(oracle, open, NULL, this->target_urn);
   CALL(target, close);

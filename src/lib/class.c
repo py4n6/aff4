@@ -58,10 +58,10 @@ inline void Object_init() {
   Object_Alloc(&__Object);
 };
 
-struct Object __Object = {
+struct Object_t __Object = {
   .__class__ = &__Object,
   .__super__ = &__Object,
-  .__size = sizeof(struct Object)
+  .__size = sizeof(struct Object_t)
 };
 
 int issubclass(Object obj, Object class, void (init)()) {

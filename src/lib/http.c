@@ -8,9 +8,13 @@ static char CURL_ERROR[CURL_ERROR_SIZE];
 We basically use libcurl to do the heavy lifting so we might actually
 get to use ftp://, http://, https:// and more all for free.
 
+    You can always get the curl options required:
+
+    curl --libcurl /tmp/test.c -X MKCOL http://localhost/webdav/test/
+
 This implementation uses webdav to write the image on the server as
 needed. You can use a Zip volume or a directory volume as needed. The
-following is a show example of how to set up apache to support
+following is an example of how to set up apache to support
 webdav. Basically add this to the default host configuration file:
 
 <Directory "/var/www/webdav/" >
@@ -28,8 +32,8 @@ webdav. Basically add this to the default host configuration file:
 </Directory>
 
 This allows all access from 127.0.0.1 but requires an authenticated
-user to modify things from anywhere else. Read only is allowed from
-anywhere.
+user to modify things from anywhere else. Read only access is allowed
+from anywhere.
 
 ******************************************************************/
 // A do nothing write callback to ignore the body
@@ -124,6 +128,11 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
   // Parse out the url
   CURL *handle = self->curl = curl_easy_init();
 
+  if(!self->curl) {
+    RaiseError(ERuntimeError, "Unable to initialise curl");
+    goto error;
+  };
+
   self->buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   URNOF(self) = talloc_strdup(self, url);
 
@@ -137,12 +146,7 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
   curl_easy_setopt( handle, CURLOPT_HEADERFUNCTION, parse_header_callback);
   curl_easy_setopt( handle, CURLOPT_HEADERDATA, self);
 
-  if(!self->curl) {
-    RaiseError(ERuntimeError, "Unable to initialise curl");
-    goto error;
-  };
-
-  // Read 1 byte to work out the file size:
+  // Read 1 byte to work out the file size through the write callback:
   { 
     char buffer[10];
     CALL((FileLikeObject)self, read, buffer, 1);
@@ -223,7 +227,7 @@ static int HTTPObject_write(FileLikeObject self, char *buffer,
   return length;
 };
 
-void HTTPObject_close(FileLikeObject self) {
+static void HTTPObject_close(FileLikeObject self) {
   HTTPObject this = (HTTPObject)self;
 
   // Call our base class

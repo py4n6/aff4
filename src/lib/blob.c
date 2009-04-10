@@ -1,7 +1,7 @@
 #include "zip.h"
 
 /** This is the implementation for the blob AFFObject */
-AFFObject Blob_Con(AFFObject self, char *urn) {
+static AFFObject Blob_Con(AFFObject self, char *urn) {
   Blob this = (Blob)self;
 
   /** If urn was provided it means we need to go get ourselves */
