@@ -1,7 +1,7 @@
 #include "zip.h"
 
 static AFFObject MapDriver_finish(AFFObject self) {
-  char *stored = CALL(oracle, resolve, URNOF(self), "aff2:stored");
+  char *stored = CALL(oracle, resolve, URNOF(self), AFF4_STORED);
   MapDriver this = (MapDriver)self;
 
   if(!stored) {
@@ -9,7 +9,7 @@ static AFFObject MapDriver_finish(AFFObject self) {
     goto error;
   };
 
-  self = CALL((AFFObject)this, Con, URNOF(self));
+  self = CALL((AFFObject)this, Con, URNOF(self),'w');
 
   // Check that we have a stored property
   return self;
@@ -19,7 +19,7 @@ static AFFObject MapDriver_finish(AFFObject self) {
 };
 
 /*** This is the implementation of the MapDriver */
-static AFFObject MapDriver_Con(AFFObject self, char *uri){ 
+static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){ 
   MapDriver this = (MapDriver)self;
 
   // Try to parse existing map object
@@ -29,31 +29,31 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri){
     int blocksize;
 
     URNOF(self) = talloc_strdup(self, uri);
-    this->parent_urn = CALL(oracle, resolve, uri, "aff2:stored");
+    this->parent_urn = CALL(oracle, resolve, uri, AFF4_STORED);
     if(!this->parent_urn) {
       RaiseError(ERuntimeError, "No storage for map %s?", uri);
       goto error;
     };
 
-    CALL(oracle, set, URNOF(self), "aff2:type", "map");
+    CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_MAP);
     blocksize = parse_int(resolver_get_with_default(oracle, 
-				     URNOF(self), "aff2:blocksize", "1"));
+				     URNOF(self), AFF4_BLOCKSIZE, "1"));
     
     // Load some parameters
     this->image_period = blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
-						   "aff2:image_period"));
+						   AFF4_IMAGE_PERIOD));
     
     this->target_period =  blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
-						     "aff2:target_period"));
+						     AFF4_TARGET_PERIOD));
     if(!this->target_period) this->target_period=-1;
     if(!this->image_period) this->image_period=-1;
     
     ((FileLikeObject)self)->size = parse_int(CALL(oracle, resolve, URNOF(self),
-						  "aff2:size"));
+						  AFF4_SIZE));
 
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
-    blob = (Blob)CALL(oracle, open, NULL, buff);
+    blob = (Blob)CALL(oracle, open, NULL, buff, 'r');
     if(blob) {
       char *map = talloc_strdup(self, blob->data);
       char *x=map, *y;
@@ -73,7 +73,7 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri){
       };      
     };
   } else {
-    this->__super__->super.Con(self, NULL);
+    this->__super__->super.Con(self, NULL, mode);
   };
 
   return self;
@@ -91,7 +91,6 @@ static int compare_points(const void *X, const void *Y) {
 
 static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
 		   char *target_urn) {
-  int i,found=0;
   struct map_point new_point;
   MapDriver this=self;
 
@@ -117,7 +116,7 @@ static void MapDriver_save_map(MapDriver self) {
   struct map_point *point;
   int i;
   FileLikeObject fd;
-  ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, self->parent_urn);
+  ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, self->parent_urn, 'w');
 
   if(!zipfile) return;
   snprintf(buff, BUFF_SIZE, "%s/map", URNOF(self));
@@ -139,7 +138,7 @@ static void MapDriver_close(FileLikeObject self) {
   // Write out a properties file
   char *properties = CALL(oracle, export_urn, URNOF(self));
   if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn);
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn, 'w');
     char tmp[BUFF_SIZE];
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", URNOF(self));
@@ -247,7 +246,7 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
   available_to_read = min(available_to_read, length);
 
   // Now do the read:
-  target = (FileLikeObject)CALL(oracle, open, NULL, this->points[l].target_urn);
+  target = (FileLikeObject)CALL(oracle, open, NULL, this->points[l].target_urn, 'r');
   if(!target) return -1;
 
   CALL(target, seek, target_offset, SEEK_SET);

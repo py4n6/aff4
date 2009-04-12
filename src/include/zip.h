@@ -14,6 +14,40 @@ extern "C" {
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
 
+  // This is the URI namespace for the AFF4 scheme
+#define NAMESPACE "aff2:"
+#define VOLATILE_NS "aff2volatile:"
+#define FQN "urn:" NAMESPACE
+
+  /** These are standard aff4 attributes */
+#define AFF4_STORED     NAMESPACE "stored"
+#define AFF4_TYPE       NAMESPACE "type"
+#define AFF4_CONTAINS   NAMESPACE "contains"
+#define AFF4_SIZE       NAMESPACE "size"
+
+  /** Image attributes */
+#define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
+#define AFF4_COMPRESSION NAMESPACE "compression"
+#define AFF4_CHUNKS_IN_SEGMENT NAMESPACE "chunks_in_segment"
+#define AFF4_DIRECTORY_OFFSET VOLATILE_NS "directory_offset"
+
+  /** Link, encryption attributes */
+#define AFF4_TARGET NAMESPACE "target"
+
+  /** Map attributes */
+#define AFF4_BLOCKSIZE NAMESPACE "blocksize"
+#define AFF4_IMAGE_PERIOD NAMESPACE "image_period"
+#define AFF4_TARGET_PERIOD NAMESPACE "target_period"
+
+  /** These are standard aff4 types */
+#define AFF4_ZIP_VOLUME       "volume"
+#define AFF4_DIRECTORY_VOLUME "directory"
+#define AFF4_BLOB             "blob"
+#define AFF4_LINK             "link"
+#define AFF4_IMAGE            "image"
+#define AFF4_MAP              "map"
+#define AFF4_ENCRYTED         "encrypted"
+
 // A helper to access the URN or an object.
 #define URNOF(x)  ((AFFObject)x)->urn
 
@@ -99,9 +133,12 @@ CLASS(AFFObject, Object)
 
      // This is the type of this object
      char *type;
+
+     // Is this object a reader or a writer?
+     char mode;
      
      /** Any object may be asked to be constructed from its URI */
-     AFFObject METHOD(AFFObject, Con, char *uri);
+     AFFObject METHOD(AFFObject, Con, char *uri, char mode);
 
      /** The is called to set properties on the object */
      void METHOD(AFFObject, set_property, char *attribute, char *value);
@@ -131,7 +168,8 @@ END_CLASS
 CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
      uint64_t size;
-     
+     char mode;
+
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
      int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
@@ -148,7 +186,6 @@ END_CLASS
 // This file like object is backed by a real disk file:
 CLASS(FileBackedObject, FileLikeObject)
      int fd;
-
      FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
 END_CLASS
 
@@ -188,6 +225,9 @@ CLASS(Resolver, Object)
      // caching at all.
      Cache cache;
 
+     // This is a cache of writers
+     Cache writers;
+
      Resolver METHOD(Resolver, Con);
 
 /* This method tries to resolve the provided uri and returns an
@@ -203,8 +243,8 @@ CLASS(Resolver, Object)
  expire from the cache while callers are holding it. For efficiency
  you must return the object to the cache as soon as possible by
  calling cache_return.
-*/
-      AFFObject METHOD(Resolver, open, void *ctx, char *uri);
+*/ 
+      AFFObject METHOD(Resolver, open, void *ctx, char *uri, char mode);
       void METHOD(Resolver, cache_return, AFFObject obj);
 
 /* This create a new object of the specified type. */
@@ -438,8 +478,13 @@ CLASS(ZipFile, AFFObject)
      // that
      char *parent_urn;
 
+     // Either 'r' or 'w'. This will be set to 'w' if we go through
+     // the create mechanism and 'r' when going through the regular
+     // open mechanism.
+     char mode; 
+
      /** A zip file is opened on a file like object */
-     ZipFile METHOD(ZipFile, Con, char *file_urn);
+     ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
 
 // Fetch a member as a string - this is suitable for small memebrs
 // only as we allocate memory for it. The buffer callers receive will
@@ -503,6 +548,20 @@ CLASS(DirVolume, ZipFile)
 END_CLASS
 
 void dump_stream_properties(FileLikeObject self, char *volume);
+
+//Some useful utilities
+ZipFile open_volume(char *urn, char mode);
+
+  // Members in a volume may have a URN relative to the volume
+  // URN. This is still globally unique, but may be stored in a more
+  // concise form. For example the ZipFile member "default" is a
+  // relative name with a fully qualified name of
+  // Volume_URN/default. These functions are used to convert from
+  // fully qualified to relative names as needed. The result is a
+  // static buffer.
+char *fully_qualified_name(char *name, char *volume_urn);
+char *relative_name(char *name, char *volume_urn);
+
 #ifdef __cplusplus
 } /* closing brace for extern "C" */
 #endif

@@ -46,7 +46,7 @@ static int Image_destructor(void *this) {
   return 0;
 };
 
-static AFFObject Image_Con(AFFObject self, char *uri) {
+static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
   Image this=(Image)self;
   char *value;
 
@@ -54,24 +54,21 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
     self->urn = talloc_strdup(self, uri);
 
     // These are the essential properties:
-    value = resolver_get_with_default(oracle, self->urn, "aff2:chunk_size", "32k");
+    value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNK_SIZE, "32k");
     this->chunk_size = parse_int(value);
 
-    value = resolver_get_with_default(oracle, self->urn, "aff2:compression", "8");
+    value = resolver_get_with_default(oracle, self->urn, AFF4_COMPRESSION, "8");
     this->compression = parse_int(value);
     
-    value = resolver_get_with_default(oracle, self->urn, "aff2:chunks_in_segment", "2048");
+    value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNKS_IN_SEGMENT, "2048");
     this->chunks_in_segment = parse_int(value);
 
-    value = resolver_get_with_default(oracle, self->urn, "aff2:size", "0");
+    value = resolver_get_with_default(oracle, self->urn, AFF4_SIZE, "0");
     this->super.size = parse_int(value);
 
-    this->parent_urn = CALL(oracle, resolve, URNOF(this), "aff2:stored");
+    this->parent_urn = CALL(oracle, resolve, URNOF(this), AFF4_STORED);
     if(this->parent_urn)
       this->parent_urn = talloc_strdup(self, this->parent_urn);
-
-    // Make sure the oracle knows we are an image
-    CALL(oracle, set, self->urn, "aff2:type", "image");
 
     this->chunk_buffer = talloc_size(self, this->chunk_size);
 
@@ -96,7 +93,7 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
     this->chunk_cache->cmp = cache_cmp_int;
   } else {
     // Call our baseclass
-    this->__super__->super.Con(self, uri);
+    this->__super__->super.Con(self, uri, mode);
   };
 
   // NOTE - its a really bad idea to set destructors which call
@@ -108,7 +105,10 @@ static AFFObject Image_Con(AFFObject self, char *uri) {
 };
   
 static AFFObject Image_finish(AFFObject self) {
-  return CALL(self, Con, self->urn);
+  // Make sure the oracle knows we are an image
+  CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE);
+
+  return CALL(self, Con, self->urn, 'w');
 };
 
 /** This is how we implement the Image stream writer:
@@ -154,7 +154,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
       goto error;
     }
 
-    parent  = (ZipFile)CALL(oracle, open, this, this->parent_urn);
+    parent  = (ZipFile)CALL(oracle, open, this, this->parent_urn, 'w');
     // Format the segment name
     snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
 	     this->segment_count);
@@ -295,7 +295,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   // Now we work out the offsets on the chunk in the segment - we read
   // the segment index which is a blob:
   {
-    Blob temp_blob = (Blob)CALL(oracle, open, self, buffer);
+    Blob temp_blob = (Blob)CALL(oracle, open, self, buffer, 'r');
     int32_t *chunk_index;
     int chunks_in_segment;
 
@@ -330,7 +330,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   };
 
   // Now we need to read the ZipFile directly
-  parent = (ZipFile)CALL(oracle, open, self, this->parent_urn);
+  parent = (ZipFile)CALL(oracle, open, self, this->parent_urn, 'r');
   if(!parent) {
     RaiseError(ERuntimeError, "No storage for Image stream?");
     goto error;
@@ -423,12 +423,12 @@ void dump_stream_properties(FileLikeObject self, char *volume) {
 
   // Set the stream size
   snprintf(tmp, BUFF_SIZE, "%lld", self->size);
-  CALL(oracle, set, ((AFFObject)self)->urn, "aff2:size", tmp);
+  CALL(oracle, set, ((AFFObject)self)->urn, AFF4_SIZE, tmp);
 
   // Write out a properties file
   properties = CALL(oracle, export_urn, URNOF(self));
   if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume);
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume, 'w');
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
     CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),

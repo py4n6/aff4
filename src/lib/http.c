@@ -1,4 +1,5 @@
 #include "zip.h"
+#include <libgen.h>
 
 static char CURL_ERROR[CURL_ERROR_SIZE];
 
@@ -97,6 +98,8 @@ static int webdav_recurse_dir_check(HTTPObject self, char *url) {
 
   dirname(buff);
   len = strlen(buff);
+  if(len==0) return 1;
+
   buff[len]='/';
   buff[len+1] =0;
   if(len < 10) return -1;
@@ -114,6 +117,8 @@ static int webdav_recurse_dir_check(HTTPObject self, char *url) {
     curl_easy_setopt(self->send_handle, CURLOPT_CUSTOMREQUEST, "MKCOL");
     curl_easy_perform(self->send_handle);
   };
+  
+  return 1;
 };
 
 static AFFObject HTTPObject_AFFObject_Con(AFFObject self, char *uri) {
@@ -236,8 +241,6 @@ static void HTTPObject_close(FileLikeObject self) {
   curl_easy_cleanup(this->curl);
 
   if(this->send_handle) {
-    int handle_count;
-
     while(this->send_buffer->size > 0) {
       int handle_count;
       int result = curl_multi_perform(this->multi_handle, &handle_count);

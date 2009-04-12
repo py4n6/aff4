@@ -28,5 +28,6 @@ typedef  unsigned long int in_addr_t;
 #define BUFF_SIZE 4096
 
 int _mkdir(const char *path);
+void init_luts();
 
 #endif

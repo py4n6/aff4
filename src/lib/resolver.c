@@ -5,24 +5,26 @@
 /** This is a dispatcher of stream classes depending on their name.
 */
 struct dispatch_t {
+  // A boolean to determine if this is a scheme or a type
+  int scheme;
   char *type;
   AFFObject class_ptr;
 };
 
 static struct dispatch_t dispatch[] = {
-  { "blob", (AFFObject)&__Blob },
-  { "volume", (AFFObject)&__ZipFile },
-  { "directory", (AFFObject)&__DirVolume },
-  { "link", (AFFObject)&__Link },
-  { "image", (AFFObject)&__Image },
-  { "map", (AFFObject)&__MapDriver},
-  { "encrypted", (AFFObject)&__Encrypted},
-  { "file://", (AFFObject)&__FileBackedObject },
+  { 0, AFF4_BLOB,                 (AFFObject)&__Blob },
+  { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
+  { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
+  { 0, AFF4_LINK,                 (AFFObject)&__Link },
+  { 0, AFF4_IMAGE, (AFFObject)&__Image },
+  { 0, AFF4_MAP, (AFFObject)&__MapDriver},
+  { 0, AFF4_ENCRYTED, (AFFObject)&__Encrypted},
+  { 1, "file://", (AFFObject)&__FileBackedObject },
   // All handled by libcurl
-  { "http://", (AFFObject)&__HTTPObject },
-  { "https://", (AFFObject)&__HTTPObject },
-  { "ftp://", (AFFObject)&__HTTPObject },
-  { NULL, NULL}
+  { 1, "http://", (AFFObject)&__HTTPObject },
+  { 1, "https://", (AFFObject)&__HTTPObject },
+  { 1, "ftp://", (AFFObject)&__HTTPObject },
+  { 0, NULL, NULL}
 };
 
 /** This is the global oracle - it knows everything about everyone. */
@@ -204,12 +206,18 @@ END_VIRTUAL
 ***********************************************************/
 
 static Resolver Resolver_Con(Resolver self) {
+  // This is a persistent cache for all object relations we know about
   self->urn = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->urn, "Main Resolver");
 
   // This is a cache for frequently used objects
   self->cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
   talloc_set_name_const(self->cache, "Temporary Cache");
+
+  // This is a cache for writers:
+  self->writers = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
+  talloc_set_name_const(self->writers, "Writer Cache");
+
   return self;
 };
 
@@ -225,7 +233,7 @@ static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
   return CALL(i, get_item, attribute);
 };
 
-static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
+static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
   int i;
   char *stream_type;
   struct dispatch_t *dispatch_ptr=NULL;
@@ -235,7 +243,12 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
   if(!urn) return NULL;
 
   // Is this object cached?
-  tmp = CALL(self->cache, get, urn);
+  if(mode =='r') {
+    tmp = CALL(self->cache, get, urn);
+  } else {
+    tmp = CALL(self->writers, get, urn);
+  };
+
   if(tmp) {
     result = (AFFObject)tmp->data;
     talloc_steal(ctx, result);
@@ -245,7 +258,8 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
 
   // OK Maybe the type is encoded into the URN:
   for(i=0; dispatch[i].type !=NULL; i++) {
-    if(strlen(urn)>7 && !memcmp(urn, ZSTRING_NO_NULL(dispatch[i].type))) {
+    if(dispatch[i].scheme && strlen(urn)>7 && 
+       !memcmp(urn, ZSTRING_NO_NULL(dispatch[i].type))) {
       dispatch_ptr = &dispatch[i];
       break;
     };
@@ -277,7 +291,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
   
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-				    Con, ctx, urn);
+				    Con, ctx, urn, mode);
   
   return result; 
 };
@@ -287,14 +301,20 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn) {
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
   // Cache it
-  if(obj)
+  if(!obj) return;
+
+  if(obj->mode == 'r') {
     CALL(self->cache, put, talloc_strdup(self, obj->urn),
 	 obj, sizeof(*obj));
+  } else {
+    CALL(self->writers, put, talloc_strdup(self, obj->urn),
+	 obj, sizeof(*obj));
+  };
 };
 
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
-  printf("Adding to resolver: %s %s=%s\n", uri, attribute, (char *)value);
+  LogWarnings("%s %s=%s", uri, attribute, (char *)value);
   
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {
@@ -350,7 +370,7 @@ static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
   AFFObject result;
   if(!class_reference || !*class_reference) return NULL;
 
-  result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL);
+  result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL, 'w');
 
   return result;
 };
@@ -412,11 +432,10 @@ static void Resolver_parse(Resolver self, char *context_urn, char *text, int len
     };
     tmp_text[k]=0;
     
-    /*
-      if(strlen(attribute)<4 || memcmp(attribute, ZSTRING_NO_NULL("aff2:"))) {
-      attribute = talloc_asprintf(tmp, "aff2:%s",attribute);
-      }
-    */
+    /** If source is not a FQN, we use the context_urn instead */
+    if(strstr(source, FQN) != source) {
+      source = context_urn;
+    };
         
     // Now add to the global resolver (These will all be possibly
     // stolen).

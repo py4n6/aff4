@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include "zip.h"
+#include "aff4.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -11,7 +12,7 @@ void print_help(struct option *opts) {
   printf("The following options are supported\n");
 
   for(i=opts; i->name; i++) {
-    char *description = i->name + strlen(i->name) +1;
+    char *description = (char *)i->name + strlen(i->name) +1;
     char short_opt[BUFF_SIZE];
     char *prefix="\t";
 
@@ -51,11 +52,11 @@ ZipFile create_volume(char *driver) {
   };
 };
 
-void aff2_open_volume(char *urn) {
+void aff2_open_volume(char *urn, char mode) {
   // Try the different volume implementations in turn until one works:
   ZipFile volume;
 
-  volume = open_volume(urn);
+  volume = open_volume(urn, mode);
 
   CALL(oracle, cache_return, (AFFObject)volume);
 };
@@ -105,7 +106,6 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   char buffer[BUFF_SIZE];
   int in_fd;
   int length;
-  Link link;
   char zipfile_urn[BUFF_SIZE], volume_urn[BUFF_SIZE];
   char *passwd = getenv("AFF4_PASSPHRASE");
 
@@ -191,11 +191,11 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   CALL((FileLikeObject)image, close);
 
   // Close the zipfile and dispose of it
-  volume = (ZipFile)CALL(oracle, open, NULL, volume_urn);
+  volume = (ZipFile)CALL(oracle, open, NULL, volume_urn, 'w');
   CALL((ZipFile)volume, close);
 
   // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn);
+  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn, 'w');
   CALL((ZipFile)zipfile, close);
   
   // We are done with that now
@@ -300,7 +300,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   // We want to make it easy to locate this image so we set up a link
   // to it:
   if(stream_name) {
-    link = (Link)CALL(oracle, open, NULL, stream_name);
+    link = (Link)CALL(oracle, open, NULL, stream_name, 'r');
     if(!link) {
       printf("Creating a link object '%s' for stream '%s'\n", stream_name, URNOF(image));
       link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
@@ -310,13 +310,13 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
       CALL((AFFObject)link, finish);
       CALL(oracle, cache_return, (AFFObject)link);
     } else {
-      char *target = CALL(oracle, resolve, URNOF(link), "aff2:stored");
+      char *target = CALL(oracle, resolve, URNOF(link), AFF4_STORED);
       printf("A link '%s' already exists to object '%s'. I will not create a link at the moment - you can make a new link later via the --link command.", URNOF(link), target);
     };
   };
 
   // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn);
+  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn, 'w');
   CALL((ZipFile)zipfile, close);
   talloc_free(zipfile);
   
@@ -331,7 +331,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 };
 
 void aff2_extract(char *stream, char *output_file) {
-  FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, NULL, stream);
+  FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, NULL, stream, 'r');
   FileLikeObject out_fd;
 
   if(!in_fd) {
@@ -340,15 +340,14 @@ void aff2_extract(char *stream, char *output_file) {
   };
 
   // Create a new FileLikeObject for the output
+  out_fd = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__FileBackedObject);
   if(strstr(output_file, "file://") != output_file) {
-    char *tmp = talloc_asprintf(NULL, "file://%s", output_file);
-    out_fd = (FileLikeObject)CALL(oracle, open, NULL, tmp);
-    talloc_free(tmp);
+    URNOF(out_fd) = talloc_asprintf(out_fd, "file://%s", output_file);
   } else {
-    out_fd = (FileLikeObject)CALL(oracle, open, NULL, output_file);
+    URNOF(out_fd) = talloc_strdup(out_fd, output_file);
   }; 
 
-  if(!out_fd) 
+  if(!CALL((AFFObject)out_fd, finish)) 
     return;
 
   // Now copy the input stream to the output stream
@@ -368,7 +367,6 @@ void aff2_extract(char *stream, char *output_file) {
 int main(int argc, char **argv)
 {
   int c;
-  int digit_optind = 0;
   char mode=0;
   char *output_file = NULL;
   char *stream_name = "default";
@@ -378,14 +376,13 @@ int main(int argc, char **argv)
   int verbose=0;
   char *extract = NULL;
   char *passphrase = NULL;
-
+  
   // Initialise the library
   AFF2_Init();
 
   talloc_enable_leak_report_full();
 
   while (1) {
-    int this_option_optind = optind ? optind : 1;
     int option_index = 0;
     // Note that we use an extension to long_options to allow the
     // helpful descriptions to be included with the long names. This
@@ -435,7 +432,7 @@ int main(int argc, char **argv)
     };
 
     case 'l':
-      aff2_open_volume(optarg);
+      aff2_open_volume(optarg, 'r');
       break;
 
     case 'o':
@@ -484,6 +481,7 @@ int main(int argc, char **argv)
 
   // Do we want to extract a stream:
   if(extract) {
+    if(!output_file) output_file = "/dev/stdout";
     aff2_extract(extract, output_file);
   } 
   // Do we just want to print the content of the resolver?

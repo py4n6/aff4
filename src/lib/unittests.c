@@ -12,7 +12,7 @@
 /** First test builds a new zip file from /bin/ls */
 void test1() {
   // Make a new zip file
-  ZipFile zip = (ZipFile)CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL);
+  ZipFile zip = (ZipFile)CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL, 'w');
 
   // Make a new file
   FileLikeObject out_fd;
@@ -114,7 +114,7 @@ void test2() {
   struct timeval new_time;
   int diff;
   Blob blob;
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE, 'r');
 
   // This is only needed to populate the oracle  
   if(!zipfile) return;
@@ -124,7 +124,7 @@ void test2() {
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    blob = (Blob)CALL(oracle, open, NULL, "hello");
+    blob = (Blob)CALL(oracle, open, NULL, "hello", 'r');
     if(!blob) {
       RaiseError(ERuntimeError, "Error reading member");
       return;
@@ -231,7 +231,7 @@ void test_image_read() {
     return;
   };
 
-  zipfile =CONSTRUCT(ZipFile, ZipFile, Con, fd, URNOF(fd));
+  zipfile =CONSTRUCT(ZipFile, ZipFile, Con, fd, URNOF(fd), 'r');
   if(!zipfile) {
     RaiseError(ERuntimeError, "%s is not a zip file?", TEST_FILE);
     talloc_free(fd);
@@ -241,7 +241,7 @@ void test_image_read() {
   // We just put it in the cache anyway
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
-  image = (Image)CALL(oracle, open, NULL, link_name);
+  image = (Image)CALL(oracle, open, NULL, link_name, 'r');
   if(!image) {
     RaiseError(ERuntimeError, "Unable to find stream %s", link_name);
     goto error;
@@ -340,10 +340,10 @@ void test_map_create() {
   // Now create a map stream:
   map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
   if(map) {
-    CALL((AFFObject)map, set_property, "aff2:stored", volume);
-    CALL((AFFObject)map, set_property, "aff2:target_period", "3");
-    CALL((AFFObject)map, set_property, "aff2:image_period", "6");
-    CALL((AFFObject)map, set_property, "aff2:blocksize", "64k");
+    CALL((AFFObject)map, set_property, AFF4_STORED, volume);
+    CALL((AFFObject)map, set_property, AFF4_TARGET_PERIOD, "3");
+    CALL((AFFObject)map, set_property, AFF4_IMAGE_PERIOD, "6");
+    CALL((AFFObject)map, set_property, AFF4_BLOCKSIZE, "64k");
     map = (MapDriver)CALL((AFFObject)map, finish);
   };
 
@@ -360,8 +360,8 @@ void test_map_create() {
   CALL(map, add, 4, 2, D0);
   CALL(map, add, 5, 2, D2);
 
-  fd = (FileLikeObject)CALL(oracle, open, NULL, D1);
-  CALL((AFFObject)map, set_property, "aff2:size", from_int(fd->size * 2));
+  fd = (FileLikeObject)CALL(oracle, open, NULL, D1, 'r');
+  CALL((AFFObject)map, set_property, AFF4_SIZE, from_int(fd->size * 2));
   CALL(oracle, cache_return, (AFFObject)fd);
 
   CALL(map, save_map);
@@ -380,7 +380,7 @@ void test_map_create() {
   };
 
  exit:
-  zipfile = (ZipFile)CALL(oracle, open, NULL, volume);
+  zipfile = (ZipFile)CALL(oracle, open, NULL, volume, 'w');
   CALL(zipfile, close);
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
@@ -390,10 +390,10 @@ void test_map_read(char *filename) {
   MapDriver map;
   int outfd, length;
   char buff[TEST_BUFF_SIZE];
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL,filename);
+  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL,filename, 'r');
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
-  map  = (MapDriver)CALL(oracle, open, NULL, "map");
+  map  = (MapDriver)CALL(oracle, open, NULL, "map", 'r');
   if(!map) return;
 
   outfd = creat("output.dd", 0644);
@@ -414,7 +414,8 @@ void test_map_read(char *filename) {
 };
 
 void test_http_handle() {
-  FileLikeObject http = CONSTRUCT(HTTPObject, HTTPObject, Con,NULL, "http://127.0.0.1/test.c");
+  FileLikeObject http = (FileLikeObject)CONSTRUCT(HTTPObject, HTTPObject, 
+						  Con, NULL, "http://127.0.0.1/test.c");
   char buff[BUFF_SIZE];
 
   CALL(http, read, buff, 100);
@@ -462,7 +463,8 @@ void test_encrypted(char *filename) {
 
   // Create a new volume inside the embedded stream
   embedded_volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  CALL((AFFObject)embedded_volume, set_property, "aff2:stored", URNOF(encrypted_stream));
+  CALL((AFFObject)embedded_volume, set_property, AFF4_STORED, 
+       URNOF(encrypted_stream));
 
   if(!CALL((AFFObject)embedded_volume, finish)) {
     CALL(oracle, cache_return, (AFFObject)embedded_stream);
@@ -479,12 +481,12 @@ void test_encrypted(char *filename) {
 
   // Now put the image on it:
   create_image(embedded_volume_uri, "/bin/ls", "encrypted");
-
-  embedded_volume = CALL(oracle, open, NULL, embedded_volume_uri);
+  
+  embedded_volume = (ZipFile)CALL(oracle, open, NULL, embedded_volume_uri, 'w');
   CALL(embedded_volume, close);
   CALL(oracle, cache_return, (AFFObject)embedded_volume);
 
-  encrypted_stream = CALL(oracle, open, NULL, encrypted_stream_uri);
+  encrypted_stream = CALL(oracle, open, NULL, encrypted_stream_uri, 'w');
   CALL(encrypted_stream, close);
   CALL(oracle, cache_return, (AFFObject)encrypted_stream);
 
@@ -494,7 +496,7 @@ void test_encrypted(char *filename) {
   CALL(oracle, cache_return, (AFFObject)embedded_stream);
   */
 
-  container = CALL(oracle, open, NULL, container_urn);
+  container = CALL(oracle, open, NULL, container_urn, 'w');
   CALL(container, close);
   CALL(oracle, cache_return, (AFFObject)container);
 };

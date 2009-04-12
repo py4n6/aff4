@@ -399,7 +399,7 @@ int issubclass(Object, Object, void (init)());
     python does it, i.e. we set the error flag and return NULL.
 */
 enum _error_type {
-  EZero,EGeneric,EOverflow,
+  EZero,EGeneric,EOverflow,EWarning,
   EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError
 };
 
@@ -417,15 +417,21 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   do {									\
     _traceback = (char *)talloc_asprintf_append(_traceback, "%s:%d - %s: ", __FILE__, \
 						__LINE__, __FUNCTION__); \
-    raise_errors(t, __VA_ARGS__);					\
+    raise_errors(t, ## __VA_ARGS__);					\
     _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
   } while(0);								
 
+#define LogWarnings(format, ...)		\
+  do {						\
+    RaiseError(EWarning, format, ## __VA_ARGS__);	\
+    PrintError();				\
+  } while(0);
+  
 #define ClearError()				\
   do {_global_error = EZero; if(_traceback) {talloc_free(_traceback); _traceback=NULL;}; } while(0);
 
 #define PrintError()				\
-  do {if(_global_error) printf("%s",_traceback); fflush(stdout); }while(0);
+  do {if(_global_error) fprintf(stderr, "%s",_traceback); fflush(stdout); ClearError(); }while(0);
 
 #define CheckError(error)			\
   (_global_error == error)

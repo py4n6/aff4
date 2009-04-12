@@ -1,35 +1,46 @@
 #include "openssl/aes.h"
 #include "zip.h"
 
-static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
+static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
   Encrypted this = (Encrypted)self;
+  FileLikeObject fd;
   char *value;
 
   if(urn) {
     URNOF(self) = talloc_strdup(self, urn);
 
-    value = resolver_get_with_default(oracle, self->urn, "aff2:block_size", "4k");
+    value = resolver_get_with_default(oracle, self->urn, AFF4_BLOCKSIZE, "4k");
     this->block_size = parse_int(value);
 
-    this->target_urn = CALL(oracle, resolve, URNOF(self), "aff2:target");
+    this->target_urn = CALL(oracle, resolve, URNOF(self), AFF4_TARGET);
     if(!this->target_urn) {
       RaiseError(ERuntimeError, "No target stream specified");
       goto error;
     };
 
-    this->volume = CALL(oracle, resolve, URNOF(self), "aff2:stored");
+    fd = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, mode);
+    if(!fd) {
+      RaiseError(ERuntimeError, "Unable to open target %s", this->target_urn);
+      goto error;
+    };
+    CALL(oracle, cache_return, (AFFObject)fd);
+
+    // Set our size 
+    ((FileLikeObject)self)->size = parse_int(resolver_get_with_default(oracle, self->urn, NAMESPACE "size", "0"));
+
+    this->volume = CALL(oracle, resolve, URNOF(self), AFF4_STORED);
     if(!this->volume) {
       RaiseError(ERuntimeError, "No idea where im stored?");
       goto error;
     };
 
-    CALL(self, set_property, "aff2:type", "encrypted");
+    CALL(self, set_property, AFF4_TYPE, AFF4_ENCRYTED);
     this->block_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
     // FIXME
     this->key = "hello world";
     this->salt = "12345678";
   } else {
-    this->__super__->super.Con(self, urn);
+    this->__super__->super.Con(self, urn, mode);
   };
 
   return self;
@@ -40,12 +51,12 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn) {
 };
 
 static AFFObject Encrypted_finish(AFFObject self) {
-  return self->Con(self, URNOF(self));
+  return self->Con(self, URNOF(self), 'w');
 };
 
 static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn);
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'r');
   int result;
 
   result = CALL(target, read, buffer, length);
@@ -58,7 +69,7 @@ static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int l
 
 static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn);
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'w');
   int result;
 
   result = CALL(target, write, buffer, length);
@@ -71,7 +82,7 @@ static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int 
 
 static void Encrypted_close(FileLikeObject self) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = CALL(oracle, open, NULL, this->target_urn);
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'w');
   CALL(target, close);
   CALL(oracle, cache_return, (AFFObject)target);
 

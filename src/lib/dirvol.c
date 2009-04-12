@@ -3,6 +3,7 @@
 
 */
 #include "zip.h"
+#include <libgen.h>
 
 static AFFObject DirVolume_finish(AFFObject self) {
   DirVolume this = (DirVolume)self;
@@ -17,7 +18,7 @@ static AFFObject DirVolume_finish(AFFObject self) {
   return result;
 };
 
-static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
+static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
   int len;
   char *text;
   // A temporary context
@@ -25,20 +26,27 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
   Cache urn, first;
 
   // Make sure we have a URN
-  CALL((AFFObject)self, Con, NULL);
+  CALL((AFFObject)self, Con, NULL, mode);
 
   self->parent_urn = talloc_strdup(self, fd_urn);
 
   // We check that there is no URN there already:
+  PrintError();
   text = CALL(self, read_member, ctx, "__URN__", &len);
   if(text && len>0) {
     URNOF(self) = talloc_strdup(self, text);
-  } else {
+  } else if(mode=='w') {
+    // We are in writing mode - but we dont already have a __URN__
+    // file - make one:
     if(CALL(self, writestr, "__URN__", ZSTRING_NO_NULL(URNOF(self)),
 	    NULL, 0, 0)<0) 
       goto error;
+  } else {
+    // We are in reading mode and we cant find the __URN__ file - quit
+    goto error;
   };
-
+  ClearError();
+  
   /** Ok - now parse all the properties files. We do this by first
       parsing the properties file at the volume layer, then iterating
       over all the aff2:contained attributes in it to find other
@@ -48,31 +56,31 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
   if(text) {
     CALL(oracle, parse, URNOF(self), text, len);
   };
-
+  
   // Now iterate over all the contained members in this directory:
   urn = CALL(oracle->urn, get_item, URNOF(self));
   if(urn) {
-    first = CALL(urn, get, "aff2:contains");
+    first = CALL(urn, get, AFF4_CONTAINS);
   };
-
+  
   if(first) {
     Cache i;
-
+    
     list_for_each_entry(i, &first->hash_list, hash_list) {
       char *filename = (char *)i->data;
       int filename_length;
       int properties_length;
       int len;
-
+      
       if(!filename) continue;
-
+      
       filename_length = strlen(filename);
       properties_length = strlen("properties");
-
+      
       // Record the blob objects:
-      CALL(oracle, set, filename, "aff2:type", "blob");
-      CALL(oracle, set, filename, "aff2:location", URNOF(self));
-
+      CALL(oracle, set, filename, AFF4_TYPE, AFF4_BLOB);
+      CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
+      
       // We identify streams by their filename ending with "properties"
       // and parse out their properties:
       if(filename_length >= properties_length && 
@@ -88,10 +96,10 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn) {
       };
     };  
   };
-
+  
   talloc_free(ctx);
   return self;
-
+    
  error:
   talloc_free(self);
   return NULL;
@@ -104,18 +112,18 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
   FileLikeObject result;
 
   snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));
-  if(mode == 'w'){
-    CALL(oracle, add, URNOF(self), "aff2:contains", filename);
+  result = (FileLikeObject)CALL(oracle, open, self, buff, mode);
+
+  if(result && mode == 'w'){
+    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
   };
 
-  result = (FileLikeObject)CALL(oracle, open, self, buff);
   return result;
 };
 
 // When we close we dump out the properties file of this directory
 static void DirVolume_close(ZipFile self) {
   char *properties = CALL(oracle, export_urn, URNOF(self));
-  char buff[BUFF_SIZE];
 
   // We check that there is no URN there already:
   CALL(self, writestr, "properties", ZSTRING_NO_NULL(properties),
@@ -130,10 +138,11 @@ static int DirVolume_writestr(ZipFile self, char *filename,
   FileLikeObject fd;
   
   snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));  
-  CALL(oracle, add, URNOF(self), "aff2:contains", filename);
-
-  fd = CALL(oracle, open, NULL, buff);
+  
+  fd = (FileLikeObject)CALL(oracle, open, NULL, buff, 'w');
   if(!fd) return -1;
+
+  CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
   CALL(fd, truncate, 0);
   len = CALL(fd, write, data, len);
   CALL(fd, close);
@@ -149,7 +158,7 @@ static char *DirVolume_read_member(ZipFile self, void *ctx,
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
 
   snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));
-  fd = (FileLikeObject)CALL(oracle, open, NULL, buff);
+  fd = (FileLikeObject)CALL(oracle, open, NULL, buff, 'r');
   if(!fd) {
     goto error;
   };
