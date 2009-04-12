@@ -1,0 +1,188 @@
+--- sleuthkit-3.0.1/configure.ac	2009-02-03 15:07:24.000000000 +1100
++++ sleuthkit-3.0.1_aff4/configure.ac	2009-04-10 19:55:29.000000000 +1000
+@@ -9,6 +9,7 @@ AC_CONFIG_SRCDIR([tsk3/base/tsk_base.h])
+ AM_CONFIG_HEADER([tsk3/tsk_config.h])
+ AC_CONFIG_AUX_DIR(config)
+ AM_INIT_AUTOMAKE([foreign])
++#AM_INIT_AUTOMAKE()
+ AM_PROG_LIBTOOL
+ AM_MAINTAINER_MODE
+ 
+@@ -101,6 +102,26 @@ AC_CHECK_HEADERS([afflib/afflib.h], 
+     ], 
+ )
+ 
++AC_CHECK_HEADERS([aff4/aff4.h], 
++    [AC_ARG_ENABLE(aff4, 
++        [  --disable-aff4  Do not use AFF4 even if it is installed],
++# Action if they gave this argument
++        [ if test "x$enableval" = "xyes" ; then
++            AC_CHECK_LIB([aff4], [aff4_open])
++          elif test "x$enableval" = "xno" ; then
++            echo "Ignoring AFF4."
++          else
++            echo "Error: Unknown enable-aff4 argument."
++            exit -1
++          fi
++        ],
++# if they did not specify aff, look for it
++        [AC_CHECK_LIB([aff4], [aff4_open])]
++        )
++    # if afflib/afflib.h was not found, then do nothing
++    ], 
++)
++
+ # Check if we should link libewf.  Some installations
+ # have only the tools install of libewf and the library exists,
+ # but the header file does not.  We now check for both.
+--- sleuthkit-3.0.1/tsk3/img/img_open.c	2008-09-29 09:02:49.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/img_open.c	2009-04-10 22:32:54.000000000 +1000
+@@ -28,7 +28,9 @@ typedef int bool;
+ #include "ewf.h"
+ #endif
+ 
+-
++#if HAVE_LIBAFF4
++#include "tsk_aff4.h"
++#endif
+ 
+ /**
+  * \ingroup imglib
+@@ -243,6 +245,12 @@ tsk_img_open(int num_img,
+         break;
+ #endif
+ 
++#if HAVE_LIBAFF4
++    case TSK_IMG_TYPE_AFF4:
++      img_info = tsk_aff4_open(num_img, images);
++      break;
++#endif
++
+     default:
+         tsk_error_reset();
+         tsk_errno = TSK_ERR_IMG_UNSUPTYPE;
+--- sleuthkit-3.0.1/tsk3/img/img_types.c	2008-09-29 09:02:49.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/img_types.c	2009-04-10 20:02:53.000000000 +1000
+@@ -35,6 +35,9 @@ static IMG_TYPES img_open_table[] = {
+     {"afd", TSK_IMG_TYPE_AFF_AFD, "AFF Multiple File"},
+     {"afm", TSK_IMG_TYPE_AFF_AFM, "AFF with external metadata"},
+ #endif
++#if HAVE_LIBAFF4
++    {"aff4", TSK_IMG_TYPE_AFF4, "Advanced Format Format Version 4"},
++#endif
+ #if HAVE_LIBEWF
+     {"ewf", TSK_IMG_TYPE_EWF_EWF, "Expert Witness format (encase)"},
+ #endif
+--- sleuthkit-3.0.1/tsk3/img/Makefile.am	2008-09-29 09:02:49.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/Makefile.am	2009-04-10 22:37:02.000000000 +1000
+@@ -3,7 +3,8 @@ EXTRA_DIST = .indent.pro 
+ 
+ noinst_LTLIBRARIES = libtskimg.la
+ libtskimg_la_SOURCES = img_open.c img_types.c raw.c raw.h \
+-    split.c split.h aff.c aff.h ewf.c ewf.h tsk_img_i.h img_io.c
++        split.c split.h aff.c aff.h ewf.c ewf.h tsk_aff4.c \
++	tsk_img_i.h img_io.c
+ 
+ indent:
+ 	indent *.c *.h
+--- sleuthkit-3.0.1/tsk3/img/tsk_aff4.c	1970-01-01 10:00:00.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/tsk_aff4.c	2009-04-12 10:38:55.000000000 +1000
+@@ -0,0 +1,64 @@
++#include "tsk_img_i.h"
++
++#ifdef HAVE_LIBAFF4
++#include "tsk_aff4.h"
++
++static ssize_t
++tsk_aff4_read(TSK_IMG_INFO * img_info, TSK_OFF_T offset, char *buf,
++	      size_t len)
++{
++  IMG_AFF4_INFO *self=(IMG_AFF4_INFO *)img_info;
++
++  aff4_seek(self->handle, offset, 0);
++  return aff4_read(self->handle, buf, len);
++};
++
++static void
++tsk_aff4_close(TSK_IMG_INFO * img_info)
++{
++    IMG_AFF4_INFO *self = (IMG_AFF4_INFO *) img_info;
++
++    aff4_close(self->handle);
++    free(self);
++};
++
++static void
++tsk_aff4_imgstat(TSK_IMG_INFO * img_info, FILE * hFile)
++{
++  
++};
++
++TSK_IMG_INFO *tsk_aff4_open(int count, const TSK_TCHAR **filenames) {
++  IMG_AFF4_INFO *result;
++  char **volumes = (char **)tsk_malloc((count+1) * sizeof(char *));
++
++  // Null terminate the volume array
++  memcpy(volumes, filenames, count * sizeof(char *));
++  volumes[count]=0;
++
++  // Make sure the library is initialised:
++  AFF2_Init();
++  result= (IMG_AFF4_INFO *)tsk_malloc(sizeof(IMG_AFF4_INFO));
++
++  if(!result) 
++    goto error1;
++  
++  result->handle = aff4_open(volumes);
++  if(!result->handle) goto error;
++
++  aff4_seek(result->handle, 0, 2);
++  result->img_info.size = aff4_tell(result->handle);
++  result->img_info.itype = TSK_IMG_TYPE_AFF4;
++  result->img_info.read = tsk_aff4_read;
++  result->img_info.close = tsk_aff4_close; 
++  result->img_info.imgstat = tsk_aff4_imgstat;
++
++  return result;
++ error:
++  free(result);
++ error1:
++  free(volumes);
++  return NULL;
++};
++
++#endif
+--- sleuthkit-3.0.1/tsk3/img/tsk_aff4.h	1970-01-01 10:00:00.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/tsk_aff4.h	2009-04-10 22:40:54.000000000 +1000
+@@ -0,0 +1,20 @@
++#ifndef TSK_AFF4_H
++#define TSK_AFF4_H
++
++#include <aff4/aff4.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++  TSK_IMG_INFO *tsk_aff4_open(int count, const TSK_TCHAR **filenames);
++  typedef struct {
++    TSK_IMG_INFO img_info;
++    AFF4_HANDLE handle;
++  } IMG_AFF4_INFO;
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+--- sleuthkit-3.0.1/tsk3/img/tsk_img.h	2008-09-29 09:02:49.000000000 +1000
++++ sleuthkit-3.0.1_aff4/tsk3/img/tsk_img.h	2009-04-10 23:24:03.000000000 +1000
+@@ -63,7 +63,7 @@ extern "C" {
+         TSK_IMG_TYPE_AFF_AFM = 0x0010,  ///< AFM AFF Format
+ 
+         TSK_IMG_TYPE_EWF_EWF = 0x0020,  ///< EWF version
+-
++	TSK_IMG_TYPE_AFF4    = 0x0021,  ///< AFF4 
+         TSK_IMG_TYPE_UNSUPP = 0xffff,   ///< Unsupported disk image type
+     } TSK_IMG_TYPE_ENUM;
+ 

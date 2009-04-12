@@ -125,5 +125,6 @@ int aff4_read(AFF4_HANDLE self, char *buf, int len) {
 void aff4_close(AFF4_HANDLE self) {
   // Just give the handle back to the oracle so it may be reused if
   // needed.
-  CALL(oracle, cache_return, (AFFObject)self);
+  if(self)
+    CALL(oracle, cache_return, (AFFObject)self);
 };

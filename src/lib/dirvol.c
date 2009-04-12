@@ -12,8 +12,8 @@ static AFFObject DirVolume_finish(AFFObject self) {
   // Correct our type:
   CALL(oracle, set, 
        URNOF(self), 	       /* Source URI */
-       "aff2:type",            /* Attributte */
-       "directory");           /* Value */
+       AFF4_TYPE,            /* Attributte */
+       AFF4_DIRECTORY_VOLUME);           /* Value */
 
   return result;
 };

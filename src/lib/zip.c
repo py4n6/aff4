@@ -240,19 +240,6 @@ static AFFObject ZipFile_finish(AFFObject self) {
     RaiseError(ERuntimeError, "Volume %s has no " NAMESPACE "stored property?", self->urn);
     return NULL;
   };
-
-#if 0
-  // Do we need to truncate it?
-  if(!CALL(oracle, resolve, self->urn, "aff2volatile:append")) {
-    CALL(fd, truncate, 0);
-  };
-
-  CALL(oracle, set, 
-       URNOF(self), 	       /* Source URI */
-       AFF4_TYPE,            /* Attributte */
-       AFF4_ZIP_VOLUME);              /* Value */
-
-#endif
     
   return (AFFObject)CALL((ZipFile)this, Con, file_urn, 'w');
 };

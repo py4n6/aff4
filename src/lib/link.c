@@ -5,17 +5,14 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
   FileLikeObject result;
 
   if(urn) {
-    char *target = CALL(oracle, resolve, urn, "aff2:target");
+    char *target = CALL(oracle, resolve, urn, AFF4_TARGET);
     if(!target) {
-      RaiseError(ERuntimeError, "%s unable to resolve the aff2:link_to property?", urn);
+      RaiseError(ERuntimeError, "%s unable to resolve the " AFF4_TARGET " property?", urn);
       goto error;
     };
 
     result = CALL(oracle, open, self, target, mode);
     if(!result) goto error;
-
-    // Copy our urn to the result
-    URNOF(result) = talloc_strdup(result, URNOF(self));
 
     return result;
   } else {

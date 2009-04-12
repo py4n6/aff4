@@ -267,7 +267,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
 
   // Nope - maybe its stated explicitely
   if(!dispatch_ptr) {
-    stream_type = CALL(self, resolve, urn, "aff2:type");
+    stream_type = CALL(self, resolve, urn, AFF4_TYPE);
     if(stream_type) {
       // Find it in the dispatcher struct and instantiate it
       for(i=0; dispatch[i].type !=NULL; i++) {
@@ -343,7 +343,7 @@ static char *Resolver_export_urn(Resolver self, char *urn) {
     char *value = (char *)j->data;
 
     // Do not write volatile data
-    if(memcmp(attribute, ZSTRING_NO_NULL("aff2volatile:"))) {
+    if(memcmp(attribute, ZSTRING_NO_NULL(VOLATILE_NS))) {
       result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
 				      attribute, value);
     };
@@ -482,7 +482,7 @@ static AFFObject AFFObject_Con(AFFObject self, char *uri) {
     uuid_str = talloc_size(self, 40);
     uuid_unparse(uuid, uuid_str);
 
-    uri = talloc_asprintf(self, "urn:aff2:%s", uuid_str);
+    uri = talloc_asprintf(self, FQN "%s", uuid_str);
   };
 
   if(!self->urn)

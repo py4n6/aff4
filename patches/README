@@ -1,0 +1,16 @@
+These patches should be applied to sleuthkit-3.0.1 to allow support for aff4.
+
+make sure libaff4 is installed properly first.
+
+tar -xvzf sleuthkit-3.0.1.tar.gz 
+cd sleuthkit-3.0.1
+patch -p1 < sleuthkit-3.0.1.patch
+autoconf
+./configure
+make install
+
+It is now possible to use fls etc, by specifying:
+fls -i aff4 aff4_file.zip stream_name
+
+Where stream_name is the name of the stream that contains the image
+(This can be a link or a fully qualified name).
