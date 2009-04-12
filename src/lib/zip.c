@@ -567,7 +567,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Indicate that the file is dirty - This means we will be writing
     // a new CD on it
-    CALL(oracle, set, URNOF(self), VOLATILE_NS "dirty", "1");
+    CALL(oracle, set, URNOF(self), AFF4_DIRTY, "1");
 
     // Open our current volume for writing:
     fd = (FileLikeObject)CALL(oracle, open, self, self->parent_urn, 'w');
@@ -629,7 +629,7 @@ static void ZipFile_close(ZipFile self) {
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
   int k=0;
-  char *_didModify = CALL(oracle, resolve, URNOF(self), VOLATILE_NS "dirty");
+  char *_didModify = CALL(oracle, resolve, URNOF(self), AFF4_DIRTY);
 
   // We iterate over all the items which are contained in the
   // volume. We then write them into the CD.
@@ -757,6 +757,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
   char *fqn_filename = fully_qualified_name(filename, URNOF(self));
 
   self->mode = mode;
+  SHA1_Init(&self->sha);
   self->container_urn = talloc_strdup(self, container_urn);
   self->compression = parse_int(CALL(oracle, resolve, 
 				     fqn_filename, 
@@ -806,6 +807,9 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   this->crc32 = crc32(this->crc32, 
 		      (unsigned char*)buffer,
 		      length);
+
+  // Update the sha1:
+  SHA1_Update(&this->sha, (unsigned char *)buffer, length);
 
   /** Position our write pointer */
   CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
@@ -920,6 +924,21 @@ static void ZipFileStream_close(FileLikeObject self) {
   // This is the point where we will be writing the next file.
   CALL(oracle, set, this->container_urn, AFF4_DIRECTORY_OFFSET,
        from_int(fd->tell(fd)));
+
+  // Calculate the sha1 hash and set the hash in the resolver:
+  {
+    unsigned char digest[20];
+    char digest_encoded[42];
+    int i;
+
+    SHA1_Final(digest, &this->sha);
+    for(i=0;i<20;i++) {
+      sprintf(digest_encoded+i*2, "%02X", digest[i]);
+    };
+
+    // Tell the resolver what the hash is:
+    CALL(oracle, set, URNOF(self), AFF4_SHA, digest_encoded);
+  };
 
   // Make sure the lock is removed from this volume now:
   CALL(oracle, del, this->container_urn, VOLATILE_NS "write_lock");

@@ -10,6 +10,7 @@ extern "C" {
 #include "stringio.h"
 #include "list.h"
 #include <zlib.h>
+#include "crypto/sha1.h"
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
@@ -24,13 +25,14 @@ extern "C" {
 #define AFF4_TYPE       NAMESPACE "type"
 #define AFF4_CONTAINS   NAMESPACE "contains"
 #define AFF4_SIZE       NAMESPACE "size"
+#define AFF4_SHA        NAMESPACE "sha1"
 
   /** Image attributes */
 #define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
 #define AFF4_COMPRESSION NAMESPACE "compression"
 #define AFF4_CHUNKS_IN_SEGMENT NAMESPACE "chunks_in_segment"
 #define AFF4_DIRECTORY_OFFSET VOLATILE_NS "directory_offset"
-
+#define AFF4_DIRTY       VOLATILE_NS "dirty"
   /** Link, encryption attributes */
 #define AFF4_TARGET NAMESPACE "target"
 
@@ -38,6 +40,9 @@ extern "C" {
 #define AFF4_BLOCKSIZE NAMESPACE "blocksize"
 #define AFF4_IMAGE_PERIOD NAMESPACE "image_period"
 #define AFF4_TARGET_PERIOD NAMESPACE "target_period"
+
+  /* signed blocks */
+#define AFF4_STATEMENT NAMESPACE "statement"
 
   /** These are standard aff4 types */
 #define AFF4_ZIP_VOLUME       "volume"
@@ -47,6 +52,7 @@ extern "C" {
 #define AFF4_IMAGE            "image"
 #define AFF4_MAP              "map"
 #define AFF4_ENCRYTED         "encrypted"
+#define AFF4_IDENTITY         "identity"
 
 // A helper to access the URN or an object.
 #define URNOF(x)  ((AFFObject)x)->urn
@@ -209,7 +215,7 @@ END_CLASS
 	 responsible with returning various objects from a globally
 	 unique identifier (URI).
      */
-CLASS(Resolver, Object)
+CLASS(Resolver, AFFObject)
 // This is a global cache of URN and their values - we try to only
 // have small URNs here and keep everything in memory.
      Cache urn;
@@ -229,6 +235,10 @@ CLASS(Resolver, Object)
      Cache writers;
 
      Resolver METHOD(Resolver, Con);
+
+     // Resolvers are all in a list. Each resolver in the list is another
+     // identity which can be signed.
+     struct list_head identities;
 
 /* This method tries to resolve the provided uri and returns an
  instance of whatever the URI refers to (As an AFFObject which is the
@@ -271,6 +281,9 @@ CLASS(Resolver, Object)
 // This updates the value or adds it if needed
      void METHOD(Resolver, set, char *uri, char *attribute, char *value);
 
+  //This returns 1 if the statement is set
+     int METHOD(Resolver, is_set, char *uri, char *attribute, char *value);
+
      // Parses the properties file
      void METHOD(Resolver, parse, char *context, char *text, int len);
 END_CLASS
@@ -278,6 +291,16 @@ END_CLASS
 // This is a global instance of the oracle. All AFFObjects must
 // communicate with the oracle rather than instantiate their own.
 extern Resolver oracle;
+
+/** This object represents an identify - like a person for example. 
+
+An identity is someone who makes statements about other AFFObjects in
+the universe.
+*/
+CLASS(Identity, AFFObject)
+       Resolver info;
+       void METHOD(Identity, store, char *volume_urn);
+END_CLASS
 
 // This function must be called to initialise the library - we prepare
 // all the classes and intantiate an oracle.
@@ -532,6 +555,9 @@ CLASS(ZipFileStream, FileLikeObject)
      uint32_t compress_size;
      uint32_t compression;
      char mode;
+
+     // We calculate the SHA1 hash of each archive member
+     SHA_CTX sha;
 
 // This is the constructor for the file like object. Note that we
 // steal the underlying file pointer which should be the underlying

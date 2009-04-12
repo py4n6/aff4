@@ -16,14 +16,15 @@ static struct dispatch_t dispatch[] = {
   { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
   { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
-  { 0, AFF4_IMAGE, (AFFObject)&__Image },
-  { 0, AFF4_MAP, (AFFObject)&__MapDriver},
-  { 0, AFF4_ENCRYTED, (AFFObject)&__Encrypted},
-  { 1, "file://", (AFFObject)&__FileBackedObject },
+  { 0, AFF4_IMAGE,                (AFFObject)&__Image },
+  { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
+  { 0, AFF4_ENCRYTED,             (AFFObject)&__Encrypted},
+  { 0, AFF4_IDENTITY,             (AFFObject)&__Identity},
+  { 1, "file://",                 (AFFObject)&__FileBackedObject },
   // All handled by libcurl
-  { 1, "http://", (AFFObject)&__HTTPObject },
-  { 1, "https://", (AFFObject)&__HTTPObject },
-  { 1, "ftp://", (AFFObject)&__HTTPObject },
+  { 1, "http://",                 (AFFObject)&__HTTPObject },
+  { 1, "https://",                (AFFObject)&__HTTPObject },
+  { 1, "ftp://",                  (AFFObject)&__HTTPObject },
   { 0, NULL, NULL}
 };
 
@@ -33,6 +34,20 @@ Resolver oracle = NULL;
 /** We need to call these initialisers explicitely or the class
     references wont work.
 */
+/** Our own special add routine */
+static void oracle_add(Resolver self, char *uri, char *attribute, char *value) {
+  Resolver i;
+
+  // Call the real add method for the oracle itself
+  __Resolver.add(self, uri, attribute, value);
+
+  // Add these to all the other identities
+  list_for_each_entry(i, &self->identities, identities) {
+    CALL(i, add, uri, attribute, value);
+  };
+};
+
+
 void AFF2_Init(void) {
   FileLikeObject_init();
   FileBackedObject_init();
@@ -45,6 +60,7 @@ void AFF2_Init(void) {
   HTTPObject_init();
   Encrypted_init();
   DirVolume_init();
+  Identity_init();
 
   init_luts();
 
@@ -54,7 +70,10 @@ void AFF2_Init(void) {
     talloc_free(oracle);
   };
 
+  // Create the oracle - it has a special add method which distributes
+  // all the adds to the other identities
   oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
+  oracle->add = oracle_add;
 };
 
 
@@ -165,7 +184,7 @@ static Cache Cache_get(Cache self, void *key) {
   // shorter list at the end of each hash table slot, while the cache
   // list is a big list of all objects in the cache. We find the
   // object using the hash list, but expire the object based on the
-  // cache list which includes all objects in the case.
+  // cache list which is also kept in sorted order.
   if(!hash_list_head) return NULL;
   list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
     if(!CALL(i, cmp, key)) {
@@ -217,6 +236,8 @@ static Resolver Resolver_Con(Resolver self) {
   // This is a cache for writers:
   self->writers = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
   talloc_set_name_const(self->writers, "Writer Cache");
+
+  INIT_LIST_HEAD(&self->identities);
 
   return self;
 };
@@ -314,8 +335,11 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
+
+  if(CALL(self, is_set, uri, attribute, value)) return;
+
   LogWarnings("%s %s=%s", uri, attribute, (char *)value);
-  
+
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {
     // Create a new URI
@@ -323,11 +347,34 @@ static void Resolver_add(Resolver self, char *uri, char *attribute, char *value)
     CALL(self->urn, put, talloc_strdup(NULL, uri),
 	 tmp, sizeof(*tmp));
   };
-  
+
   // Make a copy for us to keep
   value = talloc_strdup(NULL, value);
   CALL(tmp, put, talloc_strdup(NULL, attribute), 
        ZSTRING_NO_NULL(value));
+};
+
+static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *value) {
+  // See if the same value is already in there, if so we dont want it
+  // again (use the hash table for some speed)
+  Cache tmp =  CALL(self->urn, get_item, uri);
+  int hash;
+  Cache i;
+
+  if(!tmp) return 0;
+
+  hash = CALL(tmp, hash, attribute);
+  if(tmp->hash_table && tmp->hash_table[hash]) {
+    list_for_each_entry(i, &tmp->hash_table[hash]->hash_list, hash_list) {
+      char *key = (char *)i->key;
+      char *existing = (char *)i->data;
+      if(!strcmp(key, attribute) && !strcmp(existing, value)){
+	return 1;
+      };
+    };
+  };
+
+  return 0;
 };
 
 /** Format all the attributes of the object specified by urn */
@@ -360,7 +407,7 @@ static char *Resolver_export_all(Resolver self) {
     char *urn = (char *)i->key;
     char *tmp =Resolver_export_urn(self, urn);
 
-    result = talloc_asprintf_append(result, "%s\n", tmp);
+    result = talloc_asprintf_append(result, "%s", tmp);
     talloc_free(tmp);
   };
   return result;
@@ -377,17 +424,18 @@ static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
 
 static void Resolver_del(Resolver self, char *uri, char *attribute) {
   Cache tmp,j;
+
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) return;
-
+  
   while(1) {
     j = CALL(tmp, get, attribute);
     if(!j) break;
-    //    printf("Removing %s %s\n",uri, attribute);
+    LogWarnings("Removing %s %s",uri, attribute);
     talloc_free(j);
   };
 };
-
+  
 static void Resolver_set(Resolver self, char *uri, char *attribute, char *value) {
   CALL(self, del, uri, attribute);
   CALL(self, add, uri, attribute, value);
@@ -453,7 +501,7 @@ static void Resolver_parse(Resolver self, char *context_urn, char *text, int len
 };
 
 /** Here we implement the resolver */
-VIRTUAL(Resolver, Object)
+VIRTUAL(Resolver, AFFObject)
      VMETHOD(Con) = Resolver_Con;
      VMETHOD(create) = Resolver_create;
 
@@ -464,6 +512,7 @@ VIRTUAL(Resolver, Object)
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_return;
      VMETHOD(set) = Resolver_set;
+     VMETHOD(is_set) = Resolver_is_set;
      VMETHOD(del) = Resolver_del;
      VMETHOD(parse) = Resolver_parse;
 END_VIRTUAL
@@ -471,7 +520,7 @@ END_VIRTUAL
 /************************************************************
   AFFObject - This is the base class for all other objects
 ************************************************************/
-static AFFObject AFFObject_Con(AFFObject self, char *uri) {
+static AFFObject AFFObject_Con(AFFObject self, char *uri, char mode) {
   uuid_t uuid;
   char *uuid_str;
   

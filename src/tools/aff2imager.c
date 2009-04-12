@@ -41,6 +41,16 @@ void list_info() {
   talloc_free(result);
 };
 
+/** Loads certificate cert and creates a new identify. All segments
+    written from now on will be signed using the identity.
+*/
+void add_identity(char *cert) {
+  /* FIXME - open the cert and get the CN out */
+  Identity person = CONSTRUCT(Identity, AFFObject, super.Con, NULL, cert, 'w');
+
+  CALL(oracle, cache_return, (AFFObject)person);
+};
+
 ZipFile create_volume(char *driver) {
   if(!strcmp(driver, "volume")) {
     return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
@@ -315,6 +325,18 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
     };
   };
 
+  // Sign if needed
+  {
+    Resolver i;
+
+    list_for_each_entry(i, &oracle->identities, identities) {
+      Identity id = CALL(oracle, open, NULL, URNOF(i), 'w');
+      if(id) {
+	CALL(id, store, zipfile_urn);
+      };
+    };
+  };
+
   // Close the zipfile and dispose of it
   zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn, 'w');
   CALL((ZipFile)zipfile, close);
@@ -403,6 +425,8 @@ int main(int argc, char **argv)
        "How many chunks in each segment of the image (default 2048)", 1, 0, 0},
       {"stream\0"
        "If specified a link will be added with this name to the new stream", 1, 0, 's'},
+      {"cert\0"
+       "Certificate to use for signing", 1, 0, 'c'},
 
       {"info\0"
        "*Information mode (print information on all objects in this volume)", 0, 0, 'I'},
@@ -414,7 +438,7 @@ int main(int argc, char **argv)
       {0, 0, 0, 0}
     };
 
-    c = getopt_long(argc, argv, "l:iIho:s:d:ve:p:",
+    c = getopt_long(argc, argv, "l:iIho:s:d:ve:p:c:",
 		    long_options, &option_index);
     if (c == -1)
       break;
@@ -433,6 +457,10 @@ int main(int argc, char **argv)
 
     case 'l':
       aff2_open_volume(optarg, 'r');
+      break;
+
+    case 'c':
+      add_identity(optarg);
       break;
 
     case 'o':
