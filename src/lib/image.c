@@ -1,4 +1,5 @@
 #include "zip.h"
+#include "encode.h"
 
 /*************************************************************
   The Image stream works by collecting chunks into segments. Chunks
@@ -13,9 +14,9 @@
                            stream - This must be a "volume" object
   aff2:size                The size of this stream in bytes (0)
 
-  Note that segments are "blob" objects with an implied URN of:
+  Note that bevies are segment objects with an implied URN of:
 
-  "%s/%08d" % (Image.urn, segment_number)
+  "%s/%08d" % (Image.urn, bevy_number)
 
 **************************************************************/
 
@@ -36,14 +37,6 @@ static int cache_cmp_int(Cache self, void *other) {
   uint32_t int_other = *(uint32_t *)other;  
 
   return int_key != int_other;
-};
-
-static int Image_destructor(void *this) {
-  Image self = (Image)this;
-
-  CALL((FileLikeObject)self, close);
-
-  return 0;
 };
 
 static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
@@ -306,7 +299,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 	   segment_id);
 
   // Now we work out the offsets on the chunk in the segment - we read
-  // the segment index which is a blob:
+  // the segment index which is a segment:
   {
     FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, buffer, 'r');
     int32_t *chunk_index;
@@ -360,7 +353,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   //  printf("compressed_length %d %d ", compressed_length, uncompressed_length);
   CALL(fd, read, compressed_chunk, compressed_length);
 
-  // Done with parent and blob
+  // Done with parent and fd
   CALL(oracle, cache_return, (AFFObject)parent);
   CALL(fd, close);
 

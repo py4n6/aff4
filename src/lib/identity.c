@@ -274,9 +274,10 @@ static void Identity_store(Identity self, char *volume_urn) {
   if(!fd) {
     char name[BUFF_SIZE];
     BIO *xbp = BIO_new(BIO_s_mem());
+    char *cert_name = fully_qualified_name("cert.pem", URNOF(self));
     
     if(X509_NAME_oneline(X509_get_subject_name(self->x509), name, sizeof(name))) {
-      fd = CALL(volume, open_member, fully_qualified_name("cert.pem", URNOF(self)),
+      fd = CALL(volume, open_member, cert_name,
 		'w', NULL, 0, 0);
 
       X509_print_ex(xbp, self->x509, 0, 0);
@@ -289,7 +290,7 @@ static void Identity_store(Identity self, char *volume_urn) {
 	CALL(fd, write, buff, len);
       };
 
-      CALL(oracle, add, URNOF(self), AFF4_CERT, name);
+      CALL(oracle, add, URNOF(self), AFF4_CERT, cert_name);
     };
     BIO_free(xbp);
   };

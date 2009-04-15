@@ -362,7 +362,8 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
       // Tell the oracle about this new member
       CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
-      CALL(oracle, set, filename, AFF4_TYPE, AFF4_BLOB);
+      CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT);
+
       // FIXME - This should be non volatile?
       CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
 
@@ -605,7 +606,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     header.compression_method = compression;
     header.file_name_length = strlen(escaped_filename);
     header.extra_field_len = extra_field_len;
-    
+
     CALL(fd, write,(char *)&header, sizeof(header));
     CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
 
@@ -709,6 +710,7 @@ static void ZipFile_close(ZipFile self) {
 	    (now->tm_mon + 1) << 5 | now->tm_mday;
 	  cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
 	    now->tm_sec / 2;
+	  cd.external_file_attr = 0644 << 16L;
 
 	  cd.file_name_length = strlen(escaped_filename);
 	  cd.relative_offset_local_header = parse_int(CALL(oracle, resolve, value, 
@@ -983,8 +985,6 @@ static void ZipFileStream_close(FileLikeObject self) {
 };
 
 static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, char *urn, char mode) {
-  ZipFileStream this = (ZipFileStream)self;
-
   if(urn) {
     char *volume_urn = CALL(oracle, resolve, urn, AFF4_STORED);
     ZipFile parent;

@@ -15,13 +15,11 @@ extern "C" {
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 
-  //#include "crypto/sha1.h"
-
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
 
   // This is the URI namespace for the AFF4 scheme
-#define NAMESPACE "aff2:"
+#define NAMESPACE "aff4:"
 #define VOLATILE_NS "aff2volatile:"
 #define FQN "urn:" NAMESPACE
 
@@ -30,7 +28,7 @@ extern "C" {
 #define AFF4_TYPE       NAMESPACE "type"
 #define AFF4_CONTAINS   NAMESPACE "contains"
 #define AFF4_SIZE       NAMESPACE "size"
-#define AFF4_SHA        NAMESPACE "sha1"
+#define AFF4_SHA        NAMESPACE "sha256"
 
   /** Image attributes */
 #define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
@@ -54,7 +52,7 @@ extern "C" {
   /** These are standard aff4 types */
 #define AFF4_ZIP_VOLUME       "volume"
 #define AFF4_DIRECTORY_VOLUME "directory"
-#define AFF4_BLOB             "blob"
+#define AFF4_SEGMENT             "segment"
 #define AFF4_LINK             "link"
 #define AFF4_IMAGE            "image"
 #define AFF4_MAP              "map"
@@ -591,7 +589,7 @@ CLASS(ZipFileStream, FileLikeObject)
      uint32_t compression;
      char mode;
 
-     // We calculate the SHA1 hash of each archive member
+     // We calculate the SHA256 hash of each archive member
      EVP_MD_CTX digest;
 
 // This is the constructor for the file like object. Note that we

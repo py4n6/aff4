@@ -1,4 +1,4 @@
-/** This is an implementation of the directory volume - all blobs are
+/** This is an implementation of the directory volume - all segments are
     stored as files here.
 
 */
@@ -77,8 +77,8 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
       filename_length = strlen(filename);
       properties_length = strlen("properties");
       
-      // Record the blob objects:
-      CALL(oracle, set, filename, AFF4_TYPE, AFF4_BLOB);
+      // Record the segment objects:
+      CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT);
       CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
       
       // We identify streams by their filename ending with "properties"

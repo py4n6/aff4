@@ -1331,14 +1331,17 @@ char *talloc_strdup(const void *t, const char *p)
 	return __talloc_strlendup(t, p, strlen(p));
 }
 
+#if 0
 /*
-  strndup with a talloc
+  strndup with a talloc seems this is only possible with GNU_SOURCE
+  defined
 */
 char *talloc_strndup(const void *t, const char *p, size_t n)
 {
 	if (unlikely(!p)) return NULL;
 	return __talloc_strlendup(t, p, strnlen(p, n));
 }
+#endif
 
 static inline char *__talloc_strlendup_append(char *s, size_t slen,
 					      const char *a, size_t alen)
@@ -1396,6 +1399,7 @@ char *talloc_strdup_append_buffer(char *s, const char *a)
 	return __talloc_strlendup_append(s, slen, a, strlen(a));
 }
 
+#if 0
 /*
  * Appends at the end of the string.
  */
@@ -1435,6 +1439,7 @@ char *talloc_strndup_append_buffer(char *s, const char *a, size_t n)
 
 	return __talloc_strlendup_append(s, slen, a, strnlen(a, n));
 }
+#endif
 
 #ifndef HAVE_VA_COPY
 #ifdef HAVE___VA_COPY

@@ -33,7 +33,6 @@ static AFFObject Link_finish(AFFObject self) {
 // friendly name.
 static void Link_link(Link self, Resolver oracle, char *storage_urn,
 	       char *target, char *friendly_name) {
-  AFFObject this = (AFFObject)self;
   if(storage_urn) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, self, storage_urn, 'w');
     char tmp[BUFF_SIZE];
@@ -48,8 +47,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
     friendly_name = fully_qualified_name(friendly_name, storage_urn);
 
     // Add a reverse connection (The link urn is obviously not unique).
-    CALL(oracle, add, friendly_name, AFF4_TARGET, target);
-    CALL(oracle, add, friendly_name, AFF4_TYPE, AFF4_LINK);
+    CALL(oracle, set, friendly_name, AFF4_TARGET, target);
+    CALL(oracle, set, friendly_name, AFF4_TYPE, AFF4_LINK);
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);
 

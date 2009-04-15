@@ -12,7 +12,7 @@ struct dispatch_t {
 };
 
 static struct dispatch_t dispatch[] = {
-  { 0, AFF4_BLOB,                 (AFFObject)&__ZipFileStream },
+  { 0, AFF4_SEGMENT,                 (AFFObject)&__ZipFileStream },
   { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
   { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
