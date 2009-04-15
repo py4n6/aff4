@@ -25,9 +25,11 @@ typedef  unsigned long int in_addr_t;
 #include <inttypes.h>
 #endif
 
-#define BUFF_SIZE 4096
+#define BUFF_SIZE 40960
 
 int _mkdir(const char *path);
 void init_luts();
+
+int startswith(char *haystack, char *needle);
 
 #endif

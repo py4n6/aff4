@@ -24,7 +24,7 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
 
   // Try to parse existing map object
   if(uri) {
-    Blob blob;
+    FileLikeObject fd;
     char buff[BUFF_SIZE];
     int blocksize;
 
@@ -53,9 +53,9 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
 
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
-    blob = (Blob)CALL(oracle, open, NULL, buff, 'r');
-    if(blob) {
-      char *map = talloc_strdup(self, blob->data);
+    fd = (FileLikeObject)CALL(oracle, open, NULL, buff, 'r');
+    if(fd) {
+      char *map = talloc_strdup(self, CALL(fd,get_data));
       char *x=map, *y;
       struct map_point point;
       char target[1024];
@@ -136,7 +136,7 @@ static void MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
 
   // Write out a properties file
-  char *properties = CALL(oracle, export_urn, URNOF(self));
+  char *properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn, 'w');
     char tmp[BUFF_SIZE];

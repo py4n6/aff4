@@ -196,7 +196,7 @@ extern char *_traceback;
 #define CLASS(class,super_class)			\
   typedef struct class ## _t *class;				\
   inline void class ## _init(void);				\
-  void class ## _Alloc(class self);			\
+  inline void class ## _Alloc(class self);			\
   extern int __ ## class ## _initialised;		\
   extern struct class ## _t __ ## class;			\
   struct class ## _t { struct super_class ## _t super;		 \

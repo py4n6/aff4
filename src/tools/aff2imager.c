@@ -5,6 +5,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 void print_help(struct option *opts) {
   struct option *i;
@@ -35,7 +38,7 @@ void print_help(struct option *opts) {
 };
 
 void list_info() {
-  char *result =  CALL(oracle, export_all);
+  char *result =  CALL(oracle, export_all, "");
   printf("%s", result);
 
   talloc_free(result);
@@ -43,12 +46,20 @@ void list_info() {
 
 /** Loads certificate cert and creates a new identify. All segments
     written from now on will be signed using the identity.
-*/
-void add_identity(char *cert) {
-  /* FIXME - open the cert and get the CN out */
-  Identity person = CONSTRUCT(Identity, AFFObject, super.Con, NULL, cert, 'w');
 
-  CALL(oracle, cache_return, (AFFObject)person);
+    Note that we use the oracle to load the certificate files into
+    memory for openssl - this allows the certs to be stored as URNs
+    anywhere (on http:// URIs or inside the volume itself).
+*/
+void add_identity(char *key_file, char *cert) {
+  Identity person;
+
+  person = CONSTRUCT(Identity, Identity, Con, NULL, cert, key_file, 'w');
+  
+  if(!person) {
+    PrintError();
+      exit(-1);
+  };
 };
 
 ZipFile create_volume(char *driver) {
@@ -82,12 +93,25 @@ void aff2_print_info(int verbose) {
     list_for_each_entry(j, &attributes->cache_list, cache_list) {
       char *key = (char *)j->key;
       char *value = (char *)j->data;
+      Resolver i;
 
       // Ignore volatile data in default verbosity.
-      if(verbose==0 && !memcmp(key, ZSTRING_NO_NULL("aff2volatile")))
+      if(verbose==0 && !memcmp(key, ZSTRING_NO_NULL(VOLATILE_NS)))
 	continue;
 
       printf("\t%s = %s\n", key, value);
+      /** Now print which identity vouches for this fact */
+      list_for_each_entry(i, &oracle->identities, identities) {
+	char *hash = CALL(i, resolve, urn, key);
+
+	if(hash) {
+	  if(!strcmp(hash, value)) {
+	    printf("\t\t---> Signed by %s\n", URNOF(i));
+	  } else {
+	    printf("\t\t---> Incorrect %s says it should be %s\n", URNOF(i), hash);
+	  };
+	};
+      };
     };
   };
 };
@@ -97,11 +121,11 @@ void aff2_print_info(int verbose) {
     volume and a new AFF2 volume is created within the encrypted
     volume. The following are the major components:
 
-    Container aff2:stored file://filename.zip
-    Image URN aff2:stored in Container
-    Encrypted URN aff2:target Image
-    Encrypted Volume aff2:stored in Encrypted URN
-    Encrypted Image aff2:stored in Encrypted Volume
+    Container AFF4_STORED file://filename.zip
+    Image URN AFF4_STORED in Container
+    Encrypted URN AFF4_TARGET Image
+    Encrypted Volume AFF4_STORED in Encrypted URN
+    Encrypted Image AFF4_STORED in Encrypted Volume
 
     The source is copied onto Encrypted Image
 */
@@ -132,7 +156,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     output = talloc_asprintf(zipfile, "file://%s", output_file);
   };
 
-  CALL((AFFObject)zipfile, set_property, "aff2:stored", output);
+  CALL((AFFObject)zipfile, set_property, AFF4_STORED, output);
   if(!CALL((AFFObject)zipfile, finish))
     goto error;
 
@@ -145,10 +169,10 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Tell the image that it should be stored in the volume with no
   // compression. This is where the encrypted data is actually
   // physically stored
-  CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
-  CALL((AFFObject)image, set_property, "aff2:compression", from_int(ZIP_STORED));
+  CALL((AFFObject)image, set_property, AFF4_STORED, zipfile_urn);
+  CALL((AFFObject)image, set_property, AFF4_COMPRESSION, from_int(ZIP_STORED));
   if(chunks_in_segment)
-    CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", chunks_in_segment);
+    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
   if(!CALL((AFFObject)image, finish))
     goto error;
 
@@ -157,8 +181,8 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   
   // The encrypted object will be stored in this volume and target
   // the image
-  CALL((AFFObject)encrypted, set_property, "aff2:stored", zipfile_urn);
-  CALL((AFFObject)encrypted, set_property, "aff2:target", URNOF(image));
+  CALL((AFFObject)encrypted, set_property, AFF4_STORED, zipfile_urn);
+  CALL((AFFObject)encrypted, set_property, AFF4_TARGET, URNOF(image));
   // Dont need the original image any more
   CALL(oracle, cache_return, (AFFObject)image);
 
@@ -171,7 +195,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   strncpy(volume_urn, URNOF(volume), BUFF_SIZE);
 
   // The embedded volume lives inside the encrypted stream
-  CALL((AFFObject)volume, set_property, "aff2:stored", URNOF(encrypted));
+  CALL((AFFObject)volume, set_property, AFF4_STORED, URNOF(encrypted));
   // Is it ok?
   if(!CALL((AFFObject)volume, finish))
     goto error;
@@ -183,10 +207,10 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Tell the image that it should be stored in the volume with no
   // compression. This is where the encrypted data is actually
   // physically stored
-  CALL((AFFObject)image, set_property, "aff2:stored", volume_urn);
-  CALL((AFFObject)image, set_property, "aff2:compression", from_int(ZIP_DEFLATE));
+  CALL((AFFObject)image, set_property, AFF4_STORED, volume_urn);
+  CALL((AFFObject)image, set_property, AFF4_COMPRESSION, from_int(ZIP_DEFLATE));
   if(chunks_in_segment)
-    CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", chunks_in_segment);
+    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
     goto error;
@@ -251,11 +275,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
     output = talloc_asprintf(zipfile, "file://%s", output_file);
   };
 
-  CALL((AFFObject)zipfile, set_property, "aff2:stored", output);
-  if(append) {
-    printf("Will append to volume %s\n", URNOF(zipfile));
-    CALL((AFFObject)zipfile, set_property, "aff2volatile:append", append);
-  };
+  CALL((AFFObject)zipfile, set_property, AFF4_STORED, output);
 
   // Is it ok?
   if(!CALL((AFFObject)zipfile, finish)) {
@@ -272,9 +292,9 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
   
   // Tell the image that it should be stored in the volume
-  CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
+  CALL((AFFObject)image, set_property, AFF4_STORED, zipfile_urn);
   if(chunks_in_segment)
-    CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", chunks_in_segment);
+    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
 
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
@@ -286,8 +306,8 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 
     // The encrypted object will be stored in this volume and target
     // the image
-    CALL((AFFObject)encrypted, set_property, "aff2:stored", zipfile_urn);
-    CALL((AFFObject)encrypted, set_property, "aff2:target", URNOF(image));
+    CALL((AFFObject)encrypted, set_property, AFF4_STORED, zipfile_urn);
+    CALL((AFFObject)encrypted, set_property, AFF4_TARGET, URNOF(image));
     CALL((AFFObject)encrypted, set_property, "aff2volatile:passphrase", passwd);
     CALL((AFFObject)encrypted, finish);
 
@@ -310,12 +330,16 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   // We want to make it easy to locate this image so we set up a link
   // to it:
   if(stream_name) {
-    link = (Link)CALL(oracle, open, NULL, stream_name, 'r');
+    PrintError();
+    link = (Link)CALL(oracle, open, NULL,
+		      fully_qualified_name(stream_name, URNOF(image)),
+		      'r');
+    ClearError();
     if(!link) {
       printf("Creating a link object '%s' for stream '%s'\n", stream_name, URNOF(image));
       link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
       // The link will be stored in this zipfile
-      CALL((AFFObject)link, set_property, "aff2:stored", zipfile_urn);
+      CALL((AFFObject)link, set_property, AFF4_STORED, zipfile_urn);
       CALL(link, link, oracle, zipfile_urn, URNOF(image), stream_name);
       CALL((AFFObject)link, finish);
       CALL(oracle, cache_return, (AFFObject)link);
@@ -330,10 +354,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
     Resolver i;
 
     list_for_each_entry(i, &oracle->identities, identities) {
-      Identity id = CALL(oracle, open, NULL, URNOF(i), 'w');
-      if(id) {
-	CALL(id, store, zipfile_urn);
-      };
+      CALL(i->identity, store, zipfile_urn);
     };
   };
 
@@ -385,6 +406,27 @@ void aff2_extract(char *stream, char *output_file) {
   CALL(oracle, cache_return, (AFFObject)out_fd);
 };
 
+/** Verify all the signatures in the volumes. This essentially just
+    loads all identities and asks them to verify their statements.
+*/
+void aff2_verify() {
+  Cache i;
+
+  list_for_each_entry(i, &oracle->urn->cache_list, cache_list) {
+    char *key = (char *)i->key;
+
+    if(startswith(key, AFF4_IDENTITY_PREFIX)) {
+      // Make sure its actually an Identity object:
+      if(!strcmp(AFF4_IDENTITY, CALL(oracle, resolve, key, AFF4_TYPE))) {
+	Identity id = (Identity)CALL(oracle, open, NULL, key, 'r');
+	
+	CALL(id, verify);
+	CALL(oracle, cache_return, (AFFObject)id);
+      };
+    };
+  };
+};
+
 
 int main(int argc, char **argv)
 {
@@ -398,7 +440,10 @@ int main(int argc, char **argv)
   int verbose=0;
   char *extract = NULL;
   char *passphrase = NULL;
-  
+  char *cert = NULL;
+  char *key_file = NULL;
+  int verify = 0;
+
   // Initialise the library
   AFF2_Init();
 
@@ -427,6 +472,8 @@ int main(int argc, char **argv)
        "If specified a link will be added with this name to the new stream", 1, 0, 's'},
       {"cert\0"
        "Certificate to use for signing", 1, 0, 'c'},
+      {"key\0"
+       "Private key in PEM format", 1, 0, 'k'},
 
       {"info\0"
        "*Information mode (print information on all objects in this volume)", 0, 0, 'I'},
@@ -435,10 +482,13 @@ int main(int argc, char **argv)
 
       {"extract\0"
        "*Extract mode (dump the content of stream)", 1, 0, 'e'},
+
+      {"verify\0"
+       "*Verify all Identity objects in these volumes and report on their validity",0, 0, 'V'},
       {0, 0, 0, 0}
     };
 
-    c = getopt_long(argc, argv, "l:iIho:s:d:ve:p:c:",
+    c = getopt_long(argc, argv, "l:iIho:s:d:ve:p:c:k:V",
 		    long_options, &option_index);
     if (c == -1)
       break;
@@ -460,7 +510,11 @@ int main(int argc, char **argv)
       break;
 
     case 'c':
-      add_identity(optarg);
+      cert = optarg;
+      break;
+
+    case 'k':
+      key_file = optarg;
       break;
 
     case 'o':
@@ -496,6 +550,10 @@ int main(int argc, char **argv)
       verbose++;
       break;
 
+    case 'V':
+      verify = 1;
+      break;
+
     case '?':
     case 'h':
       printf("%s - an AFF4 general purpose imager.\n", argv[0]);
@@ -507,6 +565,9 @@ int main(int argc, char **argv)
     }
   }
 
+  if(cert || key_file)
+    add_identity(key_file, cert);
+
   // Do we want to extract a stream:
   if(extract) {
     if(!output_file) output_file = "/dev/stdout";
@@ -514,8 +575,11 @@ int main(int argc, char **argv)
   } 
   // Do we just want to print the content of the resolver?
   else if(mode == 'I') {
+    if(verify)
+      aff2_verify();
+
     aff2_print_info(verbose);
-  } else if (optind < argc) {
+  } else if(optind < argc) {
     // We are imaging now
     if(mode == 'i') {
       while (optind < argc) {
@@ -539,5 +603,6 @@ int main(int argc, char **argv)
     printf("\n");
   }
 
+  PrintError();
   exit(EXIT_SUCCESS);
 }

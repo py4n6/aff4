@@ -123,7 +123,7 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
 
 // When we close we dump out the properties file of this directory
 static void DirVolume_close(ZipFile self) {
-  char *properties = CALL(oracle, export_urn, URNOF(self));
+  char *properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
 
   // We check that there is no URN there already:
   CALL(self, writestr, "properties", ZSTRING_NO_NULL(properties),

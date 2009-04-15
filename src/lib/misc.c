@@ -43,7 +43,7 @@ char *from_int(uint64_t arg) {
 };
 
 
-static char *illegal_filename_chars = "|?[]\\=+<>:;\'\",*";
+static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*";
 static char illegal_filename_lut[128];
 void init_luts() {
   char *i;
@@ -125,3 +125,8 @@ int _mkdir(const char *path)
 
   return 1;
 }
+
+int startswith(char *haystack, char *needle) {
+  if(strlen(haystack)<strlen(needle)) return 0;
+  return !memcmp(haystack, ZSTRING_NO_NULL(needle));
+};

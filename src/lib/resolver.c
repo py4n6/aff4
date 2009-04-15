@@ -12,7 +12,7 @@ struct dispatch_t {
 };
 
 static struct dispatch_t dispatch[] = {
-  { 0, AFF4_BLOB,                 (AFFObject)&__Blob },
+  { 0, AFF4_BLOB,                 (AFFObject)&__ZipFileStream },
   { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
   { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
@@ -52,9 +52,9 @@ void AFF2_Init(void) {
   FileLikeObject_init();
   FileBackedObject_init();
   ZipFile_init();
+  ZipFileStream_init();
   Image_init();
   MapDriver_init();
-  Blob_init();
   Resolver_init();
   Link_init();
   HTTPObject_init();
@@ -246,12 +246,48 @@ static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
   Cache i=CALL(self->urn, get_item, urn);
 
   if(!i) {
+    /*
     RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
 	       attribute, urn);
+    */
     return NULL;
   };
 
   return CALL(i, get_item, attribute);
+};
+
+static char **Resolver_resolve_list(Resolver self, void *ctx, char *urn, char *attribute) {
+  Cache i=CALL(self->urn, get_item, urn);
+  StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
+  Cache j;
+  int hash;
+
+  if(!i) {
+    RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
+	       attribute, urn);
+    goto exit;
+  };
+
+  hash = CALL(i, hash, attribute);
+  if(i->hash_table && i->hash_table[hash]) {
+    list_for_each_entry(j, &i->hash_table[hash]->hash_list, hash_list) {
+      char *key = (char *)j->key;
+      char **existing = (char **)&j->data;
+      if(!strcmp(key, attribute)) {
+	// Push the string onto the result - note that we rely on the
+	// fact that the existing string will never be freed.
+	CALL(result, write, (char *)existing, sizeof(existing));
+      };
+    };
+  };
+
+ exit:
+  // NULL terminate it
+  i=0;
+  CALL(result, write, (char *)&i, sizeof(i));
+  talloc_steal(ctx, result->data);
+
+  return (char **)result->data;
 };
 
 static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
@@ -279,8 +315,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
 
   // OK Maybe the type is encoded into the URN:
   for(i=0; dispatch[i].type !=NULL; i++) {
-    if(dispatch[i].scheme && strlen(urn)>7 && 
-       !memcmp(urn, ZSTRING_NO_NULL(dispatch[i].type))) {
+    if(dispatch[i].scheme && startswith(urn, dispatch[i].type)) {
       dispatch_ptr = &dispatch[i];
       break;
     };
@@ -338,7 +373,7 @@ static void Resolver_add(Resolver self, char *uri, char *attribute, char *value)
 
   if(CALL(self, is_set, uri, attribute, value)) return;
 
-  LogWarnings("%s %s=%s", uri, attribute, (char *)value);
+  //LogWarnings("%s %s=%s", uri, attribute, (char *)value);
 
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {
@@ -378,7 +413,7 @@ static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *valu
 };
 
 /** Format all the attributes of the object specified by urn */
-static char *Resolver_export_urn(Resolver self, char *urn) {
+static char *Resolver_export_urn(Resolver self, char *urn, char *context) {
   char *result=talloc_strdup(NULL, "");
   Cache i = CALL(self->urn, get_item, urn);
   Cache j;
@@ -391,21 +426,28 @@ static char *Resolver_export_urn(Resolver self, char *urn) {
 
     // Do not write volatile data
     if(memcmp(attribute, ZSTRING_NO_NULL(VOLATILE_NS))) {
-      result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
-				      attribute, value);
+      if(!strcmp(urn, context)) {
+	// Relative form
+	result = talloc_asprintf_append(result, "%s=%s\n",
+					attribute, value);
+      } else {
+	// Absolute form
+        result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
+					attribute, value);
+      };
     };
   };
 
   return result;
 };
 
-static char *Resolver_export_all(Resolver self) {
+static char *Resolver_export_all(Resolver self, char *context) {
   Cache i;
   char *result=talloc_strdup(NULL, "");  
 
   list_for_each_entry(i, &self->urn->cache_list, cache_list) {
     char *urn = (char *)i->key;
-    char *tmp =Resolver_export_urn(self, urn);
+    char *tmp =Resolver_export_urn(self, urn, context);
 
     result = talloc_asprintf_append(result, "%s", tmp);
     talloc_free(tmp);
@@ -431,7 +473,7 @@ static void Resolver_del(Resolver self, char *uri, char *attribute) {
   while(1) {
     j = CALL(tmp, get, attribute);
     if(!j) break;
-    LogWarnings("Removing %s %s",uri, attribute);
+    //    LogWarnings("Removing %s %s",uri, attribute);
     talloc_free(j);
   };
 };
@@ -506,6 +548,7 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(create) = Resolver_create;
 
      VMETHOD(resolve) = Resolver_resolve;
+     VMETHOD(resolve_list) = Resolver_resolve_list;
      VMETHOD(add)  = Resolver_add;
      VMETHOD(export_urn) = Resolver_export_urn;
      VMETHOD(export_all) = Resolver_export_all;

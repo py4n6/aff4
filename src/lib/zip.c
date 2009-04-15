@@ -13,6 +13,7 @@
 #include <zlib.h>
 #include <time.h>
 #include <libgen.h>
+#include "encode.h"
 
 /** Implementation of FileBackedObject.
 
@@ -167,13 +168,32 @@ static AFFObject FileBackedObject_finish(AFFObject self) {
   };
 };
 
+static char *FileLikeObject_get_data(FileLikeObject self) {
+  if(self->size > MAX_CACHED_FILESIZE)
+    goto error;
+
+  if(self->data) return self->data;
+
+  CALL(self, seek, 0,0);
+  self->data = talloc_size(self, self->size+BUFF_SIZE);
+  memset(self->data, 0, self->size+BUFF_SIZE);
+  CALL(self, read, self->data, self->size);
+  
+  return self->data;
+
+ error:
+  return NULL;
+};
+
 VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
      VMETHOD(close) = FileLikeObject_close;
      VMETHOD(truncate) = FileLikeObject_truncate;
+     VMETHOD(get_data) = FileLikeObject_get_data;
 
      VATTR(mode) = 'r';
+     VATTR(data) = NULL;
 END_VIRTUAL
 
 static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
@@ -605,6 +625,12 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     break;
   };
   case 'r': {
+    // Check that this volume actually contains the requested member:
+    if(!CALL(oracle, is_set, URNOF(self), AFF4_CONTAINS, filename)) {
+      RaiseError(ERuntimeError, "Volume does not contain member %s", filename);
+      return NULL;
+    };
+
     if(compression != ZIP_STORED) {
       RaiseError(ERuntimeError, "Unable to open seekable member for compressed members.");
       break;
@@ -617,6 +643,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 				       'r');
     break;
   };
+
   default:
     RaiseError(ERuntimeError, "Unsupported mode '%c'", mode);
     return NULL;
@@ -665,7 +692,7 @@ static void ZipFile_close(ZipFile self) {
 	  // This gets the relative name of the fqn
 	  char *escaped_filename = escape_filename(relative_name(value, URNOF(self)));
 
-	  LogWarnings("Writing archive member %s -> %s", escaped_filename, value);
+	  //	  LogWarnings("Writing archive member %s -> %s", escaped_filename, value);
 
 	  memset(&cd, 0, sizeof(cd));
 
@@ -730,6 +757,7 @@ static int ZipFile_writestr(ZipFile self, char *filename,
   if(fd) {
     len = CALL(fd, write, data, len);
     CALL(fd, close);
+
     return len;
   } else return -1;
 };
@@ -757,7 +785,8 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
   char *fqn_filename = fully_qualified_name(filename, URNOF(self));
 
   self->mode = mode;
-  SHA1_Init(&self->sha);
+  EVP_DigestInit(&self->digest, EVP_sha256());
+  
   self->container_urn = talloc_strdup(self, container_urn);
   self->compression = parse_int(CALL(oracle, resolve, 
 				     fqn_filename, 
@@ -809,7 +838,7 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
 		      length);
 
   // Update the sha1:
-  SHA1_Update(&this->sha, (unsigned char *)buffer, length);
+  EVP_DigestUpdate(&this->digest,(const unsigned char *)buffer,length);
 
   /** Position our write pointer */
   CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
@@ -862,6 +891,9 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
   int len;
   FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'r');
 
+  // We only read as much data as there is
+  length = min(length, self->size - self->readptr);
+
   /** Position our write pointer */
   CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
   len = CALL(fd, read, buffer, length);
@@ -875,7 +907,10 @@ static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   FileLikeObject fd;
   
-  if(this->mode == 'r') return;
+  if(this->mode == 'r') {
+    talloc_free(self);
+    return;
+  };
   
   fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'w');
   if(!fd) {
@@ -927,17 +962,18 @@ static void ZipFileStream_close(FileLikeObject self) {
 
   // Calculate the sha1 hash and set the hash in the resolver:
   {
-    unsigned char digest[20];
-    char digest_encoded[42];
-    int i;
+    unsigned char digest[BUFF_SIZE];
+    unsigned int digest_len=sizeof(digest);
+    unsigned char digest_encoded[sizeof(digest) * 2];
 
-    SHA1_Final(digest, &this->sha);
-    for(i=0;i<20;i++) {
-      sprintf(digest_encoded+i*2, "%02X", digest[i]);
+    memset(digest, 0, BUFF_SIZE);
+    EVP_DigestFinal(&this->digest,digest,&digest_len);
+    if(digest_len < BUFF_SIZE) {
+      encode64(digest, digest_len, digest_encoded);
+      
+      // Tell the resolver what the hash is:
+      CALL(oracle, set, URNOF(self), AFF4_SHA, (char *)digest_encoded);
     };
-
-    // Tell the resolver what the hash is:
-    CALL(oracle, set, URNOF(self), AFF4_SHA, digest_encoded);
   };
 
   // Make sure the lock is removed from this volume now:
@@ -946,11 +982,48 @@ static void ZipFileStream_close(FileLikeObject self) {
   talloc_free(self);
 };
 
+static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, char *urn, char mode) {
+  ZipFileStream this = (ZipFileStream)self;
+
+  if(urn) {
+    char *volume_urn = CALL(oracle, resolve, urn, AFF4_STORED);
+    ZipFile parent;
+    AFFObject result;
+    int compression = parse_int(CALL(oracle, resolve, urn, AFF4_COMPRESSION));
+
+    if(!volume_urn) {
+      RaiseError(ERuntimeError, "Parent not set?");
+      goto error;
+    };
+
+    // Open the volume:
+    parent = (ZipFile)CALL(oracle, open, NULL, volume_urn, mode);
+    // Now just return the member from the volume:
+    talloc_free(self);
+    result = (AFFObject)CALL(parent, open_member, urn, mode, NULL, 0, compression);
+    CALL(oracle, cache_return, (AFFObject)parent);
+
+    return result;
+  };
+
+  return self;
+
+ error:
+  talloc_free(self);
+  return NULL;
+
+};
+
+
 VIRTUAL(ZipFileStream, FileLikeObject)
+     VMETHOD(super.super.Con) = ZipFileStream_AFFObject_Con;
      VMETHOD(Con) = ZipFileStream_Con;
      VMETHOD(super.write) = ZipFileStream_write;
      VMETHOD(super.read) = ZipFileStream_read;
      VMETHOD(super.close) = ZipFileStream_close;
+
+// Initialise the encoding luts
+     encode_init();
 END_VIRTUAL
 
 void print_cache(Cache self) {

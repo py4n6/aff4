@@ -10,7 +10,12 @@ extern "C" {
 #include "stringio.h"
 #include "list.h"
 #include <zlib.h>
-#include "crypto/sha1.h"
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+
+  //#include "crypto/sha1.h"
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
@@ -41,8 +46,10 @@ extern "C" {
 #define AFF4_IMAGE_PERIOD NAMESPACE "image_period"
 #define AFF4_TARGET_PERIOD NAMESPACE "target_period"
 
-  /* signed blocks */
+  /* Identity attributes */
 #define AFF4_STATEMENT NAMESPACE "statement"
+#define AFF4_CERT      NAMESPACE "x509"
+#define AFF4_PRIV_KEY  VOLATILE_NS "priv_key"
 
   /** These are standard aff4 types */
 #define AFF4_ZIP_VOLUME       "volume"
@@ -54,7 +61,10 @@ extern "C" {
 #define AFF4_ENCRYTED         "encrypted"
 #define AFF4_IDENTITY         "identity"
 
-// A helper to access the URN or an object.
+  // All identity URNs are prefixed with this:
+#define AFF4_IDENTITY_PREFIX  FQN AFF4_IDENTITY
+
+// A helper to access the URN of an object.
 #define URNOF(x)  ((AFFObject)x)->urn
 
 /** Some helper functions used to serialize int to and from URN
@@ -146,7 +156,7 @@ CLASS(AFFObject, Object)
      /** Any object may be asked to be constructed from its URI */
      AFFObject METHOD(AFFObject, Con, char *uri, char mode);
 
-     /** The is called to set properties on the object */
+     /** This is called to set properties on the object */
      void METHOD(AFFObject, set_property, char *attribute, char *value);
 
      /** Finally the object may be ready for use. We return the ready
@@ -171,21 +181,30 @@ CLASS(AFFObject, Object)
 END_CLASS
 
 // Base class for file like objects
+#define MAX_CACHED_FILESIZE 1e6
+
 CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
      uint64_t size;
      char mode;
+     char *data;
 
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
      int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
+  
+  // This can be used to get the content of the FileLikeObject in a
+  // big buffer of data. The data will be cached with the
+  // FileLikeObject. Its only really suitable for smallish amounts of
+  // data - and checks to ensure that file size is less than MAX_CACHED_FILESIZE
+     char *METHOD(FileLikeObject, get_data);
 
 // This method is just like the standard ftruncate call
      int METHOD(FileLikeObject, truncate, uint64_t offset);
 
 // This closes the FileLikeObject and also frees it - it is not valid
-// to use the FileLikeObject after calling this.
+// to use the FileLikeObject after calling this (it gets free'd).
      void METHOD(FileLikeObject, close);
 END_CLASS
 
@@ -197,7 +216,7 @@ END_CLASS
 
 #include <curl/curl.h>
 
-// This is implemented in HTTP
+// This is implemented in using libcurl
 CLASS(HTTPObject, FileLikeObject)
 // The socket
      CURL *curl;
@@ -234,6 +253,9 @@ CLASS(Resolver, AFFObject)
      // This is a cache of writers
      Cache writers;
 
+     // Resolvers contain the identity behind them (see below):
+     struct Identity_t *identity;
+
      Resolver METHOD(Resolver, Con);
 
      // Resolvers are all in a list. Each resolver in the list is another
@@ -260,20 +282,26 @@ CLASS(Resolver, AFFObject)
 /* This create a new object of the specified type. */
      AFFObject METHOD(Resolver, create, AFFObject *class_reference);
 
-/* Returns an attribute about a particular uri if know. This may
+/* Returns an attribute about a particular uri if known. This may
      consult an external data source.
 */
      char *METHOD(Resolver, resolve, char *uri, char *attribute);
 
-//Stores the uri and the value in the resolver. The value will be
-//stolen, but the uri will be copied.
+/** This returns a null terminated list of matches. */
+     char **METHOD(Resolver, resolve_list, void *ctx, char *uri, char *attribute);
+
+//Stores the uri and the value in the resolver. The value and uri will
+//be stolen.
      void METHOD(Resolver, add, char *uri, char *attribute, char *value);
 
-     // Exports all the properties to do with uri - user owns the buffer.
-     char *METHOD(Resolver, export_urn, char *uri);
+     // Exports all the properties to do with uri - user owns the
+     // buffer. context is the URN which will ultimately hold the
+     // exported file. If uri is the same as context, we write the
+     // statement as a relative notation.
+     char *METHOD(Resolver, export_urn, char *uri, char *context);
 
      // Exports all the properties to do with uri - user owns the buffer.
-     char *METHOD(Resolver, export_all);
+     char *METHOD(Resolver, export_all, char *context);
 
 // Deletes the attribute from the resolver
      void METHOD(Resolver, del, char *uri, char *attribute);
@@ -299,7 +327,19 @@ the universe.
 */
 CLASS(Identity, AFFObject)
        Resolver info;
+       
+       EVP_PKEY *priv_key;
+       EVP_PKEY *pub_key;
+       X509 *x509;
+
+       Identity METHOD(Identity, Con, char *cert, char *priv_key, char mode);
        void METHOD(Identity, store, char *volume_urn);
+  /** This method asks the identity to verify its statements. This
+       essentially populates our Resolver with statements which can be
+       verified from our statements. Our Resolver can then be
+       compared to the oracle to see which objects do not match.
+  */
+       void METHOD(Identity, verify);
 END_CLASS
 
 // This function must be called to initialise the library - we prepare
@@ -344,6 +384,7 @@ CLASS(Image, FileLikeObject)
      // This is the compression type
      int compression;
 
+     EVP_MD_CTX digest;
 END_CLASS
 
 /** The map stream driver maps an existing stream using a
@@ -433,12 +474,6 @@ CLASS(Encrypted, FileLikeObject)
 
      // The block size for CBC mode
      int block_size;
-END_CLASS
-
-// A blob is a single lump of data
-CLASS(Blob, AFFObject)
-     char *data;
-     int length;
 END_CLASS
 
  char *resolver_get_with_default(Resolver self, char *urn, 
@@ -557,7 +592,7 @@ CLASS(ZipFileStream, FileLikeObject)
      char mode;
 
      // We calculate the SHA1 hash of each archive member
-     SHA_CTX sha;
+     EVP_MD_CTX digest;
 
 // This is the constructor for the file like object. Note that we
 // steal the underlying file pointer which should be the underlying

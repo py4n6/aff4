@@ -121,7 +121,7 @@ static int webdav_recurse_dir_check(HTTPObject self, char *url) {
   return 1;
 };
 
-static AFFObject HTTPObject_AFFObject_Con(AFFObject self, char *uri) {
+static AFFObject HTTPObject_AFFObject_Con(AFFObject self, char *uri, char mode) {
   HTTPObject this = (HTTPObject)self;
 
   return (AFFObject)CALL(this, Con, uri);

@@ -11,10 +11,10 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
       goto error;
     };
 
-    result = CALL(oracle, open, self, target, mode);
+    result = (FileLikeObject)CALL(oracle, open, self, target, mode);
     if(!result) goto error;
 
-    return result;
+    return (AFFObject)result;
   } else {
     this->__super__->Con(self, urn, mode);
   };
@@ -45,6 +45,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
       return;
     };
 
+    friendly_name = fully_qualified_name(friendly_name, storage_urn);
+
     // Add a reverse connection (The link urn is obviously not unique).
     CALL(oracle, add, friendly_name, AFF4_TARGET, target);
     CALL(oracle, add, friendly_name, AFF4_TYPE, AFF4_LINK);
@@ -53,7 +55,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
 
     fd = CALL((ZipFile)zipfile, open_member, tmp, 'w', NULL, 0, ZIP_STORED);
     if(fd) {
-      properties = CALL(oracle, export_urn, friendly_name);
+      properties = CALL(oracle, export_urn, friendly_name, friendly_name);
+
       CALL(fd, write, ZSTRING_NO_NULL(properties));
       talloc_free(properties);
 

@@ -113,7 +113,7 @@ void test2() {
   struct timeval epoch_time;
   struct timeval new_time;
   int diff;
-  Blob blob;
+  FileLikeObject fd;
   ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE, 'r');
 
   // This is only needed to populate the oracle  
@@ -124,17 +124,18 @@ void test2() {
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    blob = (Blob)CALL(oracle, open, NULL, "hello", 'r');
-    if(!blob) {
+    fd = (FileLikeObject)CALL(oracle, open, NULL, "hello", 'r');
+    if(!fd) {
       RaiseError(ERuntimeError, "Error reading member");
       return;
     };
 
-    CALL(oracle, cache_return, (AFFObject)blob);
+    CALL(oracle, cache_return, (AFFObject)fd);
   };
 
+  CALL(fd, get_data);
   gettimeofday(&new_time, NULL);
-  printf("Resolving foobar produced **************\n%s\n******************\n", blob->data);
+  printf("Resolving foobar produced **************\n%s\n******************\n", fd->data);
   diff = (new_time.tv_sec * 1000 + new_time.tv_usec/1000) -
     (epoch_time.tv_sec * 1000 + epoch_time.tv_usec/1000);
   printf("Decompressed foobar %d times in %d mseconds (%f)\n", 
@@ -486,7 +487,7 @@ void test_encrypted(char *filename) {
   CALL(embedded_volume, close);
   CALL(oracle, cache_return, (AFFObject)embedded_volume);
 
-  encrypted_stream = CALL(oracle, open, NULL, encrypted_stream_uri, 'w');
+  encrypted_stream = (FileLikeObject)CALL(oracle, open, NULL, encrypted_stream_uri, 'w');
   CALL(encrypted_stream, close);
   CALL(oracle, cache_return, (AFFObject)encrypted_stream);
 
@@ -496,7 +497,7 @@ void test_encrypted(char *filename) {
   CALL(oracle, cache_return, (AFFObject)embedded_stream);
   */
 
-  container = CALL(oracle, open, NULL, container_urn, 'w');
+  container = (ZipFile)CALL(oracle, open, NULL, container_urn, 'w');
   CALL(container, close);
   CALL(oracle, cache_return, (AFFObject)container);
 };

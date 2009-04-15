@@ -105,9 +105,11 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
 };
   
 static AFFObject Image_finish(AFFObject self) {
+  Image this = (Image)self;
+
   // Make sure the oracle knows we are an image
   CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE);
-
+  EVP_DigestInit(&this->digest, EVP_sha256());
   return CALL(self, Con, self->urn, 'w');
 };
 
@@ -206,6 +208,8 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
   int available_to_read;
   int buffer_readptr=0;
 
+  EVP_DigestUpdate(&this->digest, buffer, length);
+
   while(buffer_readptr < length) {
     available_to_read = min(this->chunk_size - this->chunk_buffer_readptr, 
 			    length - buffer_readptr);
@@ -230,10 +234,17 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
 static void Image_close(FileLikeObject self) {
   Image this = (Image)self;
+  unsigned char buff[BUFF_SIZE];
+  unsigned int len;
+  unsigned char hash_base64[BUFF_SIZE];
 
   // Write the last chunk
   dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
   dump_stream_properties(self, this->parent_urn);
+
+  EVP_DigestFinal(&this->digest, buff, &len);
+  encode64(buff, len, hash_base64);
+  CALL(oracle, set, URNOF(self), AFF4_SHA, (char *)hash_base64);
 
   this->__super__->close(self);
 };
@@ -295,11 +306,11 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   // Now we work out the offsets on the chunk in the segment - we read
   // the segment index which is a blob:
   {
-    Blob temp_blob = (Blob)CALL(oracle, open, self, buffer, 'r');
+    FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, buffer, 'r');
     int32_t *chunk_index;
     int chunks_in_segment;
 
-    if(!temp_blob) {
+    if(!fd) {
       RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
       goto error;
     };
@@ -307,8 +318,8 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     /** This holds the index into the segment of all the chunks.
 	It is an array of chunks_in_segment ints long.
     */
-    chunk_index = (int32_t *)temp_blob->data;
-    chunks_in_segment = temp_blob->length / sizeof(int32_t);
+    chunk_index = (int32_t *)CALL(fd, get_data);
+    chunks_in_segment = fd->size / sizeof(int32_t);
     
     /** By here we have the chunk_index which is an array of offsets
 	into the segment where the chunks begin. We work out the size of
@@ -326,7 +337,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 	     segment_id);
     
     chunk_offset_in_segment = (uint32_t)chunk_index[chunk_index_in_segment];
-    CALL(oracle, cache_return, (AFFObject)temp_blob);
+    CALL(oracle, cache_return, (AFFObject)fd);
   };
 
   // Now we need to read the ZipFile directly
@@ -426,7 +437,7 @@ void dump_stream_properties(FileLikeObject self, char *volume) {
   CALL(oracle, set, ((AFFObject)self)->urn, AFF4_SIZE, tmp);
 
   // Write out a properties file
-  properties = CALL(oracle, export_urn, URNOF(self));
+  properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume, 'w');
 
