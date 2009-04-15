@@ -47,6 +47,17 @@ static void oracle_add(Resolver self, char *uri, char *attribute, char *value) {
   };
 };
 
+static void oracle_del(Resolver self, char *uri, char *attribute) {
+  Resolver i;
+
+  // Call the real add method for the oracle itself
+  __Resolver.del(self, uri, attribute);
+
+  // Add these to all the other identities
+  list_for_each_entry(i, &self->identities, identities) {
+    CALL(i, del, uri, attribute);
+  };
+};
 
 void AFF2_Init(void) {
   FileLikeObject_init();
@@ -73,6 +84,7 @@ void AFF2_Init(void) {
   // Create the oracle - it has a special add method which distributes
   // all the adds to the other identities
   oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
+  oracle->del = oracle_del;
   oracle->add = oracle_add;
 };
 

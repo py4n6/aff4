@@ -22,7 +22,7 @@ static void Identity_Resolver_add(Resolver self, char *uri, char *attribute, cha
     char *hash = CALL(self, resolve, uri, attribute);
 
     if(hash && strcmp(hash, value)) {
-      LogWarnings("**** Hash for %s is incorrect according to %s", uri, URNOF(self));
+      printf("**** Hash for %s is incorrect according to %s\n", uri, URNOF(self));
     } else {
       // Call the proper resolver add method
       __Resolver.add(self, uri, attribute, value);
@@ -170,7 +170,6 @@ static Identity Identity_Con(Identity self, char *cert, char *priv_key, char mod
   this->info = CONSTRUCT(Resolver, Resolver, Con, oracle);
   // We place a filtering hook for this identity.
   this->info->add = Identity_Resolver_add;
-  this->info->del = Identity_Resolver_del;
   
   URNOF(this->info) = talloc_strdup(this->info, URNOF(self));
   list_add_tail(&this->info->identities, &oracle->identities);
@@ -402,6 +401,14 @@ static void verify_hashes(Identity self) {
       };
     };
   };
+  
+  // Make the resolver read only now. Basically we allow the code
+  // previous to this to update the hashes from later statements. If a
+  // file was modified and the new hash is signed in a later statement
+  // its ok to update it. Once we finish here, hashes should not be
+  // allows to be updated. We make the Identity resolver read only by
+  // substituting a NULL del method.
+  self->info->del = Identity_Resolver_del;
 };
 
 VIRTUAL(Identity, AFFObject)

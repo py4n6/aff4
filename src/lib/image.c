@@ -238,6 +238,8 @@ static void Image_close(FileLikeObject self) {
   unsigned int len;
   unsigned char hash_base64[BUFF_SIZE];
 
+  memset(buff, 0, BUFF_SIZE);
+
   // Write the last chunk
   dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
   dump_stream_properties(self, this->parent_urn);
