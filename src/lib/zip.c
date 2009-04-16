@@ -264,6 +264,90 @@ static AFFObject ZipFile_finish(AFFObject self) {
   return (AFFObject)CALL((ZipFile)this, Con, file_urn, 'w');
 };
 
+// Seeks fd to start of CD
+static int find_cd(ZipFile self, FileLikeObject fd) {
+  if(self->end->offset_of_cd != -1) {
+    CALL(fd, seek, self->end->offset_of_cd, SEEK_SET);
+    self-> total_entries = self->end->total_entries_in_cd_on_disk;
+    // Its a Zip64 file...
+  } else {
+    struct Zip64CDLocator locator;
+    struct Zip64EndCD end_cd;
+
+    // We reposition ourselved just before the EndCentralDirectory to
+    // find the locator:
+    CALL(fd, seek, self->directory_offset - sizeof(locator), 0);
+    CALL(fd, read, (char *)&locator, sizeof(locator));
+
+    if(locator.magic != 0x07064b50) goto error;
+
+    if(locator.disk_with_cd != 0 || locator.number_of_disks != 1) {
+      RaiseError(ERuntimeError, "Zip Files with multiple parts are not supported");
+      goto error;
+    };
+
+    // Now the Zip64EndCD
+    CALL(fd, seek, locator.offset_of_end_cd, SEEK_SET);
+    CALL(fd, read, (char *)&end_cd, sizeof(end_cd));
+
+    if(end_cd.magic != 0x06064b50) goto error;
+    
+    if(end_cd.number_of_disk != 0 || end_cd.number_of_disk_with_cd != 0 ||
+       end_cd.number_of_entries_in_volume != end_cd.number_of_entries_in_total) {
+      RaiseError(ERuntimeError, "Zip Files with multiple parts are not supported");
+      goto error;
+    };
+
+    self->total_entries = end_cd.number_of_entries_in_total;
+
+    CALL(fd, seek, end_cd.offset_of_cd, SEEK_SET);
+  };
+
+  self->directory_offset = CALL(fd, tell);
+  return self->directory_offset;
+ error:
+  return 0;
+};
+
+// Parses the extra field populating ourselves as needed. We should be
+// positioned at the start of the extra field.
+static int parse_extra_field(ZipFile self, FileLikeObject fd,unsigned int length) {
+  uint16_t type,rec_length;
+
+  length -= CALL(fd, read, (char *)&type, sizeof(type));
+  if(type != 1) goto error;
+
+  length -= CALL(fd, read, (char *)&rec_length, sizeof(rec_length));
+
+  if(length < rec_length) goto error;
+  switch(rec_length) {
+  case 24:
+    length -= READ_INT(fd, self->original_member_size);
+    length -= READ_INT(fd, self->compressed_member_size);
+    length -= READ_INT(fd, self->offset_of_member_header);
+    break;
+
+  case 16:
+    length -= READ_INT(fd, self->original_member_size);
+    length -= READ_INT(fd, self->compressed_member_size);
+    break;
+
+  case 8:
+    length -= READ_INT(fd, self->original_member_size);
+  case 0:
+    break;
+
+  default:
+    RaiseError(ERuntimeError, "Invalid extra record length");
+    goto error;
+  };
+
+  CALL(fd, seek, length, SEEK_CUR);
+  return 1;
+ error:
+  CALL(fd, seek, length, SEEK_CUR);
+  return 0;
+};
 
 static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   char buffer[BUFF_SIZE+1];
@@ -285,6 +369,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   // data and scan for the header from the end, just in case there is
   // an archive comment appended to the end
   CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END);
+  self->directory_offset = CALL(fd, tell);
   length = CALL(fd, read, buffer, BUFF_SIZE);
   // Non fatal Error occured
   if(length<0) 
@@ -303,6 +388,8 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
     CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME);
     CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, from_int(fd->size));
   } else {
+    // This is now the offset to the end of central directory record
+    self->directory_offset += i;
     self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i, 
 							    sizeof(*self->end));
     int j=0;
@@ -327,18 +414,18 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
     CALL(oracle, add, URNOF(fd), AFF4_CONTAINS, URNOF(self));
     CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME);
     CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, 
-	 from_int(self->end->offset_of_cd));
+	 from_int(self->directory_offset));
 
     // Find the CD
-    CALL(fd, seek, self->end->offset_of_cd, SEEK_SET);
+    if(!find_cd(self, fd)) goto error_reason;
 
-    while(j<self->end->total_entries_in_cd_on_disk) {
+    while(j < self->total_entries) {
       struct CDFileHeader cd_header;
       char *filename;
       char *escaped_filename;
+      uint32_t tmp;
 
       // The length of the struct up to the filename
-
       // Only read up to the filename member
       if(sizeof(cd_header) != 
 	 CALL(fd, read, (char *)&cd_header, sizeof(cd_header)))
@@ -363,12 +450,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       // Tell the oracle about this new member
       CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
       CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT);
-
-      // FIXME - This should be non volatile?
       CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
 
-      CALL(oracle, set, filename, VOLATILE_NS "file_size", 
-	   from_int(cd_header.file_size));
+      if(!parse_extra_field(self, fd, cd_header.extra_field_len))
+	goto error;
 
       CALL(oracle, set, filename, VOLATILE_NS "compression", 
 	   from_int(cd_header.compression_method));
@@ -376,15 +461,24 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       CALL(oracle, set, filename, VOLATILE_NS "crc32", 
 	   from_int(cd_header.crc32));
 
+      // The following checks for zip64 values
+      tmp = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
+      CALL(oracle, set, filename, VOLATILE_NS "file_size", 
+	   from_int(tmp));
+
+      tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
+	: cd_header.compress_size;
       CALL(oracle, set, filename, VOLATILE_NS "compress_size", 
-	   from_int(cd_header.compress_size));
+	   from_int(tmp));
       
+      tmp = cd_header.relative_offset_local_header == -1 ? self->offset_of_member_header 
+	: cd_header.relative_offset_local_header;
       CALL(oracle, set, filename, VOLATILE_NS "relative_offset_local_header", 
-	   from_int(cd_header.relative_offset_local_header));
+	   from_int(tmp));
+      self->offset_of_member_header = tmp;
 
       // Skip the comments - we dont care about them
-      CALL(fd, seek, cd_header.extra_field_len + 
-	   cd_header.file_comment_length, SEEK_CUR);
+      CALL(fd, seek, cd_header.file_comment_length, SEEK_CUR);
 
       // Read the zip file itself
       {
@@ -392,10 +486,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	struct ZipFileHeader file_header;
 	uint32_t file_offset;
 
-	CALL(fd,seek, cd_header.relative_offset_local_header, SEEK_SET);
+	CALL(fd,seek, self->offset_of_member_header, SEEK_SET);
 	CALL(fd, read, (char *)&file_header, sizeof(file_header));
 
-	file_offset = cd_header.relative_offset_local_header +
+	file_offset = self->offset_of_member_header +
 	  sizeof(file_header) +
 	  file_header.file_name_length + file_header.extra_field_len;
 
@@ -518,6 +612,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
     };
 
     inflateEnd(&strm);
+    // AFF4 pretty much always uses ZIP_STORED for everything:
   } else if(compression_method == ZIP_STORED) {
     if(CALL(fd, read, buffer, *length) != *length) {
       RaiseError(EIOError, "Unable to read %d bytes from %s@%lld", *length, 
@@ -653,6 +748,33 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
   return result;
 };
 
+/** This writes a zip64 end of central directory and a central
+    directory locator */
+static void write_zip64_CD(ZipFile self, FileLikeObject fd, 
+			   uint64_t directory_offset, int total_entries) {
+  struct Zip64CDLocator locator;
+  struct Zip64EndCD end_cd;
+
+  locator.magic = 0x07064b50;
+  locator.disk_with_cd = 0;
+  locator.offset_of_end_cd = CALL(fd, tell);
+  locator.number_of_disks = 1;
+
+  memset(&end_cd, 0, sizeof(end_cd));
+  end_cd.magic = 0x06064b50;
+  end_cd.size_of_header = sizeof(end_cd)-12;
+  end_cd.version_made_by = 0x2d;
+  end_cd.version_needed = 0x2d;
+  end_cd.number_of_entries_in_volume = total_entries;
+  end_cd.number_of_entries_in_total = total_entries;
+  end_cd.size_of_cd = locator.offset_of_end_cd - directory_offset;
+  end_cd.offset_of_cd = directory_offset;
+  
+  CALL(fd,write, (char *)&end_cd, sizeof(end_cd));
+  CALL(fd,write, (char *)&locator, sizeof(locator));
+};
+
+
 static void ZipFile_close(ZipFile self) {
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
@@ -667,6 +789,7 @@ static void ZipFile_close(ZipFile self) {
     uint64_t directory_offset = parse_int(CALL(oracle, resolve, 
 					       URNOF(self), 
 					       AFF4_DIRECTORY_OFFSET));
+    uint64_t tmp;
 
     if(!fd) return;
     CALL(fd, seek, directory_offset, SEEK_SET);
@@ -675,6 +798,9 @@ static void ZipFile_close(ZipFile self) {
     {
       Cache volume_dict = CALL(oracle->urn, get_item, URNOF(self));
       Cache i;
+      StringIO zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
+
+      CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
   
       // Now we search all the tuples with URNOF(self)
       // aff2volatile:contains *
@@ -683,6 +809,9 @@ static void ZipFile_close(ZipFile self) {
 	// This is the fully qualified name of the member (the
 	// resolver always has fully qualified names).
 	char *value = (char *)i->data;
+
+	// Clear tmporary data
+	CALL(zip64_header, truncate, 4);
 	
 	// This is a zip member
 	if(!strcmp(attribute, AFF4_CONTAINS)) {
@@ -692,17 +821,17 @@ static void ZipFile_close(ZipFile self) {
 	  struct tm *now = localtime(&epoch_time);
 	  // This gets the relative name of the fqn
 	  char *escaped_filename = escape_filename(relative_name(value, URNOF(self)));
-
 	  //	  LogWarnings("Writing archive member %s -> %s", escaped_filename, value);
 
 	  memset(&cd, 0, sizeof(cd));
-
 	  cd.magic = 0x2014b50;
 	  cd.version_made_by = 0x317;
 	  cd.version_needed = 0x14;
 	  cd.compression_method = parse_int(CALL(oracle, resolve, value, 
 						 VOLATILE_NS "compression"));
 	  
+	  // We always write trailing directory structures
+	  cd.flags = 0x8;
 	  cd.crc32 = parse_int(CALL(oracle, resolve, value, 
 				     VOLATILE_NS "crc32"));
 
@@ -711,29 +840,72 @@ static void ZipFile_close(ZipFile self) {
 	  cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
 	    now->tm_sec / 2;
 	  cd.external_file_attr = 0644 << 16L;
-
 	  cd.file_name_length = strlen(escaped_filename);
-	  cd.relative_offset_local_header = parse_int(CALL(oracle, resolve, value, 
-				      VOLATILE_NS "relative_offset_local_header"));
-	  cd.file_size = parse_int(CALL(oracle, resolve, value, 
-					VOLATILE_NS "file_size"));
-	  cd.compress_size = parse_int(CALL(oracle, resolve, value, 
-					    VOLATILE_NS "compress_size"));
-	  
+
+	  // The following are optional zip64 fields. They must appear
+	  // in this order:
+	  tmp = parse_int(CALL(oracle, resolve, value, 
+			       VOLATILE_NS "file_size"));
+	  if(tmp > ZIP64_LIMIT) {
+	    cd.file_size = -1;
+	    CALL(zip64_header, write, (char *)&tmp, sizeof(tmp));
+	  } else {
+	    cd.file_size = tmp;
+	  }
+
+	  tmp = parse_int(CALL(oracle, resolve, value, 
+			       VOLATILE_NS "compress_size"));
+	  if(tmp > ZIP64_LIMIT) {
+	    cd.compress_size = -1;
+	    CALL(zip64_header, write, (char *)&tmp, sizeof(tmp));
+	  } else {
+	    cd.compress_size = tmp;
+	  };
+
+	  tmp = parse_int(CALL(oracle, resolve, value, 
+			       VOLATILE_NS "relative_offset_local_header"));
+	  if(tmp > ZIP64_LIMIT) {
+	    cd.relative_offset_local_header = -1;
+	    CALL(zip64_header, write, (char *)&tmp, sizeof(tmp));
+	  } else {
+	    cd.relative_offset_local_header = tmp;
+	  };
+
+	  // We need to append an extended zip64 header
+	  if(zip64_header->size > 4) {
+	    uint16_t *x = (uint16_t *)(zip64_header->data +2);
+
+	    // update the size of the extra field
+	    *x=zip64_header->size-4;
+	    cd.extra_field_len = zip64_header->size;
+	  };
+      
 	  CALL(fd, write, (char *)&cd, sizeof(cd));
 	  CALL(fd, write, (char *)ZSTRING_NO_NULL(escaped_filename));
+	  if(zip64_header->size > 4) {
+	    CALL(fd, write, zip64_header->data, zip64_header->size);
+	  };
+
 	  k++;
 	};
       };
+      talloc_free(zip64_header);
     };
 
     // Now write an end of central directory record
     memset(&end, 0, sizeof(end));
     end.magic = 0x6054b50;
-    end.offset_of_cd = directory_offset;
+    end.size_of_cd = CALL(fd, tell) - directory_offset;
+
+    if(directory_offset > ZIP64_LIMIT) {
+      end.offset_of_cd = -1;
+      write_zip64_CD(self, fd, directory_offset, k);
+    } else {
+      end.offset_of_cd = directory_offset;
+    };
+
     end.total_entries_in_cd_on_disk = k;
     end.total_entries_in_cd = k;
-    end.size_of_cd = CALL(fd, tell) - directory_offset;
     end.comment_len = strlen(URNOF(self));
 
     // Make sure to add our URN to the comment field in the end
@@ -908,6 +1080,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
 static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   FileLikeObject fd;
+  int magic = 0x08074b50;
   
   if(this->mode == 'r') {
     talloc_free(self);
@@ -949,14 +1122,26 @@ static void ZipFileStream_close(FileLikeObject self) {
   CALL(oracle, set, URNOF(self), VOLATILE_NS "compress_size", from_int(this->compress_size));
   CALL(oracle, set, URNOF(self), VOLATILE_NS "crc32", from_int(this->crc32));
 
-  // Put the description header on
+  // Put the data descriptor header on
   CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
+  // Write a signature:
+  CALL(fd, write, (char *)&magic, sizeof(magic));
   CALL(fd, write, (char *)&this->crc32,
        sizeof(this->crc32));
-  CALL(fd, write, (char *)&this->compress_size,
-       sizeof(uint32_t));
-  CALL(fd, write, (char *)&self->size,
-       sizeof(uint32_t));
+
+  // Zip64 data descriptor
+  if(this->file_offset > ZIP64_LIMIT || this->compress_size > ZIP64_LIMIT
+     || self->size > ZIP64_LIMIT) {
+    CALL(fd, write, (char *)&this->compress_size, sizeof(uint64_t));
+    CALL(fd, write, (char *)&self->size, sizeof(uint64_t));
+  } else {
+    // Regular data descriptor
+    uint32_t size = self->size;
+    uint32_t csize = this->compress_size;
+
+    CALL(fd, write, (char *)&csize, sizeof(csize));
+    CALL(fd, write, (char *)&size, sizeof(size));
+  };
 
   // This is the point where we will be writing the next file.
   CALL(oracle, set, this->container_urn, AFF4_DIRECTORY_OFFSET,
@@ -1037,17 +1222,16 @@ void print_cache(Cache self) {
 char *fully_qualified_name(char *filename, char *volume_urn) {
   static char fqn_filename[BUFF_SIZE];
 
-  // We are always called with a fully qualified filename. 
-  if(strstr(filename, FQN) != filename) {
+  if(startswith(filename, FQN)) {
+    return filename;
+  } else {
     snprintf(fqn_filename, BUFF_SIZE, "%s/%s", volume_urn, filename);
     return fqn_filename;
-  } else {
-    return filename;
   };
 };
 
 char *relative_name(char *name, char *volume_urn) {
-  if(strstr(name, volume_urn) == name) {
+  if(startswith(name, volume_urn)) {
     return name + strlen(volume_urn)+1;
   };
 

@@ -477,6 +477,11 @@ END_CLASS
  char *resolver_get_with_default(Resolver self, char *urn, 
 				 char *attribute, char *default_value);
 
+  // This is the largest file size which may be represented by a
+  // regular zip file without using Zip64 extensions.
+  //#define ZIP64_LIMIT ((1<<31)-1)
+#define ZIP64_LIMIT 1
+
 /** These are ZipFile structures */
 struct EndCentralDirectory {
   uint32_t magic;
@@ -524,11 +529,39 @@ struct ZipFileHeader {
   uint16_t extra_field_len;
 }__attribute__((packed));
 
+struct Zip64EndCD {
+  uint32_t magic;
+  uint64_t size_of_header;
+  uint16_t version_made_by;
+  uint16_t version_needed;
+  uint32_t number_of_disk;
+  uint32_t number_of_disk_with_cd;
+  uint64_t number_of_entries_in_volume;
+  uint64_t number_of_entries_in_total;
+  uint64_t size_of_cd;
+  uint64_t offset_of_cd;
+}__attribute__((packed));
+
+struct Zip64CDLocator {
+  uint32_t magic;
+  uint32_t disk_with_cd;
+  uint64_t offset_of_end_cd;
+  uint32_t number_of_disks;
+}__attribute__((packed));
+
 /** This represents a Zip file */
 CLASS(ZipFile, AFFObject)
      // This keeps the end of central directory struct so we can
      // recopy it when we update the CD.
      struct EndCentralDirectory *end;
+
+     // The following are attributes stored by various zip64 extended
+     // fields
+     uint64_t total_entries;
+     uint64_t original_member_size;
+     uint64_t compressed_member_size;
+     uint64_t offset_of_member_header;
+     uint64_t directory_offset;
 
      // This is our own current URN - new files will be appended to
      // that

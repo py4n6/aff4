@@ -32,4 +32,8 @@ void init_luts();
 
 int startswith(char *haystack, char *needle);
 
+/** Some helpful macros */
+#define READ_INT(fd, x)  CALL(fd, read, (char *)&x, sizeof(x))
+
+
 #endif
