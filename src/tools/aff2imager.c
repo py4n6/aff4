@@ -499,7 +499,7 @@ int main(int argc, char **argv)
   // Initialise the library
   AFF2_Init();
 
-  talloc_enable_leak_report_full();
+  //talloc_enable_leak_report_full();
 
   while (1) {
     int option_index = 0;

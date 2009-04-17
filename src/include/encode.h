@@ -11,6 +11,7 @@ int encode64(unsigned char *inbuf, int len, unsigned char *outbuf);
 int decode64(unsigned char *inbuf, int len, unsigned char *outbuf);
 int encode32(unsigned char *inbuf, int len, unsigned char *outbuf);
 int decode32(unsigned char *inbuf, int len, unsigned char *outbuf);
+int encodehex(unsigned char *inbuf, int len, unsigned char *outbuf);
 void encode_init();
 
 #endif

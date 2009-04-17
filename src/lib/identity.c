@@ -95,6 +95,9 @@ static int Identity_load_certs(Identity self, char *cert, char *priv_key) {
       BIO_free(mem);
       talloc_free(text);
       CALL(oracle, cache_return, (AFFObject)fd);
+    } else {
+      RaiseError(ERuntimeError, "Unable to open file %s", cert);
+      goto error;
     };
   };
 
@@ -161,11 +164,30 @@ static Identity Identity_Con(Identity self, char *cert, char *priv_key, char mod
   if(Identity_load_certs(this, cert, priv_key) < 0)
     goto error;
 
+  /** We set our URN from the fingerprint of the public key */
+  {
+    unsigned char hash[BUFF_SIZE];
+    unsigned char buff[BUFF_SIZE];
+    unsigned int hash_len = BUFF_SIZE;
+    EVP_MD *md = EVP_sha1();
+    int i;
+
+    /* make the plaintext message */
+    X509_digest(self->x509, md, hash, &hash_len);
+    for(i=0;i<hash_len;i++) {
+      sprintf(buff + i*3, "%02x:", hash[i]);
+    };
+    buff[i*3-1]=0;
+
+    // Make sure the name is valid to be used in a URN
+    URNOF(self) = talloc_asprintf(self, AFF4_IDENTITY_PREFIX "/%s", buff);
+  };
+
   /** Now we adjust our URN from the certs */
   if(X509_NAME_oneline(X509_get_subject_name(this->x509), name, sizeof(name))) {
-    // Make sure the name is valid to be used in a URN
-    URNOF(self) = talloc_asprintf(self, AFF4_IDENTITY_PREFIX "%s", escape_filename(name));
+    CALL(oracle, set, URNOF(self), AFF4_COMMON_NAME, name);
   };
+
 
   this->info = CONSTRUCT(Resolver, Resolver, Con, oracle);
   // We place a filtering hook for this identity.

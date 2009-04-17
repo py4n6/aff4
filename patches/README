@@ -5,8 +5,15 @@ make sure libaff4 is installed properly first.
 tar -xvzf sleuthkit-3.0.1.tar.gz 
 cd sleuthkit-3.0.1
 patch -p1 < sleuthkit-3.0.1.patch
-autoconf
+
+## The following is needed to get the autoconf system to pick up the changes
+libtoolize --force
+aclocal -I config
 autoheader
+automake
+autoconf
+
+## Now build it as normal
 ./configure
 make install
 

@@ -48,6 +48,7 @@ extern "C" {
 #define AFF4_STATEMENT NAMESPACE "statement"
 #define AFF4_CERT      NAMESPACE "x509"
 #define AFF4_PRIV_KEY  VOLATILE_NS "priv_key"
+#define AFF4_COMMON_NAME NAMESPACE "common_name"
 
   /** These are standard aff4 types */
 #define AFF4_ZIP_VOLUME       "volume"

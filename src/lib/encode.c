@@ -261,6 +261,8 @@ int encode32(unsigned char *inbuf, int len, unsigned char *outbuf) {
   case 1:
     outbuf[o-1]=STUFF_CHAR;
   };
+
+  outbuf[o]=0;
   return o;
 };
 
@@ -312,4 +314,14 @@ int decode32(unsigned char *inbuf, int len, unsigned char *outbuf) {
   */
 
   return o;
+};
+
+int encodehex(unsigned char *inbuf, int len, unsigned char *outbuf) {
+  int i;
+
+  for(i=0;i<len;i++) {
+    sprintf(outbuf + i*2, "%02x", inbuf[i]);
+  };
+
+  return i*2;
 };
