@@ -337,7 +337,7 @@ CLASS(Identity, AFFObject)
        verified from our statements. Our Resolver can then be
        compared to the oracle to see which objects do not match.
   */
-       void METHOD(Identity, verify);
+       void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
 END_CLASS
 
 // This function must be called to initialise the library - we prepare

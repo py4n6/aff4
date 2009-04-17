@@ -376,7 +376,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 void aff2_extract(char *stream, char *output_file) {
   FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, NULL, stream, 'r');
   FileLikeObject out_fd;
-
+  
   if(!in_fd) {
     printf("Stream %s not found!!!\n", stream);
     return;
@@ -406,6 +406,58 @@ void aff2_extract(char *stream, char *output_file) {
   CALL(oracle, cache_return, (AFFObject)out_fd);
 };
 
+static uint64_t current_pos=0;
+static char *current_uri = NULL;
+
+static int progress_cb(uint64_t progress, char *urn) {
+  int tmp = progress >> 20;
+
+  if(current_uri==NULL) current_uri=urn;
+
+  if(current_uri != urn) {
+    char *type = CALL(oracle, resolve, urn, AFF4_TYPE);
+    char *real_hash = CALL(oracle, resolve, current_uri, AFF4_SHA);
+    Resolver i;
+    char *result="";
+
+    list_for_each_entry(i, &oracle->identities, identities) {
+      char *signed_uri = CALL(i, resolve, current_uri, AFF4_SHA);
+
+      if(signed_uri && real_hash) {
+	if(!strcmp(signed_uri, real_hash)) {
+	  result = "OK";
+	  break;
+	} else {
+	  result = "Hash Mismatch";
+	};
+      } else {
+	result = "";
+      };
+    };
+
+    if(type)
+      printf("\r%s (%s): (%s)              \n", current_uri, type, result); 
+    else 
+      printf("\r%s: (%s)              \n", current_uri, result); 
+    
+    current_uri = urn;
+  };
+
+  if(current_pos != tmp) {
+    char *type = CALL(oracle, resolve, urn, AFF4_TYPE);
+    if(type) {
+      printf("\r%s (%s): %d MB", urn, type, tmp);
+    } else {
+      printf("\r%s:\n: %d MB", urn, tmp);
+    };
+    current_pos = tmp;
+  };
+
+  fflush(stdout);
+
+  return 1;
+};
+
 /** Verify all the signatures in the volumes. This essentially just
     loads all identities and asks them to verify their statements.
 */
@@ -420,7 +472,7 @@ void aff2_verify() {
       if(!strcmp(AFF4_IDENTITY, CALL(oracle, resolve, key, AFF4_TYPE))) {
 	Identity id = (Identity)CALL(oracle, open, NULL, key, 'r');
 	
-	CALL(id, verify);
+	CALL(id, verify, progress_cb);
 	CALL(oracle, cache_return, (AFFObject)id);
       };
     };

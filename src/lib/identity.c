@@ -11,7 +11,7 @@
 #include "zip.h"
 #include "encode.h"
 
-static void verify_hashes(Identity self);
+static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn));
 
 /** This function is a resolver filter which only allows SHA
     attributes. 
@@ -315,8 +315,12 @@ and if correct we parse the statements and add them into our resolver.
 
 After this call its possible to check which statements are different
 from the oracle.
+
+The callback function will be called periodically (every BUFF_SIZE)
+with an indication of the current progress and the currently processed
+URN.
 */
-static void Identity_verify(Identity self) {
+static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *urn)) {
   char **statements = CALL(oracle, resolve_list, NULL, URNOF(self), AFF4_STATEMENT);
   char **statement_urn;
   
@@ -359,7 +363,7 @@ static void Identity_verify(Identity self) {
 
     // Note that by default hashes are not calculated - we need to
     // calculate them here and confirm they are good:
-    verify_hashes(self);
+    verify_hashes(self, cb);
 
     // Ok - done with those now:
     CALL(oracle, cache_return, (AFFObject)oracle_signature);
@@ -370,18 +374,18 @@ static void Identity_verify(Identity self) {
   talloc_free(statements);
 };
 
-static void verify_hashes(Identity self) {
+static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)) {
   Cache i;
 
   list_for_each_entry(i, &self->info->urn->cache_list, cache_list) {
     char *urn = (char *)i->key;
     char *hash = CALL(self->info, resolve, urn, AFF4_SHA);
 
-
     if(hash) {
       FileLikeObject fd = (FileLikeObject)CALL(oracle, open, NULL, urn, 'r');
       unsigned char buff[BUFF_SIZE];
       unsigned int len;
+      uint64_t progress=0;
       EVP_MD_CTX digest;
       unsigned char hash_base64[BUFF_SIZE];
 
@@ -390,7 +394,12 @@ static void verify_hashes(Identity self) {
 	while(1) {
 	  len = CALL(fd, read, (char *)buff, BUFF_SIZE);
 	  if(len==0) break;
+	  progress+=len;
 
+	  // A zero return code break out of the verification process
+	  if(!cb(progress, urn))
+	    return;
+	  
 	  EVP_DigestUpdate(&digest, buff, len);
 	};
 
