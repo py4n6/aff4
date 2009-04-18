@@ -35,6 +35,29 @@ ZipFile open_volume(char *urn, char mode) {
   return result;
 };
 
+char **aff4_load(char **images) {
+  char **i;
+
+  StringIO result = CONSTRUCT(StringIO, StringIO, Con, NULL);
+
+  for(i=images; *i; i++) {
+    ZipFile tmp = open_volume(*i, 'r');
+    if(tmp) {
+      char *urn = talloc_strdup(result->data, URNOF(tmp));
+      CALL(result, write, (char *)&urn, sizeof(urn));
+      CALL(oracle, cache_return,(AFFObject)tmp);
+    };
+  };
+
+  if(result->size >0) {
+    i=NULL;
+    CALL(result, write, (char *)&i, sizeof(i));
+    return result->data;
+  } else {
+    return NULL;
+  };
+};
+
 /** Opens an AFF4 file for reading */
 AFF4_HANDLE aff4_open(char **images) {
   // The opaque handle we actually return is a FileLikeObject.
@@ -127,4 +150,41 @@ void aff4_close(AFF4_HANDLE self) {
   // needed.
   if(self)
     CALL(oracle, cache_return, (AFFObject)self);
+};
+
+struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn, 
+				char *attribute, char *value) {
+  Cache i,j;
+  StringIO result = CONSTRUCT(StringIO, StringIO, Con, self);
+  struct aff4_tripple **final_result=NULL;
+  struct aff4_tripple *tmp;
+
+  list_for_each_entry(i, &oracle->urn->cache_list, cache_list) {
+    char *oracle_urn = (char *)i->key;
+    Cache attributes = i->data;
+    if(urn && !startswith(oracle_urn, urn)) continue;
+
+    list_for_each_entry(j, &attributes->cache_list, cache_list) {
+      char *oracle_attribute = (char *)j->key;
+      char *oracle_value = (char *)j->data;
+
+      if(attribute && !startswith(oracle_attribute, attribute)) continue;
+      if(value && !startswith(oracle_value, value)) continue;
+
+      // Add the match to the result
+      tmp = talloc(result->data, struct aff4_tripple);
+      tmp->urn = talloc_strdup(tmp, oracle_urn); 
+      tmp->attribute = talloc_strdup(tmp, oracle_attribute); 
+      tmp->value = talloc_strdup(tmp, oracle_value); 
+      CALL(result, write, (char *)&tmp, sizeof(tmp));
+    };
+  };
+
+  // NULL terminate the result
+  CALL(result, write, (char *)&final_result, sizeof(&final_result));
+  final_result = (struct aff4_tripple **)result->data;
+  talloc_steal(self, final_result);
+  talloc_free(result);
+
+  return final_result;
 };

@@ -431,7 +431,7 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   do {_global_error = EZero; if(_traceback) {talloc_free(_traceback); _traceback=NULL;}; } while(0);
 
 #define PrintError()				\
-  do {if(_global_error) fprintf(stderr, "%s",_traceback); fflush(stdout); ClearError(); }while(0);
+  do {if(_global_error) fprintf(stdout, "%s",_traceback); fflush(stdout); ClearError(); }while(0);
 
 #define CheckError(error)			\
   (_global_error == error)

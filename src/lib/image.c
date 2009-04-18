@@ -47,6 +47,7 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
     self->urn = talloc_strdup(self, uri);
 
     // These are the essential properties:
+    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
     value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNK_SIZE, "32k");
     this->chunk_size = parse_int(value);
 
@@ -102,6 +103,8 @@ static AFFObject Image_finish(AFFObject self) {
 
   // Make sure the oracle knows we are an image
   CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE);
+  CALL(oracle, set, self->urn, AFF4_INTERFACE, AFF4_STREAM);
+
   EVP_DigestInit(&this->digest, EVP_sha256());
   return CALL(self, Con, self->urn, 'w');
 };

@@ -361,6 +361,9 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
   result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
 				    Con, ctx, urn, mode);
   
+  // Make sure the object mode is set
+  if(result)
+    ((AFFObject)result)->mode = mode;
   return result; 
 };
 

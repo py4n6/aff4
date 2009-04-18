@@ -3,17 +3,16 @@
 
     FIXME: The FileBackedObject needs to be tailored for windows.
 */
-#include "zip.h"
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include "list.h"
 #include <unistd.h>
 #include <zlib.h>
 #include <time.h>
 #include <libgen.h>
-#include "encode.h"
+#include "aff4.h"
+#include "zip.h"
 
 /** Implementation of FileBackedObject.
 
@@ -192,7 +191,6 @@ VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(truncate) = FileLikeObject_truncate;
      VMETHOD(get_data) = FileLikeObject_get_data;
 
-     VATTR(mode) = 'r';
      VATTR(data) = NULL;
 END_VIRTUAL
 
@@ -386,6 +384,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
     // We could not find the CD - we assume its a new file and we
     // stick ourselves on the end of it.
     CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME);
+    CALL(oracle, set, URNOF(self), AFF4_INTERFACE, AFF4_VOLUME);
     CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, from_int(fd->size));
   } else {
     // This is now the offset to the end of central directory record
@@ -413,6 +412,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
     CALL(oracle, set, URNOF(self), AFF4_STORED, URNOF(fd));
     CALL(oracle, add, URNOF(fd), AFF4_CONTAINS, URNOF(self));
     CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME);
+    CALL(oracle, set, URNOF(self), AFF4_INTERFACE, AFF4_VOLUME);
     CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, 
 	 from_int(self->directory_offset));
 
@@ -424,6 +424,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       char *filename;
       char *escaped_filename;
       uint32_t tmp;
+      time_t now;
 
       // The length of the struct up to the filename
       // Only read up to the filename member
@@ -450,7 +451,24 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       // Tell the oracle about this new member
       CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
       CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT);
+      CALL(oracle, set, filename, AFF4_INTERFACE, AFF4_STREAM);
       CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
+
+      // Parse the time from the CD
+      {
+	struct tm x = {
+	  .tm_year = (cd_header.dosdate>>9) + 1980 - 1900,
+	  .tm_mon = (cd_header.dosdate>>5) & 0xF -1,
+	  .tm_mday = cd_header.dosdate & 0x1F,
+	  .tm_hour = cd_header.dostime >> 11,
+	  .tm_min = (cd_header.dostime>>5) & 0x3F, 
+	  .tm_sec = (cd_header.dostime&0x1F) * 2,
+	  .tm_zone = "GMT"
+	};
+	int32_t now = mktime(&x);
+	if(now > 0)
+	  CALL(oracle, set, filename, AFF4_TIMESTAMP, from_int(now));
+      };
 
       if(!parse_extra_field(self, fd, cd_header.extra_field_len))
 	goto error;
@@ -463,7 +481,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
       // The following checks for zip64 values
       tmp = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
-      CALL(oracle, set, filename, VOLATILE_NS "file_size", 
+      CALL(oracle, set, filename, AFF4_SIZE, 
 	   from_int(tmp));
 
       tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
@@ -552,7 +570,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
   char *buffer;
   FileLikeObject fd;
   uint32_t file_size = parse_int(CALL(oracle, resolve, filename, 
-				      VOLATILE_NS "file_size"));
+				      AFF4_SIZE));
   
   int compression_method = parse_int(CALL(oracle, resolve, filename, 
 					  VOLATILE_NS "compression"));
@@ -817,7 +835,7 @@ static void ZipFile_close(ZipFile self) {
 	if(!strcmp(attribute, AFF4_CONTAINS)) {
 	  struct CDFileHeader cd;
 	  time_t epoch_time = parse_int(CALL(oracle, resolve, value, 
-					     VOLATILE_NS "timestamp"));
+					     AFF4_TIMESTAMP));
 	  struct tm *now = localtime(&epoch_time);
 	  // This gets the relative name of the fqn
 	  char *escaped_filename = escape_filename(relative_name(value, URNOF(self)));
@@ -845,7 +863,7 @@ static void ZipFile_close(ZipFile self) {
 	  // The following are optional zip64 fields. They must appear
 	  // in this order:
 	  tmp = parse_int(CALL(oracle, resolve, value, 
-			       VOLATILE_NS "file_size"));
+			       AFF4_SIZE));
 	  if(tmp > ZIP64_LIMIT) {
 	    cd.file_size = -1;
 	    CALL(zip64_header, write, (char *)&tmp, sizeof(tmp));
@@ -944,8 +962,6 @@ VIRTUAL(ZipFile, AFFObject)
      VMETHOD(writestr) = ZipFile_writestr;
      VMETHOD(super.Con) = ZipFile_AFFObject_Con;
      VMETHOD(super.finish) = ZipFile_finish;
-
-     VATTR(mode) = 'r';
 END_VIRTUAL
 
 /** container_urn is the URN of the ZipFile container which holds this
@@ -958,7 +974,8 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
 				       char mode) {
   char *fqn_filename = fully_qualified_name(filename, URNOF(self));
 
-  self->mode = mode;
+  ((AFFObject)self)->mode = mode;
+
   EVP_DigestInit(&self->digest, EVP_sha256());
   
   self->container_urn = talloc_strdup(self, container_urn);
@@ -974,7 +991,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
   self->parent_urn = talloc_strdup(self, parent_urn);
   self->super.size = parse_int(CALL(oracle, resolve,
 				    fqn_filename,
-				    VOLATILE_NS "file_size"));
+				    AFF4_SIZE));
 
   if(mode=='w' && self->compression == ZIP_DEFLATE) {
     // Initialise the stream compressor
@@ -1082,11 +1099,11 @@ static void ZipFileStream_close(FileLikeObject self) {
   FileLikeObject fd;
   int magic = 0x08074b50;
   
-  if(this->mode == 'r') {
+  if(((AFFObject)self)->mode != 'w') {
     talloc_free(self);
     return;
   };
-  
+
   fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'w');
   if(!fd) {
     RaiseError(ERuntimeError, "Unable to open file %s", this->parent_urn);
@@ -1112,13 +1129,13 @@ static void ZipFileStream_close(FileLikeObject self) {
     } while(this->strm.avail_out == 0);
     
     (void)deflateEnd(&this->strm);
- };
+  };
 
   // Store important information about this file
   CALL(oracle, add, this->container_urn, AFF4_CONTAINS, URNOF(self));
   CALL(oracle, set, URNOF(self), VOLATILE_NS "stored", this->container_urn);
-  CALL(oracle, set, URNOF(self), VOLATILE_NS "timestamp", from_int(time(NULL)));
-  CALL(oracle, set, URNOF(self), VOLATILE_NS "file_size", from_int(self->size));
+  CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
+  CALL(oracle, set, URNOF(self), AFF4_SIZE, from_int(self->size));
   CALL(oracle, set, URNOF(self), VOLATILE_NS "compress_size", from_int(this->compress_size));
   CALL(oracle, set, URNOF(self), VOLATILE_NS "crc32", from_int(this->crc32));
 

@@ -35,6 +35,7 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
     };
 
     CALL(self, set_property, AFF4_TYPE, AFF4_ENCRYTED);
+    CALL(self, set_property, AFF4_INTERFACE, AFF4_STREAM);
     this->block_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
     // FIXME
     this->key = "hello world";

@@ -6,6 +6,11 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
 
   if(urn) {
     char *target = CALL(oracle, resolve, urn, AFF4_TARGET);
+    char *interface = CALL(oracle, resolve, target, AFF4_INTERFACE);
+
+    if(interface)
+      CALL(oracle, set, urn, AFF4_INTERFACE, interface);
+
     if(!target) {
       RaiseError(ERuntimeError, "%s unable to resolve the " AFF4_TARGET " property?", urn);
       goto error;
@@ -38,6 +43,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
     char tmp[BUFF_SIZE];
     FileLikeObject fd;
     char *properties;
+    char *interface = CALL(oracle, resolve, target, AFF4_INTERFACE);
+    char *size = CALL(oracle, resolve, target, AFF4_SIZE);
 
     if(!zipfile) {
       RaiseError(ERuntimeError, "Unable to get storage container %s", storage_urn);
@@ -46,9 +53,19 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
 
     friendly_name = fully_qualified_name(friendly_name, storage_urn);
 
-    // Add a reverse connection (The link urn is obviously not unique).
+    // Note the time when the link was made
+    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
+
+    // Add a reverse connection
     CALL(oracle, set, friendly_name, AFF4_TARGET, target);
     CALL(oracle, set, friendly_name, AFF4_TYPE, AFF4_LINK);
+    if(interface) {
+      CALL(oracle, set, friendly_name, AFF4_INTERFACE, interface);
+    };
+
+    if(size) {
+      CALL(oracle, set, friendly_name, AFF4_SIZE, size);
+    };
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);
 

@@ -36,6 +36,9 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
     };
 
     CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_MAP);
+    CALL(oracle, set, URNOF(self), AFF4_INTERFACE, AFF4_STREAM);
+    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
+
     blocksize = parse_int(resolver_get_with_default(oracle, 
 				     URNOF(self), AFF4_BLOCKSIZE, "1"));
     

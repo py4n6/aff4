@@ -25,12 +25,15 @@ typedef  unsigned long int in_addr_t;
 #include <inttypes.h>
 #endif
 
+#include "encode.h"
+
 #define BUFF_SIZE 40960
 
 int _mkdir(const char *path);
 void init_luts();
 
-int startswith(char *haystack, char *needle);
+int startswith(const char *haystack, char *needle);
+int endswith(const char *haystack, char *needle);
 
 /** Some helpful macros */
 #define READ_INT(fd, x)  CALL(fd, read, (char *)&x, sizeof(x))

@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-
+#include "aff4.h"
 #include "misc.h"
 #include "stringio.h"
 #include "list.h"
@@ -18,51 +18,6 @@ extern "C" {
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
 
-  // This is the URI namespace for the AFF4 scheme
-#define NAMESPACE "aff4:"
-#define VOLATILE_NS "aff2volatile:"
-#define FQN "urn:" NAMESPACE
-
-  /** These are standard aff4 attributes */
-#define AFF4_STORED     NAMESPACE "stored"
-#define AFF4_TYPE       NAMESPACE "type"
-#define AFF4_CONTAINS   NAMESPACE "contains"
-#define AFF4_SIZE       NAMESPACE "size"
-#define AFF4_SHA        NAMESPACE "sha256"
-
-  /** Image attributes */
-#define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
-#define AFF4_COMPRESSION NAMESPACE "compression"
-#define AFF4_CHUNKS_IN_SEGMENT NAMESPACE "chunks_in_segment"
-#define AFF4_DIRECTORY_OFFSET VOLATILE_NS "directory_offset"
-#define AFF4_DIRTY       VOLATILE_NS "dirty"
-  /** Link, encryption attributes */
-#define AFF4_TARGET NAMESPACE "target"
-
-  /** Map attributes */
-#define AFF4_BLOCKSIZE NAMESPACE "blocksize"
-#define AFF4_IMAGE_PERIOD NAMESPACE "image_period"
-#define AFF4_TARGET_PERIOD NAMESPACE "target_period"
-
-  /* Identity attributes */
-#define AFF4_STATEMENT NAMESPACE "statement"
-#define AFF4_CERT      NAMESPACE "x509"
-#define AFF4_PRIV_KEY  VOLATILE_NS "priv_key"
-#define AFF4_COMMON_NAME NAMESPACE "common_name"
-
-  /** These are standard aff4 types */
-#define AFF4_ZIP_VOLUME       "volume"
-#define AFF4_DIRECTORY_VOLUME "directory"
-#define AFF4_SEGMENT             "segment"
-#define AFF4_LINK             "link"
-#define AFF4_IMAGE            "image"
-#define AFF4_MAP              "map"
-#define AFF4_ENCRYTED         "encrypted"
-#define AFF4_IDENTITY         "identity"
-
-  // All identity URNs are prefixed with this:
-#define AFF4_IDENTITY_PREFIX  FQN AFF4_IDENTITY
-
 // A helper to access the URN of an object.
 #define URNOF(x)  ((AFFObject)x)->urn
 
@@ -71,8 +26,8 @@ extern "C" {
 */
 uint64_t parse_int(char *string);
 char *from_int(uint64_t arg);
-char *escape_filename(char *filename);
-char *unescape_filename(char *filename);
+char *escape_filename(const char *filename);
+char *unescape_filename(const char *filename);
 
 /** A cache is an object which automatically expires data which is
     least used - that is the data which is most used is put at the end
@@ -568,11 +523,6 @@ CLASS(ZipFile, AFFObject)
      // that
      char *parent_urn;
 
-     // Either 'r' or 'w'. This will be set to 'w' if we go through
-     // the create mechanism and 'r' when going through the regular
-     // open mechanism.
-     char mode; 
-
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
 
@@ -621,7 +571,6 @@ CLASS(ZipFileStream, FileLikeObject)
      uint32_t crc32;
      uint32_t compress_size;
      uint32_t compression;
-     char mode;
 
      // We calculate the SHA256 hash of each archive member
      EVP_MD_CTX digest;

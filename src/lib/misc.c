@@ -55,7 +55,7 @@ void init_luts() {
     illegal_filename_lut[(int)*i]=1;
 };
 
-char *escape_filename(char *filename) {
+char *escape_filename(const char *filename) {
   static char buffer[BUFF_SIZE];
 
   int i,j=0;
@@ -76,7 +76,7 @@ char *escape_filename(char *filename) {
   return buffer;
 };
 
-char *unescape_filename(char *filename) {
+char *unescape_filename(const char *filename) {
   static char buffer[BUFF_SIZE];
 
   int i,j=0;
@@ -126,7 +126,14 @@ int _mkdir(const char *path)
   return 1;
 }
 
-int startswith(char *haystack, char *needle) {
+int startswith(const char *haystack, char *needle) {
   if(strlen(haystack)<strlen(needle)) return 0;
   return !memcmp(haystack, ZSTRING_NO_NULL(needle));
+};
+
+int endswith(const char *haystack, char *needle) {
+  int haylen = strlen(haystack);
+  int needlelen = strlen(needle);
+  if(haylen<needlelen) return 0;
+  return !memcmp(haystack + haylen - needlelen, needle, needlelen);
 };
