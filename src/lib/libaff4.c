@@ -5,13 +5,7 @@
 
 ZipFile open_volume(char *urn, char mode) {
   ZipFile result=NULL;
-  char *filename;
-
-  if(!strstr(urn, ":")) {
-    filename = talloc_asprintf(NULL, "file://%s",urn);
-  } else {
-    filename = talloc_strdup(NULL, urn);
-  }
+  char *filename = normalise_url(urn);
 
   ClearError();
 
@@ -23,13 +17,15 @@ ZipFile open_volume(char *urn, char mode) {
   };
 
   // Nope - we need to make it. Try a directory volume first:
-  if(!result)
+  if(!result) {
     result =(ZipFile)CONSTRUCT(DirVolume, ZipFile, super.Con, NULL, filename, mode);
-
+    if(result) LogWarnings("Loaded directory volume %s", filename);
+  };
   // Nope - maybe a ZipFile?
-  if(!result)
+  if(!result) {
     result = CONSTRUCT(ZipFile, ZipFile, Con, NULL, filename, mode);
-
+    if(result) LogWarnings("Loaded zip volume %s", filename);
+  };
   PrintError();
 
   return result;
@@ -37,8 +33,11 @@ ZipFile open_volume(char *urn, char mode) {
 
 char **aff4_load(char **images) {
   char **i;
+  StringIO result;
 
-  StringIO result = CONSTRUCT(StringIO, StringIO, Con, NULL);
+  AFF2_Init();
+
+  result = CONSTRUCT(StringIO, StringIO, Con, NULL);
 
   for(i=images; *i; i++) {
     ZipFile tmp = open_volume(*i, 'r');
@@ -66,9 +65,12 @@ AFF4_HANDLE aff4_open(char **images) {
   // By default we try to open the stream named default
   char *stream="default";
 
+  AFF2_Init();
+
   for(i=images; *i; i++) {
     // We try to load each image as a URL in itself:
-    FileLikeObject fd= (FileLikeObject)CALL(oracle, open, NULL, *i, 'r');
+    FileLikeObject fd= (FileLikeObject)CALL(oracle, open, NULL, 
+					    normalise_url(*i), 'r');
     ZipFile tmp;
 
     // This is actually a stream they specified
@@ -187,4 +189,22 @@ struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn,
   talloc_free(result);
 
   return final_result;
+};
+
+/** Loads certificate cert and creates a new identify. All segments
+    written from now on will be signed using the identity.
+
+    Note that we use the oracle to load the certificate files into
+    memory for openssl - this allows the certs to be stored as URNs
+    anywhere (on http:// URIs or inside the volume itself).
+*/
+void add_identity(char *key_file, char *cert) {
+  Identity person;
+
+  person = CONSTRUCT(Identity, Identity, Con, NULL, cert, key_file, 'w');
+  
+  if(!person) {
+    PrintError();
+      exit(-1);
+  };
 };

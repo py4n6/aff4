@@ -435,8 +435,8 @@ END_CLASS
 
   // This is the largest file size which may be represented by a
   // regular zip file without using Zip64 extensions.
-  //#define ZIP64_LIMIT ((1<<31)-1)
-#define ZIP64_LIMIT 1
+#define ZIP64_LIMIT ((1LL << 31)-1)
+  //#define ZIP64_LIMIT 1
 
 /** These are ZipFile structures */
 struct EndCentralDirectory {

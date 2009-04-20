@@ -1,41 +1,9 @@
-#include <getopt.h>
 #include "zip.h"
 #include "aff4.h"
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
-
-void print_help(struct option *opts) {
-  struct option *i;
-
-  printf("The following options are supported\n");
-
-  for(i=opts; i->name; i++) {
-    char *description = (char *)i->name + strlen(i->name) +1;
-    char short_opt[BUFF_SIZE];
-    char *prefix="\t";
-
-    if(description[0]=='*') {
-      prefix="\n";
-      description++;
-    };
-
-    if(i->val) 
-      snprintf(short_opt, BUFF_SIZE, ", -%c", i->val);
-    else
-      short_opt[0]=0;
-
-    if(i->has_arg) {
-      printf("%s--%s%s [ARG]\t%s\n", prefix, i->name, short_opt, description);
-    } else {
-      printf("%s--%s%s\t\t%s\n", prefix,i->name, short_opt, description);
-    };
-  };
-};
+#include "common.h"
 
 void list_info() {
   char *result =  CALL(oracle, export_all, "");
@@ -44,28 +12,10 @@ void list_info() {
   talloc_free(result);
 };
 
-/** Loads certificate cert and creates a new identify. All segments
-    written from now on will be signed using the identity.
-
-    Note that we use the oracle to load the certificate files into
-    memory for openssl - this allows the certs to be stored as URNs
-    anywhere (on http:// URIs or inside the volume itself).
-*/
-void add_identity(char *key_file, char *cert) {
-  Identity person;
-
-  person = CONSTRUCT(Identity, Identity, Con, NULL, cert, key_file, 'w');
-  
-  if(!person) {
-    PrintError();
-      exit(-1);
-  };
-};
-
 ZipFile create_volume(char *driver) {
-  if(!strcmp(driver, "volume")) {
+  if(!strcmp(driver, AFF4_ZIP_VOLUME)) {
     return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  } else if(!strcmp(driver, "directory")) {
+  } else if(!strcmp(driver, AFF4_DIRECTORY_VOLUME)) {
     return (ZipFile)CALL(oracle, create, (AFFObject *)&__DirVolume);
   } else {
     RaiseError(ERuntimeError, "Unknown driver %s", driver);
@@ -486,7 +436,7 @@ int main(int argc, char **argv)
   char mode=0;
   char *output_file = NULL;
   char *stream_name = "default";
-  char *driver = "volume";
+  char *driver = AFF4_ZIP_VOLUME;
   char *chunks_per_segment = NULL;
   char *append = NULL;
   int verbose=0;

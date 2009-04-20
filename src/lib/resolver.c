@@ -12,7 +12,10 @@ struct dispatch_t {
 };
 
 static struct dispatch_t dispatch[] = {
-  { 0, AFF4_SEGMENT,                 (AFFObject)&__ZipFileStream },
+  // Must be first - fallback position
+  { 1, "file://",                 (AFFObject)&__FileBackedObject },
+
+  { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
   { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
   { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
@@ -20,7 +23,7 @@ static struct dispatch_t dispatch[] = {
   { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
   { 0, AFF4_ENCRYTED,             (AFFObject)&__Encrypted},
   { 0, AFF4_IDENTITY,             (AFFObject)&__Identity},
-  { 1, "file://",                 (AFFObject)&__FileBackedObject },
+
   // All handled by libcurl
   { 1, "http://",                 (AFFObject)&__HTTPObject },
   { 1, "https://",                (AFFObject)&__HTTPObject },
@@ -76,16 +79,13 @@ void AFF2_Init(void) {
   init_luts();
 
   // Make a global oracle
-  if(oracle) {
-    fprintf(stderr, "detroying the existing oracle\n");
-    talloc_free(oracle);
+  if(!oracle) {
+    // Create the oracle - it has a special add method which distributes
+    // all the adds to the other identities
+    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
+    oracle->del = oracle_del;
+    oracle->add = oracle_add;
   };
-
-  // Create the oracle - it has a special add method which distributes
-  // all the adds to the other identities
-  oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
-  oracle->del = oracle_del;
-  oracle->add = oracle_add;
 };
 
 
@@ -308,6 +308,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
   struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
   Cache tmp;
+  char buff[BUFF_SIZE];
 
   if(!urn) return NULL;
 
@@ -351,10 +352,12 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
   if(!dispatch_ptr) {
     if(stream_type) {
       RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn, stream_type);
+      return NULL;
     } else {
-      RaiseError(ERuntimeError, "Unable to open %s - protocol not supported?", urn);
+      // Maybe its a file reference? - thats our last fallback
+      // position
+      i=0;
     };
-    return NULL;
   };
   
   // A special constructor from a class reference
@@ -377,9 +380,11 @@ static void Resolver_return(Resolver self, AFFObject obj) {
   if(obj->mode == 'r') {
     CALL(self->cache, put, talloc_strdup(self, obj->urn),
 	 obj, sizeof(*obj));
-  } else {
+  } else if(obj->mode == 'w') {
     CALL(self->writers, put, talloc_strdup(self, obj->urn),
 	 obj, sizeof(*obj));
+  } else {
+    RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
 };
 

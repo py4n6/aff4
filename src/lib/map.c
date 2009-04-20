@@ -56,7 +56,9 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
 
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
+    PrintError();
     fd = (FileLikeObject)CALL(oracle, open, NULL, buff, 'r');
+    ClearError();
     if(fd) {
       char *map = talloc_strdup(self, CALL(fd,get_data));
       char *x=map, *y;
@@ -127,12 +129,25 @@ static void MapDriver_save_map(MapDriver self) {
   fd = CALL(zipfile, open_member, buff, 'w', NULL, 0, ZIP_DEFLATE);
   for(i=0;i<self->number_of_points;i++) {
     point = &self->points[i];
+    // See if we can reduce adjacent points
+    if(i!=0 && i!=self->number_of_points && 
+       !strcmp(point->target_urn,self->points[i-1].target_urn)) {
+      struct map_point *previous = &self->points[i-1];
+      uint64_t prediction = point->image_offset - previous->image_offset + 
+	previous->target_offset;
+      
+      // Dont write this point if its linearly related to previous point.
+      if(prediction == point->target_offset) continue;
+    };
+
     snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->target_offset, 
 	     point->image_offset, point->target_urn);
     CALL(fd, write, ZSTRING_NO_NULL(buff));
   };
 
   CALL(fd, close);
+
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 
 static void MapDriver_close(FileLikeObject self) {
@@ -143,6 +158,11 @@ static void MapDriver_close(FileLikeObject self) {
   if(properties) {
     ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn, 'w');
     char tmp[BUFF_SIZE];
+
+    if(!zipfile) {
+      talloc_free(properties);
+      return;
+    };
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", URNOF(self));
     CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),

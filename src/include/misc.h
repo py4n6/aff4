@@ -38,5 +38,6 @@ int endswith(const char *haystack, char *needle);
 /** Some helpful macros */
 #define READ_INT(fd, x)  CALL(fd, read, (char *)&x, sizeof(x))
 
+char *normalise_url(char *url);
 
 #endif

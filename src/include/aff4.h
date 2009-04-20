@@ -108,4 +108,15 @@ struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn,
 extern int talloc_free(void *ptr);
 #define aff4_free(x) talloc_free(x)
 
+
+
+/** Loads certificate cert and creates a new identify. All segments
+    written from now on will be signed using the identity.
+
+    Note that we use the oracle to load the certificate files into
+    memory for openssl - this allows the certs to be stored as URNs
+    anywhere (on http:// URIs or inside the volume itself).
+*/
+void add_identity(char *key_file, char *cert);
+
 #endif

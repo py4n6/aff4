@@ -357,8 +357,8 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   CALL(fd, read, compressed_chunk, compressed_length);
 
   // Done with parent and fd
-  CALL(oracle, cache_return, (AFFObject)parent);
   CALL(fd, close);
+  CALL(oracle, cache_return, (AFFObject)parent);
 
   if(this->compression == 8) {
     // Try to decompress it:

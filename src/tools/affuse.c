@@ -291,6 +291,7 @@ int main(int argc, char **argv)
 	 if(startswith(info.urn, *j)) {
 	   // We store the relative URN in the value member
 	   info.path_name = info.urn + strlen(*j)+1;
+	   break;
 	 } else {
 	   info.path_name = talloc_asprintf(NULL, "__URN__/%s", info.urn);
 	  };

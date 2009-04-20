@@ -23,9 +23,17 @@ itself.
     URN encoding.
 */
 static FileBackedObject FileBackedObject_Con(FileBackedObject self, 
-					     char *filename, char mode) {
+					     char *urn, char mode) {
   int flags;
   char *buffer;
+  char *filename;
+
+  if(!startswith(urn, "file://")) {
+    RaiseError(ERuntimeError,"You must have a fully qualified urn here, not '%s'", urn);
+    return NULL;
+  };
+
+  filename = urn + strlen("file://");
 
   if(mode == 'r') {
     flags = O_RDONLY | O_BINARY;
@@ -40,15 +48,15 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
   buffer = escape_filename(filename);
   self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
   if(self->fd<0){
-    RaiseError(EIOError, "Can't open %s (%s)", filename, strerror(errno));
+    RaiseError(EIOError, "Can't open %s (%s)", urn, strerror(errno));
     goto error;
   };
 
   // Work out what the file size is:
   self->super.size = lseek(self->fd, 0, SEEK_END);
 
-  // Set our urn
-  URNOF(self) = talloc_asprintf(self, "file://%s", filename);
+  // Set our urn - always fqn
+  URNOF(self) = talloc_strdup(self, urn);
 
   return self;
 
@@ -64,13 +72,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn, char 
   self->mode = mode;
 
   if(urn) {
-    // If the urn starts with file:// we open the filename, otherwise
-    // we try to open the actual file itself:
-    if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
-      self = (AFFObject)this->Con(this, urn + strlen("file://"), mode);
-    } else {
-      self = (AFFObject)this->Con(this, urn, mode);
-    };
+    self = (AFFObject)this->Con(this, urn, mode);
   } else {
     self = this->__super__->super.Con((AFFObject)this, urn, mode);
   };
@@ -160,24 +162,23 @@ static AFFObject FileBackedObject_finish(AFFObject self) {
   FileBackedObject this = (FileBackedObject)self;
   char *urn = self->urn;
  
-  if(!memcmp(urn, ZSTRING_NO_NULL("file://"))) {
-    return (AFFObject)this->Con(this, urn + strlen("file://"), 'w');
-  } else {
-    return (AFFObject)this->Con(this, urn, 'w');
-  };
+  return (AFFObject)this->Con(this, urn, 'w');
 };
 
 static char *FileLikeObject_get_data(FileLikeObject self) {
+  char *data;
+
   if(self->size > MAX_CACHED_FILESIZE)
     goto error;
 
   if(self->data) return self->data;
 
   CALL(self, seek, 0,0);
-  self->data = talloc_size(self, self->size+BUFF_SIZE);
-  memset(self->data, 0, self->size+BUFF_SIZE);
-  CALL(self, read, self->data, self->size);
-  
+  data = talloc_size(self, self->size+BUFF_SIZE);
+  memset(data, 0, self->size+BUFF_SIZE);
+  CALL(self, read, data, self->size);
+  self->data = data;
+
   return self->data;
 
  error:
@@ -311,6 +312,8 @@ static int find_cd(ZipFile self, FileLikeObject fd) {
 // positioned at the start of the extra field.
 static int parse_extra_field(ZipFile self, FileLikeObject fd,unsigned int length) {
   uint16_t type,rec_length;
+
+  if(length < 8) return 0;
 
   length -= CALL(fd, read, (char *)&type, sizeof(type));
   if(type != 1) goto error;
@@ -458,7 +461,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       {
 	struct tm x = {
 	  .tm_year = (cd_header.dosdate>>9) + 1980 - 1900,
-	  .tm_mon = (cd_header.dosdate>>5) & 0xF -1,
+	  .tm_mon = ((cd_header.dosdate>>5) & 0xF) -1,
 	  .tm_mday = cd_header.dosdate & 0x1F,
 	  .tm_hour = cd_header.dostime >> 11,
 	  .tm_min = (cd_header.dostime>>5) & 0x3F, 
@@ -470,8 +473,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	  CALL(oracle, set, filename, AFF4_TIMESTAMP, from_int(now));
       };
 
-      if(!parse_extra_field(self, fd, cd_header.extra_field_len))
-	goto error;
+      parse_extra_field(self, fd, cd_header.extra_field_len);
 
       CALL(oracle, set, filename, VOLATILE_NS "compression", 
 	   from_int(cd_header.compression_method));
@@ -1023,6 +1025,8 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   int result=0;
   FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'w');
 
+  if(!fd) return -1;
+
   // Update the crc:
   this->crc32 = crc32(this->crc32, 
 		      (unsigned char*)buffer,
@@ -1080,17 +1084,39 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
 			      unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
   int len;
-  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'r');
+  FileLikeObject fd;
 
   // We only read as much data as there is
   length = min(length, self->size - self->readptr);
 
-  /** Position our write pointer */
-  CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
-  len = CALL(fd, read, buffer, length);
-  self->readptr += len;
 
-  CALL(oracle, cache_return, (AFFObject)fd);
+  if(this->compression == 0) {
+    /** Position our write pointer */
+    fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'r');
+    CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
+    len = CALL(fd, read, buffer, length);
+    self->readptr += len;
+    CALL(oracle, cache_return, (AFFObject)fd);
+
+    // We cheat here and decompress the entire member, then copy whats
+    // needed out
+  } else if(this->compression == ZIP_DEFLATE) {
+    int offset;
+
+    if(!self->data) {
+      ZipFile container = (ZipFile)CALL(oracle, open, NULL, this->container_urn, 'r');
+      int length;
+      if(!container) return -1;
+
+      self->data = CALL(container, read_member, self, URNOF(self), &length);
+      self->size = length;
+      CALL(oracle, cache_return, (AFFObject)container);
+    };
+
+    offset = min(self->readptr, self->size);
+    len = max(self->readptr - offset, self->size);
+    memcpy(buffer, self->data + offset, len);
+  }
   return len;
 };
 

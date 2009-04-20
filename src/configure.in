@@ -135,12 +135,19 @@ AC_CHECK_FUNCS([SHA256_Init])           # try to figure out what it's called
 AC_CHECK_FUNCS([EVP_sha256],[evp_sha256=yes],[evp_sha256="no "])
 AC_CHECK_FUNCS([PEM_read_bio_RSA_PUBKEY])
 
+
+## Check for tsk
+AC_CHECK_LIB([tsk3], [tsk_fs_fls], have_sleuthkit=yes, have_sleuthkit=no)
+AC_CHECK_HEADERS([tsk3/libtsk.h])
+
 ## Conditionals for automake
 AM_CONDITIONAL(HAVE_LIBAFFLIB, test "$have_libafflib" = yes)
 AM_CONDITIONAL(HAVE_LIBEWF, test "$have_libewf" = yes)
 AM_CONDITIONAL(HAVE_WINDOWS, test "$have_windows" = yes)
 AM_CONDITIONAL(HAVE_LIBCURL, test "$have_libcurl" = yes)
 AM_CONDITIONAL(HAVE_OPENSSL, test "$have_openssl" = yes)
+AM_CONDITIONAL(HAVE_TSK, test "$have_sleuthkit" = yes)
+
 # defines and output
 AC_DEFINE([__DEBUG__], [], [Debuging enabled])
 

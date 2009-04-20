@@ -137,3 +137,16 @@ int endswith(const char *haystack, char *needle) {
   if(haylen<needlelen) return 0;
   return !memcmp(haystack + haylen - needlelen, needle, needlelen);
 };
+
+// Turns url into a fully qualified name 
+char *normalise_url(char *url) {
+  static char normal_url[BUFF_SIZE];
+
+  if(strstr(url, "://")) {
+    return url;
+  } else {
+    snprintf(normal_url, BUFF_SIZE, "file://%s", url);
+    return normal_url;
+  };
+
+};
