@@ -31,6 +31,8 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
 };
 
 static AFFObject Link_finish(AFFObject self) {
+
+  self->mode = 'w';
   return self;
 };
 

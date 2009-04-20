@@ -101,6 +101,8 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
 static AFFObject Image_finish(AFFObject self) {
   Image this = (Image)self;
 
+  self->mode = 'w';
+
   // Make sure the oracle knows we are an image
   CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE);
   CALL(oracle, set, self->urn, AFF4_INTERFACE, AFF4_STREAM);

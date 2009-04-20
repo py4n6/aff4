@@ -198,11 +198,14 @@ struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn,
     memory for openssl - this allows the certs to be stored as URNs
     anywhere (on http:// URIs or inside the volume itself).
 */
-void add_identity(char *key_file, char *cert) {
+void add_identity(char *key_file, char *cert_file) {
   Identity person;
+  char *key = talloc_strdup(NULL, normalise_url(key_file));
+  char *cert = talloc_strdup(key, normalise_url(cert_file));
 
-  person = CONSTRUCT(Identity, Identity, Con, NULL, cert, key_file, 'w');
+  person = CONSTRUCT(Identity, Identity, Con, NULL, cert, key, 'w');
   
+  talloc_free(key);
   if(!person) {
     PrintError();
       exit(-1);

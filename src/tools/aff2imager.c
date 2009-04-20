@@ -102,10 +102,6 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   zipfile = create_volume(driver);
   if(!zipfile) goto error;
 
-  if(!strstr(output_file, ":")) {
-    output = talloc_asprintf(zipfile, "file://%s", output_file);
-  };
-
   CALL((AFFObject)zipfile, set_property, AFF4_STORED, output);
   if(!CALL((AFFObject)zipfile, finish))
     goto error;

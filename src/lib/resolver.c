@@ -354,9 +354,8 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
       RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn, stream_type);
       return NULL;
     } else {
-      // Maybe its a file reference? - thats our last fallback
-      // position
-      i=0;
+      RaiseError(ERuntimeError, "Unable to open %s", urn);
+      return NULL;
     };
   };
   
