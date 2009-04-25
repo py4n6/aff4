@@ -112,9 +112,29 @@ if test $have_libewf = yes; then
 fi
 
 #curl support
-AC_CHECK_HEADER(curl/curl.h, [
-		AC_CHECK_LIB([libcurl], [curl_easy_setopt], have_libcurl=yes, have_libcurl=no)
-		], have_libcurl=no)
+AC_ARG_ENABLE(curl,
+	[  --disable-curl          Do not use libcurl even if its installed ],
+	[ if test "x$enableval" = "xyes"; then
+              have_libcurl=yes
+	  elif test "x$enableval" = "xno"; then
+              have_libcurl=disabled
+	  else
+              exit -1
+          fi
+	],
+	[ have_libcurl=yes ]
+     )
+
+if test "x$have_libcurl" = "xyes"; then
+      AC_CHECK_HEADER(curl/curl.h, [
+	AC_CHECK_LIB([curl], [curl_easy_setopt], [
+			have_libcurl=yes
+	], have_libcurl=no)
+	], have_libcurl=no)
+
+   AC_DEFINE(HAVE_LIBCURL, 1, [ Do we support curl ])
+fi
+
 
 ################################################################
 ################################################################

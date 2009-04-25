@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include "config.h"
 #include "aff4.h"
 #include "misc.h"
 #include "stringio.h"
