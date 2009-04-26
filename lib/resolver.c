@@ -152,7 +152,14 @@ static Cache Cache_put(Cache self, void *key, void *data, int data_len) {
   // we are about to add.
   while(self->max_cache_size > 0 && self->cache_size >= self->max_cache_size) {
     list_for_each_entry(i, &self->cache_list, cache_list) {
-      talloc_free(i);
+      // Try to free the data object and if that succeeds we free the
+      // Cache itself. This allows the data to set a destructor which
+      // blocks this free. Sometimes its crucial to ensure that a
+      // cached object does not get expired suddenly when its not
+      // ready.
+      if(talloc_free(i->data) != -1) {
+	talloc_free(i);
+      };
       break;
     };
   };

@@ -102,9 +102,6 @@ END_CLASS
 CLASS(AFFObject, Object)
      char *urn;
 
-     // This is the type of this object
-     char *type;
-
      // Is this object a reader or a writer?
      char mode;
      
@@ -337,7 +334,6 @@ CLASS(Image, FileLikeObject)
 
      // An array of indexes into the segment where chunks are stored
      int32_t *chunk_indexes;
-     char *parent_urn;
 
      // This is the compression type
      int compression;
@@ -593,7 +589,7 @@ END_CLASS
 CLASS(DirVolume, ZipFile)
 END_CLASS
 
-void dump_stream_properties(FileLikeObject self, char *volume);
+void dump_stream_properties(FileLikeObject self);
 
 //Some useful utilities
 ZipFile open_volume(char *urn, char mode);

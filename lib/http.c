@@ -135,6 +135,16 @@ static AFFObject HTTPObject_AFFObject_Con(AFFObject self, char *uri, char mode) 
   return (AFFObject)CALL(this, Con, uri);
 };
 
+static int HTTPObject_destructor(void *self) {
+  HTTPObject this = (HTTPObject)self;
+
+  // We dont want to be freed in the middle of an upload transfer.
+  if(this->send_handle)
+    return -1;
+
+  return 0;
+};
+
 
 static HTTPObject HTTPObject_Con(HTTPObject self,
 				 char *url) {
@@ -164,6 +174,8 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
     char buffer[10];
     CALL((FileLikeObject)self, read, buffer, 1);
   };
+
+  talloc_set_destructor(self, HTTPObject_destructor);
 
   return self;
  error:

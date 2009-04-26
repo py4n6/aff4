@@ -198,8 +198,8 @@ void test_image_create() {
   // to it:
   link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
   // The link will be stored in this zipfile
-  CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
-  CALL(link, link, oracle, image->parent_urn, URNOF(image), "default");
+  CALL((AFFObject)link, set_property, "aff2:stored", zipfile_urn);
+  CALL(link, link, oracle, zipfile_urn, URNOF(image), "default");
   CALL((AFFObject)link, finish);
   CALL(oracle, cache_return, (AFFObject)link);
 
@@ -299,8 +299,8 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   // to it:
   link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
   // The link will be stored in this zipfile
-  CALL((AFFObject)link, set_property, "aff2:stored", image->parent_urn);
-  CALL(link, link, oracle, image->parent_urn, URNOF(image), friendly_name);
+  CALL((AFFObject)link, set_property, "aff2:stored", volume);
+  CALL(link, link, oracle, volume, URNOF(image), friendly_name);
   CALL((AFFObject)link, finish);
   CALL(oracle, cache_return, (AFFObject)link);
   
