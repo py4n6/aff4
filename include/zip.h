@@ -180,6 +180,7 @@ CLASS(HTTPObject, FileLikeObject)
 
      CURL *send_handle;
      StringIO send_buffer;
+     int send_buffer_offset;
 
      CURLM *multi_handle;
 

@@ -4,7 +4,7 @@ AC_INIT()
 # Store the configuration in this header
 AC_CONFIG_HEADER([include/config.h])
 AC_CONFIG_AUX_DIR(config)
-AM_INIT_AUTOMAKE(aff4, 0.01)
+AM_INIT_AUTOMAKE(libaff4, 0.01)
 
 # check standard stuff
 AC_PROG_LIBTOOL
@@ -216,7 +216,7 @@ AC_OUTPUT([
 ## Tell the use what we found:
 AC_MSG_NOTICE([])
 AC_MSG_NOTICE([*****************************************])
-AC_MSG_NOTICE([FIFLib ${PACKAGE} ${VERSION} configuration])
+AC_MSG_NOTICE([${PACKAGE} ${VERSION} configuration])
 AC_MSG_NOTICE([EWF Support:             $have_libewf ])
 AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
 AC_MSG_NOTICE([CURL Support:            $have_libcurl ])
