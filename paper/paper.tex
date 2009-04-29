@@ -979,12 +979,11 @@ client is interested in. This allows efficient network transport as we
 do not need to download unnecessary data, we just request exactly the
 data the client application requires.
 
-Currently the HTTP Stream is read only, but in future we anticipate
-write support to be implemented, for example, using the WebDav
-extensions to HTTP\cite{webdav-rfc}. The HTTP stream also supports the
-File Transfer Protocol (FTP) and HTTPS (Secure Sockets Layer---SSL)
-protocols transparently. This support is provided automatically by the
-curl library.
+Our implementation also enables direct writing to a HTTP URL using the
+WebDav extensions to HTTP\cite{webdav-rfc}. The HTTP stream also
+supports the File Transfer Protocol (FTP) and HTTPS (Secure Sockets
+Layer---SSL) protocols transparently. This support is provided
+automatically by the curl library.
 
 \subsection{Encrypted Streams}
 \label{crypted_stream}
@@ -1106,8 +1105,80 @@ attributes.
 
 \section{Usage Scenarios}
 In this section we describe how AFF4 may be used in various
-situations. Many of those can be solved using other forensic file
-formats, but often in a more awkward way.
+situations. Since the AFF4 framework implements a distributed evidence
+management system, we demonstrate its use by a fictitious
+multinational corporation with offices in Los Angeles and New
+York. Each office has its own computer forensics lab and is connected
+via a WAN.
+
+\subsection{Using distributed evidence}
+An investigation is conducted by the New York team. The case relates
+to a hard disk image stream stored inside a volume, in turn stored on
+the NY evidence server at URL http://ny.wan/evidence1.aff4 . The team
+requires an analyst (Bob) in LA to assist with their analysis. The LA
+analyst types\footnote{fls is the file listing command which is part
+of the Sleuthkit}:
+
+\begin{lstlisting}
+fls -i aff4 "NY case 1"
+\end{lstlisting}
+This command causes the local AFF4 implementation to:
+\begin{enumerate}
+\item Contact the universal resolver asking where \emph{``NY case 1''} is
+stored.
+\item The universal resolver replies that it is a symbolic link to a
+stream called \emph{``urn:aff4:1234''} stored within the volume
+\emph{``urn:aff4:9876''}. Further queries reveal that the volume is
+located at \emph{http://ny.wan/evidence1.aff4}.
+\item The local AFF4 library then directly accesses the volume at the
+given URL. Note that the entire volume is not copied, instead specific
+chunks are retrieved on an as needed basis.
+\end{enumerate}
+
+The overall effect is that the user in LA is able to directly access
+the disk image specified using a friendly name, and stored at a remote
+location easily.
+
+\subsection{Load redistribution}
+In the previous scenario, Bob becomes involved in this case, and
+wishes to download the entire image locally to
+\emph{http://la.wan/evidence1.aff4}. The Universal Resolver now has
+two possible locations for the same volume URN, since there are two
+copies in existence. Based on pre-determined distance metrics, the
+resolver directs requests from Bob to the LA copy, while Alice is
+redirected to the NY copy. This load redistribution can be used for
+optimal management of evidence storage in a transparent way. Analyst
+are not aware of where the evidence is physically stored, and it
+appears as though all evidence is always available.
+
+\subsection{Remote imaging}
+The NY IT security team has just responded to an incident on one of
+their servers. Alice, the responding officer, wishes to image the
+server. She types:
+\begin{lstlisting}
+aff4imager -i -o http://ny.wan/evidence2.aff4 \
+	-k http://ny.wan/alice.key \
+	-c http://ny.wan/alice.crt /dev/sda
+\end{lstlisting}
+
+This command requests an image be created directly on the evidence
+server (it will be uploaded using webdav). The image is signed using
+Alice's certificate and key (which might need to be unlocked). Note
+that Alice does not need any hardware to obtain the image as it is
+done over the network - she therefore can respond rapidly.
+
+Bob is an analyst in LA which specializes in filesystem analysis. As
+soon as the acquisition is complete, the image is available for Bob to
+examine. Bob does not have permissions to create volumes on the NY
+evidence server, so he types:
+\begin{lstlisting}
+fsbuilder -o http://la.wan/evidence3.aff4 \
+	http://ny.wan/evidence2.aff4
+\end{lstlisting}
+This creates a new volume on the LA server which contains a set of Map
+streams referring to the original evidence. The new volume is near
+zero cost but refers to the original image (which is still stored in
+NY).
 
 \subsection{Rapidly converting a set of DD images}
 Many hardware devices are available to acquire hard disks in the
@@ -1242,43 +1313,49 @@ see. This is a much more efficient way to allow remote analysts to
 collaborate.
 
 \subsection{Logical File Acquisition}
-Sometimes in a forensic investigation it is impossible to take a true
-forensic image of the underlying disk, and we must resort to acquiring
-discrete files instead. Such a case might occur for example, when
-investigating an incident on a very large network storage system or a
-critical system which can not be brought down for the duration of the
-image acquisition.
+Alice is responding to an incident on a critical corporate
+server. Since the system can not be taken down for forensic imaging,
+Alice must resort to acquiring discrete files instead. Alice is unable
+to install and run any acquisition software on the server due to
+policy restrictions.
 
-It is still advantageous in this case to bring these files into the
+It is still advantageous in this case to bring discrete files into the
 AFF4 evidence universe by acquiring each evidence file using a unique
 URN. As explained in \ref{definitions}, segments are AFF4 stream
 objects which are implemented by storing the data in Zip archive
 members. It follows, therefore, that a regular zip file containing
-files is also a valid AFF4 volume providing the segment names are
-globally unique.
+files is also a valid AFF4 volume.
 
 So a logical image of files, can be created by any regular Zip
 compression program in the field. Once brought into the lab these
-volumes can be given a volume URN and imported into the Universal
-Resolver to provide access to all the files within the archive.
+volumes are given a volume URN and imported into the Universal
+Resolver to provide access to all the files within the archive. At
+this stage digital signatures can also be added for each logical file.
+
+Alice uses windows explorer to obtain a Zip file of the files of
+interest. After taking the file back to the lab, she then signs the
+files, and adds a volume URN, making the Zip file a fully compliant
+AFF4 volume.
 
 \section{Conclusion and Future Work}
 
-This paper describes a significant enhancement to Garfinkel's Advanced
-Forensic Format (AFF1). The new version, AFF4, offers significant new
-features including the ability to store multiple kinds of evidence
+This paper describes a significant enhancement to the Advanced
+Forensic Format (AFF1). AFF4, extends beyond a file format to describe
+a universal framework for evidence management, offering significant
+new features such as the ability to store multiple kinds of evidence
 from multiple devices in a single archive, and an improved separation
 between the underlying storage mechanism and forensic software that
-makes use of evidence stored using AFF. This improved system will
-allow a single archive of evidence to be used in a plethora of
-modalities, including in a single evidence file, multiple evidence
-files stored on multiple workstations, and evidence stored in a
-relational database or object management system---all without making
-changes to forensic software.
+makes use of evidence stored using AFF. This improved system allows a
+single archive of evidence to be used in a plethora of modalities,
+including in a single evidence file, multiple evidence files stored on
+multiple workstations, and evidence stored in a relational database or
+object management system---all without making changes to forensic
+software.
 
-We have an initial implementation of AFF4 working in the lab and plan
-to integrate it into Garfinkel's. After integration and testing, we
-plan to release this system as freely usable open source software.
+We have developed an open source reference implementation, but the
+AFF4 framework is simple enough for competing implementations to be
+implemented commercially. We hope this simplicity enhances AFF4's
+acceptance and adoption as a standard evidence management platform.
 
 \bibliographystyle{IEEEtran}
 \bibliography{IEEEabrv,paper}

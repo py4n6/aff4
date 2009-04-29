@@ -682,6 +682,8 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 					       URNOF(self), 
 					       AFF4_DIRECTORY_OFFSET));
     char *escaped_filename;
+    time_t epoch_time = time(NULL);
+    struct tm *now = localtime(&epoch_time);
 
     // Make sure the filename we write on the archive is relative, and
     // the filename we use with the resolver is fully qualified
@@ -721,6 +723,10 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     header.compression_method = compression;
     header.file_name_length = strlen(escaped_filename);
     header.extra_field_len = extra_field_len;
+    header.lastmoddate = (now->tm_year + 1900 - 1980) << 9 | 
+      (now->tm_mon + 1) << 5 | now->tm_mday;
+    header.lastmodtime = now->tm_hour << 11 | now->tm_min << 5 | 
+      now->tm_sec / 2;
 
     CALL(fd, write,(char *)&header, sizeof(header));
     CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));

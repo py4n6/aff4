@@ -7,7 +7,7 @@
 #include "config.h"
 #include "common.h"
 #include <tsk3/libtsk.h>
-#include <aff4/aff4.h>
+#include "aff4.h"
 #include "talloc.h"
 #include "zip.h"
 
