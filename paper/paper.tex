@@ -64,8 +64,7 @@
 \begin{document}
 \title{Extending the Advanced Forensic Format to accommodate Multiple
   Data Sources, Logical Evidence, Arbitrary Information and Forensic Workflow}
-\author{Blinded for review}
-%\author{M. I. Cohen\footnote{scudette@gmail.com}, Simson Garfinkel, and Bradley Schatz}
+\author{M. I. Cohen\footnote{scudette@gmail.com}, Simson Garfinkel, and Bradley Schatz}
 %\author{M. I. Cohen}
 %\address{M. I. Cohen is a Data specialist with the Australian Federal Police, Brisbane, Australia}
 %\baselineskip=20pt %Sets line spacing to 1 unit
@@ -78,29 +77,41 @@ Forensic analysis requires the acquisition and management of many
 different types of evidence, including individual disk drives, RAID
 sets, network packets, memory images, and extracted files. Often the
 same evidence is reviewed by several different tools or examiners in
-different locations. We propose a backwards-compatible evolutionary
-redesign of the Advanced Forensic Format---an open, extensible file
-format for storing and sharing of evidence, arbitrary case related
-information and analysis results among different tools. The new
-specification was designed to be simple to implement, allowing the use
-of the well supported Zip File format specifications for bit level
-file access.
+different locations. We propose a backwards-compatible redesign of the
+Advanced Forensic Format---an open, extensible file format for storing
+and sharing of evidence, arbitrary case related information and
+analysis results among different tools. The new specification, termed
+AFF4, was designed to be simple to implement, allowing the use of the
+well supported Zip File format specifications for bit level file
+access.
 \end{abstract}
 
 \section{Introduction}
-Unlike other kinds of evidence, digital evidence can be instantly lost
-or corrupted if technical measures are not immediately taken to
-preserve its existence and integrity. As a result, preserving digital
-evidence is an important part of most digital
-investigations\cite{carrier:event-based}.
+Storing and managing digital evidence is becoming increasingly more
+difficult, as the volume and size of digital evidence increases. The
+type of what consitutes evidence has also evolved to include data
+other than disk images, such as memory images, network images and
+regular files. Preserving digital evidence is an important part of
+most digital investigations\cite{carrier:event-based}, and managing
+the evidence in a distributed organization is now emerging as a
+critical requirement.
+
+This paper presents a framework for managing and storing digital
+evidence. We first examine existing evidence management file formats
+and outline their strengths and limitations. We then explain how the
+proposed Advanced Forensics Format (AFF4) framework extends these
+efforts into a universal evidence management system. The detailed
+description of the AFF4 proposal is then followed by concerete real
+world use cases.
 
 \subsection{Prior Work}
 In recent years there has been a steady and growing interest in the
-actual file formats and containers used to store this digital
+actual file formats and containers used to store digital
 evidence. Early practitioners created exact bit-for-bit copies
-(``mirror disks'') or employed proprietary software systems
-(e.g. \cite{safeback,ilook,encase}) for making and authenticating
-``images'' of digital evidence. PyFlag\cite{pyflag} introduced a
+(commonly referred to as ``dd images''). More recently, proprietary
+software systems for making and authenticating ``images'' of digital
+evidence are commonly used
+(e.g. \cite{safeback,ilook,encase}). PyFlag\cite{pyflag} introduced a
 ``seekable gzip'' format that allowed disk images to be stored in a
 form that was compressed but allowed random-access to evidence data
 necessary for forensic analysis. The \emph{sgzip} format does not
@@ -108,106 +119,124 @@ store any metadata at all.
 
 The Advanced Forensic Format (AFF) expanded on this idea with a
 forensic file format that allowed both data and arbitrary metadata to
-be stored in a single digital archive\cite{garfinkel:aff}. The EWF
-file format also provides for a small number of predefined metadata
-fields to be stored within the file format\cite{libewf}.
+be stored in a single digital archive\cite{garfinkel:aff}. 
 
-Both of these approaches are limited in their expressiveness, by
-nature of their (property, value) data model. The subject of the
-properties is implicitly the single image contained within the
-evidence container. Clearly an implicit subject metadata model is
-inadequate for storing and managing multiple evidence sources
-simultaneously.
+The Eye Witness Forensic (EWF) file format was originally developed
+for Encase\cite{encase}, but then adopted by other vendors
+\cite{libewf}. The EWF file format also compresses the image into 32kb
+chunks which are stored back to back in groupings inside the file. The
+format contains multiple tables containing relative indexes to these
+compressed chunks which are also stored within the volume. EWF volumes
+have a maximum size of 2Gb and therefore usually split an image across
+many volumes. EWF provides for a small number of predefined metadata
+fields to be stored within the file format.
 
-The Sealed Digital Evidence Bags architecture of Schatz proposed an
-approach to digital evidence containers that facilitated composition
-of evidence and arbitrary evidence related information, through a
-simple data model and globally unique referencing
-scheme\cite{schatz:sdeb}. 
+Both the AFF and EWF file formats are designed to store a single
+image, and any metadata implicitely refers to that image. Therefore,
+these formats in themselves have a limited metadata model which is
+unable to exist outside the context of the image itself.
 
-Recently the open source AFF implementation library (AFFLIB) was
-expanded to support both encryption and digital signatures of digital
-evidence\cite{garfinkel:affcrypto}. Clearly, the implementation of
-encryption and authentication is critical for forensic file formats.
+%Both Of These Approaches Are Limited In Their Expressiveness, By
+%Nature Of Their (Property, Value) Data Model. The Subject Of The
+%Properties Is Implicitly The Single Image Contained Within The
+%Evidence Container. Clearly An Implicit Subject Metadata Model Is
+%Inadequate For Storing And Managing Multiple Evidence Sources
+%Simultaneously.
+
+Schatz proposed a Sealed Digital Evidence Bags architecture,
+facilitating composition of evidence and arbitrary evidence related
+information, through a simple data model and globally unique
+referencing scheme\cite{schatz:sdeb}.
+
+%Recently the open source AFF implementation library (AFFLIB) was
+%expanded to support both encryption and digital signatures of digital
+%evidence\cite{garfinkel:affcrypto}. Clearly, the implementation of
+%encryption and authentication is critical for forensic file formats.
 
 \subsection{This paper}
-The AFF4 metadata model described in this work, is based on (subject,
-property, value) statements. An explicitly defined subject (identified
-by an AFF4 URN) allows one to not only associate traditional EWF style
-metadata with a contained image, but to also define new information
-entities representing both real world and virtual entities related to
-the matter. For example, an AFF4 compliant hard disk acquisition tool
-should, in addition to storing an image, store entities representing
-and describing the tool itself, the operator of the tool, the user
-supplied parameters supplied to the tool, and the drive being imaged.
+The AFF4 metadata model described in this work, goes beyond merely
+specifying metadata as an addition to the forensic evidence
+itself. Metadata forms an essential part of the file format, with the
+same metadata system storing both essential information required to
+read the image itself, as well as non-essential metadata. For example,
+an AFF4 compliant hard disk acquisition tool should, in addition to
+storing an image, store entities representing and describing the tool
+itself, the operator of the tool, the user supplied parameters
+supplied to the tool, and the drive being imaged.
 
-An important advance of this work is the introduction of storage transformation
-functions to the forensic storage container. Prior works simply focused
-on forensically sound storage of bitstreams, leaving the necessary activities
-of translating low level storage into higher level abstractions at the 
-aggregate block (ie. RAID), volume, and filesystem layers in the domain of 
-analysis tools, as transiently constructed artifacts. AFF4, through its introduction 
-of Map Streams, enables artefacts at all these layers to be stored at zero cost within
-the forensic container, which is an important enabler for interoperable 
-forensic tools.
+An important advance of this work is the introduction of storage
+transformation functions to the forensic storage container. Prior
+works simply focused on forensically sound storage of bitstreams,
+leaving the necessary activities of translating low level storage into
+higher level abstractions at the aggregate block (ie. RAID), volume,
+and filesystem layers in the domain of analysis tools, as transiently
+constructed artifacts. In contrast AFF4 has mechanisms for describing
+transformation in a flexible and concise way, allowing users to view
+multiple transformations of the same data with virtually zero storage
+cost. This mechanism is an important enabler for interoperable
+forensic tools. For example, carved files may be described in terms of
+their block allocation sequences from an image, rather than requiring
+the carved file to be copied again.
 
-This paper extends the previous work by adapting AFF to the multiple
+This paper extends previous work on the Advanced Forensic Format (AFF)
+by taking many of the concepts developed and designing a new
+specification and toolset. The AFF4 format is a complete redesign of
+the architecture. The new architecture is capable of storing multiple
 heterogeneous data types that might arise in a modern digital
 investigation, including data from multiple data storage devices, new
 data types (including network packets and memory images), extracted
-logical evidence, and forensic workflow. We do this in a manner that
-is at once upwards compatible with AFF while adopting the AFF
-bit-level specification so that AFF files can be processed using
-standard non-forensic tools. We call the new system AFF4, and use the
-phrase AFF1 to refer to the legacy system developed by
-Garfinkel.\footnote{Although Garfinkel never changed the AFF bit-level
-specification, Garfinkel released AFFLIB implementations with major
-version numbers 1, 2 and 3. We therefore call our system AFF4 to avoid
-confusion.}
+logical evidence, and forensic workflow. The AFF4 format extends to
+become a Global Distributed Evidence Management system, while
+maintaing compatibility with the old AFF file format.
 
-\begin{figure}
-\fbox{
-\begin{minipage}{.95\linewidth}
-\begin{itemize}
-\item The ability to store evidence from one or more physical
-  devices.
-\item Schema allowing evidence files to contain memory
-  images, network packet intercepts, Netflow data, and extracted
-  files.
+We call the new system AFF4, and use the phrase AFF1 to refer to the
+legacy system developed by Garfinkel et al.\footnote{Although Garfinkel
+never changed the AFF bit-level specification, Garfinkel released
+AFFLIB implementations with major version numbers 1, 2 and 3. We
+therefore call our system AFF4 to avoid confusion.}
 
-\item Direct encoding of arbitrary mapping transformations of one or
-more sources to allow multiple logical views. This allows 
-RAID volumes to be automatically reassembled from evidence files made
-of the physical RAID devices. Maps can be created using Sleuthkit and
-stored in the evidence file, thereafter allowing arbitrary programs to directly
-read individual files stored in a disk image.
+%\begin{figure}
+%\fbox{
+%\begin{minipage}{.95\linewidth}
+%\begin{itemize}
+%\item The ability to store evidence from one or more physical
+%  devices.
+%\item Schema allowing evidence files to contain memory
+%  images, network packet intercepts, Netflow data, and extracted
+%  files.
 
-\item A revised compression system that allows individual chunks
-  within a 16MB segment to be decompressed without decompressing the
-  entire segment.
+%\item Direct encoding of arbitrary mapping transformations of one or
+%more sources to allow multiple logical views. This allows 
+%RAID volumes to be automatically reassembled from evidence files made
+%of the physical RAID devices. Maps can be created using Sleuthkit and
+%stored in the evidence file, thereafter allowing arbitrary programs to directly
+%read individual files stored in a disk image.
 
-\item Support for Global Distributed Evidence Management.
-\end{itemize}
-\end{minipage}}
-\caption{Specific design goals for the next generation forensic file
-  format.}
-\end{figure}
+%\item A revised compression system that allows individual chunks
+%  within a 16MB segment to be decompressed without decompressing the
+%  entire segment.
+
+%\item Support for Global Distributed Evidence Management.
+%\end{itemize}
+%\end{minipage}}
+%\caption{Specific design goals for the next generation forensic file
+%  format.}
+%\end{figure}
+
 \section{The Need for an Improved Forensic Format}
 
 AFF1's flexibility came from a data model of forensic data and metadata
 stored as arbitrary name/value pairs called \emph{segments}. For
 example, the first 16MB of a disk image is stored in a segment called
 \texttt{page0}, the second 16MB in a segment called \texttt{page1},
-\emph{etc.} Because of this flexibility, it was relatively easy for
-Garfinkel to extend AFF1 to support encryption, digital signatures, and
-the storage of new kinds of metadata such as chain-of-custody
-information\cite{garfinkel:affcrypto}. 
+\emph{etc.} Because of this flexibility, it was relatively easy 
+to extend AFF1 to support encryption, digital signatures, and the
+storage of new kinds of metadata such as chain-of-custody
+information\cite{garfinkel:affcrypto}.
 
 \subsection{AFF Limitations}
-After imaging literally thousands of devices using Garfinkel's AFF1
-tools and adding support for AFF1 to numerous open source programs, we
-observed numerous problems in the underlying standard
-and Garfinkel's AFFLIB implementation:
+We observed a number of practical problems in the underlying AFF1
+standard and Garfinkel's AFFLIB implementation:
 
 \begin{itemize}
 \item While AFF1's design stores a single disk image in each evidence
@@ -221,6 +250,11 @@ and Garfinkel's AFFLIB implementation:
 
 \item AFF1 has no provision for storing memory images or intercepted
   network packets.
+
+\item AFF1 (and the EWF format) are unable to recover from loss or
+  corruption. Due to the specialised nature of these formats,
+  specialised recovery software must be written to recover from
+  corruptions.
 
 \item AFF1 has no provisions for storing extracted files that is
   analogous to the EnCase ``Logical Evidence File'' (L01) format, or
@@ -239,10 +273,13 @@ and Garfinkel's AFFLIB implementation:
   the end of AFF files, Garfinkel never implemented this directory in
   the publicly released AFF1 implementation, AFFLIB. As a result,
   every header of every segment in an AFF file needs to be read when a
-  file is opened. In practice this can take 10--30 seconds the first
-  time a large AFF file is opened. (Once the file is opened, the
-  sectors corresponding to the segment headers are stored in the
-  computer's disk cache.)
+  file is opened. In practice this can take up to 10--30 seconds the
+  first time a large AFF file is opened. 
+
+%(Once the file is opened, the
+%  sectors corresponding to the segment headers are stored in the
+%  computer's disk cache.)
+
 
 \item AFF1's bit-level specification is essentially a simple container
   file specification. Given that there are other container file
@@ -253,24 +290,25 @@ and Garfinkel's AFFLIB implementation:
 \end{itemize}
 
 \section{Global Distributed Evidence Management}
-While Garfinkel designed AFF for use on a single machine that could
-both image evidence and perform analysis, the main use of AFF in
-practice has been in distributed environments in which imaging and
-analysis takes place in multiple locations and is performed by
-multiple individuals. This is a state of affairs which mirrors common
-practice in the field. 
+While AFF1 was designed for use on a single machine that could both
+image evidence and perform analysis, many modern practitioners work in
+distributed environments in which imaging and analysis takes place in
+multiple locations and is performed by multiple individuals. 
 
-Global distributed evidence management requires
-more than simply tracking the movement of disk images: it requires
-approaches for sharing evidence to multiple disconnected
-evidence, allowing offline work, and then seamlessly recombining the
-work products of the analysts in a third security domain.
+%This is a
+%state of affairs which mirrors common practice in the field.
+
+Global distributed evidence management requires more than simply
+tracking the movement of disk images: it requires approaches for
+sharing evidence to multiple disconnected evidence, allowing offline
+work, and then seamlessly recombining the work products of the
+analysts in a third security domain.
 
 Managing evidence in a globally distributed system requires the use of
-globally unique identifiers. AFF1 assigns
-each piece of evidence a unique 128-bit identifier called a GID but did
-not make it clear when this identifier should be changed and when it
-should remain the same. 
+globally unique identifiers to ensure no name collisions can occur
+with disconnected systems. AFF1 assigns each piece of evidence a
+unique 128-bit identifier called a GID but did not make it clear when
+this identifier should be changed and when it should remain the same.
 
 Consider the typical usage scenario depicted in Figure \ref{usage}, of
 a volume containing a disk image. This volume is distributed to two
@@ -279,10 +317,10 @@ individual files, while Bob may correlate information in the evidence
 file with other data that is available on departmental
 servers. Although in some environments Alice and Bob may be able to
 work on a shared file that is located on a server, in other
-environments there will not be sufficient bandwidth or
-connectivity. Instead, each analyst will be required to store the
-information in their own evidence file; these files will then be
-recombined at a later point in time.
+environments there will not be sufficient connectivity. Instead, each
+analyst will be required to store the information in their own
+evidence file; these files will then be recombined at a later point in
+time.
 
 In this case they can each create a new volume which extends to
 original volume and save their analysis on this new volume. Now they
@@ -324,20 +362,17 @@ at a time. This allows us to extend evidence collection and management
 to a truely universal scale - allowing creation and management of a
 large corpus.
 
-We have also adopted AFFLIB to implement the new schema and file
-format, which will allow existing AFF-aware programs to access images
-written in either the old or the new format without modification. We
-are extending the AFFLIB API to support the new information model.
-
-We call the result of our work effort AFF4.
+We have also released a library and toolset, \emph{LIBAFF4}
+implementing the new schema and file format. This new library provides
+legacy support for existing AFF1 volumes.
 
 \section{Introducing AFF4}
 
-This section discusses the AFF4 terminology. The AFF4 design is object
-oriented, in that a few generic objects are presented with externaly
-accessible behaviour. We discuss a number of implementations of these
-high level concepts and show how these can be put together in common
-usage cases.
+This section discusses the AFF4 terminology and architecture. The AFF4
+design is object oriented, in that a few generic objects are presented
+with externaly accessible behaviour. We discuss a number of
+implementations of these high level concepts and show how these can be
+put together in common usage cases.
 
 \begin{itemize}
 \item \emph{An AFF Object} is the basic building block of our
@@ -358,39 +393,39 @@ URN. We discuss two volume implementations below, namely the {\em
 Zip64 based volume} and the {\em Directory} based volume.
 
 \label{definitions}
+\item \emph{A stream} is an AFF Object which provides the ability to
+  seek and read random data. Stream objects implement abstracted
+  storage, but must provide clients the stream like interface. For
+  example, we discuss the {\em Image stream} used to store large
+  images, the {\em Map stream} used to create transformations and the
+  {\em Encrypted stream} used to provide encryption.
+
 \item \emph{A segment} is a single unit of data written to a volume. AFF4
   segments have a \emph{segment name} provided by their URN, a
   \emph{segment timestamp} in GMT, and the \emph{segment
-contents}. Segments are suitable for storing small quantities of data,
-and still present a stream interface.
-
-\item \emph{A stream} is an AFF Object which provides the ability to
-seek and read random data. Stream objects implement abstracted
-storage, but must provide clients the stream like interface. For
-example, we discuss the {\em Image stream} used to store large images,
-the {\em Map stream} used to create transformations and the {\em
-Encrypted stream} used to provide encryption.
+  contents}. Segments are suitable for storing small quantities of
+  data, and still present a stream interface.
 
 \item \emph{A Target Reference} is a way of referencing objects by use
-of a Uniform Resource Identifier (URI). The URI can be another AFF
-Object URN or may be a more general Uniform Resource Locator (URL),
-such as for example a HTTP or FTP object. This innovation allows
-objects in one volume to refer to objects in different volumes,
-facilitating data fusion and cross referencing.
+  of a Uniform Resource Identifier (URI). The URI can be another AFF
+  Object URN or may be a more general Uniform Resource Locator (URL),
+  such as for example a HTTP or FTP object. This innovation allows
+  objects in one volume to refer to objects in different volumes,
+  facilitating data fusion and cross referencing.
 
 \item \emph{The Resolver} is a central data store which collects and resolves
-attributes for the different AFF Objects. The Resolver has universal
-visibility of objects from all volumes, and therefore guides
-implementations in resolving external references. 
+  attributes for the different AFF Objects. The Resolver has universal
+  visibility of objects from all volumes, and therefore guides
+  implementations in resolving external references.
 \end{itemize}
 
 \section{Metadata and the Universal Resolver}
 \label{resolver}
-One of the fundamental tasks of forensics is in ensuring the
-provenance of any particular piece of digital evidence, for example by
-employing a chain of custody process. To assist in this, acquisition
-methodologies emphasise the process of individuating evidence, and
-storing it in a manner that is easily identifiable.
+%One of the fundamental tasks of forensics is in ensuring the
+%provenance of any particular piece of digital evidence, for example by
+%employing a chain of custody process. To assist in this, acquisition
+%methodologies emphasise the process of individuating evidence, and
+%storing it in a manner that is easily identifiable.
 
 Management of evidence requires an effective identififaction, with
 practitioners currently employing acquisition time metadata such as
@@ -416,30 +451,32 @@ a unique identifier generated
 as per RFC4122\cite{RFC4122}. For example, an AFF4 URN might be
 \emph{urn:aff4:bcc02ea5-eeb3-40ce-90cf-7315daf2505e}
 
-In this way we can identify uniquely any evidence without the chance
-for name collisions. Once a universal identification regime is
-created, it is now possible to collect metadata about each object. The
-AFF4 model treats metadata as an abstract concept which may exist
+%In this way we can identify uniquely any evidence without the chance
+%for name collisions. Once a universal identification regime is
+%created, it is now possible to collect metadata about each object. 
+
+The AFF4 model treats metadata as an abstract concept which may exist
 independently from the data itself. We term {\em metadata} to be a set
 of statements about objects, written in triple notations (Subject,
 Attribute, Value), where {\em Subject} is the URN of the object the
 statement is made about. Using this system we are able to store
-arbitrary attributes about any object in the AFF4 universe. Additionally,
-as these statements are universally scoped, they may be stored anywhere.
+arbitrary attributes about any object in the AFF4
+universe. Additionally, as these statements are universally scoped,
+they may be stored anywhere.
 
 The AFF4 design extends beyond the management of a single volume,
 stream or image to a universal system for managing data of many
 types. This necessarily means that a single running instance is
 generally unable to have visibility of the entire AFF4 universe. For
 example, if a volume is opened which contains a Map Stream targeting a
-stream stored in a different volume, its not generally possible to
+stream stored in a different volume, it is not generally possible to
 tell in which volume the stream exists, and where that volume is
 actually stored.
 
 To provide this global visibility of metadata we define a central
 metadata management entity, named the {\em Universal Resolver}. The
 Universal Resolver contains all the metadata about the AFF4 universe,
-that is to say it is able to resolve queries about any attribute about
+that is to say it is able to resolve queries for any attribute about
 any URN in the universe.
 
 Although the resolver has complete visibility of all attributes, it is
@@ -452,8 +489,8 @@ To this end we define a way for serializing metadata statements (or
 triples) into a standard format which implementations can load into
 their respective resolvers when parsing the volume. Triples can be
 stored in segments having a URN ending with ``{\em properties}''. The
-AFFLIB implementation loads these segments automatically into the
-Universal Resolver. 
+AFF4 implementation loads these segments automatically into the
+Universal Resolver.
 
 Triples are stored within the properties segment one per line, with
 the subject URN (encoded according to RFC1737), followed by whitespace
@@ -468,12 +505,12 @@ an external SQL server). Alternatively, these statements may be stored
 in some other way inside or outside the volume (e.g. SQLite
 databases).
 
-When the volume is loaded, the AFFLIB implementation automatically
-loads any properties files and populates its Universal Resolver with
-the information visibile to it. AFFLIB provides a mechanism to use an
-external resolver stored on a MySQL database to provide a Universal
-Resolver that shares information between different instances on the
-same network.
+When the volume is loaded, the AFF4 implementation automatically loads
+any properties files and populates its Universal Resolver with the
+information visibile to it. AFF4 provides a mechanism to use an
+external resolver stored on a MySQL database to provide for a
+Universal Resolver that shares information between different instances
+on the same network.
 
 Each URN within the AFF4 universe must have an ``\texttt{aff4:type}''
 attribute to denote the type of the Object.
@@ -517,11 +554,19 @@ The volume object is responsible for providing storage for
 segments. Segments are stored and retrieved using their URNs. We
 describe two different implementations of volume objects, namely the
 {\em Directory Volume} and the {\em ZipFile Volume}. It is possible to
-convert from one implementation to another easily, without effecting
+convert from one implementation to another easily, without affecting
 any external references. This is because external references are to
-the Volume URN itself, so its safe to convert from one representation
-to another. In this way its possible for example, to unzip a Zip64
-volume into a directory and vice versa.
+the Volume URN itself, so it is safe to convert from one
+representation to another. In this way its possible for example, to
+unzip a Zip64 volume into a directory and vice versa.
+
+It is important to emphesise that Volumes are merely containers which
+provide storage for segments. There is no restriction of which
+segments can be stored by any particular volume. For example, the
+segments which make up a single Image stream may be stored in a number
+of volumes (splitting the image in some way among them). Similarly,
+the segments representing a number of streams may be stored in the
+same volume.
 
 \subsection{Directory Volumes}
 The Directory Volume is the simplest type of volume. It simply stores
@@ -552,9 +597,10 @@ Zip64\cite{zip-format}. There are many reasons for this decision:
 \item There is already wide support for the Zip and Zip64 formats. By
   migrating to these formats, we can take advantage of the rich number
   of user and developer tools already available. The volume may be
-  inspected using any number of commercial zip application
-  (e.g. Windows Explorer natively supports Zip files as can be seen in
-  Figure~\ref{explorer}).
+  inspected using any number of commercial or open source zip
+  application (e.g. Windows Explorer natively supports Zip files as
+  can be seen in Figure~\ref{explorer}, Zip64 is supported natively
+  by Java, Python and PERL).
  
 \item Zip64 already includes support for the ``table of contents''
   envisioned but never implemented by Garfinkel; Zip64 calls this
@@ -562,10 +608,10 @@ Zip64\cite{zip-format}. There are many reasons for this decision:
   Zip64 volume.
 
 \item Zip64 libraries are readily available making proprietary implementations of
-interfaces to the AFF4 volume format simple to write. For example, a
-simple python program to dump out an Image stream
-(section~\ref{image_stream}) is illustrated in Listing
-\ref{python_code}.
+  interfaces to the AFF4 volume format simple to write. For example, a
+  simple python program to dump out an Image stream
+  (section~\ref{image_stream}) is illustrated in Listing
+  \ref{python_code}.
 
 \end{itemize}
 
@@ -608,9 +654,9 @@ using netcat or ssh.
   \begin{center}
   \mbox{\epsfxsize=0.8\columnwidth \epsffile{zip_structure.eps}}
 
-  \caption{The basic structure of a Zip archive. Also shows is how new
+  \caption{The basic structure of a Zip archive. Also shown is how new
   archive members are added to an existing Zip File. The Central
-  Directory gets overwritten by the new member, and a new Central
+  Directory is overwritten by the new member, and a new Central
   Directory is written on the end.  }
 
   \label{zip_structure}
@@ -639,7 +685,7 @@ in a different volume, and the Universal Resolver is used to find it.
 \item Although Zip64 also defines encryption and authentication
 extensions, we do not use them due to the restrictions imposed on
 their use and because they lack the functionality that is important
-for a forensic user. Instead, we use AFF1's digital signature
+for a forensic user. Instead, we use AFF4's digital signature
 facilities for integrity and non-repudiation, and we introduce a new
 stream based encryption scheme for ensuring data privacy
 (Section~\ref{crypted_stream}).
@@ -647,14 +693,9 @@ stream based encryption scheme for ensuring data privacy
 \end{itemize}
 
 \subsection{Implementing Zip64 in AFFLIB}
-Although there are numerous Zip implementations available
-today, we have created our own implementation using a combination of
-available open source technology and our own novel contributions. We
-are in the process of integrating this code into the AFFLIB library
-and performing extensive regression testing. 
-
-There are many reasons to develop our own Zip64 implementation for
-AFF4:
+Although there are numerous Zip implementations available today, we
+have created our own implementation. There are many reasons to develop
+our own Zip64 implementation for AFF4:
 
 \begin{itemize}
 \item Most Zip implementations do not implement the Zip64
@@ -733,8 +774,8 @@ Storage for the data is done by using multiple data segments stored on
 various volumes. Data segment URNs are derived by appending an 8
 digit, zero padded decimal integer representation of an incrementing
 id to the stream URN (e.g. ``urn:aff4:83a3d6db-85d5/00000032''). Each
-data segment is called a bevy and stores a number of compressed chunks
-back to back. 
+data segment is called a \emph{bevy} and stores a number of compressed
+chunks back to back.
 
 The chunk index segment is a segment containing a list of relative
 offsets to the beginning of each chunk within the bevy. The chunk
@@ -759,10 +800,10 @@ compressed individually using the zlib compress algorithm. This
 general structure of storing chunks within larger segments is similar
 to the technique used by the Expert Witness file format (EWF) used by
 EnCase\cite{encase-3.0} and implemented by the open source
-libewf\cite{libewf} package. The advantages of keeping smaller sized
-chunks is the better match between requested size and the minimum size
-required for decompression. This means that less data is needed to be
-decompressed unnecessarily.
+libewf\cite{libewf} package. This improvement from AFF1's 16MB segment
+size results in a better match between requested size and the minimum
+size required for decompression. This means that less data is needed
+to be decompressed unnecessarily where reading small sectors randomly.
 
 %% FIXME - hashing may apply to any segment not just bevies
 %Bevies can optionally be individually hashed, allowing for detection
@@ -829,9 +870,8 @@ transform is implemented via the {\em Map stream}.
 
 The mapping function is described in a segment named by appending
 ``/map'' to the stream URN. The segment data consists of a series of
-lines, each containing a stream offset, followed by a comma, and a
-target offset. Offsets are encoded using decimal notation, and are
-followed by a target URN.
+lines, each containing a stream offset, a target offset and a target
+URN. Offsets are encoded using decimal notation.
 
 Denoting the stream offset by $x$, and the target offset by $y$, the
 Map specifies a set of points $(X_i,Y_i,T_i)$. Read requests for a
@@ -1013,11 +1053,8 @@ The Encrypted Stream may contain any data at all, including disk
 images, network captures or memory images. It is useful however, to
 store an entire AFF4 volume within the Encrypted stream. This provides
 block level encryption for the contained AFF4 volume (which might
-contain arbitrary streams). It is recommended that Encrypted Streams
-containing an AFF4 volume set an attribute
-\emph{content-type=application/x-aff-volume} on the container stream,
-to allow implementations to automatically recognize volumes. This
-approach is illustrated in Figure~\ref{crypted_fif}.
+contain arbitrary streams). This approach is illustrated in
+Figure~\ref{crypted_fif}.
 
 \begin{figure}[tb]
   \begin{center}
@@ -1039,47 +1076,105 @@ Volumes} to provide storage for Encrypted Streams. The main {\em
 Embedded Volume}, which actually contains data is stored within the
 Encrypted Stream, effectively distributed throughout the container
 volumes. Note that the outer Volume may contain several Encrypted
-Streams and therefore contain multiple AFF4 Encrypted 
+Streams and therefore contain multiple AFF4 Encrypted
 Volumes. Container Volumes may contain non encrypted streams as well,
 and may implement different encryption schemes and keys for each
-Encrypted scheme. This effectively allows arbitrary access policies to
+Encrypted stream. This effectively allows arbitrary access policies to
 be implemented as only volumes which can be accessed can be merged.
 
-\subsection{Encryption Schemes}
-Our implementation provides a number of encryption schemes.
+\subsection{The Link Object}
+Although the URN of a stream names it unambiguously in the AFF4
+universe it is difficult to use and communicate due to its random
+nature. Most investigators would prefer to use a shorter name which
+might well represent the image better in their minds (e.g. a case
+name or warrant number).
 
-\subsubsection{Null Encryption}
-This scheme ({\em scheme=null}) specifies no encryption at all. This
-may be useful for testing an implementation, but obviously provides
-no real security.
+A Link is an object which has a single attribute
+\emph{aff4:target}. When the Link object is opened, it returns the
+object named by this attribute. This allows images with complex names
+to be referred to via short, meaningful names. Note that in practice
+both Image Streams and Link Objects are created by the imaging tools,
+so as far as the operators are concerned they can always refer to the
+Image stream via the Link name.
 
-\subsubsection{AES-SHA-PSK}
-This scheme ({\em scheme=aes-sha-psk}) uses AES for block level
-encryption, with the following SHA based ESSIV scheme, and Pre-Shared
-Key (passphrase).
+\subsection{Identity Object}
+AFF4 defines a \emph{Statement} as a collection of facts, or
+(subject, attribute, value) tuples. Listing \ref{statement}
+illustrates a collection of facts encoded in the standard AFF4
+notation (SHA254 hashes are base64 encoded).
 
-When creating a new encryption stream, a master key is generated using
-the first 128 bits of a SHA1 hash of the Pre-Shared-Key appended to a
-64 bit random salt:
-\begin{eqnarray}
-Key_{Master} = \left | SHA1(salt + PSK) \right | _{128}
-\end{eqnarray}
+\begin{lstlisting}[
+	caption=An Example Statement  (URNs and hashes are
+shortened for illustration).,
+	label=statement,
+	float=tb,
+	 ]
+urn:aff4:34a62f06/00000000 aff4:sha256=+Xf4i....7rPCgo=
+urn:aff4:34a62f06/00000000.idx aff4:sha256=ptV7xOK6....C7R6Xs=
+urn:aff4:34a62f06/properties aff4:sha256=yoZ9dtv....eUignYMtk=
+urn:aff4:34a62f06 aff4:sha256=udajC5C...BVii7psU=
+\end{lstlisting}
 
-For each chunk, the chunk IV is obtained by taking the first 128 bits
-of the SHA1 hash of the chunk id encoded as a 32 bit little endian
-integer, followed by the master key:
-\begin{eqnarray}
-IV = \left | SHA1(chunk\_id + Key_{Master}) \right | _{128}
-\end{eqnarray}
+The statement expresses a set of attributes of other AFF4 objects, and
+in particular the attribute of SHA256 hash is expressed (but other
+attributes may also be expressed).
 
-The block is then encrypted or decrypted using AES in CBC mode with
-this IV.
+Digital signatures have been used in previous forensic file formats
+(such as AFF1) to provide authentication and non-repudiation of
+forensic evidence. In essence, a when a person signs an object they
+are vouching for its authenticity. Similarly, when a person signs a
+\emph{Statement}, they are vouching for its authenticity. This concept
+is similar to the Bill of Material (BOM) from AFF1.
 
-The salt is specified as a stream attribute named {\em aff4:salt} in
-base64 encoding. Implementations are free to specify any API for
-passing the Pre-Shared Key, for example the PSK can be specified in a
-configuration file, typed in at the terminal, passed in using process
-environment variables, or encoded within the AFF4 URL itself.
+An AFF4 Identity object represents an entity, currently described by
+way of an X509 certificate. The URN of an identity object is the
+certificate's fingerprint, and is therefore unique to the
+certificate. Identity objects contains \emph{aff4:statement}
+attributes which refer to AFF4 streams containing statements. The
+identity object also contains a copy of the certificate used to sign
+the statements.
+
+To verify the signatures, the AFF4 library loads the stored
+certificate, then checks the signature for each statement. If a
+statement is verified (i.e. deemed as correct according to the
+identity), the facts within it are checked. Note that it is possible
+for multiple identities to sign the same data.
+
+%\subsection{Encryption Schemes}
+%Our implementation provides a number of encryption schemes.
+
+%\subsubsection{Null Encryption}
+%This scheme ({\em scheme=null}) specifies no encryption at all. This
+%may be useful for testing an implementation, but obviously provides
+%no real security.
+
+%\subsubsection{AES-SHA-PSK}
+%This scheme ({\em scheme=aes-sha-psk}) uses AES for block level
+%encryption, with the following SHA based ESSIV scheme, and Pre-Shared
+%Key (passphrase).
+
+%When creating a new encryption stream, a master key is generated using
+%the first 128 bits of a SHA1 hash of the Pre-Shared-Key appended to a
+%64 bit random salt:
+%\begin{eqnarray}
+%Key_{Master} = \left | SHA1(salt + PSK) \right | _{128}
+%\end{eqnarray}
+
+%For each chunk, the chunk IV is obtained by taking the first 128 bits
+%of the SHA1 hash of the chunk id encoded as a 32 bit little endian
+%integer, followed by the master key:
+%\begin{eqnarray}
+%IV = \left | SHA1(chunk\_id + Key_{Master}) \right | _{128}
+%\end{eqnarray}
+
+%The block is then encrypted or decrypted using AES in CBC mode with
+%this IV.
+
+%The salt is specified as a stream attribute named {\em aff4:salt} in
+%base64 encoding. Implementations are free to specify any API for
+%passing the Pre-Shared Key, for example the PSK can be specified in a
+%configuration file, typed in at the terminal, passed in using process
+%environment variables, or encoded within the AFF4 URL itself.
 
 \subsection{Private Streams}
 Often forensic software needs to store internal state, such as the
@@ -1147,9 +1242,14 @@ two possible locations for the same volume URN, since there are two
 copies in existence. Based on pre-determined distance metrics, the
 resolver directs requests from Bob to the LA copy, while Alice is
 redirected to the NY copy. This load redistribution can be used for
-optimal management of evidence storage in a transparent way. Analyst
+optimal management of evidence storage in a transparent way. Analysts
 are not aware of where the evidence is physically stored, and it
 appears as though all evidence is always available.
+
+If Alice's local NY copy is now lost, Alice's local AFF4 library will
+fail to open the NY URL, and will automatically fall back to the copy
+stored in LA. This will require access across the WAN, which will be
+slower, but provides a kind of distributed fail over capability.
 
 \subsection{Remote imaging}
 The NY IT security team has just responded to an incident on one of
@@ -1209,38 +1309,38 @@ support for RAID reassembling. This approach enables parallel
 acquisition of RAID drives, a feature long desired to handle the vast
 quantities of data presented by RAID.
 
-\subsection{In-place encryption of AFF4 volumes}
-With the large size of a typical forensic image it is often difficult
-to have to create a second copy of a volume which needs to be
-encrypted. It is usually more convenient to encrypt the file in place,
-overwriting the plain text data with the equivalent encrypted data.
+%\subsection{In-place encryption of AFF4 volumes}
+%With the large size of a typical forensic image it is often difficult
+%to have to create a second copy of a volume which needs to be
+%encrypted. It is usually more convenient to encrypt the file in place,
+%overwriting the plain text data with the equivalent encrypted data.
 
-This can be achieved using the technique shown in
-Figure~\ref{inplace_crypto}. The first step is to encrypt the first
-block from the front of the file and add it to the end of the archive
-as a new encrypted segment. Then a ZipFile header is written to the
-front which encapsulates the rest of the plain text volume. The plain
-text volume is then encrypted in place. Finally a map stream is used
-to re-map the first and second fragments into place.
+%This can be achieved using the technique shown in
+%Figure~\ref{inplace_crypto}. The first step is to encrypt the first
+%block from the front of the file and add it to the end of the archive
+%as a new encrypted segment. Then a ZipFile header is written to the
+%front which encapsulates the rest of the plain text volume. The plain
+%text volume is then encrypted in place. Finally a map stream is used
+%to re-map the first and second fragments into place.
 
-\begin{figure}[tb]
-  \begin{center}
-  \mbox{\epsfxsize=0.8\columnwidth \epsffile{inplace.eps}}
+%\begin{figure}[tb]
+%  \begin{center}
+%  \mbox{\epsfxsize=0.8\columnwidth \epsffile{inplace.eps}}
 
-  \caption{The process of encrypting a volume in place. The first
-  block from the volume is encrypted and appended to the end of the
-  volume as a new segment (A). Now a zip file header can be written in
-  its place to form the remainder of the volume as segment B. The rest
-  of the volume is encrypted in-place, block by block (Step 4). Now we
-  create a Map stream which combines segment A and B into a single
-  logical stream (M). An Encrypted stream which is backed by this map
-  stream (E) is now added. Finally a Central Directory is appended to
-  the end of the new volume. We end up with a new Zip File which
-  contains our old volume stored within an encrypted stream.}
+%  \caption{The process of encrypting a volume in place. The first
+%  block from the volume is encrypted and appended to the end of the
+%  volume as a new segment (A). Now a zip file header can be written in
+%  its place to form the remainder of the volume as segment B. The rest
+%  of the volume is encrypted in-place, block by block (Step 4). Now we
+%  create a Map stream which combines segment A and B into a single
+%  logical stream (M). An Encrypted stream which is backed by this map
+%  stream (E) is now added. Finally a Central Directory is appended to
+%  the end of the new volume. We end up with a new Zip File which
+%  contains our old volume stored within an encrypted stream.}
 
-  \label{inplace_crypto}
-  \end{center}
-\end{figure}
+%  \label{inplace_crypto}
+%  \end{center}
+%\end{figure}
 
 
 \subsection{Cryptographic management of evidence}
@@ -1248,7 +1348,7 @@ An AFF4 archive may hold multiple encrypted volumes, each in its own
 Encrypted Stream. Each of those streams is encrypted using a different
 master key, and therefore can have different passphrases, and can be
 assigned to different users by encrypting the master key with
-different X509 certificates. Its is also possible for users to create
+different X509 certificates. It is also possible for users to create
 non-encrypted volumes within the AFF4 volume.
 
 This can be used to enforce access controls in line with current
@@ -1265,52 +1365,52 @@ This can be used in sharing meta data (e.g. Map Streams of files of
 interest) between analysts, without needing to provide access to the
 underlying data.
 
-\subsection{Sharing evidence}
-When managing a large corpus of evidence it is common to require these
-to be shared across the network. Many laboratories create a
-centralized Network Attached Storage (NAS) facility to retain their
-evidence corpus. This is typically shared via some file sharing
-protocol, commonly Windows sharing (CIFS) or NFS.
+%\subsection{Sharing evidence}
+%When managing a large corpus of evidence it is common to require these
+%to be shared across the network. Many laboratories create a
+%centralized Network Attached Storage (NAS) facility to retain their
+%evidence corpus. This is typically shared via some file sharing
+%protocol, commonly Windows sharing (CIFS) or NFS.
 
-It is advantageous to be able to move evidence around between several
-servers and locations. For example, consider a disk image stored in a
-Volume with a given URN. Normally, when a user wishes to open the
-image, they will specify the path and filename of the volume which
-contains it. The library will then open the volume and retrieve the
-stream.
+%It is advantageous to be able to move evidence around between several
+%servers and locations. For example, consider a disk image stored in a
+%Volume with a given URN. Normally, when a user wishes to open the
+%image, they will specify the path and filename of the volume which
+%contains it. The library will then open the volume and retrieve the
+%stream.
 
-The AFF4 model is different however. In AFF4 metadata is managed in a location
-independant manner 
-through a Universal Resolver (perhaps implemented in a database). Relevant information
-is found not only in Volumes, but may additionally come from other sources.
-This means that in the
-above example, the user will query the resolver about the location of
-the volume. The resolver returns a URL to the current location of the
-volume. The user's library will then open a HTTP Stream instance to
-the location returned and the volume may be opened directly over the
-intra-web connection.
+%The AFF4 model is different however. In AFF4 metadata is managed in a location
+%independant manner 
+%through a Universal Resolver (perhaps implemented in a database). Relevant information
+%is found not only in Volumes, but may additionally come from other sources.
+%This means that in the
+%above example, the user will query the resolver about the location of
+%the volume. The resolver returns a URL to the current location of the
+%volume. The user's library will then open a HTTP Stream instance to
+%the location returned and the volume may be opened directly over the
+%intra-web connection.
 
-If the volume needs to be moved, the volume's \emph{aff4:stored}
-attribute can be adjusted to the new location, and all clients will
-automatically know where to find it. Furthermore, if several copies of
-the same volume exist, the resolver may have multiple values for the
-\emph{aff4:stored} property, some locations may be faster to access than
-others. The Resolver can then return the most suitable attribute based
-on locality.
+%If the volume needs to be moved, the volume's \emph{aff4:stored}
+%attribute can be adjusted to the new location, and all clients will
+%automatically know where to find it. Furthermore, if several copies of
+%the same volume exist, the resolver may have multiple values for the
+%\emph{aff4:stored} property, some locations may be faster to access than
+%others. The Resolver can then return the most suitable attribute based
+%on locality.
 
-Another interesting side effect of the sharing model is that it is far
-more efficient to allow remote analysts to peruse subsets of the
-evidence. For example, Alice is in the laboratory and wants Bob who is
-on a remote site to view several files she found on her
-image. Traditionally she would either need to copy the entire volume
-and send it to him. Or maybe extract the files she thinks are relevant
-and send those to him.
+%Another interesting side effect of the sharing model is that it is far
+%more efficient to allow remote analysts to peruse subsets of the
+%evidence. For example, Alice is in the laboratory and wants Bob who is
+%on a remote site to view several files she found on her
+%image. Traditionally she would either need to copy the entire volume
+%and send it to him. Or maybe extract the files she thinks are relevant
+%and send those to him.
 
-With the new AFF4 architecture, Bob can open the volume directly,
-using the HTTP protocol, and view the files he needs. Very little
-extra data is actually transferred in excess of the data he wishes to
-see. This is a much more efficient way to allow remote analysts to
-collaborate.
+%With the new AFF4 architecture, Bob can open the volume directly,
+%using the HTTP protocol, and view the files he needs. Very little
+%extra data is actually transferred in excess of the data he wishes to
+%see. This is a much more efficient way to allow remote analysts to
+%collaborate.
 
 \subsection{Logical File Acquisition}
 Alice is responding to an incident on a critical corporate
@@ -1353,14 +1453,13 @@ object management system---all without making changes to forensic
 software.
 
 We have developed an open source reference implementation, but the
-AFF4 framework is simple enough for competing implementations to be
-implemented commercially. We hope this simplicity enhances AFF4's
-acceptance and adoption as a standard evidence management platform.
+AFF4 framework is simple enough for competing implementations. We hope
+this simplicity enhances AFF4's acceptance and adoption as a standard
+evidence management platform.
 
 \bibliographystyle{IEEEtran}
 \bibliography{IEEEabrv,paper}
 \end{document}
-
 
 
 % BLS - The evidence set as identified by a particular UUID is no longer really in play 
