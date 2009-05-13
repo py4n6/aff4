@@ -81,9 +81,9 @@ different locations. We propose a backwards-compatible redesign of the
 Advanced Forensic Format---an open, extensible file format for storing
 and sharing of evidence, arbitrary case related information and
 analysis results among different tools. The new specification, termed
-AFF4, was designed to be simple to implement, allowing the use of the
-well supported Zip File format specifications for bit level file
-access.
+AFF4, was designed to be simple to implement, bult upon the well
+supported ZIP file format specification. AFF4 implements will have
+downward compatability with existing AFF files.
 \end{abstract}
 
 \section{Introduction}
@@ -114,14 +114,9 @@ evidence are commonly used
 (e.g. \cite{safeback,ilook,encase}). PyFlag\cite{pyflag} introduced a
 ``seekable gzip'' format that allowed disk images to be stored in a
 form that was compressed but allowed random-access to evidence data
-necessary for forensic analysis. The \emph{sgzip} format does not
-store any metadata at all.
+necessary for forensic analysis. 
 
-The Advanced Forensic Format (AFF) expanded on this idea with a
-forensic file format that allowed both data and arbitrary metadata to
-be stored in a single digital archive\cite{garfinkel:aff}. 
-
-The Eye Witness Forensic (EWF) file format was originally developed
+The Expert Witness Forensic (EWF) file format was originally developed
 for Encase\cite{encase}, but then adopted by other vendors
 \cite{libewf}. The EWF file format also compresses the image into 32kb
 chunks which are stored back to back in groupings inside the file. The
@@ -131,10 +126,27 @@ have a maximum size of 2Gb and therefore usually split an image across
 many volumes. EWF provides for a small number of predefined metadata
 fields to be stored within the file format.
 
+The Advanced Forensic Format (AFF) expanded on this idea with a
+forensic file format that allowed both data and arbitrary metadata to
+be stored in a single digital archive\cite{garfinkel:aff}. 
+
 Both the AFF and EWF file formats are designed to store a single
 image, and any metadata implicitely refers to that image. Therefore,
 these formats in themselves have a limited metadata model which is
 unable to exist outside the context of the image itself.
+But AFF went beyond merely
+specifying metadata as an addition to the forensic evidence
+itself. Metadata forms an essential part of the file format, with the
+same metadata system storing both essential information required to
+read the image itself, as well as non-essential metadata. AFF allows
+the use of arbitrary name/value pairs to store metadata, but it also
+stored critical information such as sector size and device serial
+number using the same metadata representation system. \verb+Aimage+,
+the AFF hard  disk acquisition tool should, not only stored the image,
+but also stored a description of the tool
+itself, the version of AFFLIB used to create the image, the computer
+on which the image was made, the operator of the tool, the user supplied parameters
+supplied to the tool, all in addition to the drive being imaged.
 
 %Both Of These Approaches Are Limited In Their Expressiveness, By
 %Nature Of Their (Property, Value) Data Model. The Subject Of The
@@ -154,16 +166,6 @@ referencing scheme\cite{schatz:sdeb}.
 %encryption and authentication is critical for forensic file formats.
 
 \subsection{This paper}
-The AFF4 metadata model described in this work, goes beyond merely
-specifying metadata as an addition to the forensic evidence
-itself. Metadata forms an essential part of the file format, with the
-same metadata system storing both essential information required to
-read the image itself, as well as non-essential metadata. For example,
-an AFF4 compliant hard disk acquisition tool should, in addition to
-storing an image, store entities representing and describing the tool
-itself, the operator of the tool, the user supplied parameters
-supplied to the tool, and the drive being imaged.
-
 An important advance of this work is the introduction of storage
 transformation functions to the forensic storage container. Prior
 works simply focused on forensically sound storage of bitstreams,
@@ -172,7 +174,7 @@ higher level abstractions at the aggregate block (ie. RAID), volume,
 and filesystem layers in the domain of analysis tools, as transiently
 constructed artifacts. In contrast AFF4 has mechanisms for describing
 transformation in a flexible and concise way, allowing users to view
-multiple transformations of the same data with virtually zero storage
+multiple transformations of the same data with little additional storage
 cost. This mechanism is an important enabler for interoperable
 forensic tools. For example, carved files may be described in terms of
 their block allocation sequences from an image, rather than requiring
@@ -185,15 +187,16 @@ the architecture. The new architecture is capable of storing multiple
 heterogeneous data types that might arise in a modern digital
 investigation, including data from multiple data storage devices, new
 data types (including network packets and memory images), extracted
-logical evidence, and forensic workflow. The AFF4 format extends to
-become a Global Distributed Evidence Management system, while
-maintaing compatibility with the old AFF file format.
+logical evidence, and forensic workflow. The AFF4 format extends the
+format to make it the basis of a global distributed evidence management system. 
 
 We call the new system AFF4, and use the phrase AFF1 to refer to the
 legacy system developed by Garfinkel et al.\footnote{Although Garfinkel
 never changed the AFF bit-level specification, Garfinkel released
 AFFLIB implementations with major version numbers 1, 2 and 3. We
-therefore call our system AFF4 to avoid confusion.}
+therefore call our system AFF4 to avoid confusion.} The AFF4
+implementation, when it is publicly released, will be able to read
+existing AFF files.
 
 %\begin{figure}
 %\fbox{
@@ -250,11 +253,6 @@ standard and Garfinkel's AFFLIB implementation:
 
 \item AFF1 has no provision for storing memory images or intercepted
   network packets.
-
-\item AFF1 (and the EWF format) are unable to recover from loss or
-  corruption. Due to the specialised nature of these formats,
-  specialised recovery software must be written to recover from
-  corruptions.
 
 \item AFF1 has no provisions for storing extracted files that is
   analogous to the EnCase ``Logical Evidence File'' (L01) format, or
@@ -359,7 +357,7 @@ We have also defined an information model which addresses uniquely
 identifying evidence data, expressing arbitrary information and
 integrating information and image data from multiple evidence volumes
 at a time. This allows us to extend evidence collection and management
-to a truely universal scale - allowing creation and management of a
+to a truely universal scale---allowing creation and management of a
 large corpus.
 
 We have also released a library and toolset, \emph{LIBAFF4}
@@ -445,7 +443,7 @@ collisions.
 The AFF4 design adopts a scheme of globally unique identifiers for
 identifying and referring to all evidence. We define an AFF4 specific
 URN scheme, which we call the AFF4 URN. URN's of this scheme use the
-namespace\cite{RFC1737} \emph{\'aff4\'} and therefore begin with the 
+namespace\cite{RFC1737} ``\emph{aff4}'' and therefore begin with the 
 string(\emph{urn:aff4}). AFF4 URNs are then be made unique by use of 
 a unique identifier generated
 as per RFC4122\cite{RFC4122}. For example, an AFF4 URN might be
@@ -459,7 +457,10 @@ The AFF4 model treats metadata as an abstract concept which may exist
 independently from the data itself. We term {\em metadata} to be a set
 of statements about objects, written in triple notations (Subject,
 Attribute, Value), where {\em Subject} is the URN of the object the
-statement is made about. Using this system we are able to store
+statement is made about. An \emph{Attribute{ can be any kind of value, such
+as the sector size of a device, a device capacity, or the name of the
+person who performed an imaging operation. A \emph{Value} is the value
+of the attribute. Using this system we are able to store
 arbitrary attributes about any object in the AFF4
 universe. Additionally, as these statements are universally scoped,
 they may be stored anywhere.
@@ -508,7 +509,8 @@ databases).
 When the volume is loaded, the AFF4 implementation automatically loads
 any properties files and populates its Universal Resolver with the
 information visibile to it. AFF4 provides a mechanism to use an
-external resolver stored on a MySQL database to provide for a
+external resolver as well---for example, we have implemented a
+resolved that stores Attributes in a MySQL database to provide for a
 Universal Resolver that shares information between different instances
 on the same network.
 
@@ -698,9 +700,9 @@ have created our own implementation. There are many reasons to develop
 our own Zip64 implementation for AFF4:
 
 \begin{itemize}
-\item Most Zip implementations do not implement the Zip64
-  extensions. These extensions are required to support Evidence
-  Volumes larger than 2GB.
+\item The commonly available Zip implementations written in C do not
+ implement the Zip64 extensions. These extensions are required to
+ support Evidence Volumes larger than 2GB.
 
 \item Simple Zip implementations might rescan the
   Central Directory for each segment request. Since in practice there
@@ -1265,7 +1267,7 @@ This command requests an image be created directly on the evidence
 server (it will be uploaded using webdav). The image is signed using
 Alice's certificate and key (which might need to be unlocked). Note
 that Alice does not need any hardware to obtain the image as it is
-done over the network - she therefore can respond rapidly.
+done over the network---she therefore can respond rapidly.
 
 Bob is an analyst in LA which specializes in filesystem analysis. As
 soon as the acquisition is complete, the image is available for Bob to
