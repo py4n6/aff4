@@ -22,3 +22,13 @@ if HAVE_OPENSSL
 libaff4_la_LDFLAGS       += -lssl
 libaff4_la_SOURCES       += encrypt.c
 endif
+
+if HAVE_LIBAFFLIB
+libaff4_la_LDFLAGS       += -lafflib
+libaff4_la_SOURCES       += aff1.c
+endif
+
+if HAVE_LIBEWF
+libaff4_la_LDFLAGS       += -lewf
+libaff4_la_SOURCES       += ewfvolume.c
+endif

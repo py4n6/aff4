@@ -185,6 +185,14 @@ if test "${enable_fuse}" = "yes"; then
   FUSE_LIBS=-lfuse
 fi
 
+if test "${have_libafflib}" = "yes"; then
+  AC_DEFINE([HAVE_LIBAFFLIB], 1, [Use legacy AFF1 support ])
+fi
+
+if test "${have_libewf}" = "yes"; then
+  AC_DEFINE([HAVE_LIBEWF], 1, [Use legacy EWF support ])
+fi
+
 AC_SUBST(AFFUSE_BIN)
 AM_PROG_CC_C_O                  dnl for affuse
 

@@ -124,7 +124,7 @@ void test2() {
   gettimeofday(&epoch_time, NULL);
 
   for(i=0;i<TIMES;i++) {
-    fd = (FileLikeObject)CALL(oracle, open, NULL, "hello", 'r');
+    fd = (FileLikeObject)CALL(oracle, open,  "hello", 'r');
     if(!fd) {
       RaiseError(ERuntimeError, "Error reading member");
       return;
@@ -204,7 +204,7 @@ void test_image_create() {
   CALL(oracle, cache_return, (AFFObject)link);
 
   // Close the zipfile - get it back
-  //  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn); 
+  //  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn); 
   CALL((ZipFile)zipfile, close);
   
  error:
@@ -242,7 +242,7 @@ void test_image_read() {
   // We just put it in the cache anyway
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
-  image = (Image)CALL(oracle, open, NULL, link_name, 'r');
+  image = (Image)CALL(oracle, open, link_name, 'r');
   if(!image) {
     RaiseError(ERuntimeError, "Unable to find stream %s", link_name);
     goto error;
@@ -361,7 +361,7 @@ void test_map_create() {
   CALL(map, add, 4, 2, D0);
   CALL(map, add, 5, 2, D2);
 
-  fd = (FileLikeObject)CALL(oracle, open, NULL, D1, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, D1, 'r');
   CALL((AFFObject)map, set_property, AFF4_SIZE, from_int(fd->size * 2));
   CALL(oracle, cache_return, (AFFObject)fd);
 
@@ -381,7 +381,7 @@ void test_map_create() {
   };
 
  exit:
-  zipfile = (ZipFile)CALL(oracle, open, NULL, volume, 'w');
+  zipfile = (ZipFile)CALL(oracle, open, volume, 'w');
   CALL(zipfile, close);
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
@@ -394,7 +394,7 @@ void test_map_read(char *filename) {
   ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL,filename, 'r');
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
-  map  = (MapDriver)CALL(oracle, open, NULL, "map", 'r');
+  map  = (MapDriver)CALL(oracle, open, "map", 'r');
   if(!map) return;
 
   outfd = creat("output.dd", 0644);
@@ -487,21 +487,21 @@ void test_encrypted(char *filename) {
   // Now put the image on it:
   create_image(embedded_volume_uri, "/bin/ls", "encrypted");
   
-  embedded_volume = (ZipFile)CALL(oracle, open, NULL, embedded_volume_uri, 'w');
+  embedded_volume = (ZipFile)CALL(oracle, open, embedded_volume_uri, 'w');
   CALL(embedded_volume, close);
   CALL(oracle, cache_return, (AFFObject)embedded_volume);
 
-  encrypted_stream = (FileLikeObject)CALL(oracle, open, NULL, encrypted_stream_uri, 'w');
+  encrypted_stream = (FileLikeObject)CALL(oracle, open, encrypted_stream_uri, 'w');
   CALL(encrypted_stream, close);
   CALL(oracle, cache_return, (AFFObject)encrypted_stream);
 
   /*
-  embedded_stream = CALL(oracle, open, NULL, embedded_stream_uri);
+  embedded_stream = CALL(oracle, open, embedded_stream_uri);
   CALL(embedded_stream, close);
   CALL(oracle, cache_return, (AFFObject)embedded_stream);
   */
 
-  container = (ZipFile)CALL(oracle, open, NULL, container_urn, 'w');
+  container = (ZipFile)CALL(oracle, open, container_urn, 'w');
   CALL(container, close);
   CALL(oracle, cache_return, (AFFObject)container);
 };

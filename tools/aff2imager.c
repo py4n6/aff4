@@ -171,11 +171,11 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   CALL((FileLikeObject)image, close);
 
   // Close the zipfile and dispose of it
-  volume = (ZipFile)CALL(oracle, open, NULL, volume_urn, 'w');
+  volume = (ZipFile)CALL(oracle, open, volume_urn, 'w');
   CALL((ZipFile)volume, close);
 
   // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn, 'w');
+  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn, 'w');
   CALL((ZipFile)zipfile, close);
   
   return 0;
@@ -268,7 +268,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
       uint64_t directory_offset = parse_int(CALL(oracle, resolve, zipfile_urn, 
 						 AFF4_DIRECTORY_OFFSET));
       if(directory_offset > max_size) {
-	ZipFile zip = CALL(oracle, open, NULL, zipfile_urn, 'w');
+	ZipFile zip = CALL(oracle, open, zipfile_urn, 'w');
 	char buff[BUFF_SIZE];
 	snprintf(buff, BUFF_SIZE, "%s.%u", output_file, count++);
 	
@@ -305,7 +305,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   // to it:
   if(stream_name) {
     PrintError();
-    link = (Link)CALL(oracle, open, NULL,
+    link = (Link)CALL(oracle, open,
 		      fully_qualified_name(stream_name, URNOF(image)),
 		      'r');
     ClearError();
@@ -333,7 +333,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   };
 
   // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, NULL, zipfile_urn, 'w');
+  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn, 'w');
   CALL((ZipFile)zipfile, close);
   talloc_free(zipfile);
   
@@ -348,7 +348,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 };
 
 void aff2_extract(char *stream, char *output_file) {
-  FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, NULL, stream, 'r');
+  FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, stream, 'r');
   FileLikeObject out_fd;
   
   if(!in_fd) {
@@ -444,7 +444,7 @@ void aff2_verify() {
     if(startswith(key, AFF4_IDENTITY_PREFIX)) {
       // Make sure its actually an Identity object:
       if(!strcmp(AFF4_IDENTITY, CALL(oracle, resolve, key, AFF4_TYPE))) {
-	Identity id = (Identity)CALL(oracle, open, NULL, key, 'r');
+	Identity id = (Identity)CALL(oracle, open, key, 'r');
 	
 	CALL(id, verify, progress_cb);
 	CALL(oracle, cache_return, (AFFObject)id);
@@ -474,7 +474,7 @@ int main(int argc, char **argv)
   // Initialise the library
   AFF2_Init();
 
-  //talloc_enable_leak_report_full();
+  talloc_enable_leak_report_full();
 
   while (1) {
     int option_index = 0;

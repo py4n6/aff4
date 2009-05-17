@@ -395,7 +395,7 @@ int main(int argc, char **argv)
       fls_flags = 7;
       tsk_fs_dir_walk(fs, inode, fls_flags, print_dent_act, &data);
 
-      output = (ZipFile)CALL(oracle, open, NULL, data.volume_urn, 'w');
+      output = (ZipFile)CALL(oracle, open, data.volume_urn, 'w');
       if(output)
 	CALL(output, close);
 

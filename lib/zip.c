@@ -361,7 +361,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   CALL((AFFObject)self, Con, NULL, mode);
 
   // Is there a file we need to read?
-  fd = (FileLikeObject)CALL(oracle, open, self, fd_urn, mode);
+  fd = (FileLikeObject)CALL(oracle, open, fd_urn, mode);
   if(!fd) goto error;
 
   self->parent_urn = talloc_strdup(self, fd_urn);
@@ -540,6 +540,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       j++;
       talloc_free(escaped_filename);
     };   
+  } else {
+    // A central directory was not found, but we want to open this
+    // file in read mode - this means it is not a zip file.
+    if(mode == 'r') goto error_reason;
   };
 
  exit:
@@ -587,7 +591,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
   // This is the file that backs this volume
   char *fd_urn = CALL(oracle, resolve, volume_urn, AFF4_STORED);
   
-  fd = (FileLikeObject)CALL(oracle, open, self, fd_urn, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
   if(!fd) return NULL;
 
   // We know how large we would like the buffer so we make it that big
@@ -708,7 +712,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     CALL(oracle, set, URNOF(self), AFF4_DIRTY, "1");
 
     // Open our current volume for writing:
-    fd = (FileLikeObject)CALL(oracle, open, self, self->parent_urn, 'w');
+    fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
     if(!fd) return NULL;
 
     // Go to the start of the directory_offset
@@ -829,7 +833,7 @@ static void ZipFile_close(ZipFile self) {
     // Write a properties file if needed
     dump_volume_properties(self);
 
-    fd = (FileLikeObject)CALL(oracle, open, self ,self->parent_urn, 'w');
+    fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
     if(!fd) return;
 
     directory_offset = parse_int(CALL(oracle, resolve, 
@@ -1047,7 +1051,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
 static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
-  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'w');
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->parent_urn, 'w');
 
   if(!fd) return -1;
 
@@ -1116,7 +1120,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
 
   if(this->compression == 0) {
     /** Position our write pointer */
-    fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'r');
+    fd = (FileLikeObject)CALL(oracle, open, this->parent_urn, 'r');
     CALL(fd, seek, this->file_offset + self->readptr, SEEK_SET);
     len = CALL(fd, read, buffer, length);
     self->readptr += len;
@@ -1128,7 +1132,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
     int offset;
 
     if(!self->data) {
-      ZipFile container = (ZipFile)CALL(oracle, open, NULL, this->container_urn, 'r');
+      ZipFile container = (ZipFile)CALL(oracle, open, this->container_urn, 'r');
       int length;
       if(!container) return -1;
 
@@ -1154,7 +1158,7 @@ static void ZipFileStream_close(FileLikeObject self) {
     return;
   };
 
-  fd = (FileLikeObject)CALL(oracle, open, self, this->parent_urn, 'w');
+  fd = (FileLikeObject)CALL(oracle, open, this->parent_urn, 'w');
   if(!fd) {
     RaiseError(ERuntimeError, "Unable to open file %s", this->parent_urn);
     return;
@@ -1249,7 +1253,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, char *urn, char mod
     };
 
     // Open the volume:
-    parent = (ZipFile)CALL(oracle, open, NULL, volume_urn, mode);
+    parent = (ZipFile)CALL(oracle, open, volume_urn, mode);
     // Now just return the member from the volume:
     talloc_free(self);
     result = (AFFObject)CALL(parent, open_member, urn, mode, NULL, 0, compression);

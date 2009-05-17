@@ -8,6 +8,7 @@
 #define NAMESPACE "aff4:"
 #define VOLATILE_NS "aff2volatile:"
 #define FQN "urn:" NAMESPACE
+#define FILE_NS "file://"
 
 /** These are standard aff4 attributes */
 #define AFF4_STORED     NAMESPACE "stored"
@@ -38,14 +39,22 @@
 #define AFF4_PRIV_KEY  VOLATILE_NS "priv_key"
 #define AFF4_COMMON_NAME NAMESPACE "common_name"
 
-/** These are standard aff4 types */
+/** These are standard aff4 types. */
+/** Volumes **/
 #define AFF4_ZIP_VOLUME       "zip_volume"
 #define AFF4_DIRECTORY_VOLUME "directory"
+#define AFF4_LIBAFF_VOLUME    "aff1_volume"
+#define AFF4_LIBEWF_VOLUME    "ewf_volume"
+
+/** Streams */
 #define AFF4_SEGMENT          "segment"
 #define AFF4_LINK             "link"
 #define AFF4_IMAGE            "image"
 #define AFF4_MAP              "map"
 #define AFF4_ENCRYTED         "encrypted"
+#define AFF4_LIBAFF_STREAM    "aff1_stream"
+
+/** Miscellaneous objects */
 #define AFF4_IDENTITY         "identity"
 
 /** These are various properties */

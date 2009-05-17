@@ -231,7 +231,7 @@ CLASS(Resolver, AFFObject)
  you must return the object to the cache as soon as possible by
  calling cache_return.
 */ 
-      AFFObject METHOD(Resolver, open, void *ctx, char *uri, char mode);
+      AFFObject METHOD(Resolver, open, char *uri, char mode);
       void METHOD(Resolver, cache_return, AFFObject obj);
 
 /* This create a new object of the specified type. */
@@ -588,6 +588,26 @@ END_CLASS
 // directory structure
 CLASS(DirVolume, ZipFile)
 END_CLASS
+
+#ifdef HAVE_LIBAFFLIB
+#include "aff1.h"
+#endif
+
+#ifdef HAVE_LIBEWF
+#include "ewfvolume.h"
+#endif
+
+/** This is a dispatcher of stream classes depending on their name.
+*/
+struct dispatch_t {
+  // A boolean to determine if this is a scheme or a type
+  int scheme;
+  char *type;
+  AFFObject class_ptr;
+};
+
+extern struct dispatch_t dispatch[];
+extern struct dispatch_t volume_handlers[];
 
 void dump_stream_properties(FileLikeObject self);
 

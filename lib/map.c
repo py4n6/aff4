@@ -57,7 +57,7 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
     PrintError();
-    fd = (FileLikeObject)CALL(oracle, open, NULL, buff, 'r');
+    fd = (FileLikeObject)CALL(oracle, open, buff, 'r');
     ClearError();
     if(fd) {
       char *map = talloc_strdup(self, CALL(fd,get_data));
@@ -119,7 +119,7 @@ static void MapDriver_save_map(MapDriver self) {
   struct map_point *point;
   int i;
   FileLikeObject fd;
-  ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, self->parent_urn, 'w');
+  ZipFile zipfile = (ZipFile)CALL(oracle, open, self->parent_urn, 'w');
 
   if(!zipfile) return;
   snprintf(buff, BUFF_SIZE, "%s/map", URNOF(self));
@@ -158,7 +158,7 @@ static void MapDriver_close(FileLikeObject self) {
   // Write out a properties file
   char *properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
   if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, NULL, this->parent_urn, 'w');
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, this->parent_urn, 'w');
     char tmp[BUFF_SIZE];
 
     if(!zipfile) {
@@ -271,7 +271,7 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
   available_to_read = min(available_to_read, length);
 
   // Now do the read:
-  target = (FileLikeObject)CALL(oracle, open, NULL, this->points[l].target_urn, 'r');
+  target = (FileLikeObject)CALL(oracle, open,  this->points[l].target_urn, 'r');
   if(!target) return -1;
 
   CALL(target, seek, target_offset, SEEK_SET);

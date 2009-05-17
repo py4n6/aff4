@@ -151,7 +151,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
       goto error;
     }
 
-    parent  = (ZipFile)CALL(oracle, open, this, parent_urn, 'w');
+    parent  = (ZipFile)CALL(oracle, open, parent_urn, 'w');
 
     // Format the segment name
     snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
@@ -303,7 +303,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   // Now we work out the offsets on the chunk in the segment - we read
   // the segment index which is a segment:
   {
-    FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self, buffer, 'r');
+    FileLikeObject fd = (FileLikeObject)CALL(oracle, open, buffer, 'r');
     int32_t *chunk_index;
     int chunks_in_segment;
 
@@ -338,7 +338,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
     CALL(oracle, cache_return, (AFFObject)fd);
   };
 
-  fd = (FileLikeObject)CALL(oracle, open, NULL, buffer, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, buffer, 'r');
 
   // Fetch the compressed chunk
   CALL(fd, seek, chunk_offset_in_segment, SEEK_SET);
@@ -427,7 +427,7 @@ void dump_stream_properties(FileLikeObject self) {
   // Write out a properties file
   properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
   if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, self, volume, 'w');
+    ZipFile zipfile = (ZipFile)CALL(oracle, open, volume, 'w');
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", ((AFFObject)self)->urn);
     CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),

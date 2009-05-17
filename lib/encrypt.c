@@ -18,7 +18,7 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
       goto error;
     };
 
-    fd = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, mode);
+    fd = (FileLikeObject)CALL(oracle, open, this->target_urn, mode);
     if(!fd) {
       RaiseError(ERuntimeError, "Unable to open target %s", this->target_urn);
       goto error;
@@ -57,7 +57,7 @@ static AFFObject Encrypted_finish(AFFObject self) {
 
 static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'r');
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'r');
   int result;
 
   result = CALL(target, read, buffer, length);
@@ -70,7 +70,7 @@ static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int l
 
 static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'w');
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'w');
   int result;
 
   result = CALL(target, write, buffer, length);
@@ -83,7 +83,7 @@ static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int 
 
 static void Encrypted_close(FileLikeObject self) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, NULL, this->target_urn, 'w');
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'w');
   CALL(target, close);
   CALL(oracle, cache_return, (AFFObject)target);
 

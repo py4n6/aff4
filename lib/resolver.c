@@ -2,33 +2,49 @@
 #include "zip.h"
 #include <uuid/uuid.h>
 
-/** This is a dispatcher of stream classes depending on their name.
-*/
-struct dispatch_t {
-  // A boolean to determine if this is a scheme or a type
-  int scheme;
-  char *type;
-  AFFObject class_ptr;
-};
-
-static struct dispatch_t dispatch[] = {
+// This is a big dispatcher of all AFFObjects we know about. We call
+// their AFFObjects::Con(urn, mode) constructor.
+struct dispatch_t dispatch[] = {
   // Must be first - fallback position
   { 1, "file://",                 (AFFObject)&__FileBackedObject },
 
   { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
-  { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
-  { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
   { 0, AFF4_IMAGE,                (AFFObject)&__Image },
   { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
   { 0, AFF4_ENCRYTED,             (AFFObject)&__Encrypted},
   { 0, AFF4_IDENTITY,             (AFFObject)&__Identity},
+  { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
+  { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
 
   // All handled by libcurl
 #ifdef HAVE_LIBCURL
   { 1, "http://",                 (AFFObject)&__HTTPObject },
   { 1, "https://",                (AFFObject)&__HTTPObject },
   { 1, "ftp://",                  (AFFObject)&__HTTPObject },
+#endif
+
+#ifdef HAVE_LIBAFFLIB
+  { 0, AFF4_LIBAFF_VOLUME,        (AFFObject)GETCLASS(AFF1Volume) },
+  { 0, AFF4_LIBAFF_STREAM,        (AFFObject)GETCLASS(AFF1Stream) },
+#endif
+
+  { 0, NULL, NULL}
+};
+
+// This dispatcher is for the volume handlers - we attempt to open
+// each volume with one of these handlers. Note that we actually call
+// their ZipFile::Con(fileurn, mode) constructor (since they all
+// inherit from ZipFile).
+struct dispatch_t volume_handlers[] = {
+  { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
+  { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
+  // This is legacy support for AFF1 volumes.
+#ifdef HAVE_LIBAFFLIB
+  { 0, AFF4_LIBAFF_VOLUME,        (AFFObject)&__AFF1Volume },
+#endif
+#ifdef HAVE_LIBEWF
+  { 0, AFF4_LIBEWF_VOLUME,        (AFFObject)&__EWFVolume },
 #endif
   { 0, NULL, NULL}
 };
@@ -76,6 +92,11 @@ void AFF2_Init(void) {
 
 #ifdef HAVE_LIBCURL
   HTTPObject_init();
+#endif
+
+#ifdef HAVE_LIBAFFLIB
+  AFF1Volume_init();
+  AFF1Stream_init();
 #endif
 
   Encrypted_init();
@@ -315,7 +336,13 @@ static char **Resolver_resolve_list(Resolver self, void *ctx, char *urn, char *a
   return (char **)result->data;
 };
 
-static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
+/** Instantiates a single instance of the class using this
+    resolver. The returned object MUST be returned to the cache using
+    cache_return(). We initially create the object using the NULL
+    context, and when the object is returned to the cache, it will be
+    stolen again.
+*/
+static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
   int i;
   char *stream_type;
   struct dispatch_t *dispatch_ptr=NULL;
@@ -334,7 +361,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
 
   if(tmp) {
     result = (AFFObject)tmp->data;
-    talloc_steal(ctx, result);
+    talloc_steal(NULL, result);
     talloc_free(tmp);
     return result;
   };
@@ -374,7 +401,7 @@ static AFFObject Resolver_open(Resolver self, void *ctx, char *urn, char mode) {
   
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-				    Con, ctx, urn, mode);
+				    Con, NULL, urn, mode);
   
   // Make sure the object mode is set
   if(result)
