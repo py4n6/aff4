@@ -115,7 +115,7 @@ printit(TSK_FS_FILE * fs_file, const char *a_path,
 				a_path, 
 				fs_file->name->name);
 
-    printf("%s!\n", path_name);
+    //    printf("%s!\n", path_name);
     if(fs_file->meta->type != TSK_FS_META_TYPE_REG) return;
 
     fls_data->map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
@@ -137,7 +137,7 @@ printit(TSK_FS_FILE * fs_file, const char *a_path,
     //    CALL(oracle, set, link_urn, AFF4_TYPE, AFF4_LINK);
     //    CALL(oracle, set, link_urn, AFF4_TARGET, fls_data->target_urn);
 
-    printf("File name %s\n", path_name);
+    printf("Added file name %s\n", path_name);
     talloc_free(path_name);
 
     if (tsk_fs_file_walk(fs_file, TSK_FS_FILE_WALK_FLAG_AONLY,
@@ -233,7 +233,6 @@ int main(int argc, char **argv)
 {
   int c;
   char *output_file = NULL;
-  char *stream_name = "default";
   char *driver = AFF4_ZIP_VOLUME;
   int verbose=0;
   char *cert = NULL;
@@ -325,10 +324,6 @@ int main(int argc, char **argv)
       }
       break;
 
-    case 's':
-      stream_name = optarg;
-      break;
-
     case 'v':
       verbose++;
       break;
@@ -358,7 +353,6 @@ int main(int argc, char **argv)
     i++;
   };
 
-  volumes[i++]=stream_name;
   volumes[i]=0;
 
   img = tsk_aff4_open(i, volumes);

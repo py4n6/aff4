@@ -362,7 +362,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
   // Is there a file we need to read?
   fd = (FileLikeObject)CALL(oracle, open, fd_urn, mode);
-  if(!fd) goto error;
+  if(!fd) {
+    RaiseError(ERuntimeError, "Unable to open %s", fd_urn);
+    goto error;
+  };
 
   self->parent_urn = talloc_strdup(self, fd_urn);
 

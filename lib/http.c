@@ -169,13 +169,14 @@ static HTTPObject HTTPObject_Con(HTTPObject self,
   curl_easy_setopt( handle, CURLOPT_HEADERFUNCTION, parse_header_callback);
   curl_easy_setopt( handle, CURLOPT_HEADERDATA, self);
 
+  talloc_set_destructor(self, HTTPObject_destructor);
+
   // Read 1 byte to work out the file size through the write callback:
   { 
     char buffer[10];
-    CALL((FileLikeObject)self, read, buffer, 1);
+    if(CALL((FileLikeObject)self, read, buffer, 1) < 0) 
+      goto error;
   };
-
-  talloc_set_destructor(self, HTTPObject_destructor);
 
   return self;
  error:
