@@ -43,8 +43,11 @@ struct dispatch_t volume_handlers[] = {
 #ifdef HAVE_LIBAFFLIB
   { 0, AFF4_LIBAFF_VOLUME,        (AFFObject)&__AFF1Volume },
 #endif
+
+#if 0 // Not implemented yet
 #ifdef HAVE_LIBEWF
   { 0, AFF4_LIBEWF_VOLUME,        (AFFObject)&__EWFVolume },
+#endif
 #endif
   { 0, NULL, NULL}
 };
@@ -97,6 +100,11 @@ void AFF2_Init(void) {
 #ifdef HAVE_LIBAFFLIB
   AFF1Volume_init();
   AFF1Stream_init();
+#endif
+
+#ifdef HAVE_LIBEWF
+  EWFVolume_init();
+  EWFStream_init();
 #endif
 
   Encrypted_init();

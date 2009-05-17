@@ -39,10 +39,14 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
     // We are in writing mode - but we dont already have a __URN__
     // file - make one:
     if(CALL(self, writestr, "__URN__", ZSTRING_NO_NULL(URNOF(self)),
-	    NULL, 0, 0)<0) 
+	    NULL, 0, 0)<0) {
       goto error;
+    };
   } else {
     // We are in reading mode and we cant find the __URN__ file - quit
+    ClearError();
+    RaiseError(ERuntimeError, "%s not a valid directory volume - no __URN__", fd_urn)
+
     goto error;
   };
   ClearError();

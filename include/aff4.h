@@ -56,6 +56,11 @@
 
 /** Miscellaneous objects */
 #define AFF4_IDENTITY         "identity"
+/** This is the configuration namespace - it stores configuration
+    information related to the current running instance **/
+#define AFF4_CONFIG_NAMESPACE FQN "urn:aff4config:"
+#define AFF4_CONFIG_PAD           "pad_on_read_error"
+
 
 /** These are various properties */
 #define AFF4_AUTOLOAD         NAMESPACE "autoload"  /** Instructs the loader to

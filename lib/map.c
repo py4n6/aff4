@@ -297,7 +297,18 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
   // length requested
   while(i < length ) {
     read_length = MapDriver_partial_read(self, buffer + i, length - i);
-    if(read_length <=0) break;
+    if(read_length==0) break;
+    if(read_length < 0) {
+      // An error occurred - we need to decide if to pad or not
+      char *pad = CALL(oracle, resolve, AFF4_CONFIG_NAMESPACE, AFF4_CONFIG_PAD);
+
+      if(pad) {
+	memset(buffer + i ,0, length -i);
+      } else {
+	PrintError();
+	return -1;
+      };
+    };
     i += read_length;
   };
 

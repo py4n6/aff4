@@ -192,8 +192,10 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
     errno = 0;
     res = CALL(fh, read, (char *)buf, (int)size);
     if (res<0){
-	if (errno==0) errno=-EIO;
-	else res = -errno;
+	if (errno==0) 
+	  errno= -EIO;
+
+	res = -EIO;
     }
 
     CALL(oracle, cache_return, (AFFObject)fh);
