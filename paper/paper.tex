@@ -81,17 +81,17 @@ different locations. We propose a backwards-compatible redesign of the
 Advanced Forensic Format---an open, extensible file format for storing
 and sharing of evidence, arbitrary case related information and
 analysis results among different tools. The new specification, termed
-AFF4, was designed to be simple to implement, bult upon the well
-supported ZIP file format specification. AFF4 implementation have
+AFF4, is designed to be simple to implement, bult upon the well
+supported ZIP file format specification. Furthermore, the AFF4 implementation has
 downward compatability with existing AFF files.
 \end{abstract}
 
 \section{Introduction}
 Storing and managing digital evidence is becoming increasingly more
-difficult, as the volume and size of digital evidence increases. The
-type of what consitutes evidence has also evolved to include data
+difficult, as the volume and size of digital evidence increases. Evidence
+sources have also evolved to include data
 other than disk images, such as memory images, network images and
-regular files. Preserving digital evidence is an important part of
+regular files. Preserving such digital evidence is an important part of
 most digital investigations\cite{carrier:event-based}, and managing
 the evidence in a distributed organization is now emerging as a
 critical requirement.
@@ -110,7 +110,7 @@ actual file formats and containers used to store digital
 evidence. Early practitioners created exact bit-for-bit copies
 (commonly referred to as ``dd images''). More recently, proprietary
 software systems for making and authenticating ``images'' of digital
-evidence are commonly used
+evidence have become common
 (e.g. \cite{safeback,ilook,encase}). PyFlag\cite{pyflag} introduced a
 ``seekable gzip'' format that allowed disk images to be stored in a
 form that was compressed but allowed random-access to evidence data
@@ -118,12 +118,12 @@ necessary for forensic analysis.
 
 The Expert Witness Forensic (EWF) file format was originally developed
 for Encase\cite{encase}, but then adopted by other vendors
-\cite{libewf}. The EWF file format also compresses the image into 32kb
+\cite{libewf}. The EWF file format similarly compresses the image into 32kb
 chunks which are stored back to back in groupings inside the file. The
-format contains multiple tables containing relative indexes to these
-compressed chunks which are also stored within the volume. EWF volumes
-have a maximum size of 2Gb and therefore usually split an image across
-many volumes. EWF provides for a small number of predefined metadata
+format employs tables of relative indexes to the
+compressed chunks to improve random access efficienct. EWF volumes
+have a maximum size limit of 2Gb and therefore usually split an image across
+many files. EWF provides for a small number of predefined metadata
 fields to be stored within the file format.
 
 The Advanced Forensic Format (AFF) expanded on this idea with a
@@ -133,7 +133,7 @@ be stored in a single digital archive\cite{garfinkel:aff}.
 Both the AFF and EWF file formats are designed to store a single
 image, and any metadata implicitely refers to that image. Therefore,
 these formats in themselves have a limited metadata model which is
-unable to exist outside the context of the image itself.  But AFF went
+unable to exist outside the context of the image itself.  But the AFF went
 beyond merely specifying metadata as an addition to the forensic
 evidence itself. Metadata forms an essential part of the file format,
 with the same metadata system storing both essential information
@@ -377,8 +377,8 @@ put together in common usage cases.
   namespace, and is made unique by use of a unique identifier
   generated as per RFC4122\cite{RFC4122}.
 
-\item \emph{A Relation or Fact} is a statement about an AFF Object which
-  expresses some property of the object. The relation comprises of a
+\item \emph{A Relation} is a factual statement which is used either to describe
+  a relationship between two AFF Objects, or to describe some property of an object. The relation comprises of a
   tuple of (Subject, Attribute, Value). All metadata is reduced to
   this tuple notation.
 
@@ -455,10 +455,10 @@ The AFF4 model treats metadata as an abstract concept which may exist
 independently from the data itself. We term {\em metadata} to be a set
 of statements about objects, written in tuple notations (Subject,
 Attribute, Value), where {\em Subject} is the URN of the object the
-statement is made about. An \emph{Attribute} can be any kind of value, such
+statement is made about. An \emph{Attribute} can be any kind of value or relationship, such
 as the sector size of a device, a device capacity, or the name of the
 person who performed an imaging operation. A \emph{Value} is the value
-of the attribute. Using this system we are able to store
+of the attribute, which is either another URN, or some textual value. Using this system we are able to store
 arbitrary attributes about any object in the AFF4
 universe. Additionally, as these statements are universally scoped,
 they may be stored anywhere.
@@ -569,7 +569,7 @@ the Volume URN itself, so it is safe to convert from one
 representation to another. In this way its possible for example, to
 unzip a Zip64 volume into a directory and vice versa.
 
-It is important to emphesise that Volumes are merely containers which
+It is important to emphasise that Volumes are merely containers which
 provide storage for segments. There is no restriction of which
 segments can be stored by any particular volume. For example, the
 segments which make up a single Image stream may be stored in a number
@@ -1098,9 +1098,9 @@ so as far as the operators are concerned they can always refer to the
 Image stream via the Link name.
 
 \section{Identity Object}
-AFF4 defines a \emph{Statement} as a collection of facts, or
+AFF4 defines a \emph{Statement} as a collection of relations, or
 (subject, attribute, value) tuples. Listing \ref{statement}
-illustrates a collection of facts encoded in the standard AFF4
+illustrates a collection of relations encoded in the standard AFF4
 notation (SHA254 hashes are base64 encoded).
 
 \begin{lstlisting}[
@@ -1137,7 +1137,7 @@ the statements.
 To verify the signatures, the AFF4 library loads the stored
 certificate, then checks the signature for each statement. If a
 statement is verified (i.e. deemed as correct according to the
-identity), the facts within it are checked. Note that it is possible
+identity), the relations within it are checked. Note that it is possible
 for multiple identities to sign the same data.
 
 %\subsection{Encryption Schemes}
