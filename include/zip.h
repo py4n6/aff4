@@ -418,9 +418,12 @@ END_CLASS
   the block number (as 32 bit int in little endian) appended to an 8
   byte salt.
 *************************************************************/
+#include <openssl/aes.h>
+
 CLASS(Encrypted, FileLikeObject)
      StringIO block_buffer;
-     char *key;
+     AES_KEY ekey;
+     AES_KEY dkey;
      char *salt;
      char *target_urn;
      // Our volume urn
@@ -428,6 +431,7 @@ CLASS(Encrypted, FileLikeObject)
 
      // The block size for CBC mode
      int block_size;
+     int block_number;
 END_CLASS
 
  char *resolver_get_with_default(Resolver self, char *urn, 

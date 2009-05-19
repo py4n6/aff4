@@ -427,7 +427,7 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
 
 	memset(buff, 0, BUFF_SIZE);
 	EVP_DigestFinal(&digest, buff,&len);
-	encode64(buff, len, hash_base64);
+	encode64(buff, len, hash_base64, sizeof(hash_base64));
 
 	CALL(oracle, set, urn, AFF4_SHA, (char *)hash_base64);
       };

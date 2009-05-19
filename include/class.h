@@ -443,6 +443,10 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 #define CheckError(error)			\
   (_global_error == error)
 
+  // These dont do anything but are useful to indicate when a function
+  // parameter is used purely to return a value
+#define OUT
+#define IN
 
 #endif
 #ifdef __cplusplus

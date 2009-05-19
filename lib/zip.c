@@ -867,12 +867,16 @@ static void ZipFile_close(ZipFile self) {
 	// This is a zip member
 	if(!strcmp(attribute, AFF4_CONTAINS)) {
 	  struct CDFileHeader cd;
+	  char *type = CALL(oracle, resolve, value, AFF4_TYPE);
 	  time_t epoch_time = parse_int(CALL(oracle, resolve, value, 
 					     AFF4_TIMESTAMP));
 	  struct tm *now = localtime(&epoch_time);
 	  // This gets the relative name of the fqn
 	  char *escaped_filename = escape_filename(relative_name(value, URNOF(self)));
 	  //	  LogWarnings("Writing archive member %s -> %s", escaped_filename, value);
+
+	  // Its not a segment after all
+	  if(type && strcmp(type, AFF4_SEGMENT)) continue;
 
 	  memset(&cd, 0, sizeof(cd));
 	  cd.magic = 0x2014b50;
@@ -1230,7 +1234,7 @@ static void ZipFileStream_close(FileLikeObject self) {
     memset(digest, 0, BUFF_SIZE);
     EVP_DigestFinal(&this->digest,digest,&digest_len);
     if(digest_len < BUFF_SIZE) {
-      encode64(digest, digest_len, digest_encoded);
+      encode64(digest, digest_len, digest_encoded, sizeof(digest_encoded));
       
       // Tell the resolver what the hash is:
       CALL(oracle, set, URNOF(self), AFF4_SHA, (char *)digest_encoded);

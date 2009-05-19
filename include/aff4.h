@@ -6,7 +6,7 @@
 
 // This is the URI namespace for the AFF4 scheme
 #define NAMESPACE "aff4:"
-#define VOLATILE_NS "aff2volatile:"
+#define VOLATILE_NS "aff4volatile:"
 #define FQN "urn:" NAMESPACE
 #define FILE_NS "file://"
 
@@ -60,7 +60,7 @@
     information related to the current running instance **/
 #define AFF4_CONFIG_NAMESPACE FQN "urn:aff4config:"
 #define AFF4_CONFIG_PAD           "pad_on_read_error"
-
+#define AFF4_CONFIG_AUTOLOAD      "autoload_volumes"
 
 /** These are various properties */
 #define AFF4_AUTOLOAD         NAMESPACE "autoload"  /** Instructs the loader to
@@ -78,6 +78,19 @@
 
   // All identity URNs are prefixed with this:
 #define AFF4_IDENTITY_PREFIX  FQN AFF4_IDENTITY
+
+/** Volatile attributes are never written to the file but are used to
+    pass messages between different parts of the code.
+*/
+// Thats the passphrase that will be used to encrypt the session key
+#define AFF4_VOLATILE_PASSPHRASE VOLATILE_NS "passphrase"
+
+// This is the session key for encryption
+#define AFF4_VOLATILE_KEY   VOLATILE_NS "key"
+#define AFF4_CRYPTO_NAMESPACE NAMESPACE "crypto:"
+#define AFF4_CRYPTO_FORTIFICATION_COUNT AFF4_CRYPTO_NAMESPACE "fortification"
+#define AFF4_CRYPTO_IV  AFF4_CRYPTO_NAMESPACE "IV"
+#define AFF4_CRYPTO_PASSPHRASE AFF4_CRYPTO_NAMESPACE "passphrase"
 
 /** 
     Opens the URIs specified in images and uses them to populate the

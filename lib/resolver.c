@@ -527,7 +527,7 @@ static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
   if(!class_reference || !*class_reference) return NULL;
 
   result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL, 'w');
-
+  talloc_set_name(result, "%s: %s (" __location__ ")\n              ", NAMEOF(result), URNOF(result));
   return result;
 };
 
@@ -646,6 +646,8 @@ static AFFObject AFFObject_Con(AFFObject self, char *uri, char mode) {
 
   if(!self->urn)
     self->urn = uri;
+
+  self->mode = mode;
 
   return self;
 };

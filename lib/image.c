@@ -241,7 +241,7 @@ static void Image_close(FileLikeObject self) {
   dump_stream_properties(self);
 
   EVP_DigestFinal(&this->digest, buff, &len);
-  encode64(buff, len, hash_base64);
+  encode64(buff, len, hash_base64, sizeof(hash_base64));
   CALL(oracle, set, URNOF(self), AFF4_SHA, (char *)hash_base64);
 
   this->__super__->close(self);

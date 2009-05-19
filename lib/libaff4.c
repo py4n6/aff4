@@ -5,8 +5,14 @@
 
 ZipFile open_volume(char *urn, char mode) {
   ZipFile result=NULL;
-  char *filename = normalise_url(urn);
+  char *filename;
   struct dispatch_t *i=volume_handlers;
+
+  if(startswith(urn, FQN)) {
+    filename = urn;
+  } else {
+    filename =  normalise_url(urn);
+  };
 
   ClearError();
 
@@ -25,6 +31,48 @@ ZipFile open_volume(char *urn, char mode) {
     i++;
   };
   PrintError();
+
+  // Check for autoload in this volume
+  if(result && mode=='r') {
+    char *autoload = resolver_get_with_default(oracle, AFF4_CONFIG_NAMESPACE, 
+					       AFF4_CONFIG_AUTOLOAD, "1");
+    char base_path[BUFF_SIZE]; 
+    char *dirpath;
+
+    strncpy(base_path, urn, BUFF_SIZE);
+    dirpath = dirname(base_path);
+
+    if(!strcmp(autoload, "1")) {
+      // Get a list of autoload volumes:
+      struct aff4_tripple **result_set = aff4_query(oracle, URNOF(result), AFF4_AUTOLOAD, NULL);
+      int i;
+      char *result_urn = talloc_strdup(result_set, URNOF(result));
+
+      CALL(oracle, cache_return, (AFFObject)result);
+
+      // Open them all and return to cache
+      for(i=0; result_set[i]; i++) {
+	// Note that autoloads are specified relative to the current
+	// urn path, or in a fully qualified way:
+	ZipFile fd;
+	char *path = fully_qualified_name(result_set[i]->value, dirpath);
+	
+	LogWarnings("Autoloading %s", path);
+	fd = open_volume(path, 'r');
+	if(fd) {
+	  CALL(oracle, cache_return, (AFFObject)fd);
+	};
+      };
+
+      // Get it back
+      result = (ZipFile)CALL(oracle, open, result_urn, mode);
+
+      // Remove autoloads from our resolver
+      CALL(oracle, del, URNOF(result), AFF4_AUTOLOAD);
+      // Done.
+      talloc_free(result_set);
+    };
+  };
 
   return result;
 };
