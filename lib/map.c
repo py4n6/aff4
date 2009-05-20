@@ -317,10 +317,10 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 
 
 VIRTUAL(MapDriver, FileLikeObject)
-     VMETHOD(super.super.Con) = MapDriver_Con;
-     VMETHOD(super.super.finish) = MapDriver_finish;
+     VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
+     VMETHOD_BASE(AFFObject, finish) = MapDriver_finish;
      VMETHOD(add) = MapDriver_add;
      VMETHOD(save_map) = MapDriver_save_map;
-     VMETHOD(super.read) = MapDriver_read;  
-     VMETHOD(super.close) = MapDriver_close;
+     VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
+     VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
 END_VIRTUAL

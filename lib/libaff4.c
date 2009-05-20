@@ -2,6 +2,7 @@
  */
 #include "zip.h"
 #include "aff4.h"
+#include <libgen.h>
 
 ZipFile open_volume(char *urn, char mode) {
   ZipFile result=NULL;

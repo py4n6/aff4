@@ -677,7 +677,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
 static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mode,
 				   char *extra, uint16_t extra_field_len,
 				   int compression) {
-  FileLikeObject result;
+  FileLikeObject result=NULL;
 
   switch(mode) {
   case 'w': {
@@ -1118,7 +1118,7 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
 static int ZipFileStream_read(FileLikeObject self, char *buffer,
 			      unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
-  int len;
+  int len=0;
   FileLikeObject fd;
 
   // We only read as much data as there is

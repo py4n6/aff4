@@ -302,7 +302,7 @@ analysts in a third security domain.
 
 Managing evidence in a globally distributed system requires the use of
 globally unique identifiers to ensure no name collisions can occur
-with disconnected systems. AFF1 assigns each piece of evidence a
+with disconnected locations. AFF1 assigns each piece of evidence a
 unique 128-bit identifier called a GID but did not make it clear when
 this identifier should be changed and when it should remain the same.
 
@@ -318,13 +318,13 @@ analyst will be required to store the information in their own
 evidence file; these files will then be recombined at a later point in
 time.
 
-In this case they can each create a new volume which extends to
+In this case they can each create a new volume which extends the
 original volume and save their analysis on this new volume. Now they
 only need to share this new volume with other analysts who also have a
 copy of the old volume to interchange their findings.
 
 This is made possible because each volume is independent of one
-another, but can still be recombined into a bigger evidence set. 
+another, but is still viewed as part of a bigger evidence set.
 
 \begin{figure}[tb]
   \begin{center}
@@ -402,7 +402,7 @@ Zip64 based volume} and the {\em Directory} based volume.
   contents}. Segments are suitable for storing small quantities of
   data, and still present a stream interface.
 
-\item \emph{A Target Reference} is a way of referencing objects by use
+\item \emph{A Reference} is a way of referencing objects by use
   of a Uniform Resource Identifier (URI). The URI can be another AFF
   Object URN or may be a more general Uniform Resource Locator (URL),
   such as for example a HTTP or FTP object. This innovation allows
@@ -442,7 +442,7 @@ The AFF4 design adopts a scheme of globally unique identifiers for
 identifying and referring to all evidence. We define an AFF4 specific
 URN scheme, which we call the AFF4 URN. URN's of this scheme use the
 namespace\cite{RFC1737} ``\emph{aff4}'' and therefore begin with the 
-string(\emph{urn:aff4}). AFF4 URNs are then be made unique by use of 
+string ``\emph{urn:aff4}''. AFF4 URNs are then be made unique by use of 
 a unique identifier generated
 as per RFC4122\cite{RFC4122}. For example, an AFF4 URN might be
 \emph{urn:aff4:bcc02ea5-eeb3-40ce-90cf-7315daf2505e}
@@ -501,18 +501,20 @@ serialization of statements into volume segments. The statements may
 exist without being stored in a volume (for example, being stored on
 an external SQL server). Alternatively, these statements may be stored
 in some other way inside or outside the volume (e.g. SQLite
-databases).
+database files).
 
 When the volume is loaded, the AFF4 implementation automatically loads
 any properties files and populates its Universal Resolver with the
-information visibile to it. AFF4 provides a mechanism to use an
+information visible to it. AFF4 provides a mechanism to use an
 external resolver as well---for example, we have implemented a
 resolver that stores Attributes in a MySQL database to provide for a
-Universal Resolver that shares information between different instances
-on the same network.
+persistent Universal Resolver that shares information between
+different instances on the same network.
 
 Each URN within the AFF4 universe must have an ``\texttt{aff4:type}''
-attribute to denote the type of the Object.
+attribute to denote the type of the Object. Objects may also have a
+the ``\texttt{aff4:interface}'' attribute to denote what kind of
+interface they present (e.g. {\emph stream} or {\emph volume}).
 
 \begin{lstlisting}[
 	caption=Example properties files for several AFF4 objects (URNs are
@@ -564,12 +566,9 @@ segments. Segments are stored and retrieved using their URNs. We
 describe two different implementations of volume objects, namely the
 {\em Directory Volume} and the {\em ZipFile Volume}. It is possible to
 convert from one implementation to another easily, without affecting
-any external references. This is because external references are to
-the Volume URN itself, so it is safe to convert from one
-representation to another. In this way its possible for example, to
-unzip a Zip64 volume into a directory and vice versa.
+any external references.
 
-It is important to emphasise that Volumes are merely containers which
+It is important to emphasize that Volumes are merely containers which
 provide storage for segments. There is no restriction of which
 segments can be stored by any particular volume. For example, the
 segments which make up a single Image stream may be stored in a number
@@ -590,8 +589,8 @@ The Directory Volume uses the {\em aff4:stored} attribute to provide a
 base URL. The URL for each segment is then constructed by appending
 the escaped segment URN to the base URL. Note that there is no
 restriction on what type of URL this can be, so it may be a location
-on a filesystem (e.g. {\em file://some\_directory/}) or a location on a
-HTTP server (e.g. {\em http://intranet.server/some\_path}). In this
+on a filesystem (e.g. {\em file:///some/directory/}) or a location on a
+HTTP server (e.g. {\em http://intranet.server/some/path}). In this
 way its possible to move the entire volume from a filesystem to a web
 server transparently.
 
@@ -611,11 +610,6 @@ Zip64\cite{zip-format}. There are many reasons for this decision:
   can be seen in Figure~\ref{explorer}, Zip64 is supported natively
   by Java, Python and PERL).
  
-\item Zip64 already includes support for the ``table of contents''
-  envisioned but never implemented by Garfinkel; Zip64 calls this
-  table the ``Central Directory.'' It is written at the end of the
-  Zip64 volume.
-
 \item Zip64 libraries are readily available making proprietary implementations of
   interfaces to the AFF4 volume format simple to write. For example, a
   simple python program to dump out an Image stream
@@ -657,7 +651,9 @@ Descriptor} describing the length and CRC of the archived file. Using
 the data descriptor field allows implementations to write archives
 without needing to seek in the output file. This allows Zip files to
 be written to pipes for example, sending an image over the network
-using netcat or ssh.
+using netcat or ssh. AFF4 always uses the data description header to
+ensure volumes are written continuously without needing to seek in the
+output file.
 
 \begin{figure}[tbp]
   \begin{center}
@@ -676,8 +672,7 @@ It is important to note that AFF4 only requires that the volume be
 capable of storing multiple named segments of data. Although our AFF4
 implementation uses the Zip64 file format as an underlying storage
 mechanism, our system also supports legacy AFF1 volumes as well as
-segments that are stored in other storage systems---for example,
-Amazon.com's Simple Storage System (S3)\cite{s3-aws-home-page-money}.
+Expert Witness Evidence files \cite{libewf}.
 
 We ignore Zip64's built-in support for splitting archives into
 multiple Zip files. Instead, our implementation treats each volume as
@@ -708,9 +703,10 @@ our own Zip64 implementation for AFF4:
   can be a large number of segments in a volume, it is advisable to
   have a Zip64 implementation that is optimized to storing thousands
   (or even hundreds of thousands) of segments in an efficient data
-  structure. In fact our implementation uses the Universal Resolver to
-  store the parsed central directory information, which means that in
-  most cases we dont even need to scan the Central Directory at all.
+  structure. In fact our implementation uses the Universal Resolver
+  itself to store the parsed central directory information, which
+  means that in most cases we do not even need to scan the Central
+  Directory at all.
 
 \item While the Zip specification duplicates data found in the Central
   Directory entry in each File Header (such as filename, size, CRC
@@ -720,7 +716,7 @@ our own Zip64 implementation for AFF4:
   populated to allow recovery of at least \emph{some} evidence that
   might exist in damaged volumes. If the central directory is lost, it
   is possible to scan through the volume, and locate all the Zip64
-  file headers. Then its possible to repair and reconstruct the
+  file headers. Then it is possible to repair and reconstruct the
   central directory.
 
 \item Our implementation supports simultaneous access by multiple
@@ -794,7 +790,7 @@ offsets are stored in the chunk index segment.}
 \end{figure}
 
 Image streams specify the \texttt{chunk\_size} attribute, as the
-number of image bytes each chunk contains (typically chunk sizes are
+number of image bytes each chunk contains (chunk size defaults to
 32kb). Also specified is the \texttt{chunks\_per\_segment} attribute
 which specifies how many chunks are stored in each bevy. Each chunk is
 compressed individually using the zlib compress algorithm. This
@@ -803,8 +799,9 @@ to the technique used by the Expert Witness file format (EWF) used by
 EnCase\cite{encase-3.0} and implemented by the open source
 libewf\cite{libewf} package. This improvement from AFF1's 16MB segment
 size results in a better match between requested size and the minimum
-size required for decompression. This means that less data is needed
-to be decompressed unnecessarily where reading small sectors randomly.
+size required for decompression. Less data is needed to be
+decompressed unnecessarily where reading small sectors randomly,
+leading to vast performance improvements.
 
 %% FIXME - hashing may apply to any segment not just bevies
 %Bevies can optionally be individually hashed, allowing for detection
@@ -859,11 +856,12 @@ drawn from an image, while a TCP/IP stream is simply a collection of
 payloads from selected network packets. Sometimes the same data may be
 viewed in a number of ways---for example a Virtual Address Space is a
 mapping of the Physical Address Space through a page table
-transformation.  Zero Storage Carving\cite{Meijer2006} is a way of
-specifying carved files in terms of a sequence of blocks taken from
-the image; Cohen extended this concept to an arbitrary mapping
-function\cite{1363239,Cohen2007} which can be used to describe
-arbitrary mappings of carved files within a single image.
+transformation \cite{Tanenbaum2008}.  Zero Storage
+Carving\cite{Meijer2006} is a way of specifying carved files in terms
+of a sequence of blocks taken from the image; Cohen extended this
+concept to an arbitrary mapping function\cite{1363239,Cohen2007} which
+can be used to describe arbitrary mappings of carved files within a
+single image.
 
 In this work we extend the mapping function concept to allow a single
 map to draw data from arbitrary streams (called {\em targets}). This
@@ -880,7 +878,7 @@ byte at a mapped stream offset $x$ can then be satisfied by reading a
 byte from target $T_i$ at offset $y$ given by:
 \begin{eqnarray}
 y = (x - X_i) + Y_i & &
-\forall x \in \left [X_i, X_i+1 \right )
+\forall x \in \left [X_i, X_{i+1} \right )
 \end{eqnarray}
 
 For example, consider the following map:
@@ -899,7 +897,7 @@ from offset 5000 in \emph{urn:aff4:83a3d6db-85d5}.
 
 In order to efficiently express periodic maps such as those found in
 RAID arrays, the Map stream may be provided with two optional
-parameters a {\em target\_period} ($T_p$), and {\em stream\_period}
+parameters: a {\em target\_period} ($T_p$), and {\em stream\_period}
 ($S_p$). If specified, the above relation becomes:
 \begin{eqnarray*}
 p &:=& floor\left (\frac{x}{S_p} \right) \\
@@ -1012,7 +1010,7 @@ For this reason, URLs may be used interchangeably with a URN within
 the AFF4 universe. For example, the \emph{aff4:stored} attribute of a
 volume may be specified as a URL
 (e.g. \emph{http://intranet/123453/}).  AFF4 provides transparent
-support for HTTP and FTP URLs by means of the curl HTTP
+support for HTTP and FTP URLs by means of the Curl HTTP
 library\cite{libcurl}. The HTTP Stream, therefore satisfies read
 requests by making HTTP requests to the web server. We use the
 \emph{Content-Range} HTTP header to request exactly the byte range the
@@ -1023,7 +1021,7 @@ the client application requires.
 Our implementation also enables direct writing to a HTTP URL using the
 WebDav extensions to HTTP\cite{webdav-rfc}. The HTTP stream also
 supports the File Transfer Protocol (FTP) and HTTPS (Secure Sockets
-Layer---SSL) protocols transparently, as provided by the curl library.
+Layer---SSL) protocols transparently, as provided by the Curl library.
 
 \subsection{Encrypted Streams}
 \label{crypted_stream}
@@ -1080,7 +1078,7 @@ Streams and therefore contain multiple AFF4 Encrypted
 Volumes. Container Volumes may contain non encrypted streams as well,
 and may implement different encryption schemes and keys for each
 Encrypted stream. This effectively allows arbitrary access policies to
-be implemented as only volumes which can be accessed can be merged.
+be implemented as only volumes which can be accessed can be read.
 
 \subsection{The Link Object}
 Although the URN of a stream names it unambiguously in the AFF4
@@ -1129,7 +1127,7 @@ is similar to the Bill of Material (BOM) from AFF1.
 An AFF4 Identity object represents an entity, currently described by
 way of an X509 certificate. The URN of an identity object is the
 certificate's fingerprint, and is therefore unique to the
-certificate. Identity objects contains \emph{aff4:statement}
+certificate. Identity objects contain \emph{aff4:statement}
 attributes which refer to AFF4 streams containing statements. The
 identity object also contains a copy of the certificate used to sign
 the statements.
@@ -1208,11 +1206,11 @@ via a WAN.
 
 \subsection{Using distributed evidence}
 An investigation is conducted by the New York team. The case relates
-to a hard disk image stream stored inside a volume, in turn stored on
-the NY evidence server at URL http://ny.wan/evidence1.aff4 . The team
-requires an analyst (Bob) in LA to assist with their analysis. The LA
-analyst types\footnote{fls is the file listing command which is part
-of the Sleuthkit}:
+to a hard disk {\emph Image stream} stored inside a volume, in turn
+stored on the NY evidence server at URL http://ny.wan/evidence1.aff4
+. The team requires an analyst (Bob) in LA to assist with their
+analysis. The LA analyst types\footnote{fls is the file listing
+command which is part of the Sleuthkit}:
 
 \begin{lstlisting}
 fls -i aff4 "NY case 1"
@@ -1421,7 +1419,7 @@ policy restrictions.
 
 It is still advantageous in this case to bring discrete files into the
 AFF4 evidence universe by acquiring each evidence file using a unique
-URN. As explained in \ref{definitions}, segments are AFF4 stream
+URN. As explained in Section \ref{definitions}, segments are AFF4 stream
 objects which are implemented by storing the data in Zip archive
 members. It follows, therefore, that a regular zip file containing
 files is also a valid AFF4 volume.
@@ -1433,7 +1431,7 @@ Resolver to provide access to all the files within the archive. At
 this stage digital signatures can also be added for each logical file.
 
 Alice uses windows explorer to obtain a Zip file of the files of
-interest. After taking the file back to the lab, she then signs the
+interest. After taking the archive back to the lab, she then signs the
 files, and adds a volume URN, making the Zip file a fully compliant
 AFF4 volume.
 

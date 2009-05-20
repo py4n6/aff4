@@ -58,7 +58,7 @@
 #define AFF4_IDENTITY         "identity"
 /** This is the configuration namespace - it stores configuration
     information related to the current running instance **/
-#define AFF4_CONFIG_NAMESPACE FQN "urn:aff4config:"
+#define AFF4_CONFIG_NAMESPACE     "urn:aff4config:"
 #define AFF4_CONFIG_PAD           "pad_on_read_error"
 #define AFF4_CONFIG_AUTOLOAD      "autoload_volumes"
 
@@ -91,6 +91,10 @@
 #define AFF4_CRYPTO_FORTIFICATION_COUNT AFF4_CRYPTO_NAMESPACE "fortification"
 #define AFF4_CRYPTO_IV  AFF4_CRYPTO_NAMESPACE "IV"
 #define AFF4_CRYPTO_PASSPHRASE AFF4_CRYPTO_NAMESPACE "passphrase"
+#define AFF4_CRYPTO_ALGORITHM AFF4_CRYPTO_NAMESPACE "algorithm"
+
+// Supported algorithms
+#define AFF4_CRYPTO_ALGORITHM_AES_SHA254 "AES256/SHA256"
 
 /** 
     Opens the URIs specified in images and uses them to populate the

@@ -326,7 +326,7 @@ static char **Resolver_resolve_list(Resolver self, void *ctx, char *urn, char *a
   if(i->hash_table && i->hash_table[hash]) {
     list_for_each_entry(j, &i->hash_table[hash]->hash_list, hash_list) {
       char *key = (char *)j->key;
-      char **existing = (char **)&j->data;
+      char **existing = (char **)((char *)&j->data);
       if(!strcmp(key, attribute)) {
 	// Push the string onto the result - note that we rely on the
 	// fact that the existing string will never be freed.
@@ -356,7 +356,6 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
   struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
   Cache tmp;
-  char buff[BUFF_SIZE];
 
   if(!urn) return NULL;
 

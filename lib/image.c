@@ -123,7 +123,7 @@ static int dump_chunk(Image this, char *data, uint32_t length, int force) {
     memcpy(cbuffer, data, length);
     clength = length;
   } else {
-    if(compress((unsigned char *)cbuffer, (unsigned long int *)&clength, 
+    if(compress((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength, 
 		(unsigned char *)data, (unsigned long int)length) != Z_OK) {
       RaiseError(ERuntimeError, "Compression error");
       return -1;
@@ -266,7 +266,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 
   /* Temporary storage for the uncompressed chunk */
   char *uncompressed_chunk;
-  unsigned int uncompressed_length=this->chunk_size + 1024;
+  unsigned long int uncompressed_length=this->chunk_size + 1024;
 
   /** Now we need to figure out where the segment is */
   char buffer[BUFF_SIZE];
@@ -352,7 +352,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   if(this->compression == 8) {
     // Try to decompress it:
     if(uncompress((unsigned char *)uncompressed_chunk, 
-		  (unsigned long int *)&uncompressed_length, 
+		  &uncompressed_length, 
 		  (unsigned char *)compressed_chunk,
 		  (unsigned long int)compressed_length) != Z_OK ) {
       RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
@@ -441,10 +441,11 @@ void dump_stream_properties(FileLikeObject self) {
 
 
 VIRTUAL(Image, FileLikeObject)
-     VMETHOD(super.super.Con) = Image_Con;
-     VMETHOD(super.super.finish) = Image_finish;
-     VMETHOD(super.read) = Image_read;
-     VMETHOD(super.write) = Image_write;
-     VMETHOD(super.close) = Image_close;
+     VMETHOD_BASE(AFFObject, Con) = Image_Con;
+     VMETHOD_BASE(AFFObject, finish) = Image_finish;
+
+     VMETHOD_BASE(FileLikeObject, read) = Image_read;
+     VMETHOD_BASE(FileLikeObject, write) = Image_write;
+     VMETHOD_BASE(FileLikeObject,close) = Image_close;
 END_VIRTUAL
 

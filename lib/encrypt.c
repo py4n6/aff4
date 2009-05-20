@@ -41,7 +41,8 @@ static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_le
 			sizeof(fortification_count));
       fortification_count &= 0xFFFF;
       fortification_count <<= 8;
-      
+
+      // Store it
       CALL(oracle, set, URNOF(self), AFF4_CRYPTO_FORTIFICATION_COUNT, 
 	   from_int(fortification_count));
     };
@@ -90,6 +91,7 @@ static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
     
     encode64((unsigned char *)encrypted_key, 32, buffer, sizeof(buffer));
     CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE, (char *)buffer);
+    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_ALGORITHM, AFF4_CRYPTO_ALGORITHM_AES_SHA254);
     
     saved = 1;
   };
@@ -100,9 +102,7 @@ static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
 /*
   Make a new random key. Note that we use 256 bits (32 bytes)
   of randomness, but for convenience we base64 encode it so
-  it can be stored in the resolver easily. Since openssl
-  doesnt care it can make AES keys from whatever string we
-  give it.
+  it can be stored in the resolver easily.
 
   Note that we store the key in the resolver for other instances to
   use.
