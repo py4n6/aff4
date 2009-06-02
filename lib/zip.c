@@ -158,6 +158,20 @@ static void FileBackedObject_close(FileLikeObject self) {
   talloc_free(self);
 };
 
+static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
+  FileBackedObject this = (FileBackedObject)self;
+
+  int64_t result = lseek(this->fd, offset, whence);
+  
+  if(result < 0) {
+    DEBUG("Error seeking %s\n", strerror(errno));
+    result = 0;
+  };
+
+  self->readptr = result;
+  return result;
+};
+
 static AFFObject FileBackedObject_finish(AFFObject self) {
   FileBackedObject this = (FileBackedObject)self;
   char *urn = self->urn;
@@ -211,6 +225,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
      VMETHOD(super.close) = FileBackedObject_close;
+     VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
      VMETHOD(super.truncate) = FileBackedObject_truncate;
 END_VIRTUAL;
 
@@ -264,7 +279,7 @@ static AFFObject ZipFile_finish(AFFObject self) {
 };
 
 // Seeks fd to start of CD
-static int find_cd(ZipFile self, FileLikeObject fd) {
+static int find_cd(ZipFile self, FileLikeObject fd, int directory_offset) {
   if(self->end->offset_of_cd != -1) {
     CALL(fd, seek, self->end->offset_of_cd, SEEK_SET);
     self-> total_entries = self->end->total_entries_in_cd_on_disk;
@@ -275,7 +290,7 @@ static int find_cd(ZipFile self, FileLikeObject fd) {
 
     // We reposition ourselved just before the EndCentralDirectory to
     // find the locator:
-    CALL(fd, seek, self->directory_offset - sizeof(locator), 0);
+    CALL(fd, seek, directory_offset - sizeof(locator), 0);
     CALL(fd, read, (char *)&locator, sizeof(locator));
 
     if(locator.magic != 0x07064b50) goto error;
@@ -302,8 +317,8 @@ static int find_cd(ZipFile self, FileLikeObject fd) {
     CALL(fd, seek, end_cd.offset_of_cd, SEEK_SET);
   };
 
-  self->directory_offset = CALL(fd, tell);
-  return self->directory_offset;
+  directory_offset = CALL(fd, tell);
+  return directory_offset;
  error:
   return 0;
 };
@@ -354,6 +369,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   char buffer[BUFF_SIZE+1];
   int length,i;
   FileLikeObject fd=NULL;
+  int directory_offset;
 
   memset(buffer,0,BUFF_SIZE+1);
 
@@ -369,16 +385,15 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
   self->parent_urn = talloc_strdup(self, fd_urn);
 
-  self->directory_offset = parse_int(CALL(oracle, resolve, URNOF(self), AFF4_DIRECTORY_OFFSET));
-  if(self->directory_offset) {
+  directory_offset = parse_int(CALL(oracle, resolve, URNOF(self), AFF4_DIRECTORY_OFFSET));
+  if(directory_offset) {
     goto exit;
   };
 
   // Find the End of Central Directory Record - We read about 4k of
   // data and scan for the header from the end, just in case there is
   // an archive comment appended to the end
-  CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END);
-  self->directory_offset = CALL(fd, tell);
+  directory_offset = CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END);
   length = CALL(fd, read, buffer, BUFF_SIZE);
 
   // Non fatal Error occured
@@ -394,7 +409,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   
   if(i!=0) {
     // This is now the offset to the end of central directory record
-    self->directory_offset += i;
+    directory_offset += i;
     self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i, 
 							    sizeof(*self->end));
     int j=0;
@@ -419,7 +434,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
     CALL(oracle, add, URNOF(fd), AFF4_CONTAINS, URNOF(self));
 
     // Find the CD
-    if(!find_cd(self, fd)) goto error_reason;
+    if(!find_cd(self, fd, directory_offset)) goto error_reason;
 
     while(j < self->total_entries) {
       struct CDFileHeader cd_header;
@@ -495,12 +510,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	   from_int(tmp));
       self->offset_of_member_header = tmp;
 
-      // Skip the comments - we dont care about them
-      CALL(fd, seek, cd_header.file_comment_length, SEEK_CUR);
-
       // Read the zip file itself
       {
-	uint64_t current_offset = CALL(fd, tell);
+	// Skip the comments - we dont care about them
+	uint64_t current_offset = CALL(fd, seek, cd_header.file_comment_length, SEEK_CUR);
 	struct ZipFileHeader file_header;
 	uint32_t file_offset;
 
@@ -553,7 +566,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
   CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME);
   CALL(oracle, set, URNOF(self), AFF4_INTERFACE, AFF4_VOLUME);
   CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, 
-       from_int(self->directory_offset));
+       from_int(directory_offset));
 
   CALL(oracle, cache_return, (AFFObject)fd);
   return self;
@@ -695,15 +708,9 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     escaped_filename = escape_filename(relative_name(filename, URNOF(self)));
     filename = fully_qualified_name(filename, URNOF(self));
 
-    // Check to see if this zip file is already open - a global lock
-    while(1) {
-      writer = CALL(oracle, resolve, URNOF(self),VOLATILE_NS "write_lock");
-      if(writer) {
-	sleep(1);
-      } else break;
-    };
-
-    CALL(oracle, set, URNOF(self), VOLATILE_NS "write_lock", filename);
+    // Lock the object to stop other threads from writing on us - when
+    // the ZipFileStream object is closed - we will unlock the resolver
+    CALL(oracle, lock, URNOF(self), VOLATILE_NS "write_lock");
     directory_offset = parse_int(CALL(oracle, resolve, 
 				      URNOF(self), 
 				      AFF4_DIRECTORY_OFFSET));
@@ -718,6 +725,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Go to the start of the directory_offset
     CALL(fd, seek, directory_offset, SEEK_SET);
+    DEBUG("seeking %p to %d (%d)\n", fd, directory_offset, fd->size);
 
     // Write a file header on
     memset(&header, 0, sizeof(header));
@@ -733,6 +741,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     header.lastmodtime = now->tm_hour << 11 | now->tm_min << 5 | 
       now->tm_sec / 2;
 
+    DEBUG("writing at %d\n", fd->readptr);
     CALL(fd, write,(char *)&header, sizeof(header));
     CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
 
@@ -801,6 +810,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
   end_cd.size_of_cd = locator.offset_of_end_cd - directory_offset;
   end_cd.offset_of_cd = directory_offset;
   
+  DEBUG("writing ECD at %d\n", fd->readptr);
   CALL(fd,write, (char *)&end_cd, sizeof(end_cd));
   CALL(fd,write, (char *)&locator, sizeof(locator));
 };
@@ -834,15 +844,9 @@ static void ZipFile_close(ZipFile self) {
     // Write a properties file if needed
     dump_volume_properties(self);
 
-    // Check to see if this zip file is already open - a global lock
-    while(1) {
-      char *writer = CALL(oracle, resolve, URNOF(self),VOLATILE_NS "write_lock");
-      if(writer) {
-	sleep(1);
-      } else break;
-    };
-    
-    CALL(oracle, set, URNOF(self), VOLATILE_NS "write_lock", self->parent_urn);
+    // Grab a lock on the resolver - if there are outstanding writers
+    // we will block here until they finish
+    CALL(oracle, lock, URNOF(self), VOLATILE_NS "write_lock");
     
     fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
     if(!fd) return;
@@ -978,7 +982,7 @@ static void ZipFile_close(ZipFile self) {
     CALL(oracle, cache_return, (AFFObject)fd);
 
     // Make sure the lock is removed from this volume now:
-    CALL(oracle, del, URNOF(self), VOLATILE_NS "write_lock");
+    CALL(oracle, unlock, URNOF(self), VOLATILE_NS "write_lock");
 
     // Close the fd
     CALL(fd, close);
@@ -1033,6 +1037,8 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
 				     VOLATILE_NS "file_offset"));
     
   URNOF(self) = talloc_strdup(self, filename);
+  DEBUG("ZipFileStream: created %s\n", URNOF(self));
+
   self->parent_urn = talloc_strdup(self, parent_urn);
   self->super.size = parse_int(CALL(oracle, resolve,
 				    fqn_filename,
@@ -1105,6 +1111,7 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
 
   } else {
     /** Without compression, we just write the buffer right away */
+    DEBUG("(%p) writing data at 0x%X\n", self, fd->readptr);
     result = CALL(fd, write, buffer, length);
     if(result<0) 
       goto exit;
@@ -1167,7 +1174,8 @@ static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   FileLikeObject fd;
   int magic = 0x08074b50;
-  
+
+  DEBUG("ZipFileStream: closed %s\n", URNOF(self));
   if(((AFFObject)self)->mode != 'w') {
     talloc_free(self);
     return;
@@ -1229,9 +1237,11 @@ static void ZipFileStream_close(FileLikeObject self) {
     CALL(fd, write, (char *)&size, sizeof(size));
   };
 
-  // This is the point where we will be writing the next file.
+  // This is the point where we will be writing the next file - right
+  // at the end of this file.
+  CALL(fd, seek, 0, SEEK_END);
   CALL(oracle, set, this->container_urn, AFF4_DIRECTORY_OFFSET,
-       from_int(fd->size));
+       from_int(fd->tell(fd)));
 
   // Calculate the sha1 hash and set the hash in the resolver:
   {
@@ -1250,7 +1260,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   };
 
   // Make sure the lock is removed from this volume now:
-  CALL(oracle, del, this->container_urn, VOLATILE_NS "write_lock");
+  CALL(oracle, unlock, this->container_urn, VOLATILE_NS "write_lock");
   CALL(oracle, cache_return, (AFFObject)fd);
   talloc_free(self);
 };

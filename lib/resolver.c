@@ -322,7 +322,7 @@ static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
 
   result = CALL(i, get_item, attribute);
   pthread_mutex_unlock(&self->mutex);
-  printf("Getting %s, %s, %s\n", urn, attribute, result);
+  DEBUG("Getting %s, %s, %s\n", urn, attribute, result);
 
   return result;
 };
@@ -471,7 +471,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
 
-  printf("Adding %s, %s, %s\n", uri, attribute, value);
+  DEBUG("Adding %s, %s, %s\n", uri, attribute, value);
 
   // Grab the lock
   if(pthread_mutex_lock(&self->mutex) != 0)
@@ -584,6 +584,8 @@ static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
 static void Resolver_del(Resolver self, char *uri, char *attribute) {
   Cache tmp,j;
 
+  DEBUG("Removing %s, %s\n", uri, attribute);
+
   // Grab the lock
   if(pthread_mutex_lock(&self->mutex) != 0)
     return;
@@ -679,47 +681,15 @@ struct resolver_mutex {
 };
 
 
-/** Synchronization methods */
+/** Synchronization methods. FIXME - implement fine grained
+    locking. For now the whole resolver is locked */
 int Resolver_lock(Resolver self, char *urn, char *name) {
-  struct resolver_mutex *mutex;
-
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return -1;
-
-  mutex = CALL(self, resolve, urn, name);
-  if(mutex) {
-    // This is required to avoid the race between the next two
-    // statements - we can not affort to hold the lock for the
-    // resolver while we grab the lock for the mutex or we have a
-    // deadlock. But releasing the lock here allows someone to grab
-    // the lock before us.
-    mutex->ref_count++;
-    pthread_mutex_unlock(&self->mutex);
-    pthread_mutex_lock(&mutex->mutex);
-    mutex->ref_count--;
-  } else {
-    Cache tmp;
-
-    mutex = talloc_size(self, sizeof(*mutex));
-    mutex->ref_count = 0;
-    pthread_mutexattr_init(&mutex->mta);
-    pthread_mutexattr_settype(&mutex->mta, PTHREAD_MUTEX_RECURSIVE_NP);
-    pthread_mutex_init(&mutex->mutex, &mutex->mta);
-
-    tmp = CALL(self->urn, get_item, urn);
-    if(tmp) {
-      CALL(tmp, put, talloc_strdup(tmp, name), 
-	   (void *)mutex, sizeof(*mutex));
-    };
-
-    mutex->ref_count++;
-    pthread_mutex_unlock(&self->mutex);
-    pthread_mutex_lock(&mutex->mutex);
-    mutex->ref_count--;    
-  };
-
+  return pthread_mutex_lock(&self->mutex);
 };
 
+int Resolver_unlock(Resolver self, char *urn, char *name) {
+  return pthread_mutex_unlock(&self->mutex);
+};
 
 /** Here we implement the resolver */
 VIRTUAL(Resolver, AFFObject)
@@ -737,6 +707,8 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(is_set) = Resolver_is_set;
      VMETHOD(del) = Resolver_del;
      VMETHOD(parse) = Resolver_parse;
+     VMETHOD(lock) = Resolver_lock;
+     VMETHOD(unlock) = Resolver_unlock;
 END_VIRTUAL
 
 /************************************************************

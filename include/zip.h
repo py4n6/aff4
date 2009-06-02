@@ -276,7 +276,11 @@ CLASS(Resolver, AFFObject)
      // Parses the properties file
      void METHOD(Resolver, parse, char *context, char *text, int len);
 
-  /* The following APIs are used for synchronization. One thread
+  /* The following APIs are used for synchronization. 
+     A thread begins a transaction - this locks the resolver from
+     access from all other threads.
+
+     One thread
      creates a lock on an object (Using its URN) by calling:
      
      oracle->lock(urn, name)
@@ -568,7 +572,6 @@ CLASS(ZipFile, AFFObject)
      uint64_t original_member_size;
      uint64_t compressed_member_size;
      uint64_t offset_of_member_header;
-     uint64_t directory_offset;
 
      // This is our own current URN - new files will be appended to
      // that
