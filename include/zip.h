@@ -15,6 +15,7 @@ extern "C" {
 #include <openssl/x509.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
+#include <pthread.h>
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
@@ -211,6 +212,11 @@ CLASS(Resolver, AFFObject)
      // Resolvers contain the identity behind them (see below):
      struct Identity_t *identity;
 
+     // All accesses to the resolver use this mutex for
+     // synchronization
+     pthread_mutexattr_t mta;
+     pthread_mutex_t mutex;
+
      Resolver METHOD(Resolver, Con);
 
      // Resolvers are all in a list. Each resolver in the list is another
@@ -258,17 +264,34 @@ CLASS(Resolver, AFFObject)
      // Exports all the properties to do with uri - user owns the buffer.
      char *METHOD(Resolver, export_all, char *context);
 
-// Deletes the attribute from the resolver
+     // Deletes the attribute from the resolver
      void METHOD(Resolver, del, char *uri, char *attribute);
 
-// This updates the value or adds it if needed
+     // This updates the value or adds it if needed
      void METHOD(Resolver, set, char *uri, char *attribute, char *value);
-
-  //This returns 1 if the statement is set
+  
+     //This returns 1 if the statement is set
      int METHOD(Resolver, is_set, char *uri, char *attribute, char *value);
 
      // Parses the properties file
      void METHOD(Resolver, parse, char *context, char *text, int len);
+
+  /* The following APIs are used for synchronization. One thread
+     creates a lock on an object (Using its URN) by calling:
+     
+     oracle->lock(urn, name)
+
+     Other threads can then attempt to also get a lock on the URN but
+     will be blocked until the original thread calls:
+     
+     oracle->unlock(urn, name) 
+
+     Note that locks have names and so many locks can be set on the
+     same URN.
+  */
+  int METHOD(Resolver, lock, char *urn, char *name);
+  int METHOD(Resolver, unlock, char *urn, char *name);
+
 END_CLASS
 
 // This is a global instance of the oracle. All AFFObjects must
@@ -307,36 +330,60 @@ CLASS(Link, AFFObject)
 		 char *target, char *friendly_name);
 END_CLASS
 
+#include "queue.h"
+
+CLASS(ImageWorker, AFFObject)
+       struct list_head list;
+       char *urn;
+       int segment_count;
+
+       // This is the queue which this worker belongs in
+       Queue queue;
+
+       // The bevy is written here in its entirety. When its finished,
+       // we compress it all and dump it to the output file.
+       StringIO bevy;
+       
+       // The segment is written here until it is complete and then it
+       // gets flushed
+       StringIO segment_buffer;
+
+       // When we finish writing a bevy, a thread is launched to
+       // compress and dump it
+       pthread_t thread;
+       struct Image_t *image;
+
+       // An array of indexes into the segment where chunks are stored
+       int32_t *chunk_indexes;
+
+       ImageWorker METHOD(ImageWorker, Con, struct Image_t *image);
+
+       // A write method for the worker
+       int METHOD(ImageWorker, write, char *buffer, int len);
+END_CLASS
+
 /** The Image Stream represents an Image in chunks */
 CLASS(Image, FileLikeObject)
-// Data is divided into segments, when a segment is completed (it
-// contains chunks_in_segment chunks) we dump it to the archive. These
-// are stream attributes
-     int chunks_in_segment;   // Default 2048
-     int chunk_size;          // Default 32kb   
-                              // -> Default segment size 64Mb
-
-     // Writes get queued here until full chunks are available
-     char *chunk_buffer;
-     int chunk_buffer_readptr;
-     int chunk_buffer_size;
-
-     // The segment is written here until its complete and then it
-     // gets flushed
-     StringIO segment_buffer;
-     int chunk_count;
-
      // Chunks are cached here. We cant use the main zip file cache
      // because the zip file holds the full segment
      Cache chunk_cache;
 
-     int segment_count;
+     // This is a queue of all workers available
+     Queue workers;
 
-     // An array of indexes into the segment where chunks are stored
-     int32_t *chunk_indexes;
+     // This is a queue of all workers busy
+     Queue busy;
 
-     // This is the compression type
+     // Thats the current worker we are using - when it gets full, we
+     // simply dump its bevy and take a new worker here.
+     ImageWorker current;
+
+     int chunk_size;
      int compression;
+     int chunks_in_segment;
+     int bevy_size;
+
+     int segment_count;
 
      EVP_MD_CTX digest;
 END_CLASS

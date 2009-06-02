@@ -9,7 +9,7 @@ liboo_la_CPPFLAGS 	= -DHAVE_VA_COPY
 unittests_LDADD           = libaff4.la
 unittests_SOURCES         = unittests.c
 
-libaff4_la_SOURCES       = misc.c zip.c stringio.c resolver.c image.c link.c map.c dirvol.c libaff4.c identity.c encode.c
+libaff4_la_SOURCES       = misc.c zip.c stringio.c resolver.c image.c link.c map.c dirvol.c libaff4.c identity.c encode.c queue.c
 libaff4_la_LIBADD	= liboo.la
 libaff4_la_LDFLAGS       = -lz -luuid
 

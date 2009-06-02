@@ -685,9 +685,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     char *writer;
     FileLikeObject fd;
     // We start writing new files at this point
-    uint64_t directory_offset = parse_int(CALL(oracle, resolve, 
-					       URNOF(self), 
-					       AFF4_DIRECTORY_OFFSET));
+    uint64_t directory_offset;
     char *escaped_filename;
     time_t epoch_time = time(NULL);
     struct tm *now = localtime(&epoch_time);
@@ -698,17 +696,17 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     filename = fully_qualified_name(filename, URNOF(self));
 
     // Check to see if this zip file is already open - a global lock
-    // (Note if the resolver is external this will lock all other
-    // writers). FIXME - this is a race - Implement atomic get/set
-    // locking operation in the resolver.
-    writer = CALL(oracle, resolve, URNOF(self),VOLATILE_NS "write_lock");
-    if(writer) {
-      RaiseError(ERuntimeError, "Unable to create a new member for writing '%s', when one is already writing '%s'", filename, writer);
-      return NULL;
+    while(1) {
+      writer = CALL(oracle, resolve, URNOF(self),VOLATILE_NS "write_lock");
+      if(writer) {
+	sleep(1);
+      } else break;
     };
 
-    // Put a lock on the volume now:
-    CALL(oracle, set, URNOF(self), VOLATILE_NS "write_lock", "1");
+    CALL(oracle, set, URNOF(self), VOLATILE_NS "write_lock", filename);
+    directory_offset = parse_int(CALL(oracle, resolve, 
+				      URNOF(self), 
+				      AFF4_DIRECTORY_OFFSET));
 
     // Indicate that the file is dirty - This means we will be writing
     // a new CD on it
@@ -836,6 +834,16 @@ static void ZipFile_close(ZipFile self) {
     // Write a properties file if needed
     dump_volume_properties(self);
 
+    // Check to see if this zip file is already open - a global lock
+    while(1) {
+      char *writer = CALL(oracle, resolve, URNOF(self),VOLATILE_NS "write_lock");
+      if(writer) {
+	sleep(1);
+      } else break;
+    };
+    
+    CALL(oracle, set, URNOF(self), VOLATILE_NS "write_lock", self->parent_urn);
+    
     fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
     if(!fd) return;
 

@@ -39,6 +39,129 @@ static int cache_cmp_int(Cache self, void *other) {
   return int_key != int_other;
 };
 
+static ImageWorker ImageWorker_Con(ImageWorker self, Image image) {
+  ImageWorker this=self;
+
+  URNOF(self) = URNOF(image);
+
+  this->image = image;
+  this->bevy = CONSTRUCT(StringIO, StringIO, Con, self);
+  
+  this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
+  this->chunk_indexes = talloc_array(self, int32_t, image->chunks_in_segment + 2);
+
+  // Fill it with -1 to indicate an invalid pointer
+  memset(this->chunk_indexes, 0xff, sizeof(int32_t) * image->chunks_in_segment);
+
+  return self;
+};
+
+// Compresses all the data in the current bevy and dumps it on the
+// storage. The bevy must be as full as can be (image->bevy_size)
+// before we dump it (except for the last bevy in the image which can
+// be short).
+static int dump_bevy(ImageWorker this) {
+  int segment_number = this->segment_count;
+  int bevy_index=0;
+  int chunk_count=0;
+  int result;
+
+  while(bevy_index < this->bevy->size) {
+    int length = min(this->image->chunk_size, this->bevy->size - bevy_index);
+    // We just use compress() to get the compressed buffer.
+    char cbuffer[2*compressBound(this->image->chunk_size)];
+    int clength=2*compressBound(this->image->chunk_size);
+
+    // Should we offer to store chunks uncompressed?
+    if(this->image->compression == 0) {
+      memcpy(cbuffer, this->bevy->data + bevy_index, length);
+      clength = length;
+    } else {
+      if(compress2((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength, 
+		   (unsigned char *)this->bevy->data + bevy_index, (unsigned long int)length, 1) != Z_OK) {
+	RaiseError(ERuntimeError, "Compression error");
+	return -1;
+      };
+    };
+
+    // Update the index to point at the current segment stream buffer
+    // offset
+    this->chunk_indexes[chunk_count] = this->segment_buffer->readptr;
+    
+    // Now write the buffer to the stream buffer
+    CALL(this->segment_buffer, write, cbuffer, clength);
+    chunk_count ++;
+    bevy_index += length;
+  };
+
+  // Dump the bevy to the zip volume
+  {
+    char tmp[BUFF_SIZE];
+    ZipFile parent;
+    char *parent_urn = CALL(oracle, resolve, URNOF(this), AFF4_STORED);
+
+    if(!parent_urn) {
+      RaiseError(ERuntimeError, "No storage for Image stream?");
+      goto error;
+    }
+
+    parent  = (ZipFile)CALL(oracle, open, parent_urn, 'w');
+
+    // Format the segment name
+    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
+	     segment_number);
+    
+    // Push one more offset to the index to cover the last chunk
+    this->chunk_indexes[chunk_count + 1] = this->segment_buffer->readptr;
+
+    printf("Dumping segment %s (%lld bytes)\n", tmp, this->segment_buffer->readptr);
+
+    // Store the entire segment in the zip file
+    CALL((ZipFile)parent, writestr,
+	 tmp, this->segment_buffer->data, 
+	 this->segment_buffer->readptr, 
+	 NULL, 0,
+	 // No compression for segments
+	 ZIP_STORED
+	 );
+
+    // Now write the index file which accompanies the segment
+    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
+	     ((AFFObject)this)->urn, 
+	     segment_number);
+
+    CALL((ZipFile)parent, writestr,
+	 tmp, (char *)this->chunk_indexes,
+	 (chunk_count + 1) * sizeof(uint32_t),
+	 NULL, 0,
+	 ZIP_STORED
+	 );
+
+    // Done with parent
+    CALL(oracle, cache_return, (AFFObject)parent);
+	 
+    // Reset everything to the start
+    CALL(this->segment_buffer, truncate, 0);
+    CALL(this->bevy, truncate, 0);
+    memset(this->chunk_indexes, -1, sizeof(int32_t) * this->image->chunks_in_segment);
+  };
+  
+  
+  result= 1;
+ error:
+  result = -1;
+
+  // Return ourselves to the queue of workers so we can be called
+  // again:
+  CALL(this->image->busy, remove, this->image, (void *)this);
+  CALL(this->image->workers, put, (void *)this);
+  return result;
+};
+
+VIRTUAL(ImageWorker, AFFObject)
+     VMETHOD_BASE(ImageWorker, Con) = ImageWorker_Con;
+END_VIRTUAL
+
 static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
   Image this=(Image)self;
   char *value;
@@ -50,29 +173,33 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
     CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
     value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNK_SIZE, "32k");
     this->chunk_size = parse_int(value);
-
+    
     value = resolver_get_with_default(oracle, self->urn, AFF4_COMPRESSION, "8");
     this->compression = parse_int(value);
     
     value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNKS_IN_SEGMENT, "2048");
     this->chunks_in_segment = parse_int(value);
 
+    this->bevy_size = this->chunks_in_segment * this->chunk_size;
+
     value = resolver_get_with_default(oracle, self->urn, AFF4_SIZE, "0");
     this->super.size = parse_int(value);
-
-    this->chunk_buffer = talloc_size(self, this->chunk_size);
-
-    this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
-    // This is a hack to make us pre-allocate the buffer
-    //CALL(this->segment_buffer, seek, this->chunk_size * this->chunks_in_segment, SEEK_SET);
-    //CALL(this->segment_buffer, seek, 0, SEEK_SET);
-
-    this->chunk_count = 0;
-    this->segment_count =0;
+    this->segment_count = 0;
     
-    this->chunk_indexes = talloc_array(self, int32_t, this->chunks_in_segment + 2);
-    // Fill it with -1 to indicate an invalid pointer
-    memset(this->chunk_indexes, 0xff, sizeof(int32_t) * this->chunks_in_segment);
+    // Build writer workers
+    if(mode=='w') {
+      int i;
+      
+      this->workers = CONSTRUCT(Queue, Queue, Con, self);
+      this->busy = CONSTRUCT(Queue, Queue, Con, self);
+      // Make this many workers
+      for(i=0;i<3;i++) {
+	ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, self, this);
+	CALL(this->workers, put, (void *)w);
+      };
+
+      this->current = CALL(this->workers, get, this);
+    };
 
     // Initialise the chunk cache:
     this->chunk_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, CACHE_SIZE);
@@ -86,11 +213,6 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
     this->__super__->super.Con(self, uri, mode);
   };
 
-  // NOTE - its a really bad idea to set destructors which call
-  // close() because they might try to reaccess the cache, which may
-  // be invalid while we get free (basically a reference cycle).  The
-  // downside is that we insist people call close() explicitely.
-  // talloc_set_destructor(self, Image_destructor);
   return self;
 };
   
@@ -107,98 +229,6 @@ static AFFObject Image_finish(AFFObject self) {
   return CALL(self, Con, self->urn, 'w');
 };
 
-/** This is how we implement the Image stream writer:
-
-As new data is written we append it to the chunk buffer, then we
-remove chunk sized buffers from it and push them to the segment. When
-the segment is full we dump it to the parent container set.
-**/
-static int dump_chunk(Image this, char *data, uint32_t length, int force) {
-  // We just use compress() to get the compressed buffer.
-  char cbuffer[2*compressBound(length)];
-  int clength=2*compressBound(length);
-
-  // Should we offer to store chunks uncompressed?
-  if(this->compression == 0) {
-    memcpy(cbuffer, data, length);
-    clength = length;
-  } else {
-    if(compress((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength, 
-		(unsigned char *)data, (unsigned long int)length) != Z_OK) {
-      RaiseError(ERuntimeError, "Compression error");
-      return -1;
-    };
-  };
-  
-  // Update the index to point at the current segment stream buffer
-  // offset
-  this->chunk_indexes[this->chunk_count] = this->segment_buffer->readptr;
-  
-  // Now write the buffer to the stream buffer
-  CALL(this->segment_buffer, write, cbuffer, clength);
-  this->chunk_count ++;
-  
-  // Is the segment buffer full? If it has enough chunks in it we
-  // can flush it out. We need to find out where our storage is and
-  // open a ZipFile on it:
-  if(this->chunk_count >= this->chunks_in_segment || force) {
-    char tmp[BUFF_SIZE];
-    ZipFile parent;
-    char *parent_urn = CALL(oracle, resolve, URNOF(this), AFF4_STORED);
-
-    if(!parent_urn) {
-      RaiseError(ERuntimeError, "No storage for Image stream?");
-      goto error;
-    }
-
-    parent  = (ZipFile)CALL(oracle, open, parent_urn, 'w');
-
-    // Format the segment name
-    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, ((AFFObject)this)->urn, 
-	     this->segment_count);
-
-    // Push one more offset to the index to cover the last chunk
-    this->chunk_indexes[this->chunk_count + 1] = this->segment_buffer->readptr;
-
-    printf("Dumping segment %s (%lld bytes)\n", tmp, this->segment_buffer->readptr);
-
-    // Store the entire segment in the zip file
-    CALL((ZipFile)parent, writestr,
-	 tmp, this->segment_buffer->data, 
-	 this->segment_buffer->readptr, 
-	 NULL, 0,
-	 // No compression for segments
-	 ZIP_STORED
-	 );
-
-    // Now write the index file which accompanies the segment
-    snprintf(tmp, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
-	     ((AFFObject)this)->urn, 
-	     this->segment_count);
-
-    CALL((ZipFile)parent, writestr,
-	 tmp, (char *)this->chunk_indexes,
-	 (this->chunk_count + 1) * sizeof(uint32_t),
-	 NULL, 0,
-	 ZIP_STORED
-	 );
-
-    // Done with parent
-    CALL(oracle, cache_return, (AFFObject)parent);
-	 
-    // Reset everything to the start
-    CALL(this->segment_buffer, truncate, 0);
-    memset(this->chunk_indexes, -1, sizeof(int32_t) * this->chunks_in_segment);
-    this->chunk_count =0;
-    // Next segment
-    this->segment_count ++;
-  };
-  
-  return clength;
- error:
-  return -1;
-};
-
 static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Image this = (Image)self;
   int available_to_read;
@@ -206,25 +236,31 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
   EVP_DigestUpdate(&this->digest, buffer, length);
 
-  while(buffer_readptr < length) {
-    available_to_read = min(this->chunk_size - this->chunk_buffer_readptr, 
-			    length - buffer_readptr);
-    memcpy(this->chunk_buffer + this->chunk_buffer_readptr,
-	   buffer + buffer_readptr, available_to_read);
-    this->chunk_buffer_readptr += available_to_read;
+  while(length > buffer_readptr) {
+    int result;
 
-    if(this->chunk_buffer_readptr == this->chunk_size) {
-      if(dump_chunk(this, this->chunk_buffer, this->chunk_size, 0)<0)
-	return -1;
-      this->chunk_buffer_readptr = 0;
+    available_to_read = min(length - buffer_readptr, this->bevy_size - \
+			    this->current->bevy->size);
+    if(available_to_read==0) {
+      // This bevy is complete - we send it on its way - The worker
+      // will be returned to the workers queue when its done.
+      this->current->segment_count = this->segment_count;
+
+      // put the worker in the busy queue
+      CALL(this->busy, put, this->current);
+      pthread_create( &this->current->thread, NULL, 
+		      (void *(*) (void *))dump_bevy, (void *)this->current);
+      this->segment_count++;
+
+      // Get another worker from the queue:
+      this->current = CALL(this->workers, get, self);
+      continue;
     };
 
-    buffer_readptr += available_to_read;
-    self->readptr += available_to_read;
+    result = CALL(this->current->bevy, write, buffer+buffer_readptr, available_to_read);
+    buffer_readptr += result;
   };
   
-  self->size = max(self->readptr, self->size);
-
   return length;
 };
 
@@ -237,7 +273,31 @@ static void Image_close(FileLikeObject self) {
   memset(buff, 0, BUFF_SIZE);
 
   // Write the last chunk
-  dump_chunk(this, this->chunk_buffer, this->chunk_buffer_readptr, 1);
+  this->current->segment_count = this->segment_count;
+  dump_bevy(this->current);
+
+  // Wait for all busy threads to finish - its not safe to traverse
+  // the busy list without locking it. So we lock it - pull the first
+  // item off and join it. Its not a race since the worker is never
+  // freed and just moves to the workers queue - even if it happens
+  // from under us we should be able to join immediately.
+  while(1) {
+    Queue item;
+    ImageWorker worker;
+
+    pthread_mutex_lock(&this->busy->mutex);
+    if(list_empty(&this->busy->list)) {
+      pthread_mutex_unlock(&this->busy->mutex);
+      break;
+    } else {
+      list_next(item, &this->busy->list, list);
+      pthread_mutex_unlock(&this->busy->mutex);
+
+      worker = (ImageWorker)item->data;
+      pthread_join(worker->thread, NULL);
+    };
+  };
+
   dump_stream_properties(self);
 
   EVP_DigestFinal(&this->digest, buff, &len);

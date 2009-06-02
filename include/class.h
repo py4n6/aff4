@@ -229,6 +229,7 @@ extern char *_traceback;
    those with foos methods and attributes.
 
 **********************************************************/
+#define __DEBUG__
 #ifdef __DEBUG__
 
 #define VIRTUAL(class,superclass)				\

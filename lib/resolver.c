@@ -248,7 +248,7 @@ static Cache Cache_get(Cache self, void *key) {
 	list_move(&i->cache_list, &self->cache_list);
 	list_move(&i->hash_list, &hash_list_head->hash_list);
       };
-      //printf("Getting %p\n", i);
+      //      printf("Getting %p\n", i);
       return i;
     };
   };
@@ -293,21 +293,38 @@ static Resolver Resolver_Con(Resolver self) {
 
   INIT_LIST_HEAD(&self->identities);
 
+  // This is a global lock for access to the resolver
+  pthread_mutexattr_init(&self->mta);
+  pthread_mutexattr_settype(&self->mta, PTHREAD_MUTEX_RECURSIVE_NP);
+  pthread_mutex_init(&self->mutex, &self->mta);
+
   return self;
 };
 
 static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
-  Cache i=CALL(self->urn, get_item, urn);
+  Cache i;
+  char *result;
+
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return NULL;
+
+  i=CALL(self->urn, get_item, urn);
 
   if(!i) {
     /*
     RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
 	       attribute, urn);
     */
+    pthread_mutex_unlock(&self->mutex);
     return NULL;
   };
 
-  return CALL(i, get_item, attribute);
+  result = CALL(i, get_item, attribute);
+  pthread_mutex_unlock(&self->mutex);
+  printf("Getting %s, %s, %s\n", urn, attribute, result);
+
+  return result;
 };
 
 static char **Resolver_resolve_list(Resolver self, void *ctx, char *urn, char *attribute) {
@@ -359,6 +376,10 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 
   if(!urn) return NULL;
 
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return NULL;
+
   // Is this object cached?
   if(mode =='r') {
     tmp = CALL(self->cache, get, urn);
@@ -370,6 +391,8 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
     result = (AFFObject)tmp->data;
     talloc_steal(NULL, result);
     talloc_free(tmp);
+
+    pthread_mutex_unlock(&self->mutex);
     return result;
   };
 
@@ -399,10 +422,10 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
   if(!dispatch_ptr) {
     if(stream_type) {
       RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn, stream_type);
-      return NULL;
+      goto error;
     } else {
       RaiseError(ERuntimeError, "Unable to open %s", urn);
-      return NULL;
+      goto error;
     };
   };
   
@@ -413,7 +436,12 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
   // Make sure the object mode is set
   if(result)
     ((AFFObject)result)->mode = mode;
+  pthread_mutex_unlock(&self->mutex);
   return result; 
+
+ error:
+  pthread_mutex_unlock(&self->mutex);
+  return NULL;
 };
 
 /** Return the object to the cache. Callers may not make a reference
@@ -422,6 +450,10 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 static void Resolver_return(Resolver self, AFFObject obj) {
   // Cache it
   if(!obj) return;
+
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return;
 
   if(obj->mode == 'r') {
     CALL(self->cache, put, talloc_strdup(self, obj->urn),
@@ -432,14 +464,20 @@ static void Resolver_return(Resolver self, AFFObject obj) {
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
+
+  pthread_mutex_unlock(&self->mutex);
 };
 
 static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   Cache tmp;
 
-  if(CALL(self, is_set, uri, attribute, value)) return;
+  printf("Adding %s, %s, %s\n", uri, attribute, value);
 
-  //LogWarnings("%s %s=%s", uri, attribute, (char *)value);
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return;
+
+  if(CALL(self, is_set, uri, attribute, value)) goto error;
 
   tmp = CALL(self->urn, get_item, uri);
   if(!tmp) {
@@ -453,16 +491,26 @@ static void Resolver_add(Resolver self, char *uri, char *attribute, char *value)
   value = talloc_strdup(NULL, value);
   CALL(tmp, put, talloc_strdup(NULL, attribute), 
        ZSTRING_NO_NULL(value));
+
+ error:
+  pthread_mutex_unlock(&self->mutex);
+  return;
 };
 
 static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *value) {
   // See if the same value is already in there, if so we dont want it
   // again (use the hash table for some speed)
-  Cache tmp =  CALL(self->urn, get_item, uri);
+  Cache tmp;
   int hash;
   Cache i;
 
-  if(!tmp) return 0;
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return -1;
+
+  tmp =  CALL(self->urn, get_item, uri);
+  if(!tmp) 
+    goto error;
 
   hash = CALL(tmp, hash, attribute);
   if(tmp->hash_table && tmp->hash_table[hash]) {
@@ -470,11 +518,14 @@ static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *valu
       char *key = (char *)i->key;
       char *existing = (char *)i->data;
       if(!strcmp(key, attribute) && !strcmp(existing, value)){
+	pthread_mutex_unlock(&self->mutex);
 	return 1;
       };
     };
   };
 
+ error:
+  pthread_mutex_unlock(&self->mutex);
   return 0;
 };
 
@@ -533,8 +584,12 @@ static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
 static void Resolver_del(Resolver self, char *uri, char *attribute) {
   Cache tmp,j;
 
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return;
+
   tmp = CALL(self->urn, get_item, uri);
-  if(!tmp) return;
+  if(!tmp) goto exit;
   
   while(1) {
     j = CALL(tmp, get, attribute);
@@ -542,11 +597,20 @@ static void Resolver_del(Resolver self, char *uri, char *attribute) {
     //    LogWarnings("Removing %s %s",uri, attribute);
     talloc_free(j);
   };
+
+ exit:
+  pthread_mutex_unlock(&self->mutex);
+  return;
 };
   
 static void Resolver_set(Resolver self, char *uri, char *attribute, char *value) {
+  // Grab the lock
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return;
+
   CALL(self, del, uri, attribute);
   CALL(self, add, uri, attribute, value);
+  pthread_mutex_unlock(&self->mutex);
 };
 
 // Parse a properties file (implicit context is context - if the file
@@ -607,6 +671,55 @@ static void Resolver_parse(Resolver self, char *context_urn, char *text, int len
  exit:
   talloc_free(tmp);
 };
+
+struct resolver_mutex {
+  int ref_count;
+  pthread_mutexattr_t mta;
+  pthread_mutex_t mutex;
+};
+
+
+/** Synchronization methods */
+int Resolver_lock(Resolver self, char *urn, char *name) {
+  struct resolver_mutex *mutex;
+
+  if(pthread_mutex_lock(&self->mutex) != 0)
+    return -1;
+
+  mutex = CALL(self, resolve, urn, name);
+  if(mutex) {
+    // This is required to avoid the race between the next two
+    // statements - we can not affort to hold the lock for the
+    // resolver while we grab the lock for the mutex or we have a
+    // deadlock. But releasing the lock here allows someone to grab
+    // the lock before us.
+    mutex->ref_count++;
+    pthread_mutex_unlock(&self->mutex);
+    pthread_mutex_lock(&mutex->mutex);
+    mutex->ref_count--;
+  } else {
+    Cache tmp;
+
+    mutex = talloc_size(self, sizeof(*mutex));
+    mutex->ref_count = 0;
+    pthread_mutexattr_init(&mutex->mta);
+    pthread_mutexattr_settype(&mutex->mta, PTHREAD_MUTEX_RECURSIVE_NP);
+    pthread_mutex_init(&mutex->mutex, &mutex->mta);
+
+    tmp = CALL(self->urn, get_item, urn);
+    if(tmp) {
+      CALL(tmp, put, talloc_strdup(tmp, name), 
+	   (void *)mutex, sizeof(*mutex));
+    };
+
+    mutex->ref_count++;
+    pthread_mutex_unlock(&self->mutex);
+    pthread_mutex_lock(&mutex->mutex);
+    mutex->ref_count--;    
+  };
+
+};
+
 
 /** Here we implement the resolver */
 VIRTUAL(Resolver, AFFObject)
