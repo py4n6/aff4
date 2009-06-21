@@ -4,6 +4,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include "common.h"
+#include <libgen.h>
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
@@ -311,7 +312,7 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   if(stream_name) {
     PrintError();
     link = (Link)CALL(oracle, open,
-		      fully_qualified_name(stream_name, URNOF(image)),
+		      fully_qualified_name(zipfile, stream_name, URNOF(image)),
 		      'r');
     ClearError();
     if(!link) {
@@ -475,7 +476,6 @@ int main(int argc, char **argv)
   char *append = NULL;
   int verbose=0;
   char *extract = NULL;
-  char *passphrase = NULL;
   char *cert = NULL;
   char *key_file = NULL;
   int verify = 0;
@@ -484,7 +484,7 @@ int main(int argc, char **argv)
   // Initialise the library
   AFF2_Init();
 
-  talloc_enable_leak_report_full();
+  //talloc_enable_leak_report_full();
 
   while (1) {
     int option_index = 0;

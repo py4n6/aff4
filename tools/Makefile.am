@@ -5,7 +5,7 @@ bin_PROGRAMS          += affuse
 endif
 
 if HAVE_TSK
-bin_PROGRAMS          += fsbuilder
+#bin_PROGRAMS          += fsbuilder
 endif
 
 aff4imager_SOURCES    = aff4imager.c common.c

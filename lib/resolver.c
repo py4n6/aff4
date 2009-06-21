@@ -1,6 +1,7 @@
 /** This file implemnts the resolver */
 #include "zip.h"
 #include <uuid/uuid.h>
+#include <pthread.h>
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
@@ -448,6 +449,13 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
     to it after that.
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
+
+  // For testing we force all objects to be recreated
+  if(0) {
+    talloc_free(obj);
+    return;
+  };
+
   // Cache it
   if(!obj) return;
 

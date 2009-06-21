@@ -114,14 +114,16 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
 				   int compression) {
   char buff[BUFF_SIZE];
   FileLikeObject result;
+  char *escaped_filename = escape_filename(self, filename);
 
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));
+  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);
   result = (FileLikeObject)CALL(oracle, open, buff, mode);
 
   if(result && mode == 'w'){
     CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
   };
 
+  talloc_free(escaped_filename);
   return result;
 };
 
@@ -140,17 +142,22 @@ static int DirVolume_writestr(ZipFile self, char *filename,
 		      int compression) {
   char buff[BUFF_SIZE];
   FileLikeObject fd;
-  
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));  
+  char *escaped_filename = escape_filename(self, filename);
+
+  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);  
   
   fd = (FileLikeObject)CALL(oracle, open, buff, 'w');
-  if(!fd) return -1;
+  if(!fd) {
+    talloc_free(escaped_filename);
+    return -1;
+  };
 
   CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
   CALL(fd, truncate, 0);
   len = CALL(fd, write, data, len);
   CALL(fd, close);
 
+  talloc_free(escaped_filename);
   return len;
 };
 
@@ -160,8 +167,9 @@ static char *DirVolume_read_member(ZipFile self, void *ctx,
   char buff[BUFF_SIZE];
   FileLikeObject fd;
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
+  char *escaped_filename = escape_filename(self, filename);
 
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escape_filename(filename));
+  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);
   fd = (FileLikeObject)CALL(oracle, open, buff, 'r');
   if(!fd) {
     goto error;
@@ -180,9 +188,12 @@ static char *DirVolume_read_member(ZipFile self, void *ctx,
   buff[0]=0;
   CALL(result, write, buff, 1);
   *length = result->size-1;
+
+  talloc_free(escaped_filename);
   return result->data;
 
  error:
+  talloc_free(escaped_filename);
   talloc_free(result);
   return NULL;
 };

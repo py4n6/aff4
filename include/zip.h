@@ -28,8 +28,8 @@ extern "C" {
 */
 uint64_t parse_int(char *string);
 char *from_int(uint64_t arg);
-char *escape_filename(const char *filename);
-char *unescape_filename(const char *filename);
+char *escape_filename(void *ctx, const char *filename);
+char *unescape_filename(void *ctx, const char *filename);
 
 /** A cache is an object which automatically expires data which is
     least used - that is the data which is most used is put at the end
@@ -586,12 +586,6 @@ CLASS(ZipFile, AFFObject)
      char *METHOD(ZipFile, read_member, void *ctx,
 		  char *filename, int *len);
 
-// This method is called to specify a new volume for us to use. If we
-// already have an existing volume, we will automatically call close
-// on it. The volume parent_urn must already exist (it can be newly
-// created).
-     int METHOD(ZipFile, create_new_volume, char *parent_urn);
-
 // This method opens an existing member or creates a new one. We
 // return a file like object which may be used to read and write the
 // member. If we open a member for writing the zip file will be locked
@@ -675,8 +669,8 @@ ZipFile open_volume(char *urn, char mode);
   // Volume_URN/default. These functions are used to convert from
   // fully qualified to relative names as needed. The result is a
   // static buffer.
-char *fully_qualified_name(char *name, char *volume_urn);
-char *relative_name(char *name, char *volume_urn);
+char *fully_qualified_name(void *ctx, char *name, char *volume_urn);
+char *relative_name(void *ctx, char *name, char *volume_urn);
 
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

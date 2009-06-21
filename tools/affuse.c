@@ -33,7 +33,7 @@ affuse_getattr(const char *path, struct stat *stbuf)
 {
     int res = 0;
     struct stream_info *i;
-    char *filename = unescape_filename(path+1);
+    char *filename = unescape_filename(NULL, path+1);
     int is_a_stream=0;
 
     // Truncate the extension
@@ -83,9 +83,11 @@ affuse_getattr(const char *path, struct stat *stbuf)
       };
     };
 
+    talloc_free(filename);
     return -ENOENT;
 
  exit:
+    talloc_free(filename);
     return res;
 }
 
@@ -96,7 +98,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   int i;
   Cache dict = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
   Cache dict_iter;
-  char *filename = talloc_strdup(dict, unescape_filename(path+1));
+  char *filename = talloc_strdup(dict, unescape_filename(dict, path+1));
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
@@ -142,7 +144,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   // Now go over all the cache and fill it into the directory
   list_for_each_entry(dict_iter, &dict->cache_list, cache_list) {
     char *name = (char *)dict_iter->key;
-    filler(buf, escape_filename(name), NULL, 0);
+    filler(buf, escape_filename(dict, name), NULL, 0);
   };
 
   talloc_free(dict);
@@ -153,14 +155,18 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int
 affuse_open(const char *path, struct fuse_file_info *fi)
 {
-  char *buffer=unescape_filename(path+1);
+  char *buffer=unescape_filename(NULL, path+1);
   int i;
 
-  if(!endswith(buffer, ".dd"))
+  if(!endswith(buffer, ".dd")) {
+    talloc_free(buffer);
     return -ENOENT;
+  };
 
-  if((fi->flags & 3) != O_RDONLY)
+  if((fi->flags & 3) != O_RDONLY) {
+    talloc_free(buffer);
     return -EACCES;
+  };
 
   // Now drop the .dd extension
   buffer[strlen(buffer)-3]=0;
@@ -169,10 +175,12 @@ affuse_open(const char *path, struct fuse_file_info *fi)
   for(i=0; streams[i].urn; i++) {
     if(!strcmp(streams[i].path_name, buffer)) {
       fi->fh = (uint64_t)i;
+      talloc_free(buffer);
       return 0;
     };
   };
 
+  talloc_free(buffer);
   return -ENOENT;
 }
 

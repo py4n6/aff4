@@ -42,7 +42,7 @@ char *normalise_url(char *url);
 
 #if 0
 #define DEBUG(x, ...) printf("%s:%d %d: " x, \
-			     __FUNCTION__, __LINE__, pthread_self(), ## __VA_ARGS__);
+			     __FUNCTION__, __LINE__, (int)pthread_self(), ## __VA_ARGS__);
 #else
 #define DEBUG(x, ...)
 #endif

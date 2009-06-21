@@ -56,7 +56,7 @@ ZipFile open_volume(char *urn, char mode) {
 	// Note that autoloads are specified relative to the current
 	// urn path, or in a fully qualified way:
 	ZipFile fd;
-	char *path = fully_qualified_name(result_set[i]->value, dirpath);
+	char *path = fully_qualified_name(NULL, result_set[i]->value, dirpath);
 	
 	LogWarnings("Autoloading %s", path);
 	fd = open_volume(path, 'r');

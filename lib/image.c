@@ -226,6 +226,7 @@ static AFFObject Image_finish(AFFObject self) {
   CALL(oracle, set, self->urn, AFF4_INTERFACE, AFF4_STREAM);
 
   EVP_DigestInit(&this->digest, EVP_sha256());
+  //EVP_DigestInit(&this->digest, EVP_md5());
   return CALL(self, Con, self->urn, 'w');
 };
 
@@ -260,6 +261,9 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
     result = CALL(this->current->bevy, write, buffer+buffer_readptr, available_to_read);
     buffer_readptr += result;
   };
+
+  self->size += length;
+  CALL(oracle, set, URNOF(self), AFF4_SIZE, from_int(self->size));
   
   return length;
 };

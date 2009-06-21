@@ -229,7 +229,7 @@ static AFFObject Identity_AFFObject_Con(AFFObject self, char *uri, char mode) {
     };
   };
   
-  return (AFFObject)CALL(this, Con, fully_qualified_name("cert.pem", uri),
+  return (AFFObject)CALL(this, Con, fully_qualified_name(self, "cert.pem", uri),
 			 NULL, 'r');
 
  error:
@@ -248,7 +248,7 @@ static void Identity_store(Identity self, char *volume_urn) {
   char buff[BUFF_SIZE];
   int buff_len=BUFF_SIZE;
   int i=0;
-  char *fqn = fully_qualified_name(URNOF(self), volume_urn);
+  char *fqn = fully_qualified_name(self, URNOF(self), volume_urn);
   EVP_MD_CTX md;
   FileLikeObject fd;
 
@@ -290,13 +290,13 @@ static void Identity_store(Identity self, char *volume_urn) {
   talloc_free(text);
 
   // Store the certificate in the volume - is it already there?
-  fd = CALL(volume, open_member, fully_qualified_name("cert.pem", URNOF(self)),
+  fd = CALL(volume, open_member, fully_qualified_name(self, "cert.pem", URNOF(self)),
 	    'r', NULL, 0, 0);
 
   if(!fd) {
     char name[BUFF_SIZE];
     BIO *xbp = BIO_new(BIO_s_mem());
-    char *cert_name = fully_qualified_name("cert.pem", URNOF(self));
+    char *cert_name = fully_qualified_name(self, "cert.pem", URNOF(self));
     
     if(X509_NAME_oneline(X509_get_subject_name(self->x509), name, sizeof(name))) {
       fd = CALL(volume, open_member, cert_name,
@@ -348,7 +348,7 @@ static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *ur
   
   for(statement_urn=statements; *statement_urn; statement_urn++) {
     char buff[BUFF_SIZE];
-    char *fq_name = fully_qualified_name(*statement_urn, URNOF(self));
+    char *fq_name = fully_qualified_name(self, *statement_urn, URNOF(self));
     FileLikeObject statement = (FileLikeObject)CALL(oracle, open, fq_name,'r');
 			   
     EVP_MD_CTX md;

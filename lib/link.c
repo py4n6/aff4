@@ -53,7 +53,7 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
       return;
     };
 
-    friendly_name = fully_qualified_name(friendly_name, storage_urn);
+    friendly_name = fully_qualified_name(self, friendly_name, storage_urn);
 
     // Note the time when the link was made
     CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));

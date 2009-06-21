@@ -18,6 +18,13 @@
 #define AFF4_SHA        NAMESPACE "sha256"
 #define AFF4_TIMESTAMP  NAMESPACE "timestamp"
 
+/** ZipFile attributes */
+#define AFF4_VOLATILE_HEADER_OFFSET VOLATILE_NS "relative_offset_local_header"
+#define AFF4_VOLATILE_COMPRESSED_SIZE VOLATILE_NS "compress_size"
+#define AFF4_VOLATILE_CRC VOLATILE_NS "crc32"
+#define AFF4_VOLATILE_COMPRESSION VOLATILE_NS "compression"
+#define AFF4_VOLATILE_FILE_OFFSET VOLATILE_NS "file_offset"
+
 /** Image attributes */
 #define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
 #define AFF4_COMPRESSION NAMESPACE "compression"

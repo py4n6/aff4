@@ -33,19 +33,19 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
     return NULL;
   };
 
-  filename = urn + strlen("file://");
+  filename = talloc_strdup(self, urn + strlen("file://"));
 
   if(mode == 'r') {
     flags = O_RDONLY | O_BINARY;
   } else {
     flags = O_CREAT | O_RDWR | O_BINARY;
-    buffer = escape_filename(filename);
+    buffer = escape_filename(filename, filename);
     // Try to create leading directories
     _mkdir(dirname(buffer));
   };
 
   // Now try to create the file within the new directory
-  buffer = escape_filename(filename);
+  buffer = escape_filename(filename,filename);
   self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
   if(self->fd<0){
     RaiseError(EIOError, "Can't open %s (%s)", urn, strerror(errno));
@@ -58,9 +58,11 @@ static FileBackedObject FileBackedObject_Con(FileBackedObject self,
   // Set our urn - always fqn
   URNOF(self) = talloc_strdup(self, urn);
 
+  talloc_free(filename);
   return self;
 
  error:
+  talloc_free(filename);
   talloc_free(self);
   return NULL;
 };
@@ -460,9 +462,9 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	goto error_reason;
 
       // Unescape the filename
-      filename = unescape_filename(escaped_filename);
+      filename = unescape_filename(self, escaped_filename);
       // This is the fully qualified name
-      filename = fully_qualified_name(filename, URNOF(self));
+      filename = fully_qualified_name(filename, filename, URNOF(self));
 
       // Tell the oracle about this new member
       CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
@@ -488,10 +490,10 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
       parse_extra_field(self, fd, cd_header.extra_field_len);
 
-      CALL(oracle, set, filename, VOLATILE_NS "compression", 
+      CALL(oracle, set, filename, AFF4_VOLATILE_COMPRESSION, 
 	   from_int(cd_header.compression_method));
 
-      CALL(oracle, set, filename, VOLATILE_NS "crc32", 
+      CALL(oracle, set, filename, AFF4_VOLATILE_CRC, 
 	   from_int(cd_header.crc32));
 
       // The following checks for zip64 values
@@ -501,12 +503,12 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
       tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
 	: cd_header.compress_size;
-      CALL(oracle, set, filename, VOLATILE_NS "compress_size", 
+      CALL(oracle, set, filename, AFF4_VOLATILE_COMPRESSED_SIZE, 
 	   from_int(tmp));
       
       tmp = cd_header.relative_offset_local_header == -1 ? self->offset_of_member_header 
 	: cd_header.relative_offset_local_header;
-      CALL(oracle, set, filename, VOLATILE_NS "relative_offset_local_header", 
+      CALL(oracle, set, filename, AFF4_VOLATILE_HEADER_OFFSET, 
 	   from_int(tmp));
       self->offset_of_member_header = tmp;
 
@@ -524,7 +526,7 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	  sizeof(file_header) +
 	  file_header.file_name_length + file_header.extra_field_len;
 
-	CALL(oracle, set, filename, VOLATILE_NS "file_offset", 
+	CALL(oracle, set, filename, AFF4_VOLATILE_FILE_OFFSET,
 	     from_int(file_offset));
 
 	CALL(fd, seek, current_offset, SEEK_SET);
@@ -695,7 +697,6 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
   switch(mode) {
   case 'w': {
     struct ZipFileHeader header;
-    char *writer;
     FileLikeObject fd;
     // We start writing new files at this point
     uint64_t directory_offset;
@@ -705,8 +706,8 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Make sure the filename we write on the archive is relative, and
     // the filename we use with the resolver is fully qualified
-    escaped_filename = escape_filename(relative_name(filename, URNOF(self)));
-    filename = fully_qualified_name(filename, URNOF(self));
+    escaped_filename = escape_filename(self, relative_name(self, filename, URNOF(self)));
+    filename = fully_qualified_name(escaped_filename, filename, URNOF(self));
 
     // Lock the object to stop other threads from writing on us - when
     // the ZipFileStream object is closed - we will unlock the resolver
@@ -725,7 +726,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Go to the start of the directory_offset
     CALL(fd, seek, directory_offset, SEEK_SET);
-    DEBUG("seeking %p to %d (%d)\n", fd, directory_offset, fd->size);
+    DEBUG("seeking %p to %lld (%lld)\n", fd, directory_offset, fd->size);
 
     // Write a file header on
     memset(&header, 0, sizeof(header));
@@ -741,7 +742,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     header.lastmodtime = now->tm_hour << 11 | now->tm_min << 5 | 
       now->tm_sec / 2;
 
-    DEBUG("writing at %d\n", fd->readptr);
+    DEBUG("writing at %lld\n", fd->readptr);
     CALL(fd, write,(char *)&header, sizeof(header));
     CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
 
@@ -810,7 +811,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
   end_cd.size_of_cd = locator.offset_of_end_cd - directory_offset;
   end_cd.offset_of_cd = directory_offset;
   
-  DEBUG("writing ECD at %d\n", fd->readptr);
+  DEBUG("writing ECD at %lld\n", fd->readptr);
   CALL(fd,write, (char *)&end_cd, sizeof(end_cd));
   CALL(fd,write, (char *)&locator, sizeof(locator));
 };
@@ -884,7 +885,8 @@ static void ZipFile_close(ZipFile self) {
 					     AFF4_TIMESTAMP));
 	  struct tm *now = localtime(&epoch_time);
 	  // This gets the relative name of the fqn
-	  char *escaped_filename = escape_filename(relative_name(value, URNOF(self)));
+	  char *escaped_filename = escape_filename(self, 
+						   relative_name(self, value, URNOF(self)));
 	  //	  LogWarnings("Writing archive member %s -> %s", escaped_filename, value);
 
 	  // Its not a segment after all
@@ -1017,15 +1019,25 @@ END_VIRTUAL
     member, parent_urn is the URN of the backing FileLikeObject which
     the zip file is written on. filename is the filename of this new
     zip member.
+
+    ZipFileStream objects may not expire until they are ready - this
+    is because you cant really recreate them. Ideally they should not
+    exist for long anyway.
 */
+
+static int ZipFileStream_destroy(void *self) {
+  return -1;
+};
+
 static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename, 
 				       char *parent_urn, char *container_urn,
 				       char mode) {
-  char *fqn_filename = fully_qualified_name(filename, URNOF(self));
+  char *fqn_filename = fully_qualified_name(self, filename, URNOF(self));
 
   ((AFFObject)self)->mode = mode;
 
   EVP_DigestInit(&self->digest, EVP_sha256());
+  //EVP_DigestInit(&self->digest, EVP_md5());
   
   self->container_urn = talloc_strdup(self, container_urn);
   self->compression = parse_int(CALL(oracle, resolve, 
@@ -1057,7 +1069,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, char *filename,
     };
   };
 
-
+  talloc_set_destructor((void *)self, ZipFileStream_destroy);
   // Set important parameters in the zinfo
   return self;
 
@@ -1111,7 +1123,7 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
 
   } else {
     /** Without compression, we just write the buffer right away */
-    DEBUG("(%p) writing data at 0x%X\n", self, fd->readptr);
+    DEBUG("(%p) writing data at 0x%llX\n", self, fd->readptr);
     result = CALL(fd, write, buffer, length);
     if(result<0) 
       goto exit;
@@ -1262,6 +1274,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   // Make sure the lock is removed from this volume now:
   CALL(oracle, unlock, this->container_urn, VOLATILE_NS "write_lock");
   CALL(oracle, cache_return, (AFFObject)fd);
+  talloc_set_destructor((void *)self, NULL);
   talloc_free(self);
 };
 
@@ -1315,21 +1328,21 @@ void print_cache(Cache self) {
   };
 };
 
-char *fully_qualified_name(char *filename, char *volume_urn) {
-  static char fqn_filename[BUFF_SIZE];
+char *fully_qualified_name(void *ctx, char *filename, char *volume_urn) {
+  char fqn_filename[BUFF_SIZE];
 
   if(startswith(filename, FQN)) {
-    return filename;
+    return talloc_strdup(ctx, filename);
   } else {
     snprintf(fqn_filename, BUFF_SIZE, "%s/%s", volume_urn, filename);
-    return fqn_filename;
+    return talloc_strdup(ctx, fqn_filename);
   };
 };
 
-char *relative_name(char *name, char *volume_urn) {
+char *relative_name(void *ctx, char *name, char *volume_urn) {
   if(startswith(name, volume_urn)) {
-    return name + strlen(volume_urn)+1;
+    return talloc_strdup(ctx, name + strlen(volume_urn)+1);
   };
 
-  return name;
+  return talloc_strdup(ctx,name);
 };

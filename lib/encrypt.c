@@ -337,7 +337,6 @@ static int write_encrypted_block(Encrypted this, char *data,
     return CALL(target, write, (char *)new_data, this->block_size);
 };
 
-
 /** We assume that writing is never random */
 static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Encrypted this = (Encrypted)self;
