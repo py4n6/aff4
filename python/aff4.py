@@ -1,24 +1,32 @@
 #!/usr/bin/python
 
 import unittest
-import uuid
+import uuid, posixpath
 import urllib, os, re, struct, zlib, time
 import StringIO
 from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, ZIP_FILECOUNT_LIMIT, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive
 import threading, mutex
 
-
-NAMESPACE = "aff4:"
-VOLATILE_NS = "aff4volatile:"
+## namespaces
+NAMESPACE = "aff4:" ## AFF4 namespace
+VOLATILE_NS = "aff4volatile:" ## Never written to files
+CONFIGURATION_NS = VOLATILE_NS + "config:" ## Used to configure the
+                                           ## library with global
+                                           ## settings
 FQN = "urn:" + NAMESPACE
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
 AFF4_TYPE       =NAMESPACE +"type"
+AFF4_INTERFACE  =NAMESPACE +"interface"
 AFF4_CONTAINS   =NAMESPACE +"contains"
 AFF4_SIZE       =NAMESPACE +"size"
 AFF4_SHA        =NAMESPACE +"sha256"
 AFF4_TIMESTAMP  =NAMESPACE +"timestamp"
+
+## Supported interfaces
+AFF4_STREAM     =NAMESPACE +"stream"
+AFF4_VOLUME     =NAMESPACE +"volume"
 
 #/** ZipFile attributes */
 AFF4_VOLATILE_HEADER_OFFSET   = VOLATILE_NS + "relative_offset_local_header"
@@ -65,6 +73,7 @@ _DEBUG = 1
 _INFO = 5
 _WARNING = 10
 
+#VERBOSITY=_DEBUG
 VERBOSITY=_INFO
 
 def DEBUG(verb, fmt, *args):
@@ -82,7 +91,7 @@ def fully_qualified_name(filename, context_name):
     if not filename.startswith(FQN):
         filename = "%s/%s" % (context_name, filename)
 
-    return filename
+    return posixpath.normpath(filename)
 
 def relative_name(filename, context_name):
     if filename.startswith(context_name):
@@ -179,7 +188,9 @@ class NoneObject(object):
 
     def __call__(self, *arg, **kwargs):
         return self
-    
+
+def Raise(reason):
+    raise RuntimeError(reason)
 
 class AFFObject:
     """ All AFF4 objects extend this one """
@@ -256,7 +267,7 @@ def unescape_filename(filename):
 class FileBackedObject(FileLikeObject):
     def __init__(self, uri, mode):
         if not uri.startswith("file://"):
-            raise RuntimeError("You must have a fully qualified urn here, not %s" % urn)
+            Raise("You must have a fully qualified urn here, not %s" % urn)
 
         filename = uri[len("file://"):]
         escaped = escape_filename(filename)
@@ -270,25 +281,24 @@ class FileBackedObject(FileLikeObject):
                 pass
 
         self.fd = open(escaped, mode)
-        self.fd.seek(0,2)
-        self.size = self.fd.tell()
-        self.fd.seek(0)
         self.urn = uri
+        self.mode = mode
+
+    def seek(self, offset, whence=0):
+        self.fd.seek(offset, whence)
+
+    def tell(self):
+        return self.fd.tell()
 
     def read(self, length=None):
-        if length==None:
-            length = self.size - self.readptr
-
-        self.fd.seek(self.readptr)
+        if length is None:
+            return self.fd.read()
+        
         result = self.fd.read(length)
-        self.readptr += len(result)
         return result
 
     def write(self, data):
-        self.fd.seek(self.readptr)
         self.fd.write(data)
-        self.readptr += len(data)
-
         return len(data)
 
     def close(self):
@@ -316,6 +326,9 @@ class Store:
         self.hash[urn] = obj
         self.age.append(urn)
 
+    def __contains__(self, obj):
+        return obj in self.hash
+
     def __getitem__(self, urn):
         return self.hash[urn]
     
@@ -324,7 +337,7 @@ class URNObject:
     def __init__(self, urn):
         self.properties = {}
         self.urn = urn
-        ## FIXME handle locking here
+        self.lock = threading.Lock()
 
     def __str__(self):
         result = ''
@@ -363,7 +376,7 @@ class URNObject:
         for attribute, v in self.properties.items():
             if not attribute.startswith(VOLATILE_NS):
                 for value in v:
-                    result += "%s=%s\r\n" % (attribute, value)
+                    result += "%s=%s\n" % (attribute, value)
                 
         return result
 
@@ -384,6 +397,7 @@ class Resolver:
         return obj
 
     def set(self, uri, attribute, value):
+        DEBUG(_DEBUG, "Setting %s: %s=%s", uri, attribute, value);
         self[uri].set(attribute, value)
         
     def add(self, uri, attribute, value):
@@ -407,37 +421,71 @@ class Resolver:
 
     def cache_return(self, obj):
         DEBUG(_DEBUG, "Returning %s (%s)" % (obj.urn, obj.mode))
-        if obj.mode == 'w':
-            self.write_cache.add(obj.urn, obj)
-        else:
-            self.read_cache.add(obj.urn, obj)
+        try:
+            if obj.mode == 'w':
+                if obj.urn not in self.write_cache:
+                    self.write_cache.add(obj.urn, obj)
+            else:
+                if obj.urn not in self.read_cache:
+                    self.read_cache.add(obj.urn, obj)
+        finally:
+            ## Release the lock now
+            try:
+                self[obj.urn].lock.release()
+                DEBUG(_DEBUG,"Released %s", obj.urn)
+            except: pass
 
-    def open(self, uri, mode='r'):
+    def open(self, uri, mode='r', interface=None):
         DEBUG(_DEBUG, "oracle: Openning %s (%s)" % (uri,mode))
-        """ Opens the uri returning the requested object """
+        """ Opens the uri returning the requested object.
+
+        If interface is specified we check that the object we return
+        implements the correct interface or return an error.
+        """
+        result = None
+
+        ## Check for links
+        if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
+            uri = oracle.resolve(uri, AFF4_TARGET)
+        
         try:
             if mode =='r':
-                return self.read_cache[uri]
+                result = self.read_cache[uri]
             else:
-                return self.write_cache[uri]
+                result = self.write_cache[uri]
         except KeyError:
             pass
 
-        ## Do we know what type it is?
-        type = self.resolve(uri, AFF4_TYPE)
-        if type:
+        if not result:
+            ## Do we know what type it is?
+            type = self.resolve(uri, AFF4_TYPE)
+            if type:
+                for scheme, prefix, handler in DISPATCH:
+                    if prefix == type:
+                        result = handler(uri, mode)
+                        result.mode = mode
+                        break
+
+        if not result:
+            ## find the handler according to the scheme:
             for scheme, prefix, handler in DISPATCH:
-                if prefix == type:
+                if scheme and uri.startswith(prefix):
                     result = handler(uri, mode)
                     result.mode = mode
-                    return result
-        
-        ## find the handler according to the scheme:
-        for scheme, prefix, handler in DISPATCH:
-            if scheme and uri.startswith(prefix):
-                result = handler(uri, mode)
-                result.mode = mode
-                return result
+                    break
+
+        if result:
+            ## Obtain a lock on the object
+            try:
+                obj = self[uri]
+            except KeyError:
+                obj = self[uri] = URNObject(uri)
+
+            DEBUG(_DEBUG, "Acquiring %s ",uri)
+            obj.lock.acquire()
+            DEBUG(_DEBUG, "Acquired %s", uri)
+            
+            return result
 
         ## We dont know how to open it.
         return NoneObject("Dont know how to handle URN %s. (type %s)" % (uri, type))
@@ -509,18 +557,29 @@ class ZipFileStream(FileLikeObject):
 
         if self.compression == zipfile.ZIP_STORED:
             fd = oracle.open(self.backing_fd,'r')
-            fd.seek(self.base_offset + self.readptr)
-            result = fd.read(length)
-            oracle.cache_return(fd)
+            try:
+                fd.seek(self.base_offset + self.readptr)
+                result = fd.read(length)
+            finally:
+                oracle.cache_return(fd)
+                
             self.readptr += len(result)
 
             return result
+        elif self.compression == ZIP_DEFLATED:
+            Raise("ZIP_DEFLATED not implemented")
 
 class ImageWorker(threading.Thread):
     """ This is a worker responsible for creating a full bevy """
-    def __init__(self, urn, volume, bevy_number, chunk_size, chunks_in_segment):
+    def __init__(self, urn, volume, bevy_number,
+                 chunk_size, chunks_in_segment, condition_variable=None):
+        """ Set up a new worker.
+
+        The condition variable will be notified when we finish.
+        """
         threading.Thread.__init__(self)
-        
+
+        self.condition_variable = condition_variable
         self.buffer = StringIO.StringIO()
         self.bevy = StringIO.StringIO()
         self.bevy_index = StringIO.StringIO()
@@ -540,7 +599,7 @@ class ImageWorker(threading.Thread):
 
     def run(self):
         """ This is run when we have a complete bevy """
-        print "Starting thread"
+        DEBUG(_DEBUG, "Starting thread")
         self.buffer.seek(0)
         offset = 0
         while self.buffer.tell() < self.buffer.len:
@@ -550,20 +609,33 @@ class ImageWorker(threading.Thread):
             self.bevy_index.write(struct.pack("<L", offset))
             offset += len(cdata)
 
-        self.bevy_index.write(struct.pack("<L", -1))
+        self.bevy_index.write(struct.pack("<L", 0xFFFFFFFF))
 
         ## Grab the volume
         volume = oracle.open(self.volume, 'w')
 
-        ## Write the bevy
-        volume.writestr(fully_qualified_name("%08d" % self.bevy_number, self.urn),
-                        self.bevy.getvalue())
-        volume.writestr(fully_qualified_name("%08d.idx" % self.bevy_number, self.urn),
-                        self.bevy_index.getvalue())
+        try:
+           ## Write the bevy
+            subject = fully_qualified_name("%08d" % self.bevy_number, self.urn)
+            DEBUG(_INFO, "Writing bevy %s %s/%sMb (%d%%)" ,
+                  subject,
+                  (self.bevy.len / 1024 / 1024),
+                  (self.bevy_size/ 1024 / 1024),
+                  (100 * self.bevy.len) / self.buffer.len)
+            volume.writestr(subject,
+                            self.bevy.getvalue())
+            volume.writestr(subject + '.idx',
+                            self.bevy_index.getvalue())
+        finally:
+            ## Done
+            oracle.cache_return(volume)
 
-        ## Done
-        oracle.cache_return(volume)
-        print "Finishing thread"
+        ## Notify that we are finished
+        self.condition_variable.acquire()
+        self.condition_variable.notify()
+        self.condition_variable.release()
+
+        DEBUG(_DEBUG,"Finishing thread")
         
 class Image(FileLikeObject):
     """ A Image stores a large, seekable, compressed, contiguous, block of data.
@@ -584,13 +656,16 @@ class Image(FileLikeObject):
         self.chunk_cache = Store()
         self.bevy_number = 0
         self.running = []
+        self.condition_variable = threading.Condition()
 
         if mode=='w':
             self.writer = ImageWorker(self.urn, self.container, self.bevy_number,
-                                      self.chunk_size, self.chunks_in_segment)
+                                      self.chunk_size, self.chunks_in_segment,
+                                      condition_variable = self.condition_variable)
 
     def finish(self):
         oracle.set(self.urn, AFF4_TYPE, AFF4_IMAGE)
+        oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
         self.__init__(self.urn, self.mode)
 
     def write(self, data):
@@ -606,20 +681,21 @@ class Image(FileLikeObject):
             ## It didnt all fit - flush the worker, and get a new one here
             self.writer.start()
             self.running.append(self.writer)
-            print self.running
+            DEBUG(_DEBUG, "%s" % self.running)
             
             ## Update our view of the currently running threads
             while 1:
-                ## This can be written nicer using condition vars
                 self.running = [ x for x in self.running if x.is_alive() ]
-                if len(self.running) < 2:
-                    break
-                
-                time.sleep(1)
-                    
+                if len(self.running) >= 2:
+                    self.condition_variable.acquire()
+                    self.condition_variable.wait(10)
+                    self.condition_variable.release()
+                else: break
+            
             self.bevy_number += 1
             self.writer = ImageWorker(self.urn, self.container, self.bevy_number,
-                                      self.chunk_size, self.chunks_in_segment)
+                                      self.chunk_size, self.chunks_in_segment,
+                                      condition_variable=self.condition_variable)
 
     def close(self):
         self.running.append(self.writer)
@@ -628,6 +704,14 @@ class Image(FileLikeObject):
         ## Wait untill all workers are finished
         for x in self.running:
             x.join()
+
+        ## Write the properties file
+        volume = oracle.open(self.container,'w')
+        try:
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn))
+        finally:
+            oracle.cache_return(volume)
 
     def partial_read(self, length):
         """ Read as much as is possible at the current point without
@@ -646,14 +730,19 @@ class Image(FileLikeObject):
             bevy_urn = "%s/%08d" % (self.urn, bevy)
             
             fd = oracle.open("%s.idx" % bevy_urn, 'r')
-            data = fd.get_data()
-            offset, length = struct.unpack("<LL", data[4 * chunk_in_bevy:4 * chunk_in_bevy + 8])
-            oracle.cache_return(fd)
+            try:
+                data = fd.get_data()
+                offset, length = struct.unpack(
+                    "<LL", data[4 * chunk_in_bevy:4 * chunk_in_bevy + 8])
+            finally:
+                oracle.cache_return(fd)
 
             fd = oracle.open(bevy_urn, 'r')
-            fd.seek(offset)
-            chunk = zlib.decompress(fd.read(length))
-            oracle.cache_return(fd)
+            try:
+                fd.seek(offset)
+                chunk = zlib.decompress(fd.read(length))
+            finally:
+                oracle.cache_return(fd)
             
             self.chunk_cache.add(chunk_id, chunk)
             
@@ -681,10 +770,9 @@ class ZipVolume(AFFVolume):
     """ AFF4 Zip Volumes store segments within zip files """
     def __init__(self, urn, mode):
         if urn:
-            stored = oracle.resolve(urn, AFF4_STORED)
-            if not stored:
-                raise RuntimeError("Can not find storage for Volumes %s" % urn)
-
+            stored = oracle.resolve(urn, AFF4_STORED) or \
+                     Raise("Can not find storage for Volumes %s" % urn)
+            
             try:
                 self.load_from(stored)
             except IOError: pass
@@ -693,6 +781,7 @@ class ZipVolume(AFFVolume):
             
     def finish(self):
         oracle.set(self.urn, AFF4_TYPE, AFF4_ZIP_VOLUME)
+        oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         self.__init__(self.urn, self.mode)
 
     def writestr(self, subject, data, compress_type = ZIP_STORED):
@@ -700,7 +789,6 @@ class ZipVolume(AFFVolume):
 
         subject is a fully qualified name or relative to the current volume.
         """
-        DEBUG(_INFO, "Writing segment %s" % subject)
         filename = escape_filename(relative_name(subject, self.urn))
 
         ## Where are we stored?
@@ -708,45 +796,46 @@ class ZipVolume(AFFVolume):
 
         ## This locks the backing_fd for exclusive access
         backing_fd = oracle.open(stored,'w')
+        try:
+            ## Mark the file as dirty
+            oracle.set(self.urn, AFF4_VOLATILE_DIRTY, '1')
 
-        ## Mark the file as dirty
-        oracle.set(self.urn, AFF4_VOLATILE_DIRTY, '1')
+            ## Where should we write the new file?
+            directory_offset = parse_int(oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET)) or 0
 
-        ## Where should we write the new file?
-        directory_offset = parse_int(oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET)) or 0
+            zinfo = zipfile.ZipInfo(filename = filename,
+                                 date_time=time.localtime(time.time())[:6])
 
-        zinfo = zipfile.ZipInfo(filename = filename,
-                             date_time=time.localtime(time.time())[:6])
-        
-        zinfo.external_attr = 0600 << 16L      # Unix attributes        
-        zinfo.header_offset = directory_offset
-        zinfo.file_size = len(data)
-        zinfo.CRC = zipfile.crc32(data)
+            zinfo.external_attr = 0600 << 16L      # Unix attributes        
+            zinfo.header_offset = directory_offset
+            zinfo.file_size = len(data)
+            zinfo.CRC = 0xFFFFFFFF & zipfile.crc32(data)
 
-        ## Compress the data if needed
-        zinfo.compress_type = compress_type
-        if zinfo.compress_type == ZIP_DEFLATED:
-            co = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION,
-                 zlib.DEFLATED, -15)
-            data = co.compress(data) + co.flush()
-            zinfo.compress_size = len(data)    # Compressed size
-        else:
-            zinfo.compress_size = zinfo.file_size
+            ## Compress the data if needed
+            zinfo.compress_type = compress_type
+            if zinfo.compress_type == ZIP_DEFLATED:
+                co = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION,
+                     zlib.DEFLATED, -15)
+                data = co.compress(data) + co.flush()
+                zinfo.compress_size = len(data)    # Compressed size
+            else:
+                zinfo.compress_size = zinfo.file_size
 
-        ## Write the header and data
-        backing_fd.seek(directory_offset)
-        backing_fd.write(zinfo.FileHeader())
-        backing_fd.write(data)
+            ## Write the header and data
+            backing_fd.seek(directory_offset)
+            backing_fd.write(zinfo.FileHeader())
+            backing_fd.write(data)
 
-        ## Adjust the new directory_offset
-        oracle.set(self.urn, AFF4_DIRECTORY_OFFSET, backing_fd.tell())
+            ## Adjust the new directory_offset
+            oracle.set(self.urn, AFF4_DIRECTORY_OFFSET, backing_fd.tell())
 
-        ## Add this new file to the resolver
-        subject = fully_qualified_name(subject, self.urn)
-        self.import_zinfo(subject, zinfo)
-
-        ## Done with the backing file now (this will unlock it too)
-        oracle.cache_return(backing_fd)
+            ## Add this new file to the resolver
+            subject = fully_qualified_name(subject, self.urn)
+            self.import_zinfo(subject, zinfo)
+            
+        finally:
+            ## Done with the backing file now (this will unlock it too)
+            oracle.cache_return(backing_fd)
 
     def close(self):
         """ Close and write a central directory structure on this zip file.
@@ -880,10 +969,11 @@ class ZipVolume(AFFVolume):
         """ Tries to open the filename as a ZipVolume """
 
         fileobj = oracle.open(filename, 'r')
-
         ## We parse out the CD of each file and build an index
-        zf = zipfile.ZipFile(fileobj, mode='r', allowZip64=True)
-        oracle.cache_return(fileobj)
+        try:
+            zf = zipfile.ZipFile(fileobj, mode='r', allowZip64=True)
+        finally:
+            oracle.cache_return(fileobj)
         
         self.zf = zf
         
@@ -897,10 +987,11 @@ class ZipVolume(AFFVolume):
                 self.urn = zf.read("__URN__")
                 assert(self.urn.startswith(FQN))
             except:
-                print "Volume does not have a valid URN - using temporary URN %s" % self.urn
+                DEBUG(_WARNING, "Volume does not have a valid URN - using temporary URN %s" % self.urn)
                 
         oracle.add(self.urn, AFF4_STORED, filename)
         oracle.add(filename, AFF4_CONTAINS, self.urn)
+        oracle.set(self.urn, AFF4_DIRECTORY_OFFSET, zf.start_dir)
         
         infolist = zf.infolist()
         for zinfo in infolist:
@@ -921,6 +1012,7 @@ class ZipVolume(AFFVolume):
         oracle.add(self.urn, AFF4_CONTAINS, subject)
         oracle.add(subject, AFF4_STORED, self.urn)
         oracle.add(subject, AFF4_TYPE, AFF4_SEGMENT)
+        oracle.add(subject, AFF4_INTERFACE, AFF4_STREAM)
 
         oracle.add(subject, AFF4_VOLATILE_HEADER_OFFSET, zinfo.header_offset)
         oracle.add(subject, AFF4_VOLATILE_CRC, zinfo.CRC)
@@ -933,17 +1025,194 @@ class ZipVolume(AFFVolume):
         ## so we dont need to keep calculating it all the time
         oracle.add(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
                    zipfile.sizeFileHeader + len(zinfo.filename))
+
+class Link(AFFObject):
+    """ An AFF4 object which links to another object.
+
+    When we open the link name, we return the AFF4_TARGET attribute.
+    """            
+    def finish(self):
+        oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
+        self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
+                      Raise("Link objects must have a target attribute")
+        self.stored = oracle.resolve(self.urn, AFF4_STORED) or \
+                      Raise("Link objects must be stored on a volume")
+
+        return AFFObject.finish(self)
+
+    def close(self):
+        ## Make sure we write our properties file
+        volume = oracle.open(self.stored, 'w')
+        volume.writestr(fully_qualified_name("properties", self.urn),
+                        oracle.export(self.urn))
+        oracle.cache_return(volume)
+
+class Point:
+    def __init__(self, image_offset, target_offset, target_urn):
+        self.image_offset = image_offset
+        self.target_offset= target_offset
+        self.target_urn = target_urn
+
+    def __repr__(self):
+        return "<%s,%s,%s>" % (self.image_offset, self.target_offset, self.target_urn)
+
+class Map(FileLikeObject):
+    """ A Map is an object which presents a transformed view of another
+    stream.
+    """
+    def finish(self):
+        oracle.set(self.urn, AFF4_TYPE, AFF4_MAP)
+        oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
+        self.__init__(self.urn, self.mode)
+
+    def __init__(self, uri=None, mode='r'):
+        self.points = []
+        if uri:
+            self.stored = oracle.resolve(uri, AFF4_STORED) or \
+                          Raise("Map objects must be stored somewhere")
+            self.target = oracle.resolve(uri, AFF4_TARGET) or \
+                          Raise("Map objects must have a %s attribute" % AFF4_TARGET)
+
+            self.blocksize = parse_int(oracle.resolve(uri, AFF4_BLOCKSIZE)) or 1
+            self.size = parse_int(oracle.resolve(uri, AFF4_SIZE)) or 1
+
+            ## If a period is not specified we use the size of the
+            ## image for the period. This allows us to use the same
+            ## maths for both cases.
+            max_size = max(self.size, parse_int(oracle.resolve(self.target, AFF4_SIZE)))
+            self.image_period = self.blocksize * parse_int(
+                oracle.resolve(uri, AFF4_IMAGE_PERIOD)) or max_size
+            
+            self.target_period = self.blocksize * parse_int(
+                oracle.resolve(uri, AFF4_TARGET_PERIOD)) or max_size
+
+        ## Parse the map now:
+        if uri and mode=='r':
+            fd = oracle.open("%s/map" % uri)
+            fd.seek(0)
+            line_re = re.compile("(\d+),(\d+),(.+)")
+            try:
+                for line in fd.read(fd.size).splitlines():
+                    m = line_re.match(line)
+                    if not m:
+                        print "Unable to parse map line '%s'" % line
+                    else:
+                        self.points.append(Point(parse_int(m.group(1)),
+                                                 parse_int(m.group(2)),
+                                                 m.group(3)))
+            finally:
+                oracle.cache_return(fd)
+
+        FileLikeObject.__init__(self, uri, mode)
+
+    def bisect_right(self, image_offset):
+        lo = 0
+        hi = len(self.points)
         
+        while lo < hi:
+            mid = (lo+hi)//2
+            if image_offset < self.points[mid].image_offset: hi = mid
+            else: lo = mid+1
+        return lo
+                    
+    def partial_read(self, length):
+        """ Read from the current offset as much as possible - may
+        return less than whats needed."""
+        ## This function actually does the mapping
+        period_number, image_period_offset = divmod(self.readptr, self.image_period)
+        available_to_read = min(self.size - self.readptr, length)
+        l = self.bisect_right(image_period_offset)-1
+        target_offset = self.points[l].target_offset + \
+                        image_period_offset - self.points[l].image_offset + \
+                        period_number * self.target_period
+
+        if l < len(self.points)-1:
+            available_to_read = self.points[l+1].image_offset - image_period_offset
+        else:
+            available_to_read = min(available_to_read,
+                                    self.image_period - image_period_offset)
+                
+        ## Now do the read:
+        target = oracle.open(self.points[l].target_urn, 'r')
+        try:
+            target.seek(target_offset)
+            data = target.read(available_to_read)
+        finally:
+            oracle.cache_return(target)
+
+        self.readptr += len(data)
+        return data
+
+    def read(self, length):
+        length = min(length, self.size - self.readptr)
+        result = ''
+        while len(result) < length:
+            data = self.partial_read(length - len(result))
+            if not data: break
+            result += data
+
+        return result
+
+    def add(self, image_offset, target_offset, target_urn):
+        self.points.append(Point(image_offset, target_offset, target_urn))
+
+    def close(self):
+        fd = StringIO.StringIO()
+        def cmp_fun(x,y):
+            return int(x.target_offset - y.target_offset)
+        
+        ## Sort the map array
+        self.points.sort(cmp_fun)
+
+        for i in range(len(self.points)):
+            point = self.points[i]
+
+            ## Try to reduce redundant points
+            if i!=0 and i!=len(self.points) and \
+                   self.points[i].target_urn == self.points[i-1].target_urn:
+                previous = self.points[i-1]
+                prediction = point.image_offset - previous.image_offset +\
+                             previous.target_offset
+
+                if prediction == point.target_offset: continue
+
+            fd.write("%d,%d,%s\n" % (point.image_offset,
+                     point.target_offset, point.target_urn))
+
+        volume = oracle.open(self.stored, 'w')
+        try:
+            volume.writestr(fully_qualified_name("map", self.urn),
+                            fd.getvalue())
+            
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn))
+        finally:
+            oracle.cache_return(volume)
+                
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
 DISPATCH = [
     [ 1, "file://", FileBackedObject ],
     [ 0, AFF4_SEGMENT, ZipFileStream ],
+    [ 0, AFF4_LINK, Link ],
     [ 0, AFF4_IMAGE, Image ],
+    [ 0, AFF4_MAP, Map ],
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     ]
 
-            
+
+### These are helper functions
+def load_volume(filename):
+    """ Loads the volume in filename into the resolver """
+    if "://" not in filename:
+        filename = "file://" + filename
+
+    volume = ZipVolume(None, 'r')
+    volume.load_from(filename)
+    oracle.cache_return(volume)
+
+    return volume.urn
+
 class ResolverTests(unittest.TestCase):
     def test_00access(self):
         location = "file://somewhere"
@@ -962,17 +1231,18 @@ class ResolverTests(unittest.TestCase):
         fd.close()
         
         fd = oracle.open(filename,'r')
-        self.assertEqual(fd.read(), test_string)
-        oracle.cache_return(fd)
+        try:
+            self.assertEqual(fd.read(), test_string)
+        finally:
+            oracle.cache_return(fd)
 
-    def xtest_02_ZipVolume(self):
+    def test_02_ZipVolume(self):
         """ Test creating of zip files """
         filename = "file://tests/test.zip"
-
+        
         out_fd = ZipVolume(None, "w")
         oracle.add(out_fd.urn, AFF4_STORED, filename)
         out_fd.finish()
-
         out_fd.writestr("default","Hello world")
         out_fd.close()
 
@@ -990,47 +1260,63 @@ class ResolverTests(unittest.TestCase):
 
         ## Make an image
         image_fd = Image(None, "w")
+        image_urn = image_fd.urn
         oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
-        ResolverTests.image_urn = image_fd.urn
         image_fd.finish()
         in_fd = oracle.open(in_filename)
+        try:
+            while 1:
+                data = in_fd.read(10240)
+                if not data: break
 
-        while 1:
-            data = in_fd.read(10240)
-            if not data: break
-
-            image_fd.write(data)
-
+                image_fd.write(data)
+        finally:
+            oracle.cache_return(in_fd)
+            
         image_fd.close()
-        oracle.cache_return(in_fd)
+        
+        ## Make a link
+        link = Link(fully_qualified_name("default", volume_urn))
+        oracle.set(link.urn, AFF4_STORED, volume_urn)
+        oracle.set(link.urn, AFF4_TARGET, image_urn)
+        link.finish()
+        
+        link.close()
         
         volume_fd = oracle.open(volume_urn, 'w')
         volume_fd.close()
 
     def test_03_ZipVolume(self):
         """ Tests the ZipVolume implementation """
+        print "Loading volume"
         z = ZipVolume(None, 'r')
         z.load_from(ResolverTests.filename)
 
         ## Test the stream implementation
-        fd = oracle.open("%s/properties" % z.urn)
-        data = z.zf.read("properties")
-        self.assertEqual(data,fd.read(1024))
-        oracle.cache_return(fd)
-        stream = oracle.open(ResolverTests.image_urn)
-        fd = open("output.dd")
-        while 1:
-            data = stream.read(1024)
-            data2 = fd.read(1024)
-            if not data or not data2: break
+        fd = oracle.open(fully_qualified_name("properties", z.urn))
+        try:
+            data = z.zf.read("properties")
+            self.assertEqual(data,fd.read(1024))
+        finally:
+            oracle.cache_return(fd)
+            
+        stream = oracle.open(fully_qualified_name("default", z.urn))
+        try:
+            fd = open("output.dd")
+            while 1:
+                data = stream.read(1024)
+                data2 = fd.read(1024)
+                if not data or not data2: break
 
-            self.assertEqual(data2, data)
+                self.assertEqual(data2, data)
 
-        import sk
-        stream.seek(0)
-        fs = sk.skfs(stream)
+            import sk
+            stream.seek(0)
+            fs = sk.skfs(stream)
 
-        print fs.listdir('/')
-                    
+            print fs.listdir('/')
+        finally:
+            oracle.cache_return(stream)
+
 if __name__ == "__main__":
     unittest.main()
