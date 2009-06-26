@@ -18,7 +18,7 @@ parser.add_option("", "--link", default="default",
 parser.add_option("-D","--dump", default=None,
                   help="Dump out this stream (to --output or stdout)")
 
-parser.add_option("-l","--load", default=None,
+parser.add_option("-l","--load", default=[],
                   action = "append",
                   help="Load this volume to prepopulate the resolver")
 
@@ -26,24 +26,38 @@ parser.add_option("-I", "--info", default=None,
                   action = 'store_true',
                   help="Information mode - dump all information in the resolver")
 
+parser.add_option("-k", "--key", default=None,
+                  help="Key file to use (in PEM format)")
+
+parser.add_option("-c", "--cert", default=None,
+                  help="Certificate file to use (in PEM format)")
+
+parser.add_option("-t", "--threads", default=2,
+                  help="Number of threads to use")
+
 (options, args) = parser.parse_args()
 
 if not options.image and not options.dump and not options.info:
     print "You must specify a mode (try -h)"
     sys.exit(1)
 
+oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
+
 VOLUMES = []
 for v in options.load:
     VOLUMES.append(load_volume(v))
 
-## Store the volume here:
-try:
-    output = options.output
-    if "://" not in output:
-        output = "file://" + output
-except TypeError:
-    pass
+## Prepare an identity for signing
+IDENTITY = Identity()
+if options.key:
+    IDENTITY.load_priv_key(options.key)
 
+if options.cert:
+    IDENTITY.load_certificate(options.cert)
+IDENTITY.finish()
+
+## Store the volume here:
+output = options.output
 if options.image:
     ## Make a new volume
     volume_fd = ZipVolume(None, "w")
@@ -86,7 +100,12 @@ if options.image:
             link.close()
         
         oracle.cache_return(in_fd)
-    
+
+    ## Sign it if needed
+    oracle.set(IDENTITY.urn, AFF4_STORED, volume_urn)
+    IDENTITY.close()
+
+    ## Close the volume off
     volume_fd = oracle.open(volume_urn, 'w')
     volume_fd.close()
 

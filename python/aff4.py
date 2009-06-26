@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import unittest
-import uuid, posixpath
+import uuid, posixpath, hashlib
 import urllib, os, re, struct, zlib, time
 import StringIO
 from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, ZIP_FILECOUNT_LIMIT, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive
@@ -14,6 +14,12 @@ CONFIGURATION_NS = VOLATILE_NS + "config:" ## Used to configure the
                                            ## library with global
                                            ## settings
 FQN = "urn:" + NAMESPACE
+
+GLOBAL = VOLATILE_NS + "global" ## A special urn representing the
+                                ## global context
+
+#Configuration parameters
+CONFIG_THREADS = CONFIGURATION_NS + "threads"
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
@@ -65,6 +71,7 @@ AFF4_IMAGE            ="image"
 AFF4_MAP              ="map"
 AFF4_ENCRYTED         ="encrypted"
 AFF4_IDENTITY         ="identity"
+AFF4_IDENTITY_PREFIX  =FQN + "identity"
 
 #/** These are various properties */
 AFF4_AUTOLOAD         =NAMESPACE +"autoload"
@@ -371,12 +378,12 @@ class URNObject:
         except KeyError:
             return NoneObject("URN %s has no attribute %s" % (self.urn, attribute))
 
-    def export(self):
+    def export(self, prefix=''):
         result =''
         for attribute, v in self.properties.items():
             if not attribute.startswith(VOLATILE_NS):
                 for value in v:
-                    result += "%s=%s\n" % (attribute, value)
+                    result += prefix + "%s=%s\n" % (attribute, value)
                 
         return result
 
@@ -386,6 +393,8 @@ class Resolver:
         self.urn = {}
         self.read_cache = Store()
         self.write_cache = Store()
+        self.add_hooks = []
+        self.set_hooks = []
 
     def __getitem__(self, urn):
         try:
@@ -400,9 +409,17 @@ class Resolver:
         DEBUG(_DEBUG, "Setting %s: %s=%s", uri, attribute, value);
         self[uri].set(attribute, value)
         
+        ## Notify all interested parties
+        for cb in self.set_hooks:
+            cb(uri, attribute, value)
+        
     def add(self, uri, attribute, value):
         DEBUG(_DEBUG, "Adding %s: %s=%s", uri, attribute, value);
         self[uri].add(attribute, value)
+
+        ## Notify all interested parties
+        for cb in self.add_hooks:
+            cb(uri, attribute, value)
 
     def delete(self, uri, attribute):
         self[uri].delete(attribute)
@@ -444,6 +461,10 @@ class Resolver:
         """
         result = None
 
+        ## If the uri is not complete here we guess its a file://
+        if ":" not in uri:
+            uri = "file://%s" % uri
+
         ## Check for links
         if oracle.resolve(uri, AFF4_TYPE) == AFF4_LINK:
             uri = oracle.resolve(uri, AFF4_TARGET)
@@ -484,6 +505,11 @@ class Resolver:
             DEBUG(_DEBUG, "Acquiring %s ",uri)
             obj.lock.acquire()
             DEBUG(_DEBUG, "Acquired %s", uri)
+
+            ## Try to seek it to the start
+            try:
+                result.seek(0)
+            except: pass
             
             return result
 
@@ -522,6 +548,24 @@ class Resolver:
 
     def export(self, subject):
         return self[subject].export()
+
+    def export_all(self):
+        result = ''
+        for urn, obj in self.urn.items():
+            result += obj.export(prefix=urn + " ")
+        return result
+
+    def register_add_hook(self, cb):
+        """ Callbacks may be added here to be notified of add
+        events. The callback will be called with the following
+        prototype:
+
+        cb(urn, attribute, value)
+        """
+        self.add_hooks.append(cb)
+        
+    def register_set_hook(self, cb):
+        self.set_hooks.append(cb)
         
 oracle = Resolver()
 
@@ -611,12 +655,18 @@ class ImageWorker(threading.Thread):
 
         self.bevy_index.write(struct.pack("<L", 0xFFFFFFFF))
 
+        subject = fully_qualified_name("%08d" % self.bevy_number, self.urn)
+
+        ## we calculate the SHA (before we grab the lock on the
+        ## volume)
+        oracle.set(subject, AFF4_SHA,
+                   hashlib.sha1(self.bevy.getvalue()).\
+                   digest().encode("base64").strip())
+
         ## Grab the volume
         volume = oracle.open(self.volume, 'w')
-
         try:
            ## Write the bevy
-            subject = fully_qualified_name("%08d" % self.bevy_number, self.urn)
             DEBUG(_INFO, "Writing bevy %s %s/%sMb (%d%%)" ,
                   subject,
                   (self.bevy.len / 1024 / 1024),
@@ -685,8 +735,9 @@ class Image(FileLikeObject):
             
             ## Update our view of the currently running threads
             while 1:
+                number_of_threads = parse_int(oracle.resolve(GLOBAL, CONFIG_THREADS)) or 2
                 self.running = [ x for x in self.running if x.is_alive() ]
-                if len(self.running) >= 2:
+                if len(self.running) >= number_of_threads:
                     self.condition_variable.acquire()
                     self.condition_variable.wait(10)
                     self.condition_variable.release()
@@ -1188,7 +1239,96 @@ class Map(FileLikeObject):
                             oracle.export(self.urn))
         finally:
             oracle.cache_return(volume)
+
+class Encrypted(FileLikeObject):
+    def __init__(self, urn=None, mode='r'):
+        raise RuntimeError("Encrypted streams are not implemented")
+
+import M2Crypto
+
+class Identity(AFFObject):
+    """ An Identity is an object which represents an X509 certificate"""
+    x509 = None
+    pkey = None
+    
+    ## These are properties that will be signed
+    signable = set([AFF4_SIZE, AFF4_SHA])
+    
+    def load_certificate(self, certificate_urn):
+        fd = oracle.open(certificate_urn, 'r')
+        try:
+            certificate = fd.read()
+            self.x509 = M2Crypto.X509.load_cert_string(certificate)
+        finally:
+            oracle.cache_return(fd)
+
+    def load_priv_key(self, key_urn):
+        fd = oracle.open(key_urn, 'r')
+        try:
+            self.pkey = M2Crypto.EVP.load_key_string(fd.read())
+        finally:
+            oracle.cache_return(fd)
+    
+    def finish(self):
+        if not self.x509: return
+        
+        ## We set our urn from the certificate fingerprint
+        self.urn = "%s/%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
+        
+        oracle.set(self.urn, AFF4_TYPE, AFF4_IDENTITY)
+        self.resolver = Resolver()
+
+        ## Register an add hook with the oracle
+        def add_cb(uri, attribute, value):
+            if attribute in self.signable:
+                self.resolver.add(uri, attribute, value)
+
+        def set_cb(uri, attribute, value):
+            if attribute in self.signable:
+                self.resolver.set(uri, attribute, value)
+
+        if self.x509 and self.pkey:
+            ## Check that the private and public keys go together:
+            if not self.x509.verify(self.pkey):
+                Raise("Public and private keys provided do not go with each other")
+            
+            oracle.register_add_hook(add_cb)
+            oracle.register_set_hook(set_cb)
+            
+        AFFObject.finish(self)
+
+    def close(self):
+        volume_urn = oracle.resolve(self.urn, AFF4_STORED) 
+        volume = oracle.open(volume_urn, 'w')
+        try:
+            statement = self.resolver.export_all()
+
+            ## Sign the statement
+            if self.pkey:
+                self.pkey.sign_init()
+                self.pkey.sign_update(statement)
+                signature = self.pkey.sign_final()
+
+            statement_urn = fully_qualified_name(str(uuid.uuid4()),
+                                                 self.urn)
+            oracle.set(self.urn, AFF4_STATEMENT, statement_urn)
+            
+            volume.writestr(statement_urn, statement)
+            volume.writestr(statement_urn + ".sig", signature)
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn))
+
+            ## Make sure to store the certificate in the volume
+            cert_urn = fully_qualified_name("cert.pem", self.urn)
+            cert = oracle.open(cert_urn, 'r')
+            if cert: oracle.cache_return(cert)
+            else:
+                text = self.x509.as_text() + self.x509.as_pem()
+                volume.writestr(cert_urn, text)
                 
+        finally:
+            oracle.cache_return(volume)
+
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
 DISPATCH = [
@@ -1197,6 +1337,8 @@ DISPATCH = [
     [ 0, AFF4_LINK, Link ],
     [ 0, AFF4_IMAGE, Image ],
     [ 0, AFF4_MAP, Map ],
+    [ 0, AFF4_ENCRYTED, Encrypted ],
+    [ 0, AFF4_IDENTITY, Identity],
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     ]
 
@@ -1204,9 +1346,6 @@ DISPATCH = [
 ### These are helper functions
 def load_volume(filename):
     """ Loads the volume in filename into the resolver """
-    if "://" not in filename:
-        filename = "file://" + filename
-
     volume = ZipVolume(None, 'r')
     volume.load_from(filename)
     oracle.cache_return(volume)
