@@ -147,6 +147,7 @@ elif options.info:
                 identity = oracle.open(identity_urn, 'r')
                 try:
                     print "\n****** Identity %s verifies *****" % identity_urn
+                    print "    CN: %s \n" % identity.x509.get_subject().as_text()
                     def print_result(uri, attribute, value, calculated):
                         if value == calculated:
                             print "OK  %s (%s)" % (uri, value.encode("hex"))

@@ -2,7 +2,7 @@
 
 import unittest
 import uuid, posixpath, hashlib
-import urllib, os, re, struct, zlib, time
+import urllib, os, re, struct, zlib, time, sys
 import StringIO
 from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, ZIP_FILECOUNT_LIMIT, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive
 import threading, mutex
@@ -268,7 +268,6 @@ class AFFObject:
     fd.urn is not going to change so its probably ok to read it). You
     must ensure that the object is returned to the cache as soon as
     possible to avoid other threads from blocking too long.
-
     """
     urn = None
     mode = 'r'
@@ -332,12 +331,23 @@ class FileLikeObject(AFFObject):
         pass
 
 def escape_filename(filename):
+    """ Escape a URN so its suitable to be stored in filesystems.
+
+    Windows has serious limitations of the characters allowed in
+    filenames, so we need to escape them whenever we store segments in
+    files.
+    """
     return urllib.quote(filename)
 
 def unescape_filename(filename):
     return urllib.unquote(filename)
 
 class FileBackedObject(FileLikeObject):
+    """ A FileBackedObject is a stream which reads and writes physical
+    files on disk.
+
+    The file:// URL scheme is used.
+    """
     def __init__(self, uri, mode):
         if not uri.startswith("file://"):
             Raise("You must have a fully qualified urn here, not %s" % urn)
@@ -345,15 +355,18 @@ class FileBackedObject(FileLikeObject):
         filename = uri[len("file://"):]
         escaped = escape_filename(filename)
         if mode == 'r':
-            flags = 'rb'
+            self.fd = open(escaped, 'rb')
         else:
-            flags = 'ab'
             try:
                 os.makedirs(os.path.dirname(escaped))
             except Exception,e:
                 pass
 
-        self.fd = open(escaped, flags)
+            try:
+                self.fd = open(escaped, 'r+b')
+            except:
+                self.fd = open(escaped, 'w+b')
+                
         self.urn = uri
         self.mode = mode
 
@@ -380,8 +393,131 @@ class FileBackedObject(FileLikeObject):
     def flush(self):
         self.fd.flush()
 
-class HTTPObject(FileLikeObject):
-    pass
+
+try:
+    import pycurl
+
+## TODO implement caching here
+    class HTTPObject(FileLikeObject):
+        """ This class handles http URLs.
+
+        We support both download and upload (read and write) through
+        libcurl. Uploading is done via webdav so you web server must
+        be configured to support webdav.
+
+        This implementation uses webdav to write the image on the server as
+        needed. You can use a Zip volume or a directory volume as needed. The
+        following is an example of how to set up apache to support
+        webdav. Basically add this to the default host configuration file:
+
+        <Directory "/var/www/webdav/" >
+             DAV On
+             AuthType Basic
+             AuthName "test"
+             AuthUserFile /etc/apache2/passwd.dav
+
+             <Limit PUT POST DELETE PROPPATCH MKCOL COPY BCOPY MOVE LOCK \
+             UNLOCK>
+                Allow from 127.0.0.0/255.0.0.0
+                Require user mic
+                Satisfy Any
+             </Limit>
+        </Directory>
+
+        This allows all access from 127.0.0.1 but requires an authenticated
+        user to modify things from anywhere else. Read only access is allowed
+        from anywhere.
+        """
+        handle = None
+        
+        def __init__(self, urn=None, mode='r'):
+            FileLikeObject.__init__(self, urn, mode)
+            if urn:
+                if mode=='r':
+                    self.handle = pycurl.Curl()
+                    self.buffer = StringIO.StringIO()
+
+                    def parse_header_callback(header):
+                        ## we are looking for a Content-Range header
+                        if header.lower().startswith("content-range: bytes"):
+                            header_re = re.compile(r"(\d+)-(\d+)/(\d+)")
+                            m = header_re.search(header)
+                            if m:
+                                self.size = long(m.group(3))
+
+                    self.handle.setopt(pycurl.VERBOSE, 0)
+                    self.handle.setopt(pycurl.URL, urn)
+                    self.handle.setopt(pycurl.FAILONERROR, 1)
+                    self.handle.setopt(pycurl.WRITEFUNCTION, self.buffer.write)
+                    self.handle.setopt(pycurl.HEADERFUNCTION, parse_header_callback)
+
+                    ## Make a single fetch from the url to work out our size:
+                    self.read(1)
+                    
+                elif mode=='w':
+                    self.handle = pycurl.Curl()
+                    self.multi_handle = pycurl.CurlMulti()
+                    self.send_buffer = ''
+
+                    def read_callback(length):
+                        result = self.send_buffer[:length]
+                        self.send_buffer = self.send_buffer[length:]
+
+                        return result
+
+                    self.handle.setopt(pycurl.VERBOSE, 0)
+                    self.handle.setopt(pycurl.URL, self.urn)
+                    self.handle.setopt(pycurl.FAILONERROR, 1)
+                    self.handle.setopt(pycurl.WRITEFUNCTION, lambda x: len(x))
+                    self.handle.setopt(pycurl.INFILESIZE_LARGE, 0xFFFFFFFFL)
+                    self.handle.setopt(pycurl.UPLOAD, 1)
+                    self.handle.setopt(pycurl.READFUNCTION, read_callback)
+
+                    self.multi_handle.add_handle(self.handle)
+                
+        def read(self, length=None):
+            self.buffer.truncate(0)
+            if length is None:
+                length = self.size - self.readptr
+                
+            self.handle.setopt(pycurl.RANGE, "%d-%d" % (self.readptr, self.readptr + length))
+            try:
+                self.handle.perform()
+            except pycurl.error,e:
+                raise IOError("pycurl.error: %s" % e)
+
+            result = self.buffer.getvalue()[:length]
+            self.readptr += len(result)
+
+            return result
+
+        def flush(self):
+            pass
+
+        def write(self, data):
+            if len(data)==0: return
+            
+            if self.mode!='w':
+                Raise("Trying to write on an object opened for reading")
+            
+            self.send_buffer += data
+            while 1:
+                res, handle_count = self.multi_handle.perform()
+                
+                if handle_count==0:
+                    time.sleep(1)
+
+                if not self.send_buffer:
+                    break
+
+            self.readptr += len(data)
+            self.size = max(self.size, self.readptr)
+                
+except ImportError:
+    class HTTPObject(FileLikeObject):
+        def __init__(self, urn=None, mode='r'):
+            raise RuntimeError("HTTP streams are not implemented. You need to install libcurl python bindings (python-pycurl)")
+
 
 class Store:
     """ This is a cache which expires objects in oldest first manner. """
@@ -1442,6 +1578,8 @@ try:
                     self.resolver.parse_properties(statement_data)
 
         def close(self):
+            if not self.pkey: return
+            
             volume_urn = oracle.resolve(self.urn, AFF4_STORED) 
             volume = oracle.open(volume_urn, 'w')
             try:
@@ -1484,6 +1622,7 @@ except ImportError:
 ## format is scheme, URI prefix, handler class.
 DISPATCH = [
     [ 1, "file://", FileBackedObject ],
+    [ 1, "http://", HTTPObject ],
     [ 0, AFF4_SEGMENT, ZipFileStream ],
     [ 0, AFF4_LINK, Link ],
     [ 0, AFF4_IMAGE, Image ],
@@ -1502,7 +1641,6 @@ def load_volume(filename):
     oracle.cache_return(volume)
 
     return volume.urn
-
 
 ## Set up some defaults
 oracle.add(GLOBAL, CONFIG_VERBOSE, _INFO)
@@ -1531,11 +1669,22 @@ class ResolverTests(unittest.TestCase):
         
         fd = oracle.open(filename,'r')
         try:
-            self.assertEqual(fd.read(), test_string)
+            self.assertEqual(fd.read(len(test_string)), test_string)
         finally:
             oracle.cache_return(fd)
 
-    def test_02_ZipVolume(self):
+    def test_02_HTTP(self):
+        """ Test http object """
+        url = "http://127.0.0.1/index.html"
+        fd = HTTPObject(url)
+        print "%s" % fd.read(10), fd.size
+        fd.close()
+
+        fd = HTTPObject("http://127.0.0.1/webdav/foobar.txt", 'w')
+        fd.write("hello world")
+        fd.close()
+
+    def xtest_02_ZipVolume(self):
         """ Test creating of zip files """
         filename = "file://tests/test.zip"
         
@@ -1545,7 +1694,7 @@ class ResolverTests(unittest.TestCase):
         out_fd.writestr("default","Hello world")
         out_fd.close()
 
-    def test_02_ImageWriting(self):
+    def xtest_02_ImageWriting(self):
         """ Makes a new volume """
         ResolverTests.filename = filename = "file://tests/test.zip"
         in_filename = "file://output.dd"
@@ -1585,7 +1734,7 @@ class ResolverTests(unittest.TestCase):
         volume_fd = oracle.open(volume_urn, 'w')
         volume_fd.close()
 
-    def test_03_ZipVolume(self):
+    def xtest_03_ZipVolume(self):
         """ Tests the ZipVolume implementation """
         print "Loading volume"
         z = ZipVolume(None, 'r')
