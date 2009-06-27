@@ -1041,16 +1041,22 @@ class ZipVolume(AFFVolume):
         if urn:
             stored = oracle.resolve(urn, AFF4_STORED) or \
                      Raise("Can not find storage for Volumes %s" % urn)
-            
+
             try:
                 self.load_from(stored)
             except IOError: pass
+
+            ## Do we need to adjust the urn:
+            if self.urn != urn:
+                oracle.delete(urn, AFF4_STORED)
+                oracle.set(self.urn, AFF4_STORED, stored)
+            
+            oracle.set(self.urn, AFF4_TYPE, AFF4_ZIP_VOLUME)
+            oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         else:
             AFFObject.__init__(self, urn, mode)
             
     def finish(self):
-        oracle.set(self.urn, AFF4_TYPE, AFF4_ZIP_VOLUME)
-        oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         self.__init__(self.urn, self.mode)
 
     def writestr(self, subject, data, compress_type = ZIP_STORED):
@@ -1232,8 +1238,8 @@ class ZipVolume(AFFVolume):
             
             oracle.cache_return(backing_fd)
             oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
+            oracle.cache_return(self)
             
-
     def load_from(self, filename):
         """ Tries to open the filename as a ZipVolume """
 
@@ -1279,21 +1285,21 @@ class ZipVolume(AFFVolume):
         ## Add some stats to the resolver these can be used in
         ## place of zinfo in future:
         oracle.add(self.urn, AFF4_CONTAINS, subject)
-        oracle.add(subject, AFF4_STORED, self.urn)
-        oracle.add(subject, AFF4_TYPE, AFF4_SEGMENT)
-        oracle.add(subject, AFF4_INTERFACE, AFF4_STREAM)
+        oracle.set(subject, AFF4_STORED, self.urn)
+        oracle.set(subject, AFF4_TYPE, AFF4_SEGMENT)
+        oracle.set(subject, AFF4_INTERFACE, AFF4_STREAM)
 
-        oracle.add(subject, AFF4_VOLATILE_HEADER_OFFSET, zinfo.header_offset)
-        oracle.add(subject, AFF4_VOLATILE_CRC, zinfo.CRC)
-        oracle.add(subject, AFF4_VOLATILE_COMPRESSED_SIZE, zinfo.compress_size)
-        oracle.add(subject, AFF4_SIZE, zinfo.file_size)
-        oracle.add(subject, AFF4_VOLATILE_COMPRESSION, zinfo.compress_type)
+        oracle.set(subject, AFF4_VOLATILE_HEADER_OFFSET, zinfo.header_offset)
+        oracle.set(subject, AFF4_VOLATILE_CRC, zinfo.CRC)
+        oracle.set(subject, AFF4_VOLATILE_COMPRESSED_SIZE, zinfo.compress_size)
+        oracle.set(subject, AFF4_SIZE, zinfo.file_size)
+        oracle.set(subject, AFF4_VOLATILE_COMPRESSION, zinfo.compress_type)
         oracle.set(subject, AFF4_TIMESTAMP, int(time.mktime(zinfo.date_time +\
                                             (0,) * (9-len(zinfo.date_time)))))
 
         ## We just store the actual offset where the file is
         ## so we dont need to keep calculating it all the time
-        oracle.add(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
+        oracle.set(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
                    sizeFileHeader + len(zinfo.filename))
 
 class DirectoryVolume(AFFVolume):
@@ -1464,10 +1470,6 @@ class Map(FileLikeObject):
         finally:
             oracle.cache_return(volume)
 
-class Encrypted(FileLikeObject):
-    def __init__(self, urn=None, mode='r'):
-        raise RuntimeError("Encrypted streams are not implemented")
-
 try:
     import M2Crypto
 
@@ -1596,7 +1598,7 @@ try:
 
                 statement_urn = fully_qualified_name(str(uuid.uuid4()),
                                                      self.urn)
-                oracle.set(self.urn, AFF4_STATEMENT, statement_urn)
+                oracle.add(self.urn, AFF4_STATEMENT, statement_urn)
 
                 volume.writestr(statement_urn, statement)
                 volume.writestr(statement_urn + ".sig", signature)
@@ -1616,16 +1618,42 @@ try:
                 
             finally:
                 oracle.cache_return(volume)
+
+
+    class Encrypted(FileLikeObject):
+        """ Encrypted streams provide a cryptographic transformation
+        to their backing stream.
+
+        Encrypted streams do not provide any storage of their own,
+        they simply provide a transparent read/write crypto transform
+        to another stream (usually an Image stream).
+        """
+        def prepare_passphrase(self):
+            """ Pulls the passphrase from the resolver and calculates
+            an AES key. The passphrase is hashed many times over (as
+            specified by AFF4_CRYPTO_FORTIFICATION_COUNT) to make it
+            hard to attack with a dictionary attack.
+            """
+            round_count = parse_int(oracle.resolve(urn, AFF4_CRYPTO_FORTIFICATION_COUNT))
+            
+
 except ImportError:
     class Identity(AFFObject):
         def __init__(self, urn=None, mode='r'):
             Raise("Signing is not available without the M2Crypto module. Try 'apt-get install python-m2crypto'")
+
+    class Encrypted(FileLikeObject):
+        def __init__(self, urn=None, mode='r'):
+            Raise("Encrypted streams are not available without the M2Crypto module. Try 'apt-get install python-m2crypto'")
+
+
 
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
 DISPATCH = [
     [ 1, "file://", FileBackedObject ],
     [ 1, "http://", HTTPObject ],
+    [ 1, "https://", HTTPObject ],
     [ 0, AFF4_SEGMENT, ZipFileStream ],
     [ 0, AFF4_LINK, Link ],
     [ 0, AFF4_IMAGE, Image ],

@@ -44,10 +44,7 @@ parser.add_option('-v', '--verbosity', default=5,
 
 (options, args) = parser.parse_args()
 
-if not options.image and not options.dump and not options.info:
-    print "You must specify a mode (try -h)"
-    sys.exit(1)
-
+## Load defaults into configuration space
 oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
 oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 
@@ -76,6 +73,10 @@ output = options.output
 if options.image:
     ## Make a new volume
     volume_fd = ZipVolume(None, "w")
+    try:
+        volume_fd.load_from(output)
+    except: pass
+    
     volume_urn = volume_fd.urn
     oracle.add(volume_urn, AFF4_STORED, output)
     volume_fd.finish()
@@ -147,23 +148,25 @@ elif options.dump:
             output_fd.close()
             
 elif options.info:
-    if options.verify:
-        ## Scan all volumes for identities
-        for volume_urn in VOLUMES:
-            for identity_urn in oracle.resolve_list(volume_urn, AFF4_IDENTITY_STORED):
-                ## Open each identity and verify it
-                identity = oracle.open(identity_urn, 'r')
-                try:
-                    print "\n****** Identity %s verifies *****" % identity_urn
-                    print "    CN: %s \n" % identity.x509.get_subject().as_text()
-                    def print_result(uri, attribute, value, calculated):
-                        if value == calculated:
-                            print "OK  %s (%s)" % (uri, value.encode("hex"))
-                        else:
-                            print "WRONG HASH DETECTED in %s (found %s, should be %s)" % \
-                                  (uri, calculated.encode("hex"), value.encode("hex"))
+    print oracle
     
-                    identity.verify(verify_cb = print_result)
-                finally: oracle.cache_return(identity)
-    else:
-        print oracle
+elif options.verify:
+    ## Scan all volumes for identities
+    for volume_urn in VOLUMES:
+        for identity_urn in oracle.resolve_list(volume_urn, AFF4_IDENTITY_STORED):
+            ## Open each identity and verify it
+            identity = oracle.open(identity_urn, 'r')
+            try:
+                print "\n****** Identity %s verifies *****" % identity_urn
+                print "    CN: %s \n" % identity.x509.get_subject().as_text()
+                def print_result(uri, attribute, value, calculated):
+                    if value == calculated:
+                        print "OK  %s (%s)" % (uri, value.encode("hex"))
+                    else:
+                        print "WRONG HASH DETECTED in %s (found %s, should be %s)" % \
+                              (uri, calculated.encode("hex"), value.encode("hex"))
+
+                identity.verify(verify_cb = print_result)
+            finally: oracle.cache_return(identity)
+else:
+    print "You must specify a mode (try -h)"
