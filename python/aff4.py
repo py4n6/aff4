@@ -4,8 +4,11 @@ import unittest
 import uuid, posixpath, hashlib
 import urllib, os, re, struct, zlib, time, sys
 import StringIO
-from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, ZIP_FILECOUNT_LIMIT, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive
+from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
 import threading, mutex
+
+ZIP_FILECOUNT_LIMIT = 1<<16
+sizeFileHeader = struct.calcsize(structFileHeader)
 
 ## namespaces
 NAMESPACE = "aff4:" ## AFF4 namespace
@@ -1075,7 +1078,7 @@ class ZipVolume(AFFVolume):
             zinfo.external_attr = 0600 << 16L      # Unix attributes        
             zinfo.header_offset = directory_offset
             zinfo.file_size = len(data)
-            zinfo.CRC = 0xFFFFFFFF & zipfile.crc32(data)
+            zinfo.CRC = 0xFFFFFFFF & zlib.crc32(data)
 
             ## Compress the data if needed
             zinfo.compress_type = compress_type
@@ -1172,7 +1175,7 @@ class ZipVolume(AFFVolume):
                     create_version = zinfo.create_version
 
                 try:
-                    filename, flag_bits = zinfo._encodeFilenameFlags()
+                    filename, flag_bits = zinfo.filename, zinfo.flag_bits
                     centdir = struct.pack(structCentralDir,
                      stringCentralDir, create_version,
                      zinfo.create_system, extract_version, zinfo.reserved,
@@ -1291,7 +1294,7 @@ class ZipVolume(AFFVolume):
         ## We just store the actual offset where the file is
         ## so we dont need to keep calculating it all the time
         oracle.add(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
-                   zipfile.sizeFileHeader + len(zinfo.filename))
+                   sizeFileHeader + len(zinfo.filename))
 
 class DirectoryVolume(AFFVolume):
     """ A directory volume is simply a way of storing all segments

@@ -56,14 +56,21 @@ for v in options.load:
     VOLUMES.append(load_volume(v))
 
 ## Prepare an identity for signing
-IDENTITY = Identity()
+IDENTITY = None
 if options.key:
-    IDENTITY.load_priv_key(options.key)
-
-if options.cert:
-    IDENTITY.load_certificate(options.cert)
-IDENTITY.finish()
-
+    try:
+        IDENTITY = Identity()
+        IDENTITY.load_priv_key(options.key)
+        
+        if options.cert:
+            IDENTITY.load_certificate(options.cert)
+        else:
+            raise RuntimeError("You must provide the certificate as well for signing")
+        
+        IDENTITY.finish()
+    except RuntimeError,e:
+        print e
+    
 ## Store the volume here:
 output = options.output
 if options.image:
@@ -110,8 +117,9 @@ if options.image:
         oracle.cache_return(in_fd)
 
     ## Sign it if needed
-    oracle.set(IDENTITY.urn, AFF4_STORED, volume_urn)
-    IDENTITY.close()
+    if IDENTITY:
+        oracle.set(IDENTITY.urn, AFF4_STORED, volume_urn)
+        IDENTITY.close()
 
     ## Close the volume off
     volume_fd = oracle.open(volume_urn, 'w')
