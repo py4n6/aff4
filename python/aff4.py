@@ -140,11 +140,6 @@ def parse_int(string):
 
     return NoneObject("Unknown suffix '%r'" % suffix)
 
-class DateTime:
-    def __init__(self, timestamp=None):
-        if not timestamp:
-            self.time = time.time()
-
 class NoneObject(object):
     """ A magical object which is like None but swallows bad
     dereferences, __getattribute__, iterators etc to return itself.
@@ -209,7 +204,72 @@ def Raise(reason):
     raise RuntimeError(reason)
 
 class AFFObject:
-    """ All AFF4 objects extend this one """
+    """ All AFF4 objects extend this one.
+
+    Object protocol
+    ===============
+
+    AFFObjects are created via two mechanisms:
+
+    1) The oracle.open(urn) method is called with the explicit
+    URN. This will call the constructor and pass this URN. The object
+    is then expected to initialise using various attributes of the URN
+    from the universal resolver (e.g. AFF4_STORED to find its backing
+    object etc).
+
+    2) When an object is created for the first time (and does not
+    already exist in the resolver) it does not have a known URN. In
+    this case the following protocol is followed:
+
+       a) Create a new instancd of the object - by passing None to the
+       URN it is expected to generate a new valid URN:
+
+          obj = AFFObjects() 
+
+       b) Now obj.urn is a new valid and unique URN. We set all
+       required properties:
+
+          oracle.set(obj.urn, AFF4_STORED, somewhere)
+          oracle.set(obj.urn, AFF4_CERT, ...)
+          etc.
+
+       c) Now call the finish method of the object to complete
+       it. This method should check that all required parameters were
+       provided, set defaults etc.
+
+          obj.finish()
+
+
+       Once the finish() method is called the object is complete and
+       is the same as that obtained from method 1 above.
+
+
+    Thread protocol
+    ===============
+
+    AFFObjects are always managed via the universal resolver. This
+    means that they must be returned to the resolver after we finish
+    using them. Obtaining an object via oracle.open() actually locks
+    the object so other threads can not acquire it until it is
+    returned to the oracle. Failing to return the object will result
+    in thread deadlocks.
+
+    For example, the following pattern must be used:
+
+    fd = oracle.open(urn, 'r')
+    try:
+        ## do stuff with the fd
+    finally:
+        oracle.cache_return(fd)
+
+    Your thread will hold a lock on the object between the try: and
+    finally. You must not touch the object once its returned to the
+    oracle because it may be in use by some other thread (although
+    fd.urn is not going to change so its probably ok to read it). You
+    must ensure that the object is returned to the cache as soon as
+    possible to avoid other threads from blocking too long.
+
+    """
     urn = None
     mode = 'r'
     
@@ -217,9 +277,6 @@ class AFFObject:
         self.urn = urn or "%s%s" % (FQN, uuid.uuid4())
         self.mode = mode
         
-    def set_property(self, attribute, value):
-        pass
-
     def finish(self):
         """ This method is called after the object is constructed and
         all properties are set.
@@ -296,7 +353,7 @@ class FileBackedObject(FileLikeObject):
             except Exception,e:
                 pass
 
-        self.fd = open(escaped, mode)
+        self.fd = open(escaped, flags)
         self.urn = uri
         self.mode = mode
 
@@ -360,7 +417,7 @@ class URNObject:
         verbosity = int(oracle.resolve(GLOBAL, CONFIG_VERBOSE))
         for attribute,v in self.properties.items():
             for value in v:
-                if verbosity < _INFO and attribute.startswith(VOLATILE_NS): continue
+                if verbosity <= _INFO and attribute.startswith(VOLATILE_NS): continue
                 
                 result += "       %s = %s\n" % (attribute, value)
 
@@ -530,10 +587,15 @@ class Resolver:
     def __str__(self):
         result = ''
         verbosity = int(oracle.resolve(GLOBAL, CONFIG_VERBOSE))
-        for urn,obj in self.urn.items():
-            if verbosity < _INFO and urn.startswith(VOLATILE_NS): return result
-            result += "******************** %s *****************\n" % urn
-            result += obj.__str__()
+        keys = self.urn.keys()
+        keys.sort()
+        
+        for urn in keys:
+            obj = self.urn[urn]
+            if verbosity <= _INFO and urn.startswith(VOLATILE_NS): continue
+            attr_str = obj.__str__()
+            if not attr_str: continue
+            result += "\n****** %s \n%s" % (urn, attr_str)
 
         return result
 
@@ -937,7 +999,7 @@ class ZipVolume(AFFVolume):
                 zinfo.compress_type = oracle.resolve(subject, AFF4_VOLATILE_COMPRESSION)
                 zinfo.CRC = oracle.resolve(subject, AFF4_VOLATILE_CRC)
                 zinfo.date_time = oracle.resolve(subject, AFF4_TIMESTAMP) or \
-                                  time.time()
+                                  int(time.time())
                 
                 count = count + 1
                 dt = time.gmtime(zinfo.date_time)[:6]
@@ -1087,12 +1149,18 @@ class ZipVolume(AFFVolume):
         oracle.add(subject, AFF4_VOLATILE_COMPRESSED_SIZE, zinfo.compress_size)
         oracle.add(subject, AFF4_SIZE, zinfo.file_size)
         oracle.add(subject, AFF4_VOLATILE_COMPRESSION, zinfo.compress_type)
-        oracle.set(subject, AFF4_TIMESTAMP, time.mktime(zinfo.date_time + (0,) * (9-len(zinfo.date_time))))
+        oracle.set(subject, AFF4_TIMESTAMP, int(time.mktime(zinfo.date_time +\
+                                            (0,) * (9-len(zinfo.date_time)))))
 
         ## We just store the actual offset where the file is
         ## so we dont need to keep calculating it all the time
         oracle.add(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
                    zipfile.sizeFileHeader + len(zinfo.filename))
+
+class DirectoryVolume(AFFVolume):
+    """ A directory volume is simply a way of storing all segments
+    within a directory on disk.
+    """
 
 class Link(AFFObject):
     """ An AFF4 object which links to another object.

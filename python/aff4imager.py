@@ -39,7 +39,7 @@ parser.add_option("-c", "--cert", default=None,
 parser.add_option("-t", "--threads", default=2,
                   help="Number of threads to use")
 
-parser.add_option('-v', '--verbosity', default=2,
+parser.add_option('-v', '--verbosity', default=5,
                   help="Verbosity")
 
 (options, args) = parser.parse_args()
@@ -146,7 +146,7 @@ elif options.info:
                 ## Open each identity and verify it
                 identity = oracle.open(identity_urn, 'r')
                 try:
-                    print "****** Identity %s verifies *****" % identity_urn
+                    print "\n****** Identity %s verifies *****" % identity_urn
                     def print_result(uri, attribute, value, calculated):
                         if value == calculated:
                             print "OK  %s (%s)" % (uri, value.encode("hex"))
