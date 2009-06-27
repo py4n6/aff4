@@ -26,6 +26,10 @@ parser.add_option("-I", "--info", default=None,
                   action = 'store_true',
                   help="Information mode - dump all information in the resolver")
 
+parser.add_option("-V", "--verify", default=None,
+                  action = 'store_true',
+                  help="Verify all signatures and hashes when in --info mode")
+
 parser.add_option("-k", "--key", default=None,
                   help="Key file to use (in PEM format)")
 
@@ -35,6 +39,9 @@ parser.add_option("-c", "--cert", default=None,
 parser.add_option("-t", "--threads", default=2,
                   help="Number of threads to use")
 
+parser.add_option('-v', '--verbosity', default=2,
+                  help="Verbosity")
+
 (options, args) = parser.parse_args()
 
 if not options.image and not options.dump and not options.info:
@@ -42,6 +49,7 @@ if not options.image and not options.dump and not options.info:
     sys.exit(1)
 
 oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
+oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 
 VOLUMES = []
 for v in options.load:
@@ -131,4 +139,22 @@ elif options.dump:
             output_fd.close()
             
 elif options.info:
-    print oracle
+    if options.verify:
+        ## Scan all volumes for identities
+        for volume_urn in VOLUMES:
+            for identity_urn in oracle.resolve_list(volume_urn, AFF4_IDENTITY_STORED):
+                ## Open each identity and verify it
+                identity = oracle.open(identity_urn, 'r')
+                try:
+                    print "****** Identity %s verifies *****" % identity_urn
+                    def print_result(uri, attribute, value, calculated):
+                        if value == calculated:
+                            print "OK  %s (%s)" % (uri, value.encode("hex"))
+                        else:
+                            print "WRONG HASH DETECTED in %s (found %s, should be %s)" % \
+                                  (uri, calculated.encode("hex"), value.encode("hex"))
+    
+                    identity.verify(verify_cb = print_result)
+                finally: oracle.cache_return(identity)
+    else:
+        print oracle

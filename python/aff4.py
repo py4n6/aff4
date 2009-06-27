@@ -20,6 +20,7 @@ GLOBAL = VOLATILE_NS + "global" ## A special urn representing the
 
 #Configuration parameters
 CONFIG_THREADS = CONFIGURATION_NS + "threads"
+CONFIG_VERBOSE = CONFIGURATION_NS + "verbosity"
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
@@ -42,6 +43,15 @@ AFF4_VOLATILE_COMPRESSION     = VOLATILE_NS + "compression"
 AFF4_VOLATILE_FILE_OFFSET     = VOLATILE_NS + "file_offset"
 AFF4_VOLATILE_DIRTY           = VOLATILE_NS + "dirty"
 
+## Volume attributes
+AFF4_IDENTITY_STORED = NAMESPACE + "identity" ## Indicates an identity
+                                              ## is stored in this
+                                              ## volume
+
+AFF4_AUTOLOAD = NAMESPACE +"autoload" ## A hint that this stream
+                                      ## should be automatically
+                                      ## loaded as a volume
+
 #/** Image attributes */
 AFF4_CHUNK_SIZE =NAMESPACE + "chunk_size"
 AFF4_COMPRESSION =NAMESPACE + "compression"
@@ -61,6 +71,7 @@ AFF4_STATEMENT =NAMESPACE + "statement"
 AFF4_CERT      =NAMESPACE + "x509"
 AFF4_PRIV_KEY  =VOLATILE_NS + "priv_key"
 AFF4_COMMON_NAME =NAMESPACE + "common_name"
+AFF4_IDENTITY_PREFIX  =FQN + "identity"
 
 #/** These are standard aff4 types */
 AFF4_ZIP_VOLUME       ="zip_volume"
@@ -71,21 +82,14 @@ AFF4_IMAGE            ="image"
 AFF4_MAP              ="map"
 AFF4_ENCRYTED         ="encrypted"
 AFF4_IDENTITY         ="identity"
-AFF4_IDENTITY_PREFIX  =FQN + "identity"
 
-#/** These are various properties */
-AFF4_AUTOLOAD         =NAMESPACE +"autoload"
-
-_DEBUG = 1
+## Some verbosity settings
+_DEBUG = 10
 _INFO = 5
-_WARNING = 10
-
-#VERBOSITY=_DEBUG
-VERBOSITY=_INFO
+_WARNING = 1
 
 def DEBUG(verb, fmt, *args):
-    if verb >= VERBOSITY:
-        print fmt % args
+    pass
 
 import urllib
 def escape_filename(filename):
@@ -135,6 +139,11 @@ def parse_int(string):
         return base * 1024 * 1024 * 1024
 
     return NoneObject("Unknown suffix '%r'" % suffix)
+
+class DateTime:
+    def __init__(self, timestamp=None):
+        if not timestamp:
+            self.time = time.time()
 
 class NoneObject(object):
     """ A magical object which is like None but swallows bad
@@ -348,8 +357,11 @@ class URNObject:
 
     def __str__(self):
         result = ''
+        verbosity = int(oracle.resolve(GLOBAL, CONFIG_VERBOSE))
         for attribute,v in self.properties.items():
             for value in v:
+                if verbosity < _INFO and attribute.startswith(VOLATILE_NS): continue
+                
                 result += "       %s = %s\n" % (attribute, value)
 
         return result
@@ -393,8 +405,7 @@ class Resolver:
         self.urn = {}
         self.read_cache = Store()
         self.write_cache = Store()
-        self.add_hooks = []
-        self.set_hooks = []
+        self.clear_hooks()
 
     def __getitem__(self, urn):
         try:
@@ -518,7 +529,9 @@ class Resolver:
 
     def __str__(self):
         result = ''
+        verbosity = int(oracle.resolve(GLOBAL, CONFIG_VERBOSE))
         for urn,obj in self.urn.items():
+            if verbosity < _INFO and urn.startswith(VOLATILE_NS): return result
             result += "******************** %s *****************\n" % urn
             result += obj.__str__()
 
@@ -544,7 +557,7 @@ class Resolver:
                 self.add(context, m.group(1), m.group(2))
                 continue
 
-            print "Unknown line in properties: %s" % line
+            DEBUG(_WARNING,"Unknown line in properties: %s" % line)
 
     def export(self, subject):
         return self[subject].export()
@@ -563,6 +576,10 @@ class Resolver:
         cb(urn, attribute, value)
         """
         self.add_hooks.append(cb)
+
+    def clear_hooks(self):
+        self.add_hooks = []
+        self.set_hooks = []
         
     def register_set_hook(self, cb):
         self.set_hooks.append(cb)
@@ -855,7 +872,7 @@ class ZipVolume(AFFVolume):
             directory_offset = parse_int(oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET)) or 0
 
             zinfo = zipfile.ZipInfo(filename = filename,
-                                 date_time=time.localtime(time.time())[:6])
+                                    date_time=time.gmtime(time.time())[:6])
 
             zinfo.external_attr = 0600 << 16L      # Unix attributes        
             zinfo.header_offset = directory_offset
@@ -920,10 +937,10 @@ class ZipVolume(AFFVolume):
                 zinfo.compress_type = oracle.resolve(subject, AFF4_VOLATILE_COMPRESSION)
                 zinfo.CRC = oracle.resolve(subject, AFF4_VOLATILE_CRC)
                 zinfo.date_time = oracle.resolve(subject, AFF4_TIMESTAMP) or \
-                                  time.localtime(time.time())[:6]
+                                  time.time()
                 
                 count = count + 1
-                dt = zinfo.date_time
+                dt = time.gmtime(zinfo.date_time)[:6]
                 dosdate = (dt[0] - 1980) << 9 | dt[1] << 5 | dt[2]
                 dostime = dt[3] << 11 | dt[4] << 5 | (dt[5] // 2)
                 extra = []
@@ -1070,7 +1087,7 @@ class ZipVolume(AFFVolume):
         oracle.add(subject, AFF4_VOLATILE_COMPRESSED_SIZE, zinfo.compress_size)
         oracle.add(subject, AFF4_SIZE, zinfo.file_size)
         oracle.add(subject, AFF4_VOLATILE_COMPRESSION, zinfo.compress_type)
-        oracle.set(subject, AFF4_TIMESTAMP, zinfo.date_time)
+        oracle.set(subject, AFF4_TIMESTAMP, time.mktime(zinfo.date_time + (0,) * (9-len(zinfo.date_time))))
 
         ## We just store the actual offset where the file is
         ## so we dont need to keep calculating it all the time
@@ -1146,7 +1163,7 @@ class Map(FileLikeObject):
                 for line in fd.read(fd.size).splitlines():
                     m = line_re.match(line)
                     if not m:
-                        print "Unable to parse map line '%s'" % line
+                        DEBUG(_WARNING, "Unable to parse map line '%s'" % line)
                     else:
                         self.points.append(Point(parse_int(m.group(1)),
                                                  parse_int(m.group(2)),
@@ -1244,90 +1261,156 @@ class Encrypted(FileLikeObject):
     def __init__(self, urn=None, mode='r'):
         raise RuntimeError("Encrypted streams are not implemented")
 
-import M2Crypto
+try:
+    import M2Crypto
 
-class Identity(AFFObject):
-    """ An Identity is an object which represents an X509 certificate"""
-    x509 = None
-    pkey = None
-    
-    ## These are properties that will be signed
-    signable = set([AFF4_SIZE, AFF4_SHA])
-    
-    def load_certificate(self, certificate_urn):
-        fd = oracle.open(certificate_urn, 'r')
-        try:
-            certificate = fd.read()
-            self.x509 = M2Crypto.X509.load_cert_string(certificate)
-        finally:
-            oracle.cache_return(fd)
+    class Identity(AFFObject):
+        """ An Identity is an object which represents an X509 certificate"""
+        x509 = None
+        pkey = None
 
-    def load_priv_key(self, key_urn):
-        fd = oracle.open(key_urn, 'r')
-        try:
-            self.pkey = M2Crypto.EVP.load_key_string(fd.read())
-        finally:
-            oracle.cache_return(fd)
-    
-    def finish(self):
-        if not self.x509: return
-        
-        ## We set our urn from the certificate fingerprint
-        self.urn = "%s/%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
-        
-        oracle.set(self.urn, AFF4_TYPE, AFF4_IDENTITY)
-        self.resolver = Resolver()
+        ## These are properties that will be signed
+        signable = set([AFF4_SIZE, AFF4_SHA])
 
-        ## Register an add hook with the oracle
-        def add_cb(uri, attribute, value):
-            if attribute in self.signable:
-                self.resolver.add(uri, attribute, value)
-
-        def set_cb(uri, attribute, value):
-            if attribute in self.signable:
-                self.resolver.set(uri, attribute, value)
-
-        if self.x509 and self.pkey:
-            ## Check that the private and public keys go together:
-            if not self.x509.verify(self.pkey):
-                Raise("Public and private keys provided do not go with each other")
+        def __init__(self, urn=None, mode='r'):
+            self.resolver = Resolver()
             
-            oracle.register_add_hook(add_cb)
-            oracle.register_set_hook(set_cb)
+            if urn and not self.x509:
+                ## Load the cert from the identity object
+                fd = oracle.open(urn + "/cert.pem", 'r')
+                try:
+                    self.x509 = M2Crypto.X509.load_cert_string(fd.read())
+                finally:
+                    oracle.cache_return(fd)
+                    
+            AFFObject.__init__(self, urn, mode)
+
+        def load_certificate(self, certificate_urn):
+            fd = oracle.open(certificate_urn, 'r')
+            try:
+                certificate = fd.read()
+                self.x509 = M2Crypto.X509.load_cert_string(certificate)
+            finally:
+                oracle.cache_return(fd)
+
+        def load_priv_key(self, key_urn):
+            fd = oracle.open(key_urn, 'r')
+            try:
+                self.pkey = M2Crypto.EVP.load_key_string(fd.read())
+            finally:
+                oracle.cache_return(fd)
+
+        def finish(self):
+            if not self.x509: return
+
+            ## We set our urn from the certificate fingerprint
+            self.urn = "%s/%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
+
+            oracle.set(self.urn, AFF4_TYPE, AFF4_IDENTITY)
+
+            ## Register an add hook with the oracle
+            def add_cb(uri, attribute, value):
+                if attribute in self.signable:
+                    self.resolver.add(uri, attribute, value)
+
+            def set_cb(uri, attribute, value):
+                if attribute in self.signable:
+                    self.resolver.set(uri, attribute, value)
+
+            if self.x509 and self.pkey:
+                ## Check that the private and public keys go together:
+                if not self.x509.verify(self.pkey):
+                    Raise("Public and private keys provided do not go with each other")
+
+                oracle.register_add_hook(add_cb)
+                oracle.register_set_hook(set_cb)
+
+            AFFObject.finish(self)
+
+        def verify(self, verify_cb = None):
+            """ Loads all statements and verifies the hashes are correct """
+            if not self.x509: Raise("No public key for identity %s" % self.urn)
+
+            public_key = self.x509.get_pubkey()
             
-        AFFObject.finish(self)
+            def cb(urn, attribute, value):
+                ## This callback will be called whenever the parser
+                ## reads a new property.
+                if attribute == AFF4_SHA:
+                    fd = oracle.open(urn, 'r')
+                    digest = hashlib.sha1()
+                    try:
+                        while 1:
+                            data = fd.read(1024 * 1024)
+                            if not data: break
+                            digest.update(data)
 
-    def close(self):
-        volume_urn = oracle.resolve(self.urn, AFF4_STORED) 
-        volume = oracle.open(volume_urn, 'w')
-        try:
-            statement = self.resolver.export_all()
+                        calculated = digest.digest()
+                        value = value.decode("base64")
+                    finally:
+                        oracle.cache_return(fd)
 
-            ## Sign the statement
-            if self.pkey:
-                self.pkey.sign_init()
-                self.pkey.sign_update(statement)
-                signature = self.pkey.sign_final()
-
-            statement_urn = fully_qualified_name(str(uuid.uuid4()),
-                                                 self.urn)
-            oracle.set(self.urn, AFF4_STATEMENT, statement_urn)
+                    verify_cb(urn, attribute, value, calculated)
+                        
+            self.resolver.register_add_hook(cb)
             
-            volume.writestr(statement_urn, statement)
-            volume.writestr(statement_urn + ".sig", signature)
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn))
-
-            ## Make sure to store the certificate in the volume
-            cert_urn = fully_qualified_name("cert.pem", self.urn)
-            cert = oracle.open(cert_urn, 'r')
-            if cert: oracle.cache_return(cert)
-            else:
-                text = self.x509.as_text() + self.x509.as_pem()
-                volume.writestr(cert_urn, text)
+            for statement_urn in oracle.resolve_list(self.urn, AFF4_STATEMENT):
+                ## Read and verify the statement
+                statement = oracle.open(statement_urn, 'r')
+                try:
+                    statement_data = statement.read()
+                finally: oracle.cache_return(statement)
+                signature = oracle.open(statement_urn + ".sig", 'r')
+                try:
+                    sig_data = signature.read()
+                finally: oracle.cache_return(signature)
                 
-        finally:
-            oracle.cache_return(volume)
+                ## Now check the statement signature is correct:
+                public_key.verify_init()
+                public_key.verify_update(statement_data)
+                if not public_key.verify_final(sig_data):
+                    DEBUG(_WARNING, "Statement %s signature does not match!!! Skipping" % statement_urn)
+                else:
+                    self.resolver.parse_properties(statement_data)
+
+        def close(self):
+            volume_urn = oracle.resolve(self.urn, AFF4_STORED) 
+            volume = oracle.open(volume_urn, 'w')
+            try:
+                statement = self.resolver.export_all()
+
+                ## Sign the statement
+                if self.pkey:
+                    self.pkey.sign_init()
+                    self.pkey.sign_update(statement)
+                    signature = self.pkey.sign_final()
+
+                statement_urn = fully_qualified_name(str(uuid.uuid4()),
+                                                     self.urn)
+                oracle.set(self.urn, AFF4_STATEMENT, statement_urn)
+
+                volume.writestr(statement_urn, statement)
+                volume.writestr(statement_urn + ".sig", signature)
+                volume.writestr(fully_qualified_name("properties", self.urn),
+                                oracle.export(self.urn))
+
+                ## Make sure to store the certificate in the volume
+                cert_urn = fully_qualified_name("cert.pem", self.urn)
+                cert = oracle.open(cert_urn, 'r')
+                if cert: oracle.cache_return(cert)
+                else:
+                    text = self.x509.as_text() + self.x509.as_pem()
+                    volume.writestr(cert_urn, text)
+
+                ## Ensure that the volume knows it has an identity
+                oracle.set(volume_urn, AFF4_IDENTITY_STORED, self.urn)
+                
+            finally:
+                oracle.cache_return(volume)
+except ImportError:
+    class Identity(AFFObject):
+        def __init__(self, urn=None, mode='r'):
+            Raise("Signing is not available without the M2Crypto module. Try 'apt-get install python-m2crypto'")
 
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
@@ -1351,6 +1434,15 @@ def load_volume(filename):
     oracle.cache_return(volume)
 
     return volume.urn
+
+
+## Set up some defaults
+oracle.add(GLOBAL, CONFIG_VERBOSE, _INFO)
+oracle.add(GLOBAL, CONFIG_THREADS, "2")
+
+def DEBUG(verb, fmt, *args):
+    if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
+        print fmt % args
 
 class ResolverTests(unittest.TestCase):
     def test_00access(self):
