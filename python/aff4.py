@@ -1369,6 +1369,8 @@ class Map(FileLikeObject):
 
         ## Parse the map now:
         if uri and mode=='r':
+            target_urn = oracle.resolve(uri, AFF4_TARGET)
+            
             fd = oracle.open("%s/map" % uri)
             fd.seek(0)
             line_re = re.compile("(\d+),(\d+),(.+)")
@@ -1378,9 +1380,14 @@ class Map(FileLikeObject):
                     if not m:
                         DEBUG(_WARNING, "Unable to parse map line '%s'" % line)
                     else:
+                        if m.group(3) == "@":
+                            t = target_urn
+                        else:
+                            t = m.group(3)
+                            
                         self.points.append(Point(parse_int(m.group(1)),
                                                  parse_int(m.group(2)),
-                                                 m.group(3)))
+                                                 t))
             finally:
                 oracle.cache_return(fd)
 
@@ -1673,6 +1680,19 @@ def load_volume(filename):
 
     return volume.urn
 
+def load_identity(key, cert):
+    if key:
+        try:
+            if cert:
+                result = Identity()
+                result.load_priv_key(options.key)
+                result.load_certificate(options.cert)
+                return result
+            else:
+                raise RuntimeError("You must provide the certificate as well for signing")
+        except RuntimeError,e:
+            print e
+            
 ## Set up some defaults
 oracle.add(GLOBAL, CONFIG_VERBOSE, _INFO)
 oracle.add(GLOBAL, CONFIG_THREADS, "2")

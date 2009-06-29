@@ -53,20 +53,7 @@ for v in options.load:
     VOLUMES.append(load_volume(v))
 
 ## Prepare an identity for signing
-IDENTITY = None
-if options.key:
-    try:
-        IDENTITY = Identity()
-        IDENTITY.load_priv_key(options.key)
-        
-        if options.cert:
-            IDENTITY.load_certificate(options.cert)
-        else:
-            raise RuntimeError("You must provide the certificate as well for signing")
-        
-        IDENTITY.finish()
-    except RuntimeError,e:
-        print e
+IDENTITY = load_identity(options.key, options.cert)
     
 ## Store the volume here:
 output = options.output
@@ -132,6 +119,8 @@ elif options.dump:
         if stream: break
 
     if output:
+        if "://" not in output:
+            output = "file://%s" % output
         output_fd = FileBackedObject(output, 'w')
     else:
         output_fd = sys.stdout
