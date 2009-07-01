@@ -42,6 +42,10 @@ parser.add_option("-t", "--threads", default=2,
 parser.add_option('-v', '--verbosity', default=5,
                   help="Verbosity")
 
+parser.add_option('-e', '--encrypt', default=False,
+                  action = 'store_true',
+                  help="Encrypt the image")
+
 (options, args) = parser.parse_args()
 
 ## Load defaults into configuration space
@@ -54,21 +58,44 @@ for v in options.load:
 
 ## Prepare an identity for signing
 IDENTITY = load_identity(options.key, options.cert)
-    
-## Store the volume here:
-output = options.output
-if options.image:
-    ## Make a new volume
+
+def create_volume(output):
     volume_fd = ZipVolume(None, "w")
     try:
         volume_fd.load_from(output)
     except: pass
     
-    volume_urn = volume_fd.urn
-    oracle.add(volume_urn, AFF4_STORED, output)
+    oracle.add(volume_fd.urn, AFF4_STORED, output)
     volume_fd.finish()
     oracle.cache_return(volume_fd)
 
+    return volume_fd.urn
+    
+## Store the volume here:
+output = options.output
+if options.encrypt:
+    volume_urn = create_volume(output)
+
+    for image in args:
+        image_fd = Image(None, 'w')
+        oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
+        image_fd.finish()
+        oracle.cache_return(image_fd)
+
+        encrypted_fd = Encrypted(None, 'w')
+        oracle.add(encrypted_fd.urn, AFF4_STORED, volume_urn)
+        encrypted_fd.finish()
+        encrypted_fd.close()
+
+        encrypted_fd = oracle.open(encrypted_fd.urn,'r')
+
+    volume = oracle.open(volume_urn, 'w')
+    volume.close()
+    
+elif options.image:
+    ## Make a new volume
+    volume_urn = create_volume(output)
+    
     for image in args:
         ## Make an image
         image_fd = Image(None, "w")
@@ -159,3 +186,4 @@ elif options.verify:
             finally: oracle.cache_return(identity)
 else:
     print "You must specify a mode (try -h)"
+    

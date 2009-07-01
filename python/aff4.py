@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import unittest
-import uuid, posixpath, hashlib
+import uuid, posixpath, hashlib, base64
 import urllib, os, re, struct, zlib, time, sys
 import StringIO
 from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
@@ -76,6 +76,30 @@ AFF4_PRIV_KEY  =VOLATILE_NS + "priv_key"
 AFF4_COMMON_NAME =NAMESPACE + "common_name"
 AFF4_IDENTITY_PREFIX  =FQN + "identity"
 
+#// Thats the passphrase that will be used to encrypt the session key
+AFF4_VOLATILE_PASSPHRASE = VOLATILE_NS + "passphrase"
+
+#// This is the session key for encryption (Never written down)
+AFF4_VOLATILE_KEY               = VOLATILE_NS + "key"
+
+# This is the master key actually written in the file (its the session key encrypted with the passphrase)
+AFF4_CRYPTO_NAMESPACE           = NAMESPACE + "crypto:"
+## The intermediate key is obtained from pbkdf2() of the
+## passphrase and salt. Iteration count is the fortification.
+AFF4_CRYPTO_FORTIFICATION_COUNT = AFF4_CRYPTO_NAMESPACE + "fortification"
+AFF4_CRYPTO_IV       = AFF4_CRYPTO_NAMESPACE + "iv"
+
+## This is the image master key encrypted using the intermediate key
+AFF4_CRYPTO_PASSPHRASE_KEY      = AFF4_CRYPTO_NAMESPACE + "passphrase_key"
+AFF4_CRYPTO_ALGORITHM           = AFF4_CRYPTO_NAMESPACE + "algorithm"
+
+## The nonce is the salt encrypted using the image master key. Its
+## used to check the master key is correct:
+AFF4_CRYPTO_NONCE               = AFF4_CRYPTO_NAMESPACE + "nonce"
+
+#// Supported algorithms
+AFF4_CRYPTO_ALGORITHM_AES_SHA254 = "AES256/SHA256"
+
 #/** These are standard aff4 types */
 AFF4_ZIP_VOLUME       ="zip_volume"
 AFF4_DIRECTORY_VOLUME ="directory"
@@ -112,6 +136,11 @@ def relative_name(filename, context_name):
         return filename[len(context_name)+1:]
 
     return filename
+
+def b64_encode(data):
+    """ A convenience function to base64 encode with no line breaks """
+    result = data.encode("base64").splitlines()
+    return ''.join(result)
 
 int_re = re.compile("(\d+)([kKmMgGs]?)")
 def parse_int(string):
@@ -1408,12 +1437,13 @@ class Map(FileLikeObject):
         return less than whats needed."""
         ## This function actually does the mapping
         period_number, image_period_offset = divmod(self.readptr, self.image_period)
-        available_to_read = min(self.size - self.readptr, length)
+        available_to_read = length
         l = self.bisect_right(image_period_offset)-1
         target_offset = self.points[l].target_offset + \
                         image_period_offset - self.points[l].image_offset + \
                         period_number * self.target_period
 
+        print target_offset
         if l < len(self.points)-1:
             available_to_read = self.points[l+1].image_offset - image_period_offset
         else:
@@ -1424,7 +1454,7 @@ class Map(FileLikeObject):
         target = oracle.open(self.points[l].target_urn, 'r')
         try:
             target.seek(target_offset)
-            data = target.read(available_to_read)
+            data = target.read(min(available_to_read, length))
         finally:
             oracle.cache_return(target)
 
@@ -1478,6 +1508,7 @@ class Map(FileLikeObject):
             oracle.cache_return(volume)
 
 try:
+    from M2Crypto import Rand, X509, EVP
     import M2Crypto
 
     class Identity(AFFObject):
@@ -1495,7 +1526,7 @@ try:
                 ## Load the cert from the identity object
                 fd = oracle.open(urn + "/cert.pem", 'r')
                 try:
-                    self.x509 = M2Crypto.X509.load_cert_string(fd.read())
+                    self.x509 = X509.load_cert_string(fd.read())
                 finally:
                     oracle.cache_return(fd)
                     
@@ -1505,14 +1536,14 @@ try:
             fd = oracle.open(certificate_urn, 'r')
             try:
                 certificate = fd.read()
-                self.x509 = M2Crypto.X509.load_cert_string(certificate)
+                self.x509 = X509.load_cert_string(certificate)
             finally:
                 oracle.cache_return(fd)
 
         def load_priv_key(self, key_urn):
             fd = oracle.open(key_urn, 'r')
             try:
-                self.pkey = M2Crypto.EVP.load_key_string(fd.read())
+                self.pkey = EVP.load_key_string(fd.read())
             finally:
                 oracle.cache_return(fd)
 
@@ -1635,14 +1666,97 @@ try:
         they simply provide a transparent read/write crypto transform
         to another stream (usually an Image stream).
         """
-        def prepare_passphrase(self):
+        def prepare_passphrase(self, key_size):
             """ Pulls the passphrase from the resolver and calculates
-            an AES key. The passphrase is hashed many times over (as
-            specified by AFF4_CRYPTO_FORTIFICATION_COUNT) to make it
-            hard to attack with a dictionary attack.
+            an intermediate key of the required size. The intermediate
+            key is used to decrypt the AFF4_CRYPTO_PASSPHRASE_KEY
+            attribute to produce the image key. This allows the image
+            key to be encrypted using a number of different ways, and
+            even have the passphrase changed without affecting the
+            image key.
+
+            This key is derived accroding to rfc2898.
             """
-            round_count = parse_int(oracle.resolve(urn, AFF4_CRYPTO_FORTIFICATION_COUNT))
+            round_count = parse_int(oracle.resolve(self.urn,
+                                                   AFF4_CRYPTO_FORTIFICATION_COUNT)) or \
+                          struct.unpack("L", Rand.rand_bytes(struct.calcsize("L")))[0] & 0xFFFF
+            self.iv = oracle.resolve(self.urn, AFF4_CRYPTO_IV).decode("base64") or \
+                      Rand.rand_bytes(16)
+            password = oracle.resolve(GLOBAL, AFF4_VOLATILE_PASSPHRASE) or \
+                       M2Crypto.util.passphrase_callback(1)
+
+            ## Update the crypto material
+            oracle.set(self.urn, AFF4_CRYPTO_FORTIFICATION_COUNT, round_count)
+            oracle.set(self.urn, AFF4_CRYPTO_IV, b64_encode(self.iv))
+            oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, password)
+
+            if not password: Raise("No password provided for encrypted stream")
+
+            return EVP.pbkdf2(password, self.iv, round_count, key_size)
+
+        def save_aes_key(self):
+            """ Saves the aes key in the resolver """
+
+        def encrypt_block(self, data, key, iv, mode=1):
+            """ Returns data encrypted by the master image key and IV """
+            c = M2Crypto.EVP.Cipher("aes_256_cbc", key, iv, mode)
+            result = c.update(data)
+            result += c.final()
+
+            return result
+
+        def decrypt_block(self, data, key, iv):
+            return self.encrypt_block(data, key, iv, 0)
             
+        def load_aes_key(self):
+            """ Loads the aes key into this object, or generate a new one. """
+            intermediate_key = self.prepare_passphrase(32)
+            passphrase_key = oracle.resolve(self.urn, AFF4_CRYPTO_PASSPHRASE_KEY)
+            if not passphrase_key:
+                ## Make a new master key
+                self.master_key = Rand.rand_bytes(32)
+                ## Use the intermediate_key to encrypt the master key
+                passphrase_key = self.encrypt_block(self.master_key,
+                                                    intermediate_key, self.iv)
+                
+                nonce = self.encrypt_block(self.iv, self.master_key, self.iv)
+
+                ## Store this in the resolver
+                oracle.set(self.urn, AFF4_CRYPTO_PASSPHRASE_KEY, b64_encode(passphrase_key))
+                oracle.set(self.urn, AFF4_CRYPTO_NONCE, b64_encode(nonce))
+            else:
+                ## we need to derive the master key from the passphrase_key
+                intermediate_key = self.prepare_passphrase(32)
+                passphrase_key = passphrase_key.decode("base64")
+                
+                self.master_key = self.decrypt_block(passphrase_key, intermediate_key, self.iv)
+                
+                nonce = oracle.resolve(self.urn, AFF4_CRYPTO_NONCE)
+                if nonce:
+                    ## check to make sure the key is actually right
+                    nonce = nonce.decode("base64")
+                    if self.encrypt_block(self.iv, self.master_key, self.iv)!=nonce:
+                        Raise("Passphrase incorrect")
+                    
+        def close(self):
+            ## Make sure we write our properties file
+            stored = oracle.resolve(self.urn, AFF4_STORED)
+            volume = oracle.open(stored, 'w')
+            try:
+                volume.writestr(fully_qualified_name("properties", self.urn),
+                                oracle.export(self.urn))
+            finally:
+                oracle.cache_return(volume)
+
+        def __init__(self, urn=None, mode='r'):
+            FileLikeObject.__init__(self, urn, mode)
+            if urn:
+                self.load_aes_key()
+
+        def finish(self):
+            oracle.set(self.urn, AFF4_TYPE, AFF4_ENCRYTED)
+            oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
+            self.__init__(self.urn, self.mode)
 
 except ImportError:
     class Identity(AFFObject):
