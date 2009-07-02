@@ -70,7 +70,28 @@ def create_volume(output):
     oracle.cache_return(volume_fd)
 
     return volume_fd.urn
-    
+
+def copy_stream(in_urn, out_urn):
+    """ Open image urn and copies to a stream """
+    ## Make sure its a fully qualified url
+    if "://" not in in_urn:
+        in_urn = "file://%s" % in_urn
+
+    in_fd = oracle.open(in_urn)
+    out_fd = oracle.open(out_urn, 'w')
+
+    try:
+        while 1:
+            data = in_fd.read(1024 * 1024)
+            if not data: break
+
+            out_fd.write(data)
+
+        out_fd.close()
+    finally:
+        oracle.cache_return(in_fd)
+        oracle.cache_return(out_fd)
+        
 ## Store the volume here:
 output = options.output
 if options.encrypt:
@@ -84,13 +105,15 @@ if options.encrypt:
 
         encrypted_fd = Encrypted(None, 'w')
         oracle.add(encrypted_fd.urn, AFF4_STORED, volume_urn)
+        oracle.add(encrypted_fd.urn, AFF4_TARGET, image_fd.urn)
         encrypted_fd.finish()
-        encrypted_fd.close()
+        oracle.cache_return(encrypted_fd)
 
-        encrypted_fd = oracle.open(encrypted_fd.urn,'r')
+        copy_stream(image, encrypted_fd.urn)
 
     volume = oracle.open(volume_urn, 'w')
     volume.close()
+    print oracle
     
 elif options.image:
     ## Make a new volume
@@ -102,20 +125,10 @@ elif options.image:
         oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
         image_urn = image_fd.urn
         image_fd.finish()
+        oracle.cache_return(image_fd)
 
-        ## Make sure its a fully qualified url
-        if "://" not in image:
-            image = "file://%s" % image
-            
-        in_fd = oracle.open(image)
+        copy_stream(image, image_urn)
 
-        while 1:
-            data = in_fd.read(1024 * 1024)
-            if not data: break
-
-            image_fd.write(data)
-
-        image_fd.close()
         ## Make the link
         link_urn = fully_qualified_name(options.link, volume_urn)
         link = oracle.open(link_urn, 'r')

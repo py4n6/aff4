@@ -79,11 +79,11 @@ AFF4_IDENTITY_PREFIX  =FQN + "identity"
 #// Thats the passphrase that will be used to encrypt the session key
 AFF4_VOLATILE_PASSPHRASE = VOLATILE_NS + "passphrase"
 
-#// This is the session key for encryption (Never written down)
+## This is the master key for encryption (Never written down)
 AFF4_VOLATILE_KEY               = VOLATILE_NS + "key"
 
-# This is the master key actually written in the file (its the session key encrypted with the passphrase)
 AFF4_CRYPTO_NAMESPACE           = NAMESPACE + "crypto:"
+
 ## The intermediate key is obtained from pbkdf2() of the
 ## passphrase and salt. Iteration count is the fortification.
 AFF4_CRYPTO_FORTIFICATION_COUNT = AFF4_CRYPTO_NAMESPACE + "fortification"
@@ -92,7 +92,7 @@ AFF4_CRYPTO_IV       = AFF4_CRYPTO_NAMESPACE + "iv"
 ## This is the image master key encrypted using the intermediate key
 AFF4_CRYPTO_PASSPHRASE_KEY      = AFF4_CRYPTO_NAMESPACE + "passphrase_key"
 AFF4_CRYPTO_ALGORITHM           = AFF4_CRYPTO_NAMESPACE + "algorithm"
-
+AFF4_CRYPTO_BLOCKSIZE           = AFF4_CRYPTO_NAMESPACE + "blocksize"
 ## The nonce is the salt encrypted using the image master key. Its
 ## used to check the master key is correct:
 AFF4_CRYPTO_NONCE               = AFF4_CRYPTO_NAMESPACE + "nonce"
@@ -944,7 +944,7 @@ class Image(FileLikeObject):
     """
     def __init__(self, urn=None, mode='r'):
         FileLikeObject.__init__(self, urn, mode)
-
+        DEBUG(_DEBUG, "Creating a new object %s", urn)
         self.container = oracle.resolve(self.urn, AFF4_STORED)
         self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
         self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
@@ -967,7 +967,8 @@ class Image(FileLikeObject):
 
     def write(self, data):
         self.readptr += len(data)
-        oracle.set(self.urn, AFF4_SIZE, self.readptr)
+        self.size = max(self.size, self.readptr)
+        oracle.set(self.urn, AFF4_SIZE, self.size)
         while 1:
             data = self.writer.write(data)
 
@@ -1701,7 +1702,9 @@ try:
             """ Returns data encrypted by the master image key and IV """
             c = M2Crypto.EVP.Cipher("aes_256_cbc", key, iv, mode)
             result = c.update(data)
-            result += c.final()
+            try:
+                result += c.final()
+            except: pass
 
             return result
 
@@ -1724,6 +1727,7 @@ try:
                 ## Store this in the resolver
                 oracle.set(self.urn, AFF4_CRYPTO_PASSPHRASE_KEY, b64_encode(passphrase_key))
                 oracle.set(self.urn, AFF4_CRYPTO_NONCE, b64_encode(nonce))
+                
             else:
                 ## we need to derive the master key from the passphrase_key
                 intermediate_key = self.prepare_passphrase(32)
@@ -1738,7 +1742,22 @@ try:
                     if self.encrypt_block(self.iv, self.master_key, self.iv)!=nonce:
                         Raise("Passphrase incorrect")
                     
+            ## Since this is never written we dont need to encode it
+            oracle.set(self.urn, AFF4_VOLATILE_KEY, self.master_key)
+
         def close(self):
+            oracle.set(self.urn, AFF4_SIZE, self.size)
+            fd = oracle.open(self.target, 'w')
+
+            ## pad the buffer a bit
+            self.buffer += '\x00' * 16
+            
+            ## Flush the last bit of data:
+            fd.write(self.encrypt_block(self.buffer, self.master_key, self.iv))
+            
+            ## Close the target stream as well
+            fd.close()
+
             ## Make sure we write our properties file
             stored = oracle.resolve(self.urn, AFF4_STORED)
             volume = oracle.open(stored, 'w')
@@ -1751,8 +1770,78 @@ try:
         def __init__(self, urn=None, mode='r'):
             FileLikeObject.__init__(self, urn, mode)
             if urn:
-                self.load_aes_key()
+                ## Try to get our master key
+                self.master = oracle.resolve(urn, AFF4_VOLATILE_KEY)
+                self.blocksize = parse_int(oracle.resolve(urn, AFF4_CRYPTO_BLOCKSIZE)) or \
+                                 4096
+                self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
+                              Raise("You must set a target for an encrypted stream")
 
+                if not self.master:
+                    self.load_aes_key()
+
+                self.buffer = ''
+
+        def write(self, data):
+            self.buffer += data
+            self.readptr += len(data)
+            self.size = max(self.readptr, self.size)
+            
+            blocks = len(self.buffer) / self.blocksize
+            if blocks > 0:
+                fd = oracle.open(self.target, 'w')
+                try:
+                    fd.seek(0,2)
+                    for i in range(blocks):
+                        block_number = fd.tell() / self.blocksize
+                        iv = struct.pack("<QQ", block_number, block_number)
+                        
+                        encrypted = self.encrypt_block(
+                            self.buffer[i*self.blocksize:(i+1)*self.blocksize],
+                            self.master_key,
+                            iv)
+                        ## Sometimes M2Crypto pads with an extra block
+                        ## thats not needed (assuming blocksize is a
+                        ## correct multiple of the AES blocksize.
+                        fd.write(encrypted[:self.blocksize])
+                    self.buffer = self.buffer[(i+1) * self.blocksize:]
+                    
+                finally:
+                    oracle.cache_return(fd)
+
+        def partial_read(self, length):
+            block_number, block_offset = divmod(self.readptr, self.blocksize)
+            available_to_read = min(length , self.blocksize - block_offset)
+            fd = oracle.open(self.target, 'r')
+            try:
+                fd.seek(block_number * self.blocksize)
+                cdata = fd.read(self.blocksize) + 16 * 'a'
+                iv = struct.pack("<QQ", block_number, block_number)
+
+                decrypted = self.decrypt_block(
+                    cdata, self.master_key,
+                    iv)
+                
+                self.readptr += available_to_read
+                return decrypted[block_offset:block_offset+available_to_read]
+            finally:
+                oracle.cache_return(fd)
+                
+        def read(self, length=None):
+            if length is None: length = self.size
+
+            ## Clamp the length to the size
+            length = min(self.size-self.readptr, length)
+
+            result = ''
+            while len(result) < length:
+                data = self.partial_read(length - len(result))
+                if not data: break
+
+                result += data
+
+            return result
+                    
         def finish(self):
             oracle.set(self.urn, AFF4_TYPE, AFF4_ENCRYTED)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
@@ -1799,8 +1888,8 @@ def load_identity(key, cert):
         try:
             if cert:
                 result = Identity()
-                result.load_priv_key(options.key)
-                result.load_certificate(options.cert)
+                result.load_priv_key(key)
+                result.load_certificate(cert)
                 return result
             else:
                 raise RuntimeError("You must provide the certificate as well for signing")
