@@ -103,7 +103,10 @@ output = options.output
 if options.encrypt:
     container_volume_urn = create_volume(output)
     container_image = Image(None, 'w')
-    oracle.add(container_image.urn, AFF4_STORED, container_volume_urn)
+    oracle.set(container_image.urn, AFF4_STORED, container_volume_urn)
+    ## Make sure the container does not compress (the data will be
+    ## enctypted)
+    oracle.set(container_image.urn, AFF4_COMPRESSION, 0)
     container_image.finish()
     oracle.cache_return(container_image)
     
@@ -138,7 +141,6 @@ if options.encrypt:
     
     container_volume = oracle.open(container_volume_urn, 'w')
     container_volume.close()
-    print oracle
     
 elif options.image:
     ## Make a new volume

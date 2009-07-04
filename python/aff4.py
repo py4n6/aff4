@@ -1905,7 +1905,7 @@ def load_volume(filename):
             ## Have we done this volume before?
             if not oracle.resolve(v, AFF4_CONTAINS):
                 try:
-                    result.append(load_volume(v))
+                    result.extend(load_volume(v))
                 except Exception,e:
                     DEBUG(_WARNING, "Error occured autoloading %s: %s",
                           v, e)
