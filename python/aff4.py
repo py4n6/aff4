@@ -23,6 +23,7 @@ GLOBAL = VOLATILE_NS + "global" ## A special urn representing the
 #Configuration parameters
 CONFIG_THREADS = CONFIGURATION_NS + "threads"
 CONFIG_VERBOSE = CONFIGURATION_NS + "verbosity"
+CONFIG_AUTOLOAD = CONFIGURATION_NS + "autoload"
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
@@ -1747,12 +1748,19 @@ try:
         def flush(self):
             oracle.set(self.urn, AFF4_SIZE, self.size)
             fd = oracle.open(self.target, 'w')
+            fd.seek(0,2)
             try:
-                ## pad the buffer a bit
-                self.buffer += '\x00' * 16
-                
-                ## Flush the last bit of data:
-                fd.write(self.encrypt_block(self.buffer, self.master_key, self.iv))
+                if self.buffer:
+                    ## pad the buffer a bit
+                    self.buffer += '\x00' * 16
+                    
+                    block_number = fd.tell() / self.blocksize
+                    iv = struct.pack("<QQ", block_number, block_number)
+
+                    ## Flush the last bit of data:
+                    cdata = self.encrypt_block(self.buffer, self.master_key, iv)
+                    fd.write(cdata)
+                    self.buffer = ''
             finally:
                 oracle.cache_return(fd)
 
@@ -1808,7 +1816,8 @@ try:
                         ## Sometimes M2Crypto pads with an extra block
                         ## thats not needed (assuming blocksize is a
                         ## correct multiple of the AES blocksize.
-                        fd.write(encrypted[:self.blocksize])
+                        data = encrypted[:self.blocksize]
+                        fd.write(data)
                     self.buffer = self.buffer[(i+1) * self.blocksize:]
                     
                 finally:
@@ -1886,7 +1895,22 @@ def load_volume(filename):
     volume.load_from(filename)
     oracle.cache_return(volume)
 
-    return volume.urn
+    result = [volume.urn]
+
+    ## Do we need to auto load things?
+    if oracle.resolve(GLOBAL, CONFIG_AUTOLOAD):
+        volumes = oracle.resolve_list(volume.urn, AFF4_AUTOLOAD)
+        oracle.delete(volume.urn, AFF4_AUTOLOAD)
+        for v in volumes:
+            ## Have we done this volume before?
+            if not oracle.resolve(v, AFF4_CONTAINS):
+                try:
+                    result.append(load_volume(v))
+                except Exception,e:
+                    DEBUG(_WARNING, "Error occured autoloading %s: %s",
+                          v, e)
+
+    return result
 
 def load_identity(key, cert):
     if key:
@@ -1902,8 +1926,9 @@ def load_identity(key, cert):
             print e
             
 ## Set up some defaults
-oracle.add(GLOBAL, CONFIG_VERBOSE, _INFO)
-oracle.add(GLOBAL, CONFIG_THREADS, "2")
+oracle.set(GLOBAL, CONFIG_VERBOSE, _INFO)
+oracle.set(GLOBAL, CONFIG_THREADS, "2")
+oracle.set(GLOBAL, CONFIG_AUTOLOAD, 'yes')
 
 def DEBUG(verb, fmt, *args):
     if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):

@@ -46,15 +46,21 @@ parser.add_option('-e', '--encrypt', default=False,
                   action = 'store_true',
                   help="Encrypt the image")
 
+parser.add_option("-p", "--password", default='',
+                  help='Use this password instead of prompting')
+
 (options, args) = parser.parse_args()
 
 ## Load defaults into configuration space
 oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
 oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 
+if options.password:
+    oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, options.password)
+
 VOLUMES = []
 for v in options.load:
-    VOLUMES.append(load_volume(v))
+    VOLUMES.extend(load_volume(v))
 
 ## Prepare an identity for signing
 IDENTITY = load_identity(options.key, options.cert)
@@ -110,6 +116,11 @@ if options.encrypt:
     ## create a new volume inside the encrypted stream
     volume_urn = create_volume(encrypted_fd.urn)
 
+    ## Make sure the encrypted volume is autoloaded when the container
+    ## volume is opened
+    oracle.set(container_volume_urn, AFF4_AUTOLOAD, encrypted_fd.urn)
+
+    ## Put the image inside the encrypted volume
     for image in args:
         image_fd = Image(None, 'w')
         oracle.add(image_fd.urn, AFF4_STORED, volume_urn)

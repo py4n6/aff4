@@ -32,7 +32,7 @@ parser.add_option("-c", "--cert", default=None,
 
 VOLUMES = []
 for v in options.load:
-    VOLUMES.append(load_volume(v))
+    VOLUMES.extend(load_volume(v))
 
 oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 

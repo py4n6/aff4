@@ -18,7 +18,7 @@ parser.add_option("-s", "--stream", default="default",
 VOLUME = ''
 
 if options.load:
-    VOLUME = load_volume(options.load)
+    VOLUME = load_volume(options.load)[0]
 
 if not options.output:
     print "You must specify an output volume to store the map files in"
