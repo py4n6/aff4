@@ -95,7 +95,20 @@ def copy_stream(in_urn, out_urn):
 ## Store the volume here:
 output = options.output
 if options.encrypt:
-    volume_urn = create_volume(output)
+    container_volume_urn = create_volume(output)
+    container_image = Image(None, 'w')
+    oracle.add(container_image.urn, AFF4_STORED, container_volume_urn)
+    container_image.finish()
+    oracle.cache_return(container_image)
+    
+    encrypted_fd = Encrypted(None, 'w')
+    oracle.add(encrypted_fd.urn, AFF4_STORED, container_volume_urn)
+    oracle.add(encrypted_fd.urn, AFF4_TARGET, container_image.urn)
+    encrypted_fd.finish()
+    oracle.cache_return(encrypted_fd)
+
+    ## create a new volume inside the encrypted stream
+    volume_urn = create_volume(encrypted_fd.urn)
 
     for image in args:
         image_fd = Image(None, 'w')
@@ -103,16 +116,17 @@ if options.encrypt:
         image_fd.finish()
         oracle.cache_return(image_fd)
 
-        encrypted_fd = Encrypted(None, 'w')
-        oracle.add(encrypted_fd.urn, AFF4_STORED, volume_urn)
-        oracle.add(encrypted_fd.urn, AFF4_TARGET, image_fd.urn)
-        encrypted_fd.finish()
-        oracle.cache_return(encrypted_fd)
-
-        copy_stream(image, encrypted_fd.urn)
+        copy_stream(image, image_fd.urn)
 
     volume = oracle.open(volume_urn, 'w')
     volume.close()
+
+    ## We now done with the encrypted volume
+    encrypted_fd = oracle.open(encrypted_fd.urn, 'w')
+    encrypted_fd.close()
+    
+    container_volume = oracle.open(container_volume_urn, 'w')
+    container_volume.close()
     print oracle
     
 elif options.image:

@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import unittest
 import uuid, posixpath, hashlib, base64
 import urllib, os, re, struct, zlib, time, sys
 import StringIO
@@ -485,6 +484,7 @@ try:
 
                     ## Make a single fetch from the url to work out our size:
                     self.read(1)
+                    self.seek(0)
                     
                 elif mode=='w':
                     self.handle = pycurl.Curl()
@@ -1074,7 +1074,7 @@ class ZipVolume(AFFVolume):
 
             try:
                 self.load_from(stored)
-            except IOError: pass
+            except: pass
 
             ## Do we need to adjust the urn:
             if self.urn != urn:
@@ -1444,7 +1444,6 @@ class Map(FileLikeObject):
                         image_period_offset - self.points[l].image_offset + \
                         period_number * self.target_period
 
-        print target_offset
         if l < len(self.points)-1:
             available_to_read = self.points[l+1].image_offset - image_period_offset
         else:
@@ -1745,17 +1744,23 @@ try:
             ## Since this is never written we dont need to encode it
             oracle.set(self.urn, AFF4_VOLATILE_KEY, self.master_key)
 
-        def close(self):
+        def flush(self):
             oracle.set(self.urn, AFF4_SIZE, self.size)
             fd = oracle.open(self.target, 'w')
+            try:
+                ## pad the buffer a bit
+                self.buffer += '\x00' * 16
+                
+                ## Flush the last bit of data:
+                fd.write(self.encrypt_block(self.buffer, self.master_key, self.iv))
+            finally:
+                oracle.cache_return(fd)
 
-            ## pad the buffer a bit
-            self.buffer += '\x00' * 16
-            
-            ## Flush the last bit of data:
-            fd.write(self.encrypt_block(self.buffer, self.master_key, self.iv))
-            
+        def close(self):
+            self.flush()
+
             ## Close the target stream as well
+            fd = oracle.open(self.target, 'w')
             fd.close()
 
             ## Make sure we write our properties file
@@ -1903,122 +1908,3 @@ oracle.add(GLOBAL, CONFIG_THREADS, "2")
 def DEBUG(verb, fmt, *args):
     if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
         print fmt % args
-
-class ResolverTests(unittest.TestCase):
-    def test_00access(self):
-        location = "file://somewhere"
-        test_urn = "urn:aff4:testurn"
-        test_attr = "aff4:stored"
-        oracle.add(test_urn, test_attr, location)
-        self.assertEqual( location, oracle.resolve(test_urn, test_attr))
-
-    def test_01FileBackedObject(self):
-        """ Tests the file backed object """
-        filename = "file://tests/FileBackedObject_test.txt"
-        test_string = "hello world"
-        
-        fd = FileBackedObject(filename, 'w')
-        fd.write(test_string)
-        fd.close()
-        
-        fd = oracle.open(filename,'r')
-        try:
-            self.assertEqual(fd.read(len(test_string)), test_string)
-        finally:
-            oracle.cache_return(fd)
-
-    def test_02_HTTP(self):
-        """ Test http object """
-        url = "http://127.0.0.1/index.html"
-        fd = HTTPObject(url)
-        print "%s" % fd.read(10), fd.size
-        fd.close()
-
-        fd = HTTPObject("http://127.0.0.1/webdav/foobar.txt", 'w')
-        fd.write("hello world")
-        fd.close()
-
-    def xtest_02_ZipVolume(self):
-        """ Test creating of zip files """
-        filename = "file://tests/test.zip"
-        
-        out_fd = ZipVolume(None, "w")
-        oracle.add(out_fd.urn, AFF4_STORED, filename)
-        out_fd.finish()
-        out_fd.writestr("default","Hello world")
-        out_fd.close()
-
-    def xtest_02_ImageWriting(self):
-        """ Makes a new volume """
-        ResolverTests.filename = filename = "file://tests/test.zip"
-        in_filename = "file://output.dd"
-
-        ## Make a new volume
-        volume_fd = ZipVolume(None, "w")
-        volume_urn = volume_fd.urn
-        oracle.add(volume_urn, AFF4_STORED, filename)
-        volume_fd.finish()
-        oracle.cache_return(volume_fd)
-
-        ## Make an image
-        image_fd = Image(None, "w")
-        image_urn = image_fd.urn
-        oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
-        image_fd.finish()
-        in_fd = oracle.open(in_filename)
-        try:
-            while 1:
-                data = in_fd.read(10240)
-                if not data: break
-
-                image_fd.write(data)
-        finally:
-            oracle.cache_return(in_fd)
-            
-        image_fd.close()
-        
-        ## Make a link
-        link = Link(fully_qualified_name("default", volume_urn))
-        oracle.set(link.urn, AFF4_STORED, volume_urn)
-        oracle.set(link.urn, AFF4_TARGET, image_urn)
-        link.finish()
-        
-        link.close()
-        
-        volume_fd = oracle.open(volume_urn, 'w')
-        volume_fd.close()
-
-    def xtest_03_ZipVolume(self):
-        """ Tests the ZipVolume implementation """
-        print "Loading volume"
-        z = ZipVolume(None, 'r')
-        z.load_from(ResolverTests.filename)
-
-        ## Test the stream implementation
-        fd = oracle.open(fully_qualified_name("properties", z.urn))
-        try:
-            data = z.zf.read("properties")
-            self.assertEqual(data,fd.read(1024))
-        finally:
-            oracle.cache_return(fd)
-            
-        stream = oracle.open(fully_qualified_name("default", z.urn))
-        try:
-            fd = open("output.dd")
-            while 1:
-                data = stream.read(1024)
-                data2 = fd.read(1024)
-                if not data or not data2: break
-
-                self.assertEqual(data2, data)
-
-            import sk
-            stream.seek(0)
-            fs = sk.skfs(stream)
-
-            print fs.listdir('/')
-        finally:
-            oracle.cache_return(stream)
-
-if __name__ == "__main__":
-    unittest.main()
