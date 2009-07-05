@@ -116,7 +116,7 @@ if not options.external:
             if mode == 'destroy':
                 if connection['l'] > 0 or connection['reverse']['l'] > 0:
                     map_stream = connection['map']
-                    oracle.set(map_stream.urn, AFF4_SIZE, connection['l'])
+                    map_stream.size = connection['l']
                     map_stream.close()
 
                     map_stream = connection['reverse']['map']

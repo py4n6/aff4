@@ -1,5 +1,5 @@
 from aff4 import *
-import unittest
+import unittest,re
 
 class ResolverTests(unittest.TestCase):
     """ Test the universal resolver """
@@ -44,6 +44,54 @@ class HTTPObject_Test(unittest.TestCase):
         self.assertEqual(fd.size, len(message))
         fd.close()
 
+class SparseImageTest(unittest.TestCase):
+    """ Test the sparse image facility """
+    filename = 'tests/test.zip'
+
+    def setUp(self):
+        try:
+            os.unlink(self.filename)
+        except: pass
+        
+    def test_01_Sparse(self):
+        """ Test creation of sparse image """
+        volume = ZipVolume(None, 'w')
+        oracle.add(volume.urn, AFF4_STORED, self.filename)
+        volume.finish()
+        oracle.cache_return(volume)
+
+        ## The backing image provides storage
+        image = Image(None, 'w')
+        oracle.add(image.urn, AFF4_STORED, volume.urn)
+        oracle.set(image.urn, AFF4_COMPRESSION, 0)
+        image.finish()
+        oracle.cache_return(image)
+
+        ## The Map stream provides direct interface
+        map_fd = Map(None, 'w')
+        oracle.set(map_fd.urn, AFF4_STORED, volume.urn)
+        oracle.set(map_fd.urn, AFF4_TARGET, image.urn)
+        map_fd.finish()
+
+        map_fd.add(0, 0, '@')
+
+        ## Now write in a sparse way
+        map_fd.write("abc")
+        map_fd.write("def")
+        
+        ## Skip some data
+        map_fd.seek(3,1)
+        map_fd.write("ghi")
+        map_fd.seek(-4,1)
+        map_fd.write("foobar")
+
+        map_fd.close()
+
+        image = oracle.open(image.urn, 'w')
+        image.close()
+        
+        volume = oracle.open(volume.urn, 'w')
+        volume.close()
 
 class ZipVolumeTest(unittest.TestCase):
     """ Creation and reading of Zip Volumes """
@@ -132,7 +180,25 @@ class ZipVolumeTest(unittest.TestCase):
             oracle.cache_return(stream)
 
 if __name__ == '__main__':
+    import optparse
+
+    parser = optparse.OptionParser()
+    parser.add_option("-m", "--match", default=None,
+                      help = "Match the test name to this RE")
+    parser.add_option("-L", "--list", default=False,
+                      action='store_true',
+                      help = "Just list the test names without running them")
+
+    (options, args) = parser.parse_args()
+
+    if options.match:
+        match = re.compile(options.match)
+    else:
+        match = None
+        
     for cls_name in dir():
+        if match and not match.search(cls_name): continue
+        
         cls = globals()[cls_name]
         try:
             if issubclass(cls, unittest.TestCase):
@@ -145,6 +211,10 @@ if __name__ == '__main__':
                 except: pass
                 if not doc:
                     doc = cls
+
+                if options.list:
+                    print "%s: %s" % (cls.__name__, doc)
+                    continue
 
                 tmp = "Running tests in %s: %s " % (cls.__name__,doc)
                 print "-" * len(tmp)

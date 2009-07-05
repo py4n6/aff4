@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import uuid, posixpath, hashlib, base64
+import uuid, posixpath, hashlib, base64, bisect
 import urllib, os, re, struct, zlib, time, sys
 import StringIO
 from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
@@ -24,6 +24,7 @@ GLOBAL = VOLATILE_NS + "global" ## A special urn representing the
 CONFIG_THREADS = CONFIGURATION_NS + "threads"
 CONFIG_VERBOSE = CONFIGURATION_NS + "verbosity"
 CONFIG_AUTOLOAD = CONFIGURATION_NS + "autoload"
+CONFIG_PAD      = CONFIGURATION_NS + "pad"
 
 #/** These are standard aff4 attributes */
 AFF4_STORED     =NAMESPACE +"stored"
@@ -109,12 +110,24 @@ AFF4_IMAGE            ="image"
 AFF4_MAP              ="map"
 AFF4_ENCRYTED         ="encrypted"
 AFF4_IDENTITY         ="identity"
+AFF4_ERROR_STREAM     ="error"
+
+## The following URNs are special and should be known by the
+## implementation:
+AFF4_SPECIAL_URN_NULL = FQN + "null" ## This URN refers to NULL data
+                                     ## in Sparse maps (unread data
+                                     ## not the same as zero)
+
+AFF4_SPECIAL_URN_ZERO = FQN + "zero" ## This is used to represent long
+                                     ## runs of zero
 
 ## Some verbosity settings
 _DEBUG = 10
 _INFO = 5
 _WARNING = 1
 
+## Bootstap DEBUG function (only add this after loading this module -
+## see below)
 def DEBUG(verb, fmt, *args):
     pass
 
@@ -915,11 +928,12 @@ class ImageWorker(threading.Thread):
         volume = oracle.open(self.volume, 'w')
         try:
            ## Write the bevy
-            DEBUG(_INFO, "Writing bevy %s %s/%sMb (%d%%)" ,
-                  subject,
-                  (self.bevy.len / 1024 / 1024),
-                  (self.bevy_size/ 1024 / 1024),
-                  (100 * self.bevy.len) / self.buffer.len)
+            if self.buffer.len > 0:
+                DEBUG(_INFO, "Writing bevy %s %s/%sMb (%d%%)" ,
+                      subject,
+                      (self.bevy.len / 1024 / 1024),
+                      (self.bevy_size/ 1024 / 1024),
+                      (100 * self.bevy.len) / self.buffer.len)
             volume.writestr(subject,
                             self.bevy.getvalue())
             volume.writestr(subject + '.idx',
@@ -969,7 +983,7 @@ class Image(FileLikeObject):
     def write(self, data):
         self.readptr += len(data)
         self.size = max(self.size, self.readptr)
-        oracle.set(self.urn, AFF4_SIZE, self.size)
+
         while 1:
             data = self.writer.write(data)
 
@@ -1004,6 +1018,8 @@ class Image(FileLikeObject):
         ## Wait untill all workers are finished
         for x in self.running:
             x.join()
+
+        oracle.set(self.urn, AFF4_SIZE, self.size)
 
         ## Write the properties file
         volume = oracle.open(self.container,'w')
@@ -1359,15 +1375,6 @@ class Link(AFFObject):
                         oracle.export(self.urn))
         oracle.cache_return(volume)
 
-class Point:
-    def __init__(self, image_offset, target_offset, target_urn):
-        self.image_offset = image_offset
-        self.target_offset= target_offset
-        self.target_urn = target_urn
-
-    def __repr__(self):
-        return "<%s,%s,%s>" % (self.image_offset, self.target_offset, self.target_urn)
-
 class Map(FileLikeObject):
     """ A Map is an object which presents a transformed view of another
     stream.
@@ -1378,10 +1385,27 @@ class Map(FileLikeObject):
         self.__init__(self.urn, self.mode)
 
     def __init__(self, uri=None, mode='r'):
-        self.points = []
+        ## As a matter of convension we refer to our own offsets as
+        ## image offsets and the offsets in the target as target
+        ## offsets:
+
+        ## This is a sorted array of image offsets for which we have
+        ## mapping points:
+        self.image_offsets = [0]
+        self.last_image_offset_index = None
+
+        ## There are the target offsets for each image_offset kept in
+        ## self.image_offsets:
+        self.target_offsets = {0:0}
+
+        ## These are the targets for each image_offset in
+        ## self.image_offsets:
+        self.target_urns = {0:"@"}
+
         if uri:
             self.stored = oracle.resolve(uri, AFF4_STORED) or \
                           Raise("Map objects must be stored somewhere")
+            ## This is not essential
             self.target = oracle.resolve(uri, AFF4_TARGET) or \
                           Raise("Map objects must have a %s attribute" % AFF4_TARGET)
 
@@ -1415,24 +1439,16 @@ class Map(FileLikeObject):
                             t = target_urn
                         else:
                             t = m.group(3)
-                            
-                        self.points.append(Point(parse_int(m.group(1)),
-                                                 parse_int(m.group(2)),
-                                                 t))
+
+                        ## Add the point to the map
+                        self.add(parse_int(m.group(1)),
+                                 parse_int(m.group(2)),
+                                 t)
             finally:
                 oracle.cache_return(fd)
 
         FileLikeObject.__init__(self, uri, mode)
 
-    def bisect_right(self, image_offset):
-        lo = 0
-        hi = len(self.points)
-        
-        while lo < hi:
-            mid = (lo+hi)//2
-            if image_offset < self.points[mid].image_offset: hi = mid
-            else: lo = mid+1
-        return lo
                     
     def partial_read(self, length):
         """ Read from the current offset as much as possible - may
@@ -1440,19 +1456,25 @@ class Map(FileLikeObject):
         ## This function actually does the mapping
         period_number, image_period_offset = divmod(self.readptr, self.image_period)
         available_to_read = length
-        l = self.bisect_right(image_period_offset)-1
-        target_offset = self.points[l].target_offset + \
-                        image_period_offset - self.points[l].image_offset + \
+
+        ## We try to find the previous point before the current readptr
+        l = bisect.bisect_right(self.image_offsets, image_period_offset) - 1
+        image_offset_at_point = self.image_offsets[l]
+        target_offset_at_point = self.target_offsets[image_offset_at_point]
+        
+        target_offset = target_offset_at_point + \
+                        image_period_offset - image_offset_at_point + \
                         period_number * self.target_period
 
-        if l < len(self.points)-1:
-            available_to_read = self.points[l+1].image_offset - image_period_offset
+        if l < len(self.image_offsets)-1:
+            available_to_read = self.image_offsets[l+1] - \
+                                image_period_offset
         else:
             available_to_read = min(available_to_read,
                                     self.image_period - image_period_offset)
                 
         ## Now do the read:
-        target = oracle.open(self.points[l].target_urn, 'r')
+        target = oracle.open(self.target_urns[image_offset_at_point], 'r')
         try:
             target.seek(target_offset)
             data = target.read(min(available_to_read, length))
@@ -1472,32 +1494,74 @@ class Map(FileLikeObject):
 
         return result
 
+    def write(self, data):
+        target = oracle.resolve(self.urn, AFF4_TARGET) or \
+                 Raise("Map objects must have a default target when using write()")
+        backing_fd = oracle.open(target, 'w')
+        try:
+            ## we always append to our backing image
+            backing_fd.seek(0,2)
+            image_offset = backing_fd.tell()
+            
+            ## The first point on the new line
+            left = self.add(self.readptr, image_offset, target) + 1
+            backing_fd.write(data)
+            self.readptr += len(data)
+
+            ## The end point on the new line
+            right = self.add(self.readptr, 0, AFF4_SPECIAL_URN_NULL)
+
+            ## Now delete points from map between left and right -
+            ## this overwrites previous map points:
+            if left != right:
+                tmp = self.image_offsets[left:right]
+                self.image_offsets = self.image_offsets[:left] + \
+                                     self.image_offsets[right:]
+
+                for x in tmp:
+                    del self.target_offsets[x]
+                    del self.target_urns[x]
+            
+            self.size = max(self.size, self.readptr)
+        finally:
+            oracle.cache_return(backing_fd)
+
     def add(self, image_offset, target_offset, target_urn):
-        self.points.append(Point(image_offset, target_offset, target_urn))
+        ## FIXME: This should be made more efficient by testing the
+        ## array index of the previous write rather than searching it
+        ## each time.
+        l = bisect.bisect_left(self.image_offsets, image_offset)
+        try:
+            image_offset_at_point = self.image_offsets[l]
+        except IndexError:
+            self.image_offsets.append(image_offset)
+            image_offset_at_point = image_offset
+            
+        ## A new point is added
+        if image_offset_at_point != image_offset:
+            self.image_offsets.insert(l, image_offset)
+
+        self.target_offsets[image_offset] = target_offset
+        self.target_urns[image_offset] = target_urn
+        
+        return l
 
     def close(self):
         fd = StringIO.StringIO()
-        def cmp_fun(x,y):
-            return int(x.target_offset - y.target_offset)
-        
-        ## Sort the map array
-        self.points.sort(cmp_fun)
+        oracle.set(self.urn, AFF4_SIZE, self.size)
 
-        for i in range(len(self.points)):
-            point = self.points[i]
+        previous = None
+        for x in self.image_offsets:
+            ## Collapse points which are redundant
+            if previous is not None and \
+                   self.target_urns[previous]==self.target_urns[x]:
+                prediction = x - previous + self.target_offsets[previous]
+                if prediction == self.target_offsets[x]:
+                    continue
 
-            ## Try to reduce redundant points
-            if i!=0 and i!=len(self.points) and \
-                   self.points[i].target_urn == self.points[i-1].target_urn:
-                previous = self.points[i-1]
-                prediction = point.image_offset - previous.image_offset +\
-                             previous.target_offset
-
-                if prediction == point.target_offset: continue
-
-            fd.write("%d,%d,%s\n" % (point.image_offset,
-                     point.target_offset, point.target_urn))
-
+            fd.write("%d,%d,%s\n" % (x, self.target_offsets[x],
+                                     self.target_urns[x]))
+            previous = x
         volume = oracle.open(self.stored, 'w')
         try:
             volume.writestr(fully_qualified_name("map", self.urn),
@@ -1871,6 +1935,20 @@ except ImportError:
             Raise("Encrypted streams are not available without the M2Crypto module. Try 'apt-get install python-m2crypto'")
 
 
+class ErrorStream(FileLikeObject):
+    """ ErrorStreams are special streams which either raise an
+    exception or pad with 0's when read.
+
+    This is used to raise an error condition when invalid data is read
+    from an image. For example attempting to read bad blocks, or
+    reading in sparse regions on an image.
+    """
+    def read(self, length):
+        if oracle.resolve(self.urn, CONFIG_PAD):
+            return '\x00' * length
+
+        raise IOError("Invalid read of %s" % self.urn)
+        
 
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
@@ -1885,6 +1963,7 @@ DISPATCH = [
     [ 0, AFF4_ENCRYTED, Encrypted ],
     [ 0, AFF4_IDENTITY, Identity],
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
+    [ 0, AFF4_ERROR_STREAM, ErrorStream],
     ]
 
 
@@ -1902,7 +1981,7 @@ def load_volume(filename):
         volumes = oracle.resolve_list(volume.urn, AFF4_AUTOLOAD)
         oracle.delete(volume.urn, AFF4_AUTOLOAD)
         for v in volumes:
-            ## Have we done this volume before?
+            ## Have we done this volume before (stop circular autoloads)?
             if not oracle.resolve(v, AFF4_CONTAINS):
                 try:
                     result.extend(load_volume(v))
@@ -1929,6 +2008,13 @@ def load_identity(key, cert):
 oracle.set(GLOBAL, CONFIG_VERBOSE, _INFO)
 oracle.set(GLOBAL, CONFIG_THREADS, "2")
 oracle.set(GLOBAL, CONFIG_AUTOLOAD, 'yes')
+
+## Some well known objects
+oracle.set(AFF4_SPECIAL_URN_NULL, AFF4_TYPE, AFF4_ERROR_STREAM)
+oracle.set(AFF4_SPECIAL_URN_NULL, CONFIG_PAD, 1)
+oracle.set(AFF4_SPECIAL_URN_ZERO, AFF4_TYPE, AFF4_ERROR_STREAM)
+oracle.set(AFF4_SPECIAL_URN_ZERO, CONFIG_PAD, 1)
+
 
 def DEBUG(verb, fmt, *args):
     if verb <= int(oracle.resolve(GLOBAL, CONFIG_VERBOSE)):
