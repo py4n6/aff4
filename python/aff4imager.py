@@ -9,6 +9,9 @@ parser.add_option("-i", "--image", default=None,
                   action='store_true',
                   help = "Imaging mode")
 
+parser.add_option("-m", "--max_size", default=0,
+                  help = "Try to change volumes after the volume is bigger than this size")
+
 parser.add_option("-o", "--output", default=None,
                   help="Create the output volume on this file or URL (using webdav)")
 
@@ -65,122 +68,33 @@ for v in options.load:
 ## Prepare an identity for signing
 IDENTITY = load_identity(options.key, options.cert)
 
-def create_volume(output):
-    volume_fd = ZipVolume(None, "w")
-    try:
-        volume_fd.load_from(output)
-    except: pass
+## Use the high level interface to get what we want:
+if options.image:
+    ## Imaging mode
+    volume = CreateNewVolume(options.output, encrypted=options.encrypt,
+                             password=options.password,
+                             max_volume_size = parse_int(options.max_size))
+
+    ## Add any identities needed
+    volume.add_identity(options.key, options.cert)
     
-    oracle.add(volume_fd.urn, AFF4_STORED, output)
-    volume_fd.finish()
-    oracle.cache_return(volume_fd)
+    for in_urn in args:
+        image = volume.new_image(link = options.link, sparse=True)
+        if "://" not in in_urn:
+            in_urn = "file://%s" % in_urn
 
-    return volume_fd.urn
-
-def copy_stream(in_urn, out_urn):
-    """ Open image urn and copies to a stream """
-    ## Make sure its a fully qualified url
-    if "://" not in in_urn:
-        in_urn = "file://%s" % in_urn
-
-    in_fd = oracle.open(in_urn)
-    out_fd = oracle.open(out_urn, 'w')
-
-    try:
+        in_fd = oracle.open(in_urn)
         while 1:
             data = in_fd.read(1024 * 1024)
             if not data: break
+            
+            image.write(data)
+        image.close()
 
-            out_fd.write(data)
-
-        out_fd.close()
-    finally:
-        oracle.cache_return(in_fd)
-        oracle.cache_return(out_fd)
-        
-## Store the volume here:
-output = options.output
-if options.encrypt:
-    container_volume_urn = create_volume(output)
-    container_image = Image(None, 'w')
-    oracle.set(container_image.urn, AFF4_STORED, container_volume_urn)
-    ## Make sure the container does not compress (the data will be
-    ## enctypted)
-    oracle.set(container_image.urn, AFF4_COMPRESSION, 0)
-    container_image.finish()
-    oracle.cache_return(container_image)
-    
-    encrypted_fd = Encrypted(None, 'w')
-    oracle.add(encrypted_fd.urn, AFF4_STORED, container_volume_urn)
-    oracle.add(encrypted_fd.urn, AFF4_TARGET, container_image.urn)
-    encrypted_fd.finish()
-    oracle.cache_return(encrypted_fd)
-
-    ## create a new volume inside the encrypted stream
-    volume_urn = create_volume(encrypted_fd.urn)
-
-    ## Make sure the encrypted volume is autoloaded when the container
-    ## volume is opened
-    oracle.set(container_volume_urn, AFF4_AUTOLOAD, encrypted_fd.urn)
-
-    ## Put the image inside the encrypted volume
-    for image in args:
-        image_fd = Image(None, 'w')
-        oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
-        image_fd.finish()
-        oracle.cache_return(image_fd)
-
-        copy_stream(image, image_fd.urn)
-
-    volume = oracle.open(volume_urn, 'w')
     volume.close()
 
-    ## We now done with the encrypted volume
-    encrypted_fd = oracle.open(encrypted_fd.urn, 'w')
-    encrypted_fd.close()
-    
-    container_volume = oracle.open(container_volume_urn, 'w')
-    container_volume.close()
-    
-elif options.image:
-    ## Make a new volume
-    volume_urn = create_volume(output)
-    
-    for image in args:
-        ## Make an image
-        image_fd = Image(None, "w")
-        oracle.add(image_fd.urn, AFF4_STORED, volume_urn)
-        image_urn = image_fd.urn
-        image_fd.finish()
-        oracle.cache_return(image_fd)
-
-        copy_stream(image, image_urn)
-
-        ## Make the link
-        link_urn = fully_qualified_name(options.link, volume_urn)
-        link = oracle.open(link_urn, 'r')
-        if link:
-            print "A link '%s' already exists in this volume. I wont create a link now - but you can add it later using the -L mode"
-            oracle.cache_return(link)
-        else:
-            link = Link(link_urn)
-            oracle.set(link.urn, AFF4_STORED, volume_urn)
-            oracle.set(link.urn, AFF4_TARGET, image_urn)
-            link.finish()
-            link.close()
-        
-        oracle.cache_return(in_fd)
-
-    ## Sign it if needed
-    if IDENTITY:
-        oracle.set(IDENTITY.urn, AFF4_STORED, volume_urn)
-        IDENTITY.close()
-
-    ## Close the volume off
-    volume_fd = oracle.open(volume_urn, 'w')
-    volume_fd.close()
-
 elif options.dump:
+    ## Look for the right stream in one of the volumes
     for v in VOLUMES:
         stream = oracle.open(fully_qualified_name(options.dump, v), 'r')
         if stream: break

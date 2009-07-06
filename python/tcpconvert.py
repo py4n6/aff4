@@ -113,7 +113,7 @@ if not options.external:
                                       "@")
                 connection['l'] += len(tcp.data)
 
-            if mode == 'destroy':
+            elif mode == 'destroy':
                 if connection['l'] > 0 or connection['reverse']['l'] > 0:
                     map_stream = connection['map']
                     map_stream.size = connection['l']
