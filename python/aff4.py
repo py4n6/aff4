@@ -87,11 +87,16 @@ AFF4_IMAGE_PERIOD= NAMESPACE + "image_period"
 AFF4_TARGET_PERIOD= NAMESPACE + "target_period"
 
 #/* Identity attributes */
-AFF4_STATEMENT =NAMESPACE + "statement"
-AFF4_CERT      =NAMESPACE + "x509"
-AFF4_PRIV_KEY  =VOLATILE_NS + "priv_key"
-AFF4_COMMON_NAME =NAMESPACE + "common_name"
-AFF4_IDENTITY_PREFIX  =FQN + "identity"
+AFF4_STATEMENT        = NAMESPACE   + "statement"
+AFF4_CERT             = NAMESPACE   + "x509"
+AFF4_PRIV_KEY         = VOLATILE_NS + "priv_key"
+AFF4_COMMON_NAME      = NAMESPACE   + "common_name"
+AFF4_IDENTITY_PREFIX  = FQN         + "identity"
+AFF4_HASH_TYPE        = FQN         + "hash_type"
+
+## A property indicating this object should be highlighted
+AFF4_HIGHLIGHT        = NAMESPACE   + "highlight"  
+
 
 #// Thats the passphrase that will be used to encrypt the session key
 AFF4_VOLATILE_PASSPHRASE = VOLATILE_NS + "passphrase"
@@ -139,6 +144,7 @@ AFF4_SPECIAL_URN_ZERO = FQN + "zero" ## This is used to represent long
 
 ## Some verbosity settings
 _DEBUG = 10
+_DETAILED = 7
 _INFO = 5
 _WARNING = 1
 
@@ -661,6 +667,7 @@ class Resolver:
         self.read_cache = Store()
         self.write_cache = Store()
         self.clear_hooks()
+        self.closed = {}
 
     def __getitem__(self, urn):
         try:
@@ -678,6 +685,11 @@ class Resolver:
         ## Notify all interested parties
         for cb in self.set_hooks:
             cb(uri, attribute, value)
+            
+    def close(self, urn):
+        DEBUG(_DEBUG, "Closing urn %s" % urn)
+        #self.closed[urn] = self.urn[urn]
+        del self.urn[urn]
         
     def add(self, uri, attribute, value):
         DEBUG(_DEBUG, "Adding %s: %s=%s", uri, attribute, value);
@@ -693,7 +705,7 @@ class Resolver:
     def resolve(self, uri, attribute):
         try:
             return self.resolve_list(uri,attribute)[0]
-        except: return NoneObject("No attribute found")
+        except: return NoneObject("No attribute %s found on %s" % (attribute, uri))
     
     def resolve_list(self, uri, attribute):
         try:
@@ -729,8 +741,8 @@ class Resolver:
         """
         result = None
 
-        if self.resolve(uri, AFF4_TYPE) == AFF4_VOLUME:
-            pdb.set_trace()
+        if uri.startswith(FQN) and uri not in self.urn:          
+            Raise("Trying to open a non existant or already closed object %s" % uri)
 
         ## If the uri is not complete here we guess its a file://
         if ":" not in uri:
@@ -767,16 +779,8 @@ class Resolver:
                     break
 
         if result:
-            ## Obtain a lock on the object
-            try:
-                obj = self[uri]
-            except KeyError:
-                obj = self[uri] = URNObject(uri)
-
-            DEBUG(_DEBUG, "Acquiring %s ",uri)
-            obj.lock.acquire()
-            DEBUG(_DEBUG, "Acquired %s", uri)
-
+            self.lock(uri)
+            
             ## Try to seek it to the start
             try:
                 result.seek(0)
@@ -787,6 +791,27 @@ class Resolver:
         ## We dont know how to open it.
         return NoneObject("Dont know how to handle URN %s. (type %s)" % (uri, type))
 
+    def lock(self, uri):
+        ## Obtain a lock on the object
+        try:
+            obj = self[uri]
+        except KeyError:
+            obj = self[uri] = URNObject(uri)
+
+        DEBUG(_DEBUG, "Acquiring %s ",uri)
+        obj.lock.acquire()
+        DEBUG(_DEBUG, "Acquired %s", uri)
+
+    def unlock(self, uri):
+        ## Obtain a lock on the object
+        try:
+            obj = self[uri]
+        except KeyError:
+            obj = self[uri] = URNObject(uri)
+
+        DEBUG(_DEBUG, "Releasing %s ",uri)
+        obj.lock.release()
+
     def __str__(self):
         result = ''
         verbosity = int(oracle.resolve(GLOBAL, CONFIG_VERBOSE))
@@ -795,7 +820,11 @@ class Resolver:
         
         for urn in keys:
             obj = self.urn[urn]
-            if verbosity <= _INFO and urn.startswith(VOLATILE_NS): continue
+            if verbosity <= _DETAILED and urn.startswith(VOLATILE_NS): continue
+            
+            if verbosity - (_DETAILED - int(self.resolve(urn, AFF4_HIGHLIGHT))) < 0:
+                continue
+            
             attr_str = obj.__str__()
             if not attr_str: continue
             result += "\n****** %s \n%s" % (urn, attr_str)
@@ -898,7 +927,8 @@ class ZipFileStream(FileLikeObject):
 class ImageWorker(threading.Thread):
     """ This is a worker responsible for creating a full bevy """
     def __init__(self, urn, bevy_number,
-                 chunk_size, chunks_in_segment, condition_variable=None):
+                 chunk_size, chunks_in_segment, condition_variable=None,
+                 compression=9):
         """ Set up a new worker.
 
         The condition variable will be notified when we finish.
@@ -915,6 +945,7 @@ class ImageWorker(threading.Thread):
         self.len = 0
         self.urn = urn
         self.bevy_number = bevy_number
+        self.compression = compression
         
     def write(self, data):
         available_to_read = min(self.bevy_size - self.buffer.len, len(data))
@@ -929,7 +960,12 @@ class ImageWorker(threading.Thread):
         offset = 0
         while self.buffer.tell() < self.buffer.len:
             data = self.buffer.read(self.chunk_size)
-            cdata = zlib.compress(data, 1)
+            if self.compression > 0:
+                print "compressing %s" % self.compression
+                cdata = zlib.compress(data, self.compression)
+            else:
+                cdata = data
+                
             self.bevy.write(cdata)
             self.bevy_index.write(struct.pack("<L", offset))
             offset += len(cdata)
@@ -940,9 +976,11 @@ class ImageWorker(threading.Thread):
 
         ## we calculate the SHA (before we grab the lock on the
         ## volume)
-        oracle.set(subject, AFF4_SHA,
-                   hashlib.sha1(self.bevy.getvalue()).\
-                   digest().encode("base64").strip())
+        hash_type = oracle.resolve(self.urn, AFF4_HASH_TYPE)
+        if hash_type == AFF4_SHA:
+            oracle.set(subject, AFF4_SHA,
+                       hashlib.sha1(self.bevy.getvalue()).\
+                       digest().encode("base64").strip())
 
         ## Grab the volume
         volume_urn = oracle.resolve(self.urn, AFF4_STORED)
@@ -981,23 +1019,28 @@ class Image(FileLikeObject):
     """
     def __init__(self, urn=None, mode='r'):
         FileLikeObject.__init__(self, urn, mode)
-        DEBUG(_DEBUG, "Creating a new object %s", urn)
-        container = oracle.resolve(self.urn, AFF4_STORED)
-        oracle.add(container, AFF4_CONTAINS, self.urn)
-        
-        self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
-        self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
-        self.compression = parse_int(oracle.resolve(self.urn, AFF4_COMPRESSION)) or 8
+        if urn:
+            container = oracle.resolve(self.urn, AFF4_STORED)
+            oracle.add(container, AFF4_CONTAINS, self.urn)
 
-        self.chunk_cache = Store()
-        self.bevy_number = 0
-        self.running = []
-        self.condition_variable = threading.Condition()
+            self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
+            self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
+            self.compression = oracle.resolve(self.urn, AFF4_COMPRESSION)
+            if self.compression is NoneObject:
+                self.compression = 8
+            else:
+                self.compression = parse_int(self.compression)
 
-        if mode=='w':
-            self.writer = ImageWorker(self.urn, self.bevy_number,
-                                      self.chunk_size, self.chunks_in_segment,
-                                      condition_variable = self.condition_variable)
+            self.chunk_cache = Store()
+            self.bevy_number = 0
+            self.running = []
+            self.condition_variable = threading.Condition()
+
+            if mode=='w':
+                self.writer = ImageWorker(self.urn, self.bevy_number,
+                                          self.chunk_size, self.chunks_in_segment,
+                                          compression = self.compression,
+                                          condition_variable = self.condition_variable)
 
     def finish(self):
         oracle.set(self.urn, AFF4_TYPE, AFF4_IMAGE)
@@ -1036,6 +1079,7 @@ class Image(FileLikeObject):
             self.bevy_number += 1
             self.writer = ImageWorker(self.urn, self.bevy_number,
                                       self.chunk_size, self.chunks_in_segment,
+                                      compression = self.compression,
                                       condition_variable=self.condition_variable)
 
     def close(self):
@@ -1087,7 +1131,10 @@ class Image(FileLikeObject):
             fd = oracle.open(bevy_urn, 'r')
             try:
                 fd.seek(offset)
-                chunk = zlib.decompress(fd.read(length))
+                if self.compression > 0:
+                    chunk = zlib.decompress(fd.read(length))
+                else:
+                    chunk = fd.read(length)
             finally:
                 oracle.cache_return(fd)
             
@@ -1318,7 +1365,7 @@ class ZipVolume(AFFVolume):
             backing_fd.close()
             
             oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
-            oracle.cache_return(self)
+            oracle.close(self.urn)
             
     def load_from(self, filename):
         """ Tries to open the filename as a ZipVolume """
@@ -1393,6 +1440,12 @@ class Link(AFFObject):
     When we open the link name, we return the AFF4_TARGET attribute.
     """            
     def finish(self):
+        ## Make sure we write our properties file
+        stored = oracle.resolve(self.urn, AFF4_STORED) or \
+                      Raise("Link objects must be stored on a volume")
+        oracle.add(stored, AFF4_CONTAINS, self.urn)
+        oracle.set(self.urn, AFF4_VOLATILE_DIRTY, 1)
+        
         oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
         self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                       Raise("Link objects must have a target attribute")
@@ -1401,13 +1454,13 @@ class Link(AFFObject):
 
     def close(self):
         ## Make sure we write our properties file
-        stored = oracle.resolve(self.urn, AFF4_STORED) or \
-                      Raise("Link objects must be stored on a volume")
-        
+        stored = oracle.resolve(self.urn, AFF4_STORED)
         volume = oracle.open(stored, 'w')
-        volume.writestr(fully_qualified_name("properties", self.urn),
-                        oracle.export(self.urn))
-        oracle.cache_return(volume)
+        try:
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn))
+        finally:
+            oracle.cache_return(volume)
 
 class Map(FileLikeObject):
     """ A Map is an object which presents a transformed view of another
@@ -1599,7 +1652,7 @@ class Map(FileLikeObject):
             fd.write("%d,%d,%s\n" % (x, self.target_offsets[x],
                                      self.target_urns[x]))
             previous = x
-            
+
         stored = oracle.resolve(self.urn, AFF4_STORED)
         volume = oracle.open(stored, 'w')
         try:
@@ -1886,9 +1939,15 @@ try:
             finally:
                 oracle.cache_return(volume)
 
+            oracle.close(self.urn)
+
         def __init__(self, urn=None, mode='r'):
             FileLikeObject.__init__(self, urn, mode)
             if urn:
+                container = oracle.resolve(self.urn, AFF4_STORED) or \
+                            Raise("Encrypted stream must be stored somewhere")
+                oracle.add(container, AFF4_CONTAINS, self.urn)
+
                 ## Try to get our master key
                 self.master = oracle.resolve(urn, AFF4_VOLATILE_KEY)
                 self.blocksize = parse_int(oracle.resolve(urn, AFF4_CRYPTO_BLOCKSIZE)) or \
@@ -1965,6 +2024,7 @@ try:
         def finish(self):
             oracle.set(self.urn, AFF4_TYPE, AFF4_ENCRYTED)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_STREAM)
+            oracle.set(self.urn, AFF4_VOLATILE_DIRTY, 1)
             self.__init__(self.urn, self.mode)
 
 except ImportError:
@@ -2036,10 +2096,11 @@ def load_volume(filename, autoload=True):
     ## Do we need to auto load things?
     if autoload or oracle.resolve(GLOBAL, CONFIG_AUTOLOAD):
         volumes = oracle.resolve_list(volume.urn, AFF4_AUTOLOAD)
-        oracle.delete(volume.urn, AFF4_AUTOLOAD)
+#        oracle.delete(volume.urn, AFF4_AUTOLOAD)
         for v in volumes:
             ## Have we done this volume before (stop circular autoloads)?
             if not oracle.resolve(v, AFF4_CONTAINS):
+                DEBUG(_INFO, "Autoloading %s" % v)
                 try:
                     result.extend(load_volume(v))
                 except Exception,e:
@@ -2110,15 +2171,11 @@ class AFF4Image:
 
     def write(self, data):
         ## Its safe to close off volumes here
-        if self.volume.volumes:
-            print self.volume.volumes
-            
-        for volume_urn in self.volume.volumes:
+        while self.volume.volumes:
+            volume_urn=self.volume.volumes.pop()
             volume = oracle.open(volume_urn, 'w')
             volume.close()
-
-        self.volume.volumes = set()
-
+                
         fd = oracle.open(self.image_urn, self.mode)
         fd.write(data)
         oracle.cache_return(fd)
@@ -2130,7 +2187,7 @@ class AFF4Image:
 
     def close(self):
         if self.mode != 'w': return
-        
+
         fd = oracle.open(self.image_urn, self.mode)
         fd.close()
 
@@ -2150,7 +2207,6 @@ class AFF4Image:
                 oracle.set(link.urn, AFF4_TARGET, self.image_urn)
                 link.finish()
                 link.close()
-
 
 class CreateNewVolume:
     """ This create a new volume on the provided filename.
@@ -2174,7 +2230,7 @@ class CreateNewVolume:
     volume.close()
     """
     def __init__(self, filename, encrypted=False, password=None,
-                 max_volume_size=0):
+                 max_volume_size=0, chunks_in_segment=0):
         """ Create a new volume """
         self.encrypted = encrypted
         self.identities = []
@@ -2198,7 +2254,9 @@ class CreateNewVolume:
             self.container_image_urn = container_image.urn
             oracle.set(self.container_image_urn, AFF4_STORED,
                        self.container_volume_urn)
-            
+            if chunks_in_segment:
+                oracle.set(self.container_image_urn, AFF4_CHUNKS_IN_SEGMENT,
+                           chunks_in_segment)
             ## Make sure the container does not compress (the data will be
             ## encrypted)
             oracle.set(container_image.urn, AFF4_COMPRESSION, 0)
@@ -2213,10 +2271,6 @@ class CreateNewVolume:
             encrypted_fd.finish()
             oracle.cache_return(encrypted_fd)
             
-            ## Make sure the encrypted volume is autoloaded when the container
-            ## volume is opened
-            oracle.set(self.container_volume_urn, AFF4_AUTOLOAD, encrypted_fd.urn)
-
             ## create a new volume inside the encrypted stream
             self.volume_urn = create_volume(encrypted_fd.urn)
         else:
@@ -2257,27 +2311,28 @@ class CreateNewVolume:
             ## Ok. volume is exceeded, we need to make a new volume
             new_filename = self.new_filename()
             
-            ## Schedule the monitored_volume to be closed off later
+            ## We can not really close off any volumes here because we
+            ## are called as part of the Resolver.set() function,
+            ## which means that someone is writing to this volume. If
+            ## we try to close() here we will cause a
+            ## deadlock. Schedule the monitored_volume to be closed
+            ## off later, at a more convenient time.
             self.volumes.add(monitored_volume)
-
-#            print "Volume maximum size exceeded, Making a new volume %s" % new_filename
 
             new_monitored_volume_urn = create_volume(new_filename)
             
             if self.encrypted:
                 self.container_volume_urn = new_monitored_volume_urn
-                ## Make the storage image write to the new volume now
-                oracle.set(self.container_image_urn, AFF4_STORED,
-                           new_monitored_volume_urn)
             else:
                 self.volume_urn = new_monitored_volume_urn
-                ## Search for all dirty objects which were written in
-                ## the previous volume, and update them to the new
-                ## volume:
-                for urn in oracle.resolve_list(monitored_volume, AFF4_CONTAINS):
-                    if oracle.resolve(urn, AFF4_VOLATILE_DIRTY):
-                        oracle.set(urn, AFF4_STORED, self.volume_urn)
-                        oracle.add(self.volume_urn, AFF4_CONTAINS, urn)
+                
+            ## Search for all dirty objects which were written in
+            ## the previous volume, and update them to the new
+            ## volume:
+            for urn in oracle.resolve_list(monitored_volume, AFF4_CONTAINS):
+                if oracle.resolve(urn, AFF4_VOLATILE_DIRTY):
+                    oracle.set(urn, AFF4_STORED, new_monitored_volume_urn)
+                    oracle.add(new_monitored_volume_urn, AFF4_CONTAINS, urn)
 
     def add_identity(self, key, cert):
         identity = load_identity(key,cert)
@@ -2285,8 +2340,8 @@ class CreateNewVolume:
             self.identities.append(identity.urn)
             oracle.cache_return(identity)
         
-    def new_image(self, link=None, sparse=False):
-        """ Call this to obtain a new Image object. Remember to call
+    def new_image(self, link=None, sparse=False, compression=True):
+        """ Call this to obtain a new AFF4Image object. Remember to call
         close() on that object before calling close() on the volume.
         """
         if sparse:
@@ -2297,13 +2352,15 @@ class CreateNewVolume:
             ## Make the storage object clearly related to the map
             image.urn = "%s/storage" % map_fd.urn
             oracle.add(image.urn, AFF4_STORED, self.volume_urn)
-            #oracle.set(image.urn, AFF4_COMPRESSION, 0)
+            if not compression:
+                oracle.set(image.urn, AFF4_COMPRESSION, 0)
             image.finish()
             oracle.cache_return(image)
 
             ## The Map stream provides the sparse interface
             oracle.set(map_fd.urn, AFF4_STORED, self.volume_urn)
             oracle.set(map_fd.urn, AFF4_TARGET, image.urn)
+            oracle.set(map_fd.urn, AFF4_HIGHLIGHT, _DETAILED)
             map_fd.finish()
 
             return AFF4Image(map_fd.urn, self, link=link,
@@ -2312,6 +2369,7 @@ class CreateNewVolume:
         else:
             image_fd = Image(None, 'w')
             oracle.add(image_fd.urn, AFF4_STORED, self.volume_urn)
+            oracle.set(image_fd.urn, AFF4_HIGHLIGHT, _DETAILED)
             image_fd.finish()
             oracle.cache_return(image_fd)
 
@@ -2331,14 +2389,22 @@ class CreateNewVolume:
     def close(self):
         self.sync_identities()
         self.volumes.add(self.volume_urn)
-        for volume_urn in self.volumes:
+
+        ## We need to do this as the set might change as a result of
+        ## closing the volume if a new volume needs to be created for
+        ## property files etc.
+        while self.volumes:
+            volume_urn = self.volumes.pop()
             volume = oracle.open(volume_urn, 'w')
             volume.close()
 
         if self.encrypted:
-            pass
-            
+            ## Make sure the encrypted volume is autoloaded when the container
+            ## volume is opened
+            oracle.set(self.container_volume_urn, AFF4_AUTOLOAD, self.encrypted_fd_urn)
 
+            volume = oracle.open(self.container_volume_urn, 'w')
+            volume.close()
         
 ## Set up some defaults
 oracle.set(GLOBAL, CONFIG_VERBOSE, _INFO)

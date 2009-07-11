@@ -21,8 +21,33 @@ parser.add_option("", "--link", default="default",
 parser.add_option("-D","--dump", default=None,
                   help="Dump out this stream (to --output or stdout)")
 
-parser.add_option("-l","--load", default=[],
-                  action = "append",
+parser.add_option("","--chunks_in_segment", default=0, type='int',
+                  help="Total number of chunks in each bevy")
+
+parser.add_option("","--nocompress", default=False, action='store_true',
+                  help="Do not Compress image")
+
+## This is needed to support globbing for -l option
+def vararg_callback(option, opt_str, value, parser):
+    assert value is None
+    value = []
+    
+    for arg in parser.rargs:
+        # stop on --foo like options
+        if arg[:2] == "--" and len(arg) > 2:
+            break
+
+        ## stop on -f like options
+        if arg[:1] == "-" and len(arg) > 1:
+            break
+        
+        value.append(arg)
+            
+    del parser.rargs[:len(value)]
+    setattr(parser.values, option.dest, value)
+
+parser.add_option("-l","--load", default=[], dest="load",
+                  action = "callback", callback=vararg_callback,
                   help="Load this volume to prepopulate the resolver")
 
 parser.add_option("-I", "--info", default=None,
@@ -73,13 +98,15 @@ if options.image:
     ## Imaging mode
     volume = CreateNewVolume(options.output, encrypted=options.encrypt,
                              password=options.password,
+                             chunks_in_segment=options.chunks_in_segment,
                              max_volume_size = parse_int(options.max_size))
 
     ## Add any identities needed
     volume.add_identity(options.key, options.cert)
     
     for in_urn in args:
-        image = volume.new_image(link = options.link, sparse=True)
+        image = volume.new_image(link = options.link, sparse=True,
+                                 compression=not options.nocompress)
         if "://" not in in_urn:
             in_urn = "file://%s" % in_urn
 
@@ -99,6 +126,7 @@ elif options.dump:
         stream = oracle.open(fully_qualified_name(options.dump, v), 'r')
         if stream: break
 
+    output = options.output
     if output:
         if "://" not in output:
             output = "file://%s" % output
