@@ -81,6 +81,7 @@ class AFF4Fuse(Fuse):
         urns = oracle.urn.keys()
         result = set()
         for e in urns:
+            if not e: continue
             global VOLUMES
             virtual_path = e
             for v in VOLUMES:
@@ -232,7 +233,7 @@ class AFF4Fuse(Fuse):
         return Fuse.main(self, *a, **kw)
 
 def main():
-
+    global server
     usage = """
 Userspace nullfs-alike: mirror the filesystem tree from some point on.
 
@@ -251,6 +252,12 @@ Userspace nullfs-alike: mirror the filesystem tree from some point on.
     
     server.parser.add_option(mountopt="load", metavar="FILE,FILE,FILE", default=[],
                              help="Load these AFF4 volumes to populate the filesystem")
+
+    server.parser.add_option(mountopt="key", metavar="FILE", default=None,
+                             help="x509 key")
+
+    server.parser.add_option(mountopt="cert", metavar="FILE", default=None,
+                             help="x509 cert")
     
     server.parse(values = server, errex=1)
 
@@ -258,7 +265,12 @@ Userspace nullfs-alike: mirror the filesystem tree from some point on.
     ## CWD
     if not os.access(os.path.join("/",server.fuse_args.mountpoint), os.W_OK):
         server.fuse_args.mountpoint = os.path.join(os.getcwd(), server.fuse_args.mountpoint)
-        
+
+    ## Prepare an identity for signing
+    try:
+        IDENTITY = load_identity(server.key, server.cert)
+    except AttributeError: pass
+    
     ## Load all the volumes FIXME - support more than one volume
     for v in server.load.split(","):
         global VOLUMES

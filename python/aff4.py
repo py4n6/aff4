@@ -97,7 +97,7 @@ AFF4_HASH_TYPE        = FQN         + "hash_type"
 ## A property indicating this object should be highlighted
 AFF4_HIGHLIGHT        = NAMESPACE   + "highlight"  
 
-
+## Encrypted stream attributes
 #// Thats the passphrase that will be used to encrypt the session key
 AFF4_VOLATILE_PASSPHRASE = VOLATILE_NS + "passphrase"
 
@@ -124,15 +124,20 @@ AFF4_CRYPTO_NONCE               = AFF4_CRYPTO_NAMESPACE + "nonce"
 AFF4_CRYPTO_ALGORITHM_AES_SHA254 = "AES256/SHA256"
 
 #/** These are standard aff4 types */
+# Volumes:
 AFF4_ZIP_VOLUME       ="zip_volume"
 AFF4_DIRECTORY_VOLUME ="directory"
+
+# Streams:
 AFF4_SEGMENT          ="segment"
 AFF4_LINK             ="link"
 AFF4_IMAGE            ="image"
 AFF4_MAP              ="map"
 AFF4_ENCRYTED         ="encrypted"
-AFF4_IDENTITY         ="identity"
 AFF4_ERROR_STREAM     ="error"
+
+# misc:
+AFF4_IDENTITY         ="identity"
 
 ## The following URNs are special and should be known by the
 ## implementation:
@@ -825,6 +830,7 @@ class Resolver:
         keys.sort()
         
         for urn in keys:
+            if not urn: continue
             obj = self.urn[urn]
             if verbosity <= _DETAILED and urn.startswith(VOLATILE_NS): continue
             
@@ -2225,7 +2231,7 @@ def load_identity(key, cert):
     
     return result
 
-class AFF4Image:
+class AFF4Image(FileLikeObject):
     """ This is the object obtained from CreateNewVolume.new_image().
 
     This is essentially a proxy object for the real image URN which
@@ -2239,11 +2245,8 @@ class AFF4Image:
         self.mode = mode
         self.backing_fd = backing_fd
         self.volume = volume
-
-    def seek(self, offset, whence):
-        fd = oracle.open(self.image_urn, self.mode)
-        fd.seek(offset, whence)
-        oracle.cache_return(fd)
+        self.readptr = 0
+        self.size = parse_int(oracle.resolve(backing_fd, AFF4_SIZE)) or 0
 
     def write(self, data):
         ## Its safe to close off volumes here
@@ -2253,14 +2256,20 @@ class AFF4Image:
             volume.close()
                 
         fd = oracle.open(self.image_urn, self.mode)
+        fd.seek(self.readptr)
         fd.write(data)
+        self.readptr += len(data)
         oracle.cache_return(fd)
 
     def read(self, length):
         fd = oracle.open(self.image_urn, self.mode)
-        fd.read(length)
+        fd.seek(self.readptr)
+        data = fd.read(length)
+        self.readptr += len(data)        
         oracle.cache_return(fd)
-
+        
+        return data
+    
     def close(self):
         if self.mode != 'w': return
 

@@ -718,7 +718,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Indicate that the file is dirty - This means we will be writing
     // a new CD on it
-    CALL(oracle, set, URNOF(self), AFF4_DIRTY, "1");
+    CALL(oracle, set, URNOF(self), AFF4_VOLATILE_DIRTY, "1");
 
     // Open our current volume for writing:
     fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
@@ -832,7 +832,7 @@ static void ZipFile_close(ZipFile self) {
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
   int k=0;
-  char *_didModify = CALL(oracle, resolve, URNOF(self), AFF4_DIRTY);
+  char *_didModify = CALL(oracle, resolve, URNOF(self), AFF4_VOLATILE_DIRTY);
 
   // We iterate over all the items which are contained in the
   // volume. We then write them into the CD.

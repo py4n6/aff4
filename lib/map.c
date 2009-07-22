@@ -300,7 +300,7 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
     if(read_length==0) break;
     if(read_length < 0) {
       // An error occurred - we need to decide if to pad or not
-      char *pad = CALL(oracle, resolve, AFF4_CONFIG_NAMESPACE, AFF4_CONFIG_PAD);
+      char *pad = CALL(oracle, resolve, CONFIGURATION_NS, CONFIG_PAD);
 
       if(pad) {
 	memset(buffer + i ,0, length -i);

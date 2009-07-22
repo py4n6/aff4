@@ -35,8 +35,8 @@ ZipFile open_volume(char *urn, char mode) {
 
   // Check for autoload in this volume
   if(result && mode=='r') {
-    char *autoload = resolver_get_with_default(oracle, AFF4_CONFIG_NAMESPACE, 
-					       AFF4_CONFIG_AUTOLOAD, "1");
+    char *autoload = resolver_get_with_default(oracle, CONFIGURATION_NS,
+					       CONFIG_AUTOLOAD, "1");
     char base_path[BUFF_SIZE]; 
     char *dirpath;
 

@@ -22,7 +22,7 @@
     4) We save the IV in the resolver using AFF4_CRYPTO_IV
 */
 static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_length) {
-  char *passphrase = CALL(oracle, resolve, AFF4_CONFIG_NAMESPACE, AFF4_VOLATILE_PASSPHRASE);
+  char *passphrase = CALL(oracle, resolve, CONFIGURATION_NS, AFF4_VOLATILE_PASSPHRASE);
   
   if(passphrase) {
     int passphrase_len = strlen(passphrase);
@@ -90,7 +90,7 @@ static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
     AES_cbc_encrypt(affkey, encrypted_key, 32, &aes_key, iv, AES_ENCRYPT);
     
     encode64((unsigned char *)encrypted_key, 32, buffer, sizeof(buffer));
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE, (char *)buffer);
+    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE_KEY, (char *)buffer);
     CALL(oracle, set, URNOF(self), AFF4_CRYPTO_ALGORITHM, AFF4_CRYPTO_ALGORITHM_AES_SHA254);
     
     saved = 1;
@@ -155,7 +155,7 @@ static int load_AES_key(Encrypted this) {
       char *encoded_iv = CALL(oracle, resolve, URNOF(this), AFF4_CRYPTO_IV);
 
       if(encoded_iv) {
-	char *encoded_key = CALL(oracle, resolve, URNOF(this), AFF4_CRYPTO_PASSPHRASE);
+	char *encoded_key = CALL(oracle, resolve, URNOF(this), AFF4_CRYPTO_PASSPHRASE_KEY);
 	AES_KEY aes_key;
       
 	decode64((unsigned char*)ZSTRING_NO_NULL(encoded_iv), iv, sizeof(iv));
