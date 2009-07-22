@@ -608,6 +608,7 @@ class Store:
     def add(self, urn, obj):
         self.hash[urn] = obj
         self.age.append(urn)
+        self.expire()
 
     def __contains__(self, obj):
         return obj in self.hash
@@ -670,8 +671,8 @@ class Resolver:
     """ The resolver is a central point for storing facts about the universe """
     def __init__(self):
         self.urn = {}
-        self.read_cache = Store()
-        self.write_cache = Store()
+        self.read_cache = Store(50)
+        self.write_cache = Store(50)
         self.clear_hooks()
         self.closed = {}
 
@@ -973,7 +974,6 @@ class ImageWorker(threading.Thread):
         while self.buffer.tell() < self.buffer.len:
             data = self.buffer.read(self.chunk_size)
             if self.compression > 0:
-                print "compressing %s" % self.compression
                 cdata = zlib.compress(data, self.compression)
             else:
                 cdata = data
@@ -1135,8 +1135,9 @@ class Image(FileLikeObject):
             fd = oracle.open("%s.idx" % bevy_urn, 'r')
             try:
                 data = fd.get_data()
-                offset, length = struct.unpack(
+                offset, offset_end = struct.unpack(
                     "<LL", data[4 * chunk_in_bevy:4 * chunk_in_bevy + 8])
+                length = offset_end - offset
             finally:
                 oracle.cache_return(fd)
 
@@ -1152,7 +1153,8 @@ class Image(FileLikeObject):
             
             self.chunk_cache.add(chunk_id, chunk)
             
-        return chunk[chuck_offset: chuck_offset + available_to_read]
+        data = chunk[chuck_offset: chuck_offset + available_to_read]
+        return data
         
     def read(self, length=None):        
         if length is None:
@@ -2023,7 +2025,9 @@ try:
                 ## Try to get our master key
                 self.master_key = oracle.resolve(urn, AFF4_VOLATILE_KEY)
                 self.blocksize = parse_int(oracle.resolve(urn, AFF4_CRYPTO_BLOCKSIZE)) or \
-                                 4096
+                                 4 * 1024
+                oracle.set(urn, AFF4_CRYPTO_BLOCKSIZE, self.blocksize)
+                
                 self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                               Raise("You must set a target for an encrypted stream")
 
@@ -2072,9 +2076,11 @@ try:
                 decrypted = self.decrypt_block(
                     cdata, self.master_key,
                     iv)
+
+                result = decrypted[block_offset:block_offset+available_to_read]
                 
-                self.readptr += available_to_read
-                return decrypted[block_offset:block_offset+available_to_read]
+                self.readptr += len(result)
+                return result
             finally:
                 oracle.cache_return(fd)
                 
@@ -2267,7 +2273,8 @@ class AFF4Image(FileLikeObject):
         data = fd.read(length)
         self.readptr += len(data)        
         oracle.cache_return(fd)
-        
+
+        self.readptr = min(self.readptr, self.size)
         return data
     
     def close(self):
