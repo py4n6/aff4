@@ -110,6 +110,7 @@ AFF4_CRYPTO_NAMESPACE           = NAMESPACE + "crypto:"
 ## passphrase and salt. Iteration count is the fortification.
 AFF4_CRYPTO_FORTIFICATION_COUNT = AFF4_CRYPTO_NAMESPACE + "fortification"
 AFF4_CRYPTO_IV       = AFF4_CRYPTO_NAMESPACE + "iv"
+AFF4_CRYPTO_RSA      = AFF4_CRYPTO_NAMESPACE + "rsa"
 
 ## This is the image master key encrypted using the intermediate key
 AFF4_CRYPTO_PASSPHRASE_KEY      = AFF4_CRYPTO_NAMESPACE + "passphrase_key"
@@ -712,6 +713,11 @@ class Resolver:
             return self[uri][attribute]
         except KeyError:
             return NoneObject("Unable to resolve uri")
+
+    def search_attribute(self, attribute):
+        for urn in self.urn.keys():
+            for value in self.resolve_list(urn, attribute):
+                yield urn, value
         
     def create(self, class_reference):
         return class_reference(None, 'w')
@@ -1668,7 +1674,7 @@ class Map(FileLikeObject):
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
 
 try:
-    from M2Crypto import Rand, X509, EVP
+    from M2Crypto import Rand, X509, EVP, m2, RSA
     import M2Crypto
 
     class Identity(AFFObject):
@@ -1683,13 +1689,19 @@ try:
             self.resolver = Resolver()
             
             if urn and not self.x509:
+                ## Check to ensure that the oracle doesnt already have
+                ## this Identity (there can only be one identity with this
+                ## fingerprint active at once).
+                if oracle.resolve(self.urn, AFF4_TYPE):
+                    Raise("Identity %s already exists" % self.urn)
+
                 ## Load the cert from the identity object
                 fd = oracle.open(urn + "/cert.pem", 'r')
                 try:
                     self.x509 = X509.load_cert_string(fd.read())
                 finally:
                     oracle.cache_return(fd)
-                    
+                
             AFFObject.__init__(self, urn, mode)
 
         def load_certificate(self, certificate_urn):
@@ -1712,7 +1724,6 @@ try:
 
             ## We set our urn from the certificate fingerprint
             self.urn = "%s/%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
-
             oracle.set(self.urn, AFF4_TYPE, AFF4_IDENTITY)
 
             ## Register an add hook with the oracle
@@ -1780,6 +1791,56 @@ try:
                 else:
                     self.resolver.parse_properties(statement_data)
 
+        def load_encryption_keys(self):
+            """ Search through all the encryption keys and load them.
+
+            Note that keys are normally stored inside volumes, so this
+            function should be called for each identity when a volume
+            is loaded.
+            """
+            for encrypted_urn in oracle.resolve_list(self.urn, AFF4_CRYPTO_RSA):
+                if not oracle.resolve(encrypted_urn, AFF4_VOLATILE_KEY):
+                    if not self.pkey:
+                        DEBUG(_WARNING, "Unable to load encryption keys since "
+                              "private key is missing - do you need to specify it?")
+                        Raise("Private key missing")
+                    
+                    ## Key is not present - we need to derive it
+                    print "Will load key for %s" % encrypted_urn
+                    fd = oracle.open("%s/%s" % (self.urn,encrypted_urn),'r')
+                    try:
+                        encrypted_key = fd.get_data()
+                    finally: oracle.cache_return(fd)
+
+                    key = m2.rsa_private_decrypt(
+                        self.pkey.get_rsa().rsa, encrypted_key,
+                        RSA.pkcs1_padding)
+
+                    oracle.set(encrypted_urn, AFF4_VOLATILE_KEY, key)
+
+        def save_encryption_keys(self):
+            volume_urn = oracle.resolve(self.urn, AFF4_STORED) 
+            volume = oracle.open(volume_urn, 'w')
+            try:
+                ## Encrypt all keys using the public key - this will
+                ## allow the private key to unlock them
+                for uri, key in oracle.search_attribute(AFF4_VOLATILE_KEY):
+                    print "Exporting keys for %s" % uri
+                    encrypted_key = m2.rsa_public_encrypt(
+                        self.x509.get_pubkey().get_rsa().rsa, key, RSA.pkcs1_padding)
+                    key_name = "%s/%s" % (self.urn, uri)
+                    volume.writestr(key_name,
+                                    encrypted_key)
+                    oracle.set(self.urn, AFF4_CRYPTO_RSA, uri)
+                    
+                volume.writestr(fully_qualified_name("properties", self.urn),
+                                oracle.export(self.urn))
+
+                ## Ensure that the volume knows it has an identity
+                oracle.set(volume_urn, AFF4_IDENTITY_STORED, self.urn)
+            finally:
+                oracle.cache_return(volume)
+
         def close(self):
             if not self.pkey: return
             
@@ -1805,15 +1866,15 @@ try:
 
                 ## Make sure to store the certificate in the volume
                 cert_urn = fully_qualified_name("cert.pem", self.urn)
-                cert = oracle.open(cert_urn, 'r')
-                if cert: oracle.cache_return(cert)
-                else:
+                try:
+                    cert = oracle.open(cert_urn, 'r')
+                    oracle.cache_return(cert)
+                except RuntimeError:
                     text = self.x509.as_text() + self.x509.as_pem()
                     volume.writestr(cert_urn, text)
 
                 ## Ensure that the volume knows it has an identity
                 oracle.set(volume_urn, AFF4_IDENTITY_STORED, self.urn)
-                
             finally:
                 oracle.cache_return(volume)
 
@@ -1838,24 +1899,27 @@ try:
             This key is derived accroding to rfc2898.
             """
             round_count = parse_int(oracle.resolve(self.urn,
-                                                   AFF4_CRYPTO_FORTIFICATION_COUNT)) or \
-                          struct.unpack("L", Rand.rand_bytes(struct.calcsize("L")))[0] & 0xFFFF
+                                                   AFF4_CRYPTO_FORTIFICATION_COUNT))
+            if not round_count:
+                if self.mode == 'r':
+                    Raise("Object not encrypted using passphrase")
+                else:
+                    round_count = struct.unpack("L", Rand.rand_bytes(
+                        struct.calcsize("L")))[0] & 0xFFFF
+                    
             self.iv = oracle.resolve(self.urn, AFF4_CRYPTO_IV).decode("base64") or \
                       Rand.rand_bytes(16)
             password = oracle.resolve(GLOBAL, AFF4_VOLATILE_PASSPHRASE) or \
                        M2Crypto.util.passphrase_callback(1)
 
             ## Update the crypto material
-            oracle.set(self.urn, AFF4_CRYPTO_FORTIFICATION_COUNT, round_count)
-            oracle.set(self.urn, AFF4_CRYPTO_IV, b64_encode(self.iv))
-            oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, password)
+            if password:
+                oracle.set(self.urn, AFF4_CRYPTO_FORTIFICATION_COUNT, round_count)
+                oracle.set(self.urn, AFF4_CRYPTO_IV, b64_encode(self.iv))
+                oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, password)
+                return EVP.pbkdf2(password, self.iv, round_count, key_size)
 
-            if not password: Raise("No password provided for encrypted stream")
-
-            return EVP.pbkdf2(password, self.iv, round_count, key_size)
-
-        def save_aes_key(self):
-            """ Saves the aes key in the resolver """
+            #else: Raise("No password provided for encrypted stream")
 
         def encrypt_block(self, data, key, iv, mode=1):
             """ Returns data encrypted by the master image key and IV """
@@ -1877,15 +1941,16 @@ try:
             if not passphrase_key:
                 ## Make a new master key
                 self.master_key = Rand.rand_bytes(32)
-                ## Use the intermediate_key to encrypt the master key
-                passphrase_key = self.encrypt_block(self.master_key,
-                                                    intermediate_key, self.iv)
+                if intermediate_key:
+                    ## Use the intermediate_key to encrypt the master key
+                    passphrase_key = self.encrypt_block(self.master_key,
+                                                        intermediate_key, self.iv)
                 
-                nonce = self.encrypt_block(self.iv, self.master_key, self.iv)
+                    nonce = self.encrypt_block(self.iv, self.master_key, self.iv)
 
-                ## Store this in the resolver
-                oracle.set(self.urn, AFF4_CRYPTO_PASSPHRASE_KEY, b64_encode(passphrase_key))
-                oracle.set(self.urn, AFF4_CRYPTO_NONCE, b64_encode(nonce))
+                    ## Store this in the resolver
+                    oracle.set(self.urn, AFF4_CRYPTO_PASSPHRASE_KEY, b64_encode(passphrase_key))
+                    oracle.set(self.urn, AFF4_CRYPTO_NONCE, b64_encode(nonce))
                 
             else:
                 ## we need to derive the master key from the passphrase_key
@@ -1899,6 +1964,7 @@ try:
                     ## check to make sure the key is actually right
                     nonce = nonce.decode("base64")
                     if self.encrypt_block(self.iv, self.master_key, self.iv)!=nonce:
+                        DEBUG(_WARNING, "Passphrase incorrect")
                         Raise("Passphrase incorrect")
                     
             ## Since this is never written we dont need to encode it
@@ -1949,13 +2015,13 @@ try:
                 oracle.add(container, AFF4_CONTAINS, self.urn)
 
                 ## Try to get our master key
-                self.master = oracle.resolve(urn, AFF4_VOLATILE_KEY)
+                self.master_key = oracle.resolve(urn, AFF4_VOLATILE_KEY)
                 self.blocksize = parse_int(oracle.resolve(urn, AFF4_CRYPTO_BLOCKSIZE)) or \
                                  4096
                 self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                               Raise("You must set a target for an encrypted stream")
 
-                if not self.master:
+                if not self.master_key:
                     self.load_aes_key()
 
                 self.buffer = ''
@@ -2051,7 +2117,6 @@ class ErrorStream(FileLikeObject):
 
         raise IOError("Invalid read of %s" % self.urn)
         
-
 ## This is a dispatch table for all handlers of a URL method. The
 ## format is scheme, URI prefix, handler class.
 DISPATCH = [
@@ -2071,7 +2136,6 @@ DISPATCH = [
 
 ### Following is the high level API. See specific documentation on using these.
 
-
 def load_volume(filename, autoload=True):
     """ Loads the volume in filename into the resolver.
 
@@ -2088,6 +2152,15 @@ def load_volume(filename, autoload=True):
         volume.load_from(filename)
     except:
         return []
+
+    ## Load identities from this volume:
+    for identity_urn in oracle.resolve_list(volume.urn, AFF4_IDENTITY_STORED):
+        identity = oracle.open(identity_urn, 'w')
+        try:
+            identity.load_encryption_keys()
+        except RuntimeError: pass
+        
+        oracle.cache_return(identity)
     
     oracle.cache_return(volume)
 
@@ -2096,7 +2169,6 @@ def load_volume(filename, autoload=True):
     ## Do we need to auto load things?
     if autoload or oracle.resolve(GLOBAL, CONFIG_AUTOLOAD):
         volumes = oracle.resolve_list(volume.urn, AFF4_AUTOLOAD)
-#        oracle.delete(volume.urn, AFF4_AUTOLOAD)
         for v in volumes:
             ## Have we done this volume before (stop circular autoloads)?
             if not oracle.resolve(v, AFF4_CONTAINS):
@@ -2135,19 +2207,23 @@ def load_identity(key, cert):
     data, or decrypt Encrypted streams, you will also need a private
     key.
     """
-    if key:
-        try:
-            if cert:
-                result = Identity(mode='w')
-                result.load_priv_key(key)
-                result.load_certificate(cert)
-                result.finish()
-                
-                return result
-            else:
-                raise RuntimeError("You must provide the certificate as well for signing")
-        except RuntimeError,e:
-            print e
+    try:
+        result = Identity(mode='w')
+    except RuntimeError:
+        result = oracle.open(result.urn, 'w')    
+
+    try:
+        if key:
+            result.load_priv_key(key)
+
+        if cert:
+            result.load_certificate(cert)
+
+        result.finish()
+    finally:
+        oracle.cache_return(result)
+    
+    return result
 
 class AFF4Image:
     """ This is the object obtained from CreateNewVolume.new_image().
@@ -2205,6 +2281,7 @@ class AFF4Image:
                 link = Link(link_urn)
                 oracle.set(link.urn, AFF4_STORED, self.volume.volume_urn)
                 oracle.set(link.urn, AFF4_TARGET, self.image_urn)
+                oracle.set(link.urn, AFF4_HIGHLIGHT, _DETAILED)
                 link.finish()
                 link.close()
 
@@ -2337,8 +2414,10 @@ class CreateNewVolume:
     def add_identity(self, key, cert):
         identity = load_identity(key,cert)
         if identity:
-            self.identities.append(identity.urn)
-            oracle.cache_return(identity)
+            try:
+                self.identities.append(identity.urn)
+            finally:
+                oracle.cache_return(identity)
         
     def new_image(self, link=None, sparse=False, compression=True):
         """ Call this to obtain a new AFF4Image object. Remember to call
@@ -2379,9 +2458,16 @@ class CreateNewVolume:
     def sync_identities(self):
         ## Write off any Identities we may have
         for i in self.identities:
-            oracle.set(i, AFF4_STORED, self.volume_urn)
-            identity = oracle.open(i, 'w')
+            identity = oracle.open(i, 'w')                            
             try:
+                if self.encrypted:
+                    ## Encrypted streams need some stuff in the container
+                    ## volume (like keys)
+                    oracle.set(identity.urn, AFF4_STORED, self.container_volume_urn)
+                    identity.save_encryption_keys()
+                else:
+                    oracle.set(identity.urn, AFF4_STORED, self.volume_urn)
+                    
                 identity.close()
             finally:
                 oracle.cache_return(identity)

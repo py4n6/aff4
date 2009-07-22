@@ -1,5 +1,4 @@
 #!/usr/bin/python
-
 from aff4 import *
 import optparse
 import sys
@@ -86,12 +85,12 @@ oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
 if options.password:
     oracle.set(GLOBAL, AFF4_VOLATILE_PASSPHRASE, options.password)
 
+## Prepare an identity for signing
+IDENTITY = load_identity(options.key, options.cert)
+
 VOLUMES = []
 for v in options.load:
     VOLUMES.extend(load_volume(v))
-
-## Prepare an identity for signing
-IDENTITY = load_identity(options.key, options.cert)
 
 ## Use the high level interface to get what we want:
 if options.image:
