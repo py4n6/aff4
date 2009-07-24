@@ -213,6 +213,14 @@ def parse_int(string):
 
     return NoneObject("Unknown suffix '%r'" % suffix)
 
+def read_with_default(uri, attribute, default):
+    result = oracle.resolve(uri, attribute)
+    if result is NoneObject:
+        result = default
+        oracle.set(uri, attribute, default)
+
+    return result
+
 class NoneObject(object):
     """ A magical object which is like None but swallows bad
     dereferences, __getattribute__, iterators etc to return itself.
@@ -371,7 +379,7 @@ class FileLikeObject(AFFObject):
 
     def __init__(self, urn=None, mode='r'):
         AFFObject.__init__(self, urn, mode)
-        self.size = parse_int(oracle.resolve(self.urn, AFF4_SIZE)) or 0
+        self.size = parse_int(read_with_default(self.urn, AFF4_SIZE, 0))
 
     def seek(self, offset, whence=0):
         if whence == 0:
@@ -621,7 +629,21 @@ class URNObject:
     def __init__(self, urn):
         self.properties = {}
         self.urn = urn
-        self.lock = threading.Lock()
+        self.read_lock = threading.Lock()
+        self.write_lock = threading.Lock()
+
+    def lock(self, mode='r'):
+        if mode=='r':
+            self.read_lock.acquire()
+        else:
+            self.write_lock.acquire()
+
+    def release(self, mode='r'):
+        if mode=='r':
+            self.read_lock.release()
+        else:
+            self.write_lock.release()
+        
 
     def __str__(self):
         result = ''
@@ -740,7 +762,7 @@ class Resolver:
         finally:
             ## Release the lock now
             try:
-                self[obj.urn].lock.release()
+                self[obj.urn].release(obj.mode)
                 DEBUG(_DEBUG,"Released %s", obj.urn)
             except: pass
 
@@ -791,7 +813,7 @@ class Resolver:
                     break
 
         if result:
-            self.lock(uri)
+            self.lock(uri, mode)
             
             ## Try to seek it to the start
             try:
@@ -803,7 +825,7 @@ class Resolver:
         ## We dont know how to open it.
         return NoneObject("Dont know how to handle URN %s. (type %s)" % (uri, type))
 
-    def lock(self, uri):
+    def lock(self, uri, mode='r'):
         ## Obtain a lock on the object
         try:
             obj = self[uri]
@@ -811,7 +833,7 @@ class Resolver:
             obj = self[uri] = URNObject(uri)
 
         DEBUG(_DEBUG, "Acquiring %s ",uri)
-        obj.lock.acquire()
+        obj.lock(mode)
         DEBUG(_DEBUG, "Acquired %s", uri)
 
     def unlock(self, uri):
@@ -935,7 +957,32 @@ class ZipFileStream(FileLikeObject):
 
             return result
         elif self.compression == ZIP_DEFLATED:
-            Raise("ZIP_DEFLATED not implemented")
+            ## We assume that the compressed segment is small enough
+            ## to do all this in memory. This is the case with AFF4
+            ## which only uses compressed segments for small files,
+            ## but may not the case for logical file images.
+            data = self.get_data()
+            result = data[self.readptr:self.readptr + length]
+            self.readptr += len(result)
+
+            return result
+
+    def get_data(self):
+        if not self.data:
+            fd = oracle.open(self.backing_fd,'r')
+            try:
+                fd.seek(self.base_offset)
+                cdata = fd.read(self.compress_size)
+            finally:
+                oracle.cache_return(fd)
+
+            if self.compression == ZIP_DEFLATED:
+                dc = zlib.decompressobj(-15)
+                self.data = dc.decompress(cdata) + dc.flush()
+            else:
+                self.data = cdata
+                
+        return self.data
 
 class ImageWorker(threading.Thread):
     """ This is a worker responsible for creating a full bevy """
@@ -1109,7 +1156,8 @@ class Image(FileLikeObject):
         volume = oracle.open(container,'w')
         try:
             volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn))
+                            oracle.export(self.urn),
+                            compress_type = ZIP_DEFLATED)
         finally:
             oracle.cache_return(volume)
 
@@ -1258,7 +1306,8 @@ class ZipVolume(AFFVolume):
         ## Is this file dirty?
         if oracle.resolve(self.urn, AFF4_VOLATILE_DIRTY):
             ## Store volume properties
-            self.writestr("properties", oracle.export(self.urn))
+            self.writestr("properties", oracle.export(self.urn),
+                          compress_type = ZIP_DEFLATED)
 
             ## Where are we stored?
             stored = oracle.resolve(self.urn, AFF4_STORED)
@@ -1379,7 +1428,10 @@ class ZipVolume(AFFVolume):
             backing_fd.close()
             
             oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
-            oracle.close(self.urn)
+            #oracle.close(self.urn)
+            ## We allow the object to persist in the resolver after we
+            ## closed it - could be useful if we need to read it now
+            oracle.cache_return(self)
             
     def load_from(self, filename):
         """ Tries to open the filename as a ZipVolume """
@@ -1463,7 +1515,9 @@ class Link(AFFObject):
         oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
         self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                       Raise("Link objects must have a target attribute")
-
+        self.size = oracle.resolve(self.target, AFF4_SIZE) or 0
+        oracle.set(self.urn, AFF4_SIZE, self.size)
+        
         return AFFObject.finish(self)
 
     def close(self):
@@ -1472,7 +1526,8 @@ class Link(AFFObject):
         volume = oracle.open(stored, 'w')
         try:
             volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn))
+                            oracle.export(self.urn),
+                            compress_type = ZIP_DEFLATED)
         finally:
             oracle.cache_return(volume)
 
@@ -1630,6 +1685,14 @@ class Map(FileLikeObject):
         finally:
             oracle.cache_return(backing_fd)
 
+    def write_from(self, target_urn, target_offset, target_length):
+        """ Adds the next chunk from this target_urn. This advances
+        the readptr.
+        """
+        self.add(self.readptr, target_offset, target_urn)
+        self.readptr += target_length
+        self.size = max(self.size, self.readptr)
+        
     def add(self, image_offset, target_offset, target_urn):
         ## FIXME: This should be made more efficient by testing the
         ## array index of the previous write rather than searching it
@@ -1671,10 +1734,11 @@ class Map(FileLikeObject):
         volume = oracle.open(stored, 'w')
         try:
             volume.writestr(fully_qualified_name("map", self.urn),
-                            fd.getvalue())
+                            fd.getvalue(), compress_type = ZIP_DEFLATED)
             
             volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn))
+                            oracle.export(self.urn),
+                            compress_type = ZIP_DEFLATED)
         finally:
             oracle.cache_return(volume)
 
@@ -1842,7 +1906,8 @@ try:
                     oracle.set(self.urn, AFF4_CRYPTO_RSA, uri)
                     
                 volume.writestr(fully_qualified_name("properties", self.urn),
-                                oracle.export(self.urn))
+                                oracle.export(self.urn),
+                                compress_type = ZIP_DEFLATED)
 
                 ## Ensure that the volume knows it has an identity
                 oracle.set(volume_urn, AFF4_IDENTITY_STORED, self.urn)
@@ -1870,7 +1935,8 @@ try:
                 volume.writestr(statement_urn, statement)
                 volume.writestr(statement_urn + ".sig", signature)
                 volume.writestr(fully_qualified_name("properties", self.urn),
-                                oracle.export(self.urn))
+                                oracle.export(self.urn),
+                                compress_type = ZIP_DEFLATED)
 
                 ## Make sure to store the certificate in the volume
                 cert_urn = fully_qualified_name("cert.pem", self.urn)
@@ -2009,7 +2075,8 @@ try:
             volume = oracle.open(stored, 'w')
             try:
                 volume.writestr(fully_qualified_name("properties", self.urn),
-                                oracle.export(self.urn))
+                                oracle.export(self.urn),
+                                compress_type = ZIP_DEFLATED)
             finally:
                 oracle.cache_return(volume)
 

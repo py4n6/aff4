@@ -3,6 +3,7 @@
 from aff4 import *
 import stat
 from errno import *
+import pdb
 
 # pull in some spaghetti to make this stuff work without fuse-py being installed
 try:
@@ -49,6 +50,7 @@ class AFF4Fuse(Fuse):
 
         ## Is this a directory?
         sub_dir = self.list_dir(path)
+        print "sub_dir of %s: %s" %( path,sub_dir)
         if sub_dir:
             s.st_mode = 040755
             return s
@@ -74,12 +76,15 @@ class AFF4Fuse(Fuse):
         return True
 
     display_types = [ relative_name(AFF4_MAP, NAMESPACE),
+                      relative_name(AFF4_LINK, NAMESPACE),
                       relative_name(AFF4_IMAGE, NAMESPACE)]
 
     def list_dir(self, path):
-        path = path[1:]
+        if path.startswith("/"):
+            path = path[1:]
         urns = oracle.urn.keys()
         result = set()
+        print "Will list path %s" % path
         for e in urns:
             if not e: continue
             global VOLUMES
@@ -88,7 +93,7 @@ class AFF4Fuse(Fuse):
                 if e.startswith(v):
                     virtual_path = relative_name(e, v)
                     break
-            
+
             if virtual_path.startswith(path):
                 ## Only show some streams
                 type = oracle.resolve(e, AFF4_TYPE)
@@ -201,10 +206,12 @@ class AFF4Fuse(Fuse):
             oracle.cache_return(obj)
 
         def read(self, length, offset):
+            print length, offset,
             fd = oracle.open(self.urn, 'r')
             try:
                 fd.seek(offset)
                 data = fd.read(length)
+                print len(data)
                 return data
             finally:
                 oracle.cache_return(fd)

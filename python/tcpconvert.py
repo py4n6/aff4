@@ -1,5 +1,11 @@
 from optparse import OptionParser
-import reassembler
+import sys
+try:
+    import reassembler
+except ImportError:
+    print """You need to have PyFlag installed from http://www.pyflag.net/ for this to work. The reassembler module must also be on the python class path (do you need to run pyflag_launch to set the class path?)"""
+    sys.exit(1)
+    
 import pypcap
 from aff4 import *
 
