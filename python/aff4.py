@@ -2307,11 +2307,9 @@ def load_identity(key, cert):
     data, or decrypt Encrypted streams, you will also need a private
     key.
     """
-    try:
-        result = Identity(mode='w')
-    except RuntimeError:
-        result = oracle.open(result.urn, 'w')    
-
+    if not cert: return
+    result = Identity(mode='w')
+    urn = result.urn
     try:
         if key:
             result.load_priv_key(key)
