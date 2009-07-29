@@ -18,12 +18,28 @@ low level API alone.
 import uuid, posixpath, hashlib, base64, bisect
 import urllib, os, re, struct, zlib, time, sys
 import StringIO
-from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
 import threading, mutex
 import pdb
 
-ZIP_FILECOUNT_LIMIT = 1<<16
+ZIP64_LIMIT = (1<<31) - 1
+ZIP_FILECOUNT_LIMIT = 1 << 16
+ZIP_STORED = 0
+ZIP_DEFLATED = 8
+
+structCentralDir = "<4s4B4HL2L5H2L"
+stringCentralDir = "PK\001\002"
+structEndArchive64 = "<4sQ2H2L4Q"
+stringEndArchive64 = "PK\x06\x06"
+structEndArchive = "<4s4H2LH"
+stringEndArchive = "PK\005\006"
+structFileHeader = "<4s2B4HL2L2H"
+stringFileHeader = "PK\003\004"
 sizeFileHeader = struct.calcsize(structFileHeader)
+structEndArchive64Locator = "<4sLQL"
+stringEndArchive64Locator = "PK\x06\x07"
+sizeEndCentDir64Locator = struct.calcsize(structEndArchive64Locator)
+
+#from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
 
 ## namespaces
 NAMESPACE = "aff4:" ## AFF4 namespace
@@ -697,12 +713,13 @@ class Resolver:
         self.write_cache = Store(50)
         self.clear_hooks()
         self.closed = {}
+        self.urn_obj_class = URNObject
 
     def __getitem__(self, urn):
         try:
             obj = self.urn[urn]
         except KeyError:
-            obj = URNObject(urn)
+            obj = self.urn_obj_class(urn)
 
         self.urn[urn] = obj
         return obj
@@ -775,7 +792,8 @@ class Resolver:
         """
         result = None
 
-        if uri.startswith(FQN) and uri not in self.urn:          
+        if uri.startswith(FQN) and \
+               not self.resolve_list(uri, AFF4_TYPE):
             Raise("Trying to open a non existant or already closed object %s" % uri)
 
         ## If the uri is not complete here we guess its a file://
@@ -830,7 +848,7 @@ class Resolver:
         try:
             obj = self[uri]
         except KeyError:
-            obj = self[uri] = URNObject(uri)
+            obj = self[uri] = self.urn_obj_class(uri)
 
         DEBUG(_DEBUG, "Acquiring %s ",uri)
         obj.lock(mode)
@@ -841,7 +859,7 @@ class Resolver:
         try:
             obj = self[uri]
         except KeyError:
-            obj = self[uri] = URNObject(uri)
+            obj = self[uri] = self.urn_obj_class(uri)
 
         DEBUG(_DEBUG, "Releasing %s ",uri)
         obj.lock.release()
@@ -934,8 +952,8 @@ class ZipFileStream(FileLikeObject):
         self.backing_fd = oracle.resolve(self.volume, AFF4_STORED)
 
         ## our base offset
-        self.base_offset = oracle.resolve(self.urn, AFF4_VOLATILE_FILE_OFFSET)
-        self.compression = oracle.resolve(self.urn, AFF4_VOLATILE_COMPRESSION)
+        self.base_offset = parse_int(oracle.resolve(self.urn, AFF4_VOLATILE_FILE_OFFSET))
+        self.compression = parse_int(oracle.resolve(self.urn, AFF4_VOLATILE_COMPRESSION))
         self.compress_size = parse_int(oracle.resolve(self.urn, AFF4_VOLATILE_COMPRESSED_SIZE))
         self.size = parse_int(oracle.resolve(self.urn, AFF4_SIZE))
 
@@ -1084,7 +1102,7 @@ class Image(FileLikeObject):
 
             self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
             self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
-            self.compression = oracle.resolve(self.urn, AFF4_COMPRESSION)
+            self.compression = parse_int(oracle.resolve(self.urn, AFF4_COMPRESSION))
             if self.compression is NoneObject:
                 self.compression = 8
             else:
@@ -1237,7 +1255,8 @@ class ZipVolume(AFFVolume):
             if self.urn != urn:
                 oracle.delete(urn, AFF4_STORED)
                 oracle.set(self.urn, AFF4_STORED, stored)
-            
+
+            oracle.set(stored, AFF4_CONTAINS, self.urn)
             oracle.set(self.urn, AFF4_TYPE, AFF4_ZIP_VOLUME)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         else:
@@ -1318,7 +1337,7 @@ class ZipVolume(AFFVolume):
             ## Get all the files we own
             count = 0
             extra = []
-            pos1 = oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET)
+            pos1 = parse_int(oracle.resolve(self.urn, AFF4_DIRECTORY_OFFSET))
             backing_fd.seek(pos1)
             
             for subject in oracle.resolve_list(self.urn, AFF4_CONTAINS):
@@ -1328,12 +1347,12 @@ class ZipVolume(AFFVolume):
                 filename = escape_filename(relative_name(subject, self.urn))
                 zinfo = zipfile.ZipInfo(filename)
 
-                zinfo.header_offset = oracle.resolve(subject, AFF4_VOLATILE_HEADER_OFFSET)
-                zinfo.compress_size = oracle.resolve(subject, AFF4_VOLATILE_COMPRESSED_SIZE)
-                zinfo.file_size = oracle.resolve(subject, AFF4_SIZE)
-                zinfo.compress_type = oracle.resolve(subject, AFF4_VOLATILE_COMPRESSION)
-                zinfo.CRC = oracle.resolve(subject, AFF4_VOLATILE_CRC)
-                zinfo.date_time = oracle.resolve(subject, AFF4_TIMESTAMP) or \
+                zinfo.header_offset = parse_int(oracle.resolve(subject, AFF4_VOLATILE_HEADER_OFFSET))
+                zinfo.compress_size = parse_int(oracle.resolve(subject, AFF4_VOLATILE_COMPRESSED_SIZE))
+                zinfo.file_size = parse_int(oracle.resolve(subject, AFF4_SIZE))
+                zinfo.compress_type = parse_int(oracle.resolve(subject, AFF4_VOLATILE_COMPRESSION))
+                zinfo.CRC = parse_int(oracle.resolve(subject, AFF4_VOLATILE_CRC))
+                zinfo.date_time = parse_int(oracle.resolve(subject, AFF4_TIMESTAMP)) or \
                                   int(time.time())
                 
                 count = count + 1
@@ -1440,6 +1459,8 @@ class ZipVolume(AFFVolume):
         ## We parse out the CD of each file and build an index
         try:
             zf = zipfile.ZipFile(fileobj, mode='r', allowZip64=True)
+        except:
+            zf = zipfile.ZipFile(fileobj, mode='r')
         finally:
             oracle.cache_return(fileobj)
         
@@ -1515,7 +1536,7 @@ class Link(AFFObject):
         oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
         self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                       Raise("Link objects must have a target attribute")
-        self.size = oracle.resolve(self.target, AFF4_SIZE) or 0
+        self.size = parse_int(oracle.resolve(self.target, AFF4_SIZE)) or 0
         oracle.set(self.urn, AFF4_SIZE, self.size)
         
         return AFFObject.finish(self)

@@ -83,9 +83,7 @@ if not options.external:
         def Callback(mode, packet, connection):
             if mode == 'est':
                 ## Now do the reverse connection
-                if 'l' not in connection:
-                    connection['l'] = 0
-                    connection['reverse']['l'] = 0
+                if 'map' not in connection:
                     ip = packet.find_type("IP")
                     ## We can only get tcp or udp packets here
                     try:
@@ -93,18 +91,30 @@ if not options.external:
                     except AttributeError:
                         tcp = packet.find_type("UDP")
 
+                    base_urn = "%s/%s-%s/%s-%s/" % (
+                        volume_urn,
+                        ip.source_addr, ip.dest_addr,
+                        tcp.source, tcp.dest)
+
+                    combined_stream = Map(None, 'w')
+                    connection['reverse']['combined'] = combined_stream
+                    connection['combined'] = combined_stream
+                    combined_stream.urn = base_urn + "combined"
+                    
+                    oracle.set(combined_stream.urn, AFF4_STORED, volume_urn)
+                    oracle.set(combined_stream.urn, AFF4_TARGET, image_urn)
+                    combined_stream.finish()
+                    
                     map_stream = connection['map'] = Map(None, 'w')
-                    map_stream.urn = "%s-%s/%s-%s/forward" % (ip.source_addr, ip.dest_addr,
-                                                               tcp.source, tcp.dest)
-                
+                    map_stream.urn = base_urn + "forward"
+                    
                     oracle.set(map_stream.urn, AFF4_STORED, volume_urn)
                     oracle.set(map_stream.urn, AFF4_TARGET, image_urn)
                     map_stream.finish()
 
                     connection['reverse']['map'] = map_stream = Map(None, 'w')
-                    map_stream.urn = "%s-%s/%s-%s/reverse" % (ip.source_addr, ip.dest_addr,
-                                                               tcp.source, tcp.dest)
-                
+                    map_stream.urn = base_urn + "reverse"
+
                     oracle.set(map_stream.urn, AFF4_STORED, volume_urn)
                     oracle.set(map_stream.urn, AFF4_TARGET, image_urn)
                     map_stream.finish()
@@ -115,20 +125,22 @@ if not options.external:
                 except AttributeError:
                     tcp = packet.find_type("UDP")
 
-                connection['map'].add(connection['l'], packet.offset + tcp.data_offset,
-                                      "@")
-                connection['l'] += len(tcp.data)
+                length = len(tcp.data)
+                connection['map'].write_from("@", packet.offset + tcp.data_offset, length)
+                connection['combined'].write_from("@", packet.offset + tcp.data_offset,
+                                                  length)
 
             elif mode == 'destroy':
-                if connection['l'] > 0 or connection['reverse']['l'] > 0:
+                if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
                     map_stream = connection['map']
-                    map_stream.size = connection['l']
                     map_stream.close()
 
-                    map_stream = connection['reverse']['map']
-                    oracle.set(map_stream.urn, AFF4_SIZE, connection['reverse']['l'])
-                    map_stream.close()
-                
+                    r_map_stream = connection['reverse']['map']
+                    r_map_stream.close()
+
+                    combined_stream = connection['combined']
+                    combined_stream.close()
+
         ## Create a tcp reassembler
         processor = reassembler.Reassembler(packet_callback = Callback)
 
