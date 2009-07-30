@@ -55,11 +55,6 @@ def DEBUG(verb, fmt, *args):
     pass
 
 import urllib
-def escape_filename(filename):
-    urllib.quote(filename)
-    
-def unescape_filename(filename):
-    urllib.unquote(filename)
 
 def fully_qualified_name(filename, context_name):
     if not filename.startswith(FQN):
@@ -313,7 +308,7 @@ def escape_filename(filename):
     filenames, so we need to escape them whenever we store segments in
     files.
     """
-    return urllib.quote(filename)
+    return urllib.quote(filename, safe="/\\")
 
 def unescape_filename(filename):
     return urllib.unquote(filename)
