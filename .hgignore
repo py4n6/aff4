@@ -31,3 +31,4 @@ src/lib/evtool
 src/lib/sgzip
 src/mailtools/readpst
 src/regtools/reglookup
+*.Tpo

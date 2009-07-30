@@ -1,3 +1,3 @@
-This is the pure python port of AFF4. Its useful to have a pure python port of AFF4 because its portable, simple to add to other python code and pretty fast.
+This is the python implementation of the Advanced Forensic File Format 4 (AFF4).
 
 This is currently work in progress.
