@@ -20,6 +20,7 @@ import urllib, os, re, struct, zlib, time, sys
 import StringIO
 import threading, mutex
 import pdb
+import textwrap, os.path, glob
 
 ZIP64_LIMIT = (1<<31) - 1
 ZIP_FILECOUNT_LIMIT = 1 << 16
@@ -42,6 +43,10 @@ sizeEndCentDir64Locator = struct.calcsize(structEndArchive64Locator)
 #from zipfile import ZIP_STORED, ZIP_DEFLATED, ZIP64_LIMIT, structCentralDir, stringCentralDir, structEndArchive64, stringEndArchive64, structEndArchive, stringEndArchive, structFileHeader
 
 from aff4_attributes import *
+
+## This is a dispatch table for different volume handlers. When a
+## volume is opened, we try each handler in turn.
+VOLUME_DISPATCH = []
 
 ## Some verbosity settings
 _DEBUG = 10
@@ -260,7 +265,26 @@ class AFFObject:
 
     def __str__(self):
         return "<%s: %s instance at 0x%X>" % (self.urn, self.__class__.__name__, hash(self))
-        
+
+    def explain(self):
+        stored = oracle.resolve(self.urn, AFF4_STORED)
+        result = "Stream %s %s:\n   %s" % (
+            self.__class__.__name__,
+            self.urn,
+            "\n   ".join(oracle.export(self.urn).splitlines()))
+
+        result += "\n\n* "
+
+        if stored:
+            ## Now explain the stored URN
+            fd = oracle.open(stored, 'r')
+            try:
+                result += "\n ".join(fd.explain().splitlines())
+            finally:
+                oracle.cache_return(fd)
+
+        return result
+
 
 class AFFVolume(AFFObject):
     """ A Volume simply stores segments """
@@ -1124,8 +1148,10 @@ class Image(FileLikeObject):
 
 class ZipVolume(AFFVolume):
     """ AFF4 Zip Volumes store segments within zip files """
+    type = AFF4_ZIP_VOLUME
     def __init__(self, urn, mode):
         if urn:
+            self.urn = urn
             stored = oracle.resolve(urn, AFF4_STORED) or \
                      Raise("Can not find storage for Volumes %s" % urn)
 
@@ -1139,7 +1165,7 @@ class ZipVolume(AFFVolume):
                 oracle.set(self.urn, AFF4_STORED, stored)
 
             oracle.set(stored, AFF4_CONTAINS, self.urn)
-            oracle.set(self.urn, AFF4_TYPE, AFF4_ZIP_VOLUME)
+            oracle.set(self.urn, AFF4_TYPE, self.type)
             oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
         else:
             AFFObject.__init__(self, urn, mode)
@@ -1397,6 +1423,77 @@ class ZipVolume(AFFVolume):
         ## so we dont need to keep calculating it all the time
         oracle.set(subject, AFF4_VOLATILE_FILE_OFFSET, zinfo.header_offset +
                    sizeFileHeader + len(zinfo.filename))
+
+## Implement an EWF AFF4 Volume
+try:
+    import pyewf
+
+    class EWFVolume(ZipVolume):
+        """ An AFF4 class to handle EWF volumes.
+
+        Based on the pyflag python bindings.
+        """
+        type = AFF4_EWF_VOLUME
+
+        def load_from(self, urn):
+            """ Load volume from the URN """
+            if urn.startswith(FQN):
+                Raise("EWF module only supports storage to real files")
+
+            filename = urn[7:]
+            ## Try to glob the volumes
+            base, ext = os.path.splitext(urn)
+            if not ext.lower().startswith(".e"):
+                Raise("EWF files usually have an extension of .E00")
+
+            files = glob.glob(base + ".[Ee]*")
+            self.handler = pyewf.open(files)
+            ## Now add headers
+            h = self.handler.get_headers()
+
+            ## Try to make a unique volume URN
+            try:
+                self.urn = h["MD5"].encode("hex")
+            except: self.urn = base
+            self.urn = FQN + self.urn
+            
+            oracle.set(self.urn, AFF4_TYPE, AFF4_EWF_VOLUME)
+            oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
+            oracle.set(self.urn, AFF4_STORED, urn)
+            
+            ## The stream URN is based on the volume
+            stream_urn = self.urn + "/stream"
+            oracle.set(self.urn, AFF4_CONTAINS, stream_urn)
+            oracle.set(stream_urn, AFF4_STORED, self.urn)
+            self.handler.seek(0,2)
+            oracle.set(stream_urn, AFF4_SIZE, self.handler.tell())
+            oracle.set(stream_urn, AFF4_TYPE, AFF4_EWF_STREAM)
+            oracle.set(stream_urn, AFF4_INTERFACE, AFF4_STREAM)
+            oracle.set(stream_urn, AFF4_HIGHLIGHT, _DETAILED)
+            
+            for k in h:
+                oracle.set(self.urn, NAMESPACE + "ewf:" + k, h[k])
+
+
+    class EWFStream(FileLikeObject):
+        def read(self, length):
+            volume_urn = oracle.resolve(self.urn, AFF4_STORED)
+            volume = oracle.open(volume_urn, 'r')
+            try:
+                available_to_read = min(self.size - self.readptr, length)
+                volume.handler.seek(self.readptr)
+                
+                return volume.handler.read(available_to_read)
+            finally:
+                oracle.cache_return(volume)
+
+    VOLUME_DISPATCH.append(EWFVolume)
+
+except ImportError:
+    ## Not implemented
+    pass
+
+VOLUME_DISPATCH.append(ZipVolume)
 
 class DirectoryVolume(AFFVolume):
     """ A directory volume is simply a way of storing all segments
@@ -2113,6 +2210,7 @@ DISPATCH = [
     [ 0, AFF4_IDENTITY, Identity],
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     [ 0, AFF4_ERROR_STREAM, ErrorStream],
+    [ 0, AFF4_EWF_STREAM, EWFStream],
     ]
 
 
@@ -2129,10 +2227,17 @@ def load_volume(filename, autoload=True):
     The autoload option is also controlled by the
     GLOBAL:CONFIG_AUTOLOAD attribute.
     """
-    volume = ZipVolume(None, 'r')
-    try:
-        volume.load_from(filename)
-    except Exception,e:
+    ## Try to open the volume using all the handlers we have
+    for handler in VOLUME_DISPATCH:    
+        volume = handler(None, 'r')
+        try:
+            volume.load_from(filename)
+            break
+        except Exception,e:
+            volume = None
+            continue
+
+    if not volume:
         DEBUG(_DEBUG, "Cant load volume %s" % e)
         return []
 

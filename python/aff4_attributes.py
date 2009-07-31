@@ -102,6 +102,8 @@ AFF4_CRYPTO_ALGORITHM_AES_SHA254 = "AES256/SHA256"
 # Volumes:
 AFF4_ZIP_VOLUME       ="zip_volume"
 AFF4_DIRECTORY_VOLUME ="directory"
+AFF4_EWF_VOLUME       ="ewf_volume"
+AFF4_EWF_STREAM       ="ewf_stream"
 
 # Streams:
 AFF4_SEGMENT          ="segment"
