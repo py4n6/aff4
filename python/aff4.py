@@ -1426,7 +1426,7 @@ class ZipVolume(AFFVolume):
 
 ## Implement an EWF AFF4 Volume
 try:
-    import pyewf
+    import ewf
 
     class EWFVolume(ZipVolume):
         """ An AFF4 class to handle EWF volumes.
@@ -1447,13 +1447,13 @@ try:
                 Raise("EWF files usually have an extension of .E00")
 
             files = glob.glob(base + ".[Ee]*")
-            self.handler = pyewf.open(files)
+            self.handler = ewf.ewf_open(files)
             ## Now add headers
             h = self.handler.get_headers()
 
             ## Try to make a unique volume URN
             try:
-                self.urn = h["MD5"].encode("hex")
+                self.urn = h["md5"].encode("hex")
             except: self.urn = base
             self.urn = FQN + self.urn
             
@@ -1465,8 +1465,7 @@ try:
             stream_urn = self.urn + "/stream"
             oracle.set(self.urn, AFF4_CONTAINS, stream_urn)
             oracle.set(stream_urn, AFF4_STORED, self.urn)
-            self.handler.seek(0,2)
-            oracle.set(stream_urn, AFF4_SIZE, self.handler.tell())
+            oracle.set(stream_urn, AFF4_SIZE, self.handler.size)
             oracle.set(stream_urn, AFF4_TYPE, AFF4_EWF_STREAM)
             oracle.set(stream_urn, AFF4_INTERFACE, AFF4_STREAM)
             oracle.set(stream_urn, AFF4_HIGHLIGHT, _DETAILED)
@@ -1474,24 +1473,79 @@ try:
             for k in h:
                 oracle.set(self.urn, NAMESPACE + "ewf:" + k, h[k])
 
-
-    class EWFStream(FileLikeObject):
-        def read(self, length):
-            volume_urn = oracle.resolve(self.urn, AFF4_STORED)
-            volume = oracle.open(volume_urn, 'r')
-            try:
-                available_to_read = min(self.size - self.readptr, length)
-                volume.handler.seek(self.readptr)
-                
-                return volume.handler.read(available_to_read)
-            finally:
-                oracle.cache_return(volume)
-
     VOLUME_DISPATCH.append(EWFVolume)
 
 except ImportError:
     ## Not implemented
     pass
+
+class EWFStream(FileLikeObject):
+    def read(self, length):
+        volume_urn = oracle.resolve(self.urn, AFF4_STORED)
+        volume = oracle.open(volume_urn, 'r')
+        try:
+            available_to_read = min(self.size - self.readptr, length)
+            volume.handler.seek(self.readptr)
+
+            data = volume.handler.read(available_to_read)
+            self.readptr += len(data)
+            return data
+        finally:
+            oracle.cache_return(volume)
+
+## Implement an AFF1 backward compatible AFF4 Volume
+try:
+    import pyaff
+
+    class AFF1Volume(ZipVolume):
+        """ An AFF4 class to handle EWF volumes.
+
+        Based on the pyflag python bindings.
+        """
+        type = AFF4_AFF1_VOLUME
+
+        def load_from(self, urn):
+            """ Load volume from the URN """
+            if urn.startswith(FQN):
+                Raise("EWF module only supports storage to real files")
+
+            self.handler = pyaff.aff_open(urn)
+            
+            ## Now add headers
+            h = self.handler.get_headers()
+
+            ## Try to make a unique volume URN
+            try:
+                self.urn = h["image_gid"].encode("hex")
+            except: self.urn = base
+            self.urn = FQN + self.urn
+            
+            oracle.set(self.urn, AFF4_TYPE, AFF4_AFF1_VOLUME)
+            oracle.set(self.urn, AFF4_INTERFACE, AFF4_VOLUME)
+            oracle.set(self.urn, AFF4_STORED, urn)
+            
+            ## The stream URN is based on the volume
+            stream_urn = self.urn + "/stream"
+            oracle.set(self.urn, AFF4_CONTAINS, stream_urn)
+            oracle.set(stream_urn, AFF4_STORED, self.urn)
+            oracle.set(stream_urn, AFF4_SIZE, self.handler.size)
+            oracle.set(stream_urn, AFF4_TYPE, AFF4_AFF1_STREAM)
+            oracle.set(stream_urn, AFF4_INTERFACE, AFF4_STREAM)
+            oracle.set(stream_urn, AFF4_HIGHLIGHT, _DETAILED)
+            
+            for k in h:
+                oracle.set(self.urn, "aff1:" + k, h[k])
+
+    class AFF1Stream(EWFStream):
+        pass
+    
+    VOLUME_DISPATCH.append(AFF1Volume)
+
+except ImportError:
+    ## Not implemented
+    pass
+
+
 
 VOLUME_DISPATCH.append(ZipVolume)
 
@@ -2211,6 +2265,7 @@ DISPATCH = [
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     [ 0, AFF4_ERROR_STREAM, ErrorStream],
     [ 0, AFF4_EWF_STREAM, EWFStream],
+    [ 0, AFF4_AFF1_STREAM, AFF1Stream],
     ]
 
 

@@ -3,9 +3,17 @@
 This needs to be tested with the windows port.
 """
 from ctypes import *
+import ctypes.util
+
+possible_names = ['libewf-1', 'ewf',]
+for name in possible_names:
+    resolved = ctypes.util.find_library(name)
+    if resolved:
+        break
 
 try:
-    libewf = CDLL("libewf.so.1")
+    libewf = CDLL(resolved)
+    if not libewf._name: raise OSError()
 except OSError:
     raise ImportError("libewf not found")
 
