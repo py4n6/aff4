@@ -6,7 +6,7 @@ except ImportError:
     print """You need to have PyFlag installed from http://www.pyflag.net/ for this to work. The reassembler module must also be on the python class path (do you need to run pyflag_launch to set the class path?)"""
     sys.exit(1)
     
-import pypcap
+import pypcap, pdb
 from aff4 import *
 
 parser = OptionParser(usage = """%prog [options] -o output.aff4 pcap_file ... pcap_file
@@ -103,6 +103,7 @@ if not options.external:
                     
                     oracle.set(combined_stream.urn, AFF4_STORED, volume_urn)
                     oracle.set(combined_stream.urn, AFF4_TARGET, image_urn)
+                    oracle.set(combined_stream.urn, AFF4_TIMESTAMP, packet.ts_sec)
                     combined_stream.finish()
                     
                     map_stream = connection['map'] = Map(None, 'w')
@@ -110,6 +111,7 @@ if not options.external:
                     
                     oracle.set(map_stream.urn, AFF4_STORED, volume_urn)
                     oracle.set(map_stream.urn, AFF4_TARGET, image_urn)
+                    oracle.set(map_stream.urn, AFF4_TIMESTAMP, packet.ts_sec)
                     map_stream.finish()
 
                     connection['reverse']['map'] = map_stream = Map(None, 'w')
@@ -117,6 +119,7 @@ if not options.external:
 
                     oracle.set(map_stream.urn, AFF4_STORED, volume_urn)
                     oracle.set(map_stream.urn, AFF4_TARGET, image_urn)
+                    oracle.set(map_stream.urn, AFF4_TIMESTAMP, packet.ts_sec)
                     map_stream.finish()
 
             elif mode == 'data':
