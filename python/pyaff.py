@@ -12,6 +12,8 @@ for name in possible_names:
         break
 
 try:
+    if resolved == None:
+        raise ImportError("afflib not found")
     afflib = CDLL(resolved)
     if not afflib._name: raise OSError()
 except OSError:

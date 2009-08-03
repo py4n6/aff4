@@ -1535,10 +1535,11 @@ try:
         pass
     
     VOLUME_DISPATCH.append(AFF1Volume)
-
+    pyaff_imported = True
+    
 except ImportError:
     ## Not implemented
-    pass
+    pyaff_imported = False
 
 
 
@@ -2260,9 +2261,10 @@ DISPATCH = [
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     [ 0, AFF4_ERROR_STREAM, ErrorStream],
     [ 0, AFF4_EWF_STREAM, EWFStream],
-    [ 0, AFF4_AFF1_STREAM, AFF1Stream],
     ]
 
+if pyaff_imported:
+    DISPATCH.append([0, AFF4_AFF1_STREAM, AFF1Stream])
 
 ### Following is the high level API. See specific documentation on using these.
 

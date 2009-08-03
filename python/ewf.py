@@ -12,6 +12,8 @@ for name in possible_names:
         break
 
 try:
+    if resolved == None:
+        raise ImportError("libewf not found")
     libewf = CDLL(resolved)
     if not libewf._name: raise OSError()
 except OSError:
