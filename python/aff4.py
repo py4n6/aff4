@@ -1435,9 +1435,13 @@ try:
             if urn.startswith(FQN):
                 Raise("EWF module only supports storage to real files")
 
-            filename = urn[7:]
+            if urn.startswith("file://"):
+                filename = urn[7:]
+            else:
+                filename = urn
+                
             ## Try to glob the volumes
-            base, ext = os.path.splitext(urn)
+            base, ext = os.path.splitext(filename)
             if not ext.lower().startswith(".e"):
                 Raise("EWF files usually have an extension of .E00")
 
@@ -1448,7 +1452,7 @@ try:
 
             ## Try to make a unique volume URN
             try:
-                self.urn = h["md5"].encode("hex")
+                self.urn = h["md5"]
             except: self.urn = base
             self.urn = FQN + self.urn
             
@@ -1471,8 +1475,11 @@ try:
     VOLUME_DISPATCH.append(EWFVolume)
 
 except ImportError:
-    ## Not implemented
-    pass
+    class EWFVolume(ZipVolume):
+        def __init__(self, urn=None, mode='r'):
+            raise RuntimeError("EWF streams are not implemented. You need to install libewf first")
+    class EWFStream(EWFVolume):
+        pass
 
 class EWFStream(FileLikeObject):
     def read(self, length):
@@ -1534,14 +1541,14 @@ try:
     class AFF1Stream(EWFStream):
         pass
     
-    VOLUME_DISPATCH.append(AFF1Volume)
-    pyaff_imported = True
-    
+    VOLUME_DISPATCH.append(AFF1Volume)    
 except ImportError:
-    ## Not implemented
-    pyaff_imported = False
+    class AFF1Stream(ZipVolume):
+        def __init__(self, urn=None, mode='r'):
+            raise RuntimeError("AFF1 legacy volumes are not implemented. You need to install afflib first")
 
-
+    class AFF1Volume(AFF1Stream):
+        pass
 
 VOLUME_DISPATCH.append(ZipVolume)
 
@@ -2261,10 +2268,10 @@ DISPATCH = [
     [ 0, AFF4_ZIP_VOLUME, ZipVolume ],
     [ 0, AFF4_ERROR_STREAM, ErrorStream],
     [ 0, AFF4_EWF_STREAM, EWFStream],
+    [ 0, AFF4_EWF_VOLUME, EWFVolume],
+    [ 0, AFF4_AFF1_STREAM, AFF1Stream],
+    [ 0, AFF4_AFF1_VOLUME, AFF1Volume],
     ]
-
-if pyaff_imported:
-    DISPATCH.append([0, AFF4_AFF1_STREAM, AFF1Stream])
 
 ### Following is the high level API. See specific documentation on using these.
 
