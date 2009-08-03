@@ -1008,8 +1008,8 @@ class Image(FileLikeObject):
 
             self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
             self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
-            self.compression = parse_int(oracle.resolve(self.urn, AFF4_COMPRESSION))
-            if self.compression is NoneObject:
+            self.compression = oracle.resolve(self.urn, AFF4_COMPRESSION)
+            if isinstance(self.compression,NoneObject):
                 self.compression = 8
             else:
                 self.compression = parse_int(self.compression)
