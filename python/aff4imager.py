@@ -104,6 +104,7 @@ if options.image:
     volume.add_identity(options.key, options.cert)
     
     for in_urn in args:
+        print options.nocompress
         image = volume.new_image(link = options.link, sparse=True,
                                  compression=not options.nocompress)
         if "://" not in in_urn:
@@ -115,8 +116,17 @@ if options.image:
             if not data: break
             
             image.write(data)
+        
+        
+        tool = Image(None,'w')
+        oracle.set(tool.urn, AFF4_STORED, volume.volume_urn)
+        oracle.set(tool.urn, "aff4:type", "aff4:AcquisitionTool")
+        oracle.set(tool.urn, "aff4:version", "0.2")
+        oracle.set(tool.urn, "aff4:author", "http://aff.org/")
+        tool.finish()
+        tool.close()
         image.close()
-
+        
     volume.close()
 
 elif options.dump:
