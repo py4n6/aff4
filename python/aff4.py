@@ -282,6 +282,17 @@ class AFFObject:
 
         return result
 
+    def close(self):
+        ## Write the properties file
+        container = oracle.resolve(self.urn, AFF4_STORED)
+        volume = oracle.open(container,'w')
+        try:
+            volume.writestr(fully_qualified_name("properties", self.urn),
+                            oracle.export(self.urn),
+                            compress_type = ZIP_DEFLATED)
+        finally:
+            oracle.cache_return(volume)
+            
 
 class AFFVolume(AFFObject):
     """ A Volume simply stores segments """
@@ -605,7 +616,7 @@ class URNObject:
             if not attribute.startswith(VOLATILE_NS):
                 for value in v:
                     result += prefix + "%s=%s\n" % (attribute, value)
-                
+
         return result
 
     def flush(self):
@@ -1075,15 +1086,7 @@ class Image(FileLikeObject):
 
         oracle.set(self.urn, AFF4_SIZE, self.size)
 
-        ## Write the properties file
-        container = oracle.resolve(self.urn, AFF4_STORED)
-        volume = oracle.open(container,'w')
-        try:
-            volume.writestr(fully_qualified_name("properties", self.urn),
-                            oracle.export(self.urn),
-                            compress_type = ZIP_DEFLATED)
-        finally:
-            oracle.cache_return(volume)
+        AFFObject.close(self)
 
         ## Ok, we are done now
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
