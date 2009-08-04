@@ -1,8 +1,6 @@
 #!/usr/bin/python
 from aff4 import *
-from aff4_attributes import *
-
-import optparse, pdb
+import optparse
 import sys
 
 parser = optparse.OptionParser()
@@ -45,10 +43,7 @@ def vararg_callback(option, opt_str, value, parser):
         value.append(arg)
             
     del parser.rargs[:len(value)]
-    try:
-        getattr(parser.values, option.dest).append(value)
-    except:
-        setattr(parser.values, option.dest, value)
+    setattr(parser.values, option.dest, value)
 
 parser.add_option("-l","--load", default=[], dest="load",
                   action = "callback", callback=vararg_callback,
@@ -82,7 +77,7 @@ parser.add_option("-p", "--password", default='',
                   help='Use this password instead of prompting')
 
 (options, args) = parser.parse_args()
-    
+
 ## Load defaults into configuration space
 oracle.set(GLOBAL, CONFIG_THREADS, options.threads)
 oracle.set(GLOBAL, CONFIG_VERBOSE, options.verbosity)
@@ -94,30 +89,8 @@ if options.password:
 IDENTITY = load_identity(options.key, options.cert)
 
 VOLUMES = []
-for volume_set in options.load:
-    loaded_volume_set = []
-    for v in volume_set:
-        loaded_volume_set.extend(load_volume(v))
-
-    if len(loaded_volume_set)>1:
-        ## Make a combined stream
-        m = Map(None, 'w')
-        m.urn  = loaded_volume_set[0] + "/combined"
-        oracle.set(m.urn, AFF4_STORED, AFF4_SPECIAL_URN_NULL)
-        oracle.set(m.urn, AFF4_HIGHLIGHT, 7)
-        m.finish()
-        m.mode = 'r'
-
-        ## Add the image to the map
-        for t in loaded_volume_set:
-            m.write_from(t, 0, oracle.resolve(t, AFF4_SIZE))
-
-        oracle.set(m.urn, AFF4_SIZE, m.size)
-
-        ## The map is ready for use
-        oracle.cache_return(m)
-        
-    VOLUMES.extend(loaded_volume_set)
+for v in options.load:
+    VOLUMES.extend(load_volume(v))
 
 ## Use the high level interface to get what we want:
 if options.image:
@@ -131,6 +104,7 @@ if options.image:
     volume.add_identity(options.key, options.cert)
     
     for in_urn in args:
+        print options.nocompress
         image = volume.new_image(link = options.link, sparse=True,
                                  compression=not options.nocompress)
         if "://" not in in_urn:
@@ -142,8 +116,28 @@ if options.image:
             if not data: break
             
             image.write(data)
-        image.close()
+        
+        
+        tool = AFFObject()
+        oracle.set(tool.urn, AFF4_STORED, volume.volume_urn)
+        oracle.set(tool.urn, "aff4:type", "aff4:AcquisitionTool")
+        oracle.set(tool.urn, "aff4:version", "0.2")
+        oracle.set(tool.urn, "aff4:vendor", "http://aff.org/")
+        oracle.add(tool.urn, "aff4:states", image.image_urn + "/properties")
+        oracle.add(tool.urn, "aff4:states", image.image_urn + "/map")
+        oracle.add(tool.urn, "aff4:states", image.backing_fd + "/properties")
+        tool.finish()
+        tool.close()
 
+        user = AFFObject()
+        oracle.set(user.urn, AFF4_STORED, volume.volume_urn)
+        oracle.set(user.urn, "aff4:type", "aff4-tool:OperatorInput")
+        oracle.set(user.urn, "aff4-tool:commandLine", "\"" +  " ".join(sys.argv) + "\"")
+        user.finish()
+        user.close()
+        
+        image.close()
+        
     volume.close()
 
 elif options.dump:
