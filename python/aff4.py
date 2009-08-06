@@ -1882,7 +1882,7 @@ try:
             if not self.x509: return
 
             ## We set our urn from the certificate fingerprint
-            self.urn = "%s/%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
+            self.urn = "%s:%s" % (AFF4_IDENTITY_PREFIX, self.x509.get_fingerprint())
             oracle.set(self.urn, AFF4_TYPE, AFF4_IDENTITY)
 
             ## Register an add hook with the oracle
