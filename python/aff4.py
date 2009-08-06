@@ -62,6 +62,10 @@ def DEBUG(verb, fmt, *args):
 import urllib
 
 def fully_qualified_name(filename, context_name):
+    """ Converts filename into a fully_qualified_name relative to the
+    context_name. If filename is already a fully_qualified_name, do
+    nothing.
+    """
     if "://" in filename: return filename
     
     if not filename.startswith(FQN):
@@ -70,6 +74,9 @@ def fully_qualified_name(filename, context_name):
     return posixpath.normpath(filename)
 
 def relative_name(filename, context_name):
+    """ Returns a relative name to the supplied context. (ie. if the
+    name begins with context, strip the context off it.
+    """
     if filename.startswith(context_name):
         return filename[len(context_name)+1:]
 
@@ -96,7 +103,7 @@ def parse_int(string):
     if not suffix:
         return base
 
-    if suffix=='s':
+    if suffix == 's':
         return base * 512
 
     if suffix == 'k':
@@ -112,7 +119,7 @@ def parse_int(string):
 
 def read_with_default(uri, attribute, default):
     result = oracle.resolve(uri, attribute)
-    if result is NoneObject:
+    if isinstance(result,NoneObject):
         result = default
         oracle.set(uri, attribute, default)
 
@@ -199,7 +206,7 @@ class AFFObject:
     already exist in the resolver) it does not have a known URN. In
     this case the following protocol is followed:
 
-       a) Create a new instancd of the object - by passing None to the
+       a) Create a new instance of the object - by passing None to the
        URN it is expected to generate a new valid URN:
 
           obj = AFFObjects() 
@@ -357,10 +364,14 @@ class FileBackedObject(FileLikeObject):
     The file:// URL scheme is used.
     """
     def __init__(self, uri, mode):
+        filename = uri
         if not uri.startswith("file://"):
-            Raise("You must have a fully qualified urn here, not %s" % urn)
+            filename = oracle.resolve(uri, AFF4_STORED)
 
-        filename = uri[len("file://"):]
+        if not filename.startswith("file://"):
+            Raise("You must have a fully qualified urn here, not %s" % filename)
+
+        filename = filename[len("file://"):]
         escaped = escape_filename(filename)
         if mode == 'r':
             self.fd = open(escaped, 'rb')
@@ -619,7 +630,7 @@ class URNObject:
 
         return result
 
-    def flush(self):
+    def flush(self, **kwargs):
         pass
 
 class Resolver:
@@ -1019,12 +1030,7 @@ class Image(FileLikeObject):
 
             self.chunk_size = parse_int(oracle.resolve(self.urn, AFF4_CHUNK_SIZE)) or 32*1024
             self.chunks_in_segment = parse_int(oracle.resolve(self.urn, AFF4_CHUNKS_IN_SEGMENT)) or 2048
-            self.compression = oracle.resolve(self.urn, AFF4_COMPRESSION)
-            if isinstance(self.compression,NoneObject):
-                self.compression = 8
-            else:
-                self.compression = parse_int(self.compression)
-
+            self.compression = read_with_default(self.urn, AFF4_COMPRESSION, 8)
             self.chunk_cache = Store()
             self.bevy_number = 0
             self.running = []
@@ -1186,11 +1192,13 @@ class RAWVolume(AFFVolume):
         fd = oracle.open(urn, 'r')
         try:
             self.urn = fd.urn
-            
-            oracle.set(self.urn, AFF4_STORED, self.urn)
-            oracle.set(self.urn, AFF4_CONTAINS, self.urn)
-            oracle.set(self.urn, AFF4_HIGHLIGHT, _DETAILED)
-            oracle.set(self.urn, AFF4_SIZE, fd.size)
+            basename = os.path.basename(self.urn)
+            new_urn = FQN + basename
+            oracle.set(new_urn, AFF4_STORED, self.urn)
+            oracle.set(new_urn, AFF4_TYPE, AFF4_RAW_STREAM)
+            oracle.set(self.urn, AFF4_CONTAINS, new_urn)
+            oracle.set(new_urn, AFF4_HIGHLIGHT, _DETAILED)
+            oracle.set(new_urn, AFF4_SIZE, fd.size)
         finally:
             oracle.cache_return(fd)
 
@@ -1478,6 +1486,7 @@ try:
             self.handler = ewf.ewf_open(files)
             ## Now add headers
             h = self.handler.get_headers()
+            h['md5'] = h.get('md5','').encode("hex")
 
             ## Try to make a unique volume URN
             try:
@@ -1596,8 +1605,6 @@ class Link(AFFObject):
         stored = oracle.resolve(self.urn, AFF4_STORED) or \
                       Raise("Link objects must be stored on a volume")
         oracle.add(stored, AFF4_CONTAINS, self.urn)
-        oracle.set(self.urn, AFF4_VOLATILE_DIRTY, 1)
-        
         oracle.set(self.urn, AFF4_TYPE, AFF4_LINK)
         self.target = oracle.resolve(self.urn, AFF4_TARGET) or \
                       Raise("Link objects must have a target attribute")
@@ -1831,6 +1838,40 @@ class Map(FileLikeObject):
 
         ## Ok, we are done now
         oracle.delete(self.urn, AFF4_VOLATILE_DIRTY)
+
+    def explain(self):
+        result = "Stream %s %s:\n   %s" % (
+            self.__class__.__name__,
+            self.urn,
+            "\n   ".join(oracle.export(self.urn).splitlines()))
+
+        result += "\n\n* "
+
+        targets = set()
+        targets.add(oracle.resolve(self.urn, AFF4_STORED))
+        targets.add(oracle.resolve(self.urn, AFF4_TARGET))
+
+        fd = oracle.open("%s/map" % self.urn, 'r')
+        try:
+            for urn in self.target_urns.values():
+                targets.add(urn)
+                
+            result += "Map %s:\n" % self.urn + fd.get_data() + "\n"
+        finally:
+            oracle.cache_return(fd)
+
+        result += "Targets:\n"
+        for target in targets:
+            if not target: continue
+            ## Now explain the stored URN
+            fd = oracle.open(target, 'r')
+            try:
+                result += "\n ".join(fd.explain().splitlines())
+            finally:
+                oracle.cache_return(fd)
+
+        return result
+
 
 try:
     from M2Crypto import Rand, X509, EVP, m2, RSA
@@ -2300,6 +2341,7 @@ DISPATCH = [
     [ 0, AFF4_EWF_STREAM, EWFStream],
     [ 0, AFF4_EWF_VOLUME, EWFVolume],
     [ 0, AFF4_AFF1_STREAM, AFF1Stream],
+    [ 0, AFF4_RAW_STREAM, FileBackedObject],
     ]
 
 
