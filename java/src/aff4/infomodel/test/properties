@@ -1,0 +1,16 @@
+aff4:stored=test.zip
+aff4:type=zip_volume
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/storage
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa
+aff4:contains=urn:aff4:86c0737e-2ee0-40b4-ae6e-a62e7478cb55
+aff4:contains=urn:aff4:86c0737e-2ee0-40b4-ae6e-a62e7478cb55/00000000
+aff4:contains=urn:aff4:86c0737e-2ee0-40b4-ae6e-a62e7478cb55/00000000.idx
+aff4:contains=urn:aff4:86c0737e-2ee0-40b4-ae6e-a62e7478cb55/properties
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/map
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/properties
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/storage/00000000
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/storage/00000000.idx
+aff4:contains=urn:aff4:4a4cffd1-1972-40e2-979f-1a62a7719baa/storage/properties
+aff4:contains=urn:aff4:c5aa9183-9255-46d8-a8e8-6a65e6bb9d4a/default
+aff4:contains=urn:aff4:c5aa9183-9255-46d8-a8e8-6a65e6bb9d4a/default/properties
+aff4:interface=aff4:volume

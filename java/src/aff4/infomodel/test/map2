@@ -1,0 +1,4 @@
+aff4:contains 0,0,urn:aff4:da0d1948-846f-491d-8183-34ae691e8293/storage
+92208,0,urn:aff4:null
+urn:aff4:da0d1948-846f-491d-8183-34ae691e8293 aff4:contains urn:aff4:da0d1948-846f-491d-8183-34ae691e8293[0,92208] 
+urn:aff4:da0d1948-846f-491d-8183-34ae691e8293[0,92208] aff4:sameAs urn:aff4:da0d1948-846f-491d-8183-34ae691e8293/storage[0,92208]
