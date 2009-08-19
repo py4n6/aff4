@@ -59,16 +59,15 @@ public class TestContainer extends TestCase {
 	}
 
 	ByteBuffer getTestData(String str) {
-		if (testData == null) {
-
-			testData = ByteBuffer.allocate(32*1024);
+		ByteBuffer data = ByteBuffer.allocate(32*1024);
 			for (int j=0 ; j < 32*1024/str.getBytes().length ; j++) {
-				testData.put(str.getBytes());
+				data.put(str.getBytes());
 			}
 			
-		}
-		testData.limit(testData.capacity());
-		return testData;
+
+		data.limit(data.capacity());
+		data.position(0);
+		return data;
 	}
 	
 	boolean hashesEqual(byte[] a, byte[] b) {
@@ -84,6 +83,45 @@ public class TestContainer extends TestCase {
 		return true;
 	}
 	
+	public void testCreateImage2ChunkBigWrite() {
+		try {
+			String tempDir = System.getenv("TEMP");
+			String name = tempDir + "\\testWrite.zip";
+			
+			assertTrue(deleteTestFile());
+			
+			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			String urn = fd.getURN();
+			
+			ByteBuffer buf = ByteBuffer.allocate(64*1024);
+			buf.put(getTestData("a"));
+			buf.put(getTestData("b"));
+			
+			fd.write(buf);
+
+			fd.flush();
+			fd.close();
+			zv.close();
+			
+			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
+			Reader dev = new GeneralReadDevice(rzv,urn);
+			ByteBuffer b = dev.read(getTestData().limit());
+			assertNotNull(b);
+			assertEquals(0, b.compareTo(getTestData("a")));
+			b = dev.read(getTestData().limit());
+			assertNotNull(b);
+			assertEquals(0, b.compareTo(getTestData("b")));
+			dev.close();
+			rzv.close();
+			
+		} catch (IOException e) {
+			fail();
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			fail();
+		}
+	}
 	public void testCreateImageWithDifferentBlocksThenReload() {
 		try {
 			String tempDir = System.getenv("TEMP");
@@ -107,6 +145,7 @@ public class TestContainer extends TestCase {
 			fd.write(ByteBuffer.wrap(new String("a few more bytes").getBytes()));
 			fd.flush();
 			fd.close();
+			String storedHash = zv.query(null, fd.getURN(), "aff4:hash", null).get(0).getObject();
 			zv.close();
 			
 			MD5Digest hash = new MD5Digest();
@@ -166,7 +205,8 @@ public class TestContainer extends TestCase {
 			b = dev.read(1);
 			assertNull(b);
 			dev.close();
-
+			String readHash = rzv.queryValue(null, dev.getURN(), "aff4:hash");
+			assertEquals(storedHash, readHash);
 			dev.close();
 			rzv.close();
 

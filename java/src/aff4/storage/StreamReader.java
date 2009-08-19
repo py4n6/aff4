@@ -6,6 +6,7 @@ import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.text.ParseException;
 import java.util.List;
+import java.util.UUID;
 import java.util.zip.Inflater;
 
 import aff4.util.StructConverter;
@@ -22,6 +23,7 @@ public class StreamReader  implements Reader {
 	int bevvy_number = 0;
 	long size;
 	long readptr;
+	Inflater decompresser = new Inflater();
 	
 	public StreamReader(ReadOnlyZipVolume v, String u) throws IOException, ParseException {
 		volume = v;
@@ -75,7 +77,6 @@ public class StreamReader  implements Reader {
         	is.read(buf,0,8);
         	ByteBuffer bb = ByteBuffer.wrap(buf);
         	long offset = StructConverter.bytesIntoUInt(buf, 0);
-        	System.out.println(offset);
         	long offset_end = StructConverter.bytesIntoUInt(buf, 4);
             length = Math.min((offset_end - offset), available_to_read);
         	//length = offset_end - offset;
@@ -84,17 +85,17 @@ public class StreamReader  implements Reader {
             //ZipEntry ee = volume.zf.getEntry(encode(bevy_urn));
             
             is = volume.zf.getInputStream(encode(bevy_urn));
-            is.skip(offset);
+            long skipped = is.skip(offset);
             int res = -1;
             if (compression != ZipEntry.STORED) {
             	//InflaterInputStream iis = new InflaterInputStream(is, new Inflater());
-            	byte[] cdata = new byte[(int)chunk_size];
+            	byte[] cdata = new byte[(int)(offset_end - offset)];
             	int readBytes = is.read(cdata);
-            	Inflater decompresser = new Inflater();
-                decompresser.setInput(cdata, 0, (int)readBytes);
-                
+            	decompresser.reset();
+           		decompresser.setInput(cdata, 0, (int)(offset_end - offset));
+
                 int resultLength = decompresser.inflate(buf);
-                decompresser.end();
+                //decompresser.end();
           	
             	//res = iis.read(buf,0,(int)available_to_read);
             } else {
@@ -147,6 +148,13 @@ public class StreamReader  implements Reader {
     public void close() {
     	
     }
+    
+	public String getURN() {
+		if (urn == null) {
+			urn = "urn:aff4:" + UUID.randomUUID().toString();
+		}
+		return urn;
+	}
 }
 
 /*

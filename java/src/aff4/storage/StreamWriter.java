@@ -131,7 +131,7 @@ public class StreamWriter implements Writer {
 		long offset = 0;
 		long offset_end = 0;
 		int len = 0;
-		byte[] outBuf = new byte[chunk_size];
+		byte[] outBuf = new byte[chunk_size*2];
 		byte[] b = StructConverter.UInt2bytes(offset_end);
 		bevvy_index.put(b);
 		while (pos < limit) {
@@ -140,10 +140,15 @@ public class StreamWriter implements Writer {
 			if (compression > 0) {
 				byte[] input = buf.array();
 				int count = Math.min(chunk_size, (int)(limit - pos));
+				d.reset();
 				d.setInput(input, pos, count);
 				d.finish();
 				d.deflate(outBuf);
 				len = (int) d.getBytesWritten();
+				if (!d.finished()) {
+					throw new RuntimeException("Decompression buffer too small");
+				}
+				
 				bevvy.put(outBuf, 0,  len);
 				//len = (int) off;
 
