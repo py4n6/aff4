@@ -1,19 +1,14 @@
 package aff4.infomodel.test;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.text.ParseException;
-import java.util.HashMap;
-import java.util.List;
 
+import junit.framework.TestCase;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.serialization.MultiHashPropertiesReader;
 import aff4.infomodel.serialization.MultiHashSet;
 import aff4.infomodel.serialization.Properties2Resolver;
-
-import junit.framework.TestCase;
 
 public class TestPropertiesFile extends TestCase {
 	

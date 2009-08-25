@@ -1,7 +1,5 @@
 package aff4.infomodel.serialization;
 
-import java.util.List;
-
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 

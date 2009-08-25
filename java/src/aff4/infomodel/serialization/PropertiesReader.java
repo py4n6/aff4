@@ -5,11 +5,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 
-public class PropertiesReader {
+public abstract class PropertiesReader {
 	InputStream stream = null;
 	public  PropertiesReader(InputStream stream) {
 		this.stream = stream;
@@ -26,12 +23,7 @@ public class PropertiesReader {
 
 
 	
-	protected void doLine(String line) throws ParseException {
-		int equalsCharPos = line.indexOf('=');
-		String name = line.substring(0, equalsCharPos);
-		String value = line.substring(equalsCharPos+1);
-		//res.put(name,value);
-	}
+	abstract protected void doLine(String line) throws ParseException;
 }
 
 /*

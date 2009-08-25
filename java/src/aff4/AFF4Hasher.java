@@ -13,19 +13,24 @@ import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
+import org.bouncycastle.crypto.Digest;
 import org.bouncycastle.crypto.digests.MD5Digest;
+import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.util.encoders.Hex;
 
-import aff4.container.LinkWriter;
-import aff4.container.WarrantReader;
+import aff4.commonobjects.LinkWriter;
+import aff4.commonobjects.ToolWriter;
+import aff4.commonobjects.WarrantReader;
+import aff4.datamodel.Reader;
+import aff4.hash.HashDigestAdapter;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
-import aff4.storage.ReadOnlyZipVolume;
-import aff4.storage.Reader;
-import aff4.storage.StreamWriter;
-import aff4.storage.WritableZipVolumeImpl;
+import aff4.infomodel.QueryTools;
+import aff4.storage.zip.ReadOnlyZipVolume;
+import aff4.storage.zip.StreamWriter;
+import aff4.storage.zip.WritableZipVolume;
 
-public class AFF4Hasher {
+public class aff4hasher {
 
 	/**
 	 * @param args
@@ -41,7 +46,14 @@ public class AFF4Hasher {
             .withLongOpt( "output" )
             .create("o");
 		options.addOption(outputOption);
-		
+	
+		Option chunkSizeOption = OptionBuilder.withArgName( "chunksize" )
+        .hasArg()
+        .withDescription(  "chunk size" )
+        .withLongOpt( "chunk-size" )
+        .create("c");
+		options.addOption(chunkSizeOption);
+	
 		Option help = new Option( "h", "help", false,"print this message" );
 		options.addOption(help);
 		
@@ -63,16 +75,35 @@ public class AFF4Hasher {
 				String outputFile = line.getOptionValue("o");
 				String inputFile = line.getArgs()[0];
 				if (outputFile != null && inputFile != null) {
+					long chunkSize = 64*1024; 
+					if (line.hasOption("c")) {
+						chunkSize = Long.parseLong(line.getOptionValue("c"));
+					}
+					
 					ReadOnlyZipVolume v = new ReadOnlyZipVolume(inputFile);
+					WritableZipVolume zv = new WritableZipVolume(outputFile);
+					
+					ToolWriter tr = new ToolWriter(zv);
+					
 					QuadList res = v.query(null, null, "aff4:type", "image");
 					for (Quad q : res ) {
+						long readPtr = 0;
 						Reader r = v.open(q.getSubject());
-						String storedMD5 = v.queryValue(q.getGraph(), q.getSubject(), "aff4:hash");
-						MD5Digest md5 = new MD5Digest();
-						ByteBuffer buf = null;
-						while ((buf = r.read(64*1024)) != null) {
-							md5.update(buf.array(), buf.position(), buf.limit());
+						String storedMD5 = QueryTools.queryValue(v, q.getGraph(), q.getSubject(), "aff4:hash");
+						HashDigestAdapter md5 = new HashDigestAdapter(new MD5Digest());
+						HashDigestAdapter sha256 = new HashDigestAdapter(new SHA256Digest());
+						ByteBuffer buf = ByteBuffer.allocate(64*1024);
+						int readCount;
+						while ((readCount = r.read(buf)) != -1) {
+							md5.update(buf);
+							sha256.reset();
+							sha256.update(buf);
+							sha256.doFinal();
+							String calculatedSHA256  = sha256.getStringValue();
+							zv.add(zv.getURN() + "/properties", q.getSubject() + "[" + readPtr + ":" + (buf.limit() - buf.position()) + "]" , "aff4:sha256hash", calculatedSHA256);
+							readPtr += buf.limit() - buf.position();
 						}
+						
 						byte[] md5bytes =  new byte[md5.getDigestSize()];
 						md5.doFinal(md5bytes,0);
 						String calculatedMD5  = new String(Hex.encode(md5bytes),"UTF-8");
@@ -82,39 +113,17 @@ public class AFF4Hasher {
 							System.out.println("MD5 verifification faild");
 						}
 					}
-					v.close();
-					
-					/*
-					WritableZipVolumeImpl zv = new WritableZipVolumeImpl(outputFile);
-					StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-					
-					byte[] buf = new byte[64*1024];
-					long readPtr = 0;
-					
-					
-					while (readPtr < in.length()) {
-						long res = raf.read(buf);
-						fd.write(ByteBuffer.wrap(buf,0,(int)res));
-						readPtr = readPtr + res;
-					}
-					
-					fd.flush();
-					fd.close();
-					
-					if (line.hasOption("link")) {
-						LinkWriter l = new LinkWriter(zv, fd, line.getOptionValue("link"));
-						l.close();			
-					} else {
-						LinkWriter l = new LinkWriter(zv, fd, "default");
-						l.close();	
-					}
+					tr.addAssertion(zv.getURN() + "/properties");
+					tr.setToolName("aff4hasher");
+					tr.setToolURL("http://aff.org/java/aff4hasher");
+					tr.setToolVersion("0.1");
+					tr.close();
 					zv.close();
-					raf.close();
-					*/
+					v.close();
 				}
 			} else {
 				HelpFormatter formatter = new HelpFormatter();
-				formatter.printHelp( "aff4imager", options );
+				formatter.printHelp( "aff4hasher -o container2.zip image.zip", options );
 			    System.exit(0);
 			}
 		} catch (IOException ex) {

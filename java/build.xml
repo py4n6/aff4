@@ -1,0 +1,79 @@
+<project name="aff4" default="jar" basedir=".">
+
+	<!-- paths -->
+	<property file="${basedir}/build.properties"/>
+  	<property name="src.dir" location="${basedir}/src"/>
+  	<property name="java.src.dir" location="${basedir}/src"/>
+  	<property name="bin.dir" location="${basedir}/bin"/>
+  	<property name="dist.dir"  location="${basedir}/dist"/>
+    <property name="lib.dir"  value="${basedir}/lib"/>
+    <property name="build.dir"  location="${basedir}/build"/>
+    <property name="build.lib.dir"  location="${basedir}/lib/build"/>
+
+
+	<!-- build / compile properties -->
+    <property name="debug" value="off"/>
+    <property name="optimize" value="on"/>
+    <property name="deprecation" value="off"/>
+    <property name="compress.jars" value="true"/>
+	<property name="link" value="static"/>
+
+
+    <path id="project.class.path">
+        <pathelement path="${java.class.path}" />
+        <fileset dir="${lib.dir}">
+            <include name="*.jar" />
+        </fileset>
+    </path>
+
+    <path id="build.class.path">
+        <pathelement path="${java.class.path}" />
+        <fileset dir="${lib.dir}">
+            <include name="*.jar" />
+        </fileset>
+   </path>	
+
+	<target name="init">
+	    <tstamp/>
+	    <mkdir dir="${build.dir}"/>
+	    <mkdir dir="${dist.dir}"/>
+	</target>
+	
+  <target name="compile" depends="init"
+        description="compile the source " >
+        <javac srcdir="${java.src.dir}"
+            destdir="${build.dir}"
+            debug="${debug}"
+            optimize="${optimize}"
+            deprecation="${deprecation}"
+            target="1.5">
+                <classpath refid="project.class.path" />
+ 		</javac>
+  </target>
+  
+	<target name="jar" depends="compile">
+		<jar jarfile="${dist.dir}/aff4.jar" 
+				basedir="${build.dir}" 
+				includes="**/*.class,**/*.properties,**/*.bmp,**/*.gif">
+		</jar>
+	</target>
+
+	<target name="dist" depends="jar">
+		<zip destfile="${dist.dir}/ctypes4j.zip">
+			<zipfileset prefix="doc" dir="${doc.dir}" />
+			<zipfileset prefix="lib" dir="${lib.dir}" />
+			<zipfileset prefix="src" dir="${src.dir}" >
+			</zipfileset>
+			<zipfileset dir="${dist.dir}">
+				<include name="*.jar"/>
+			</zipfileset>
+		</zip>
+	</target>	
+		
+  <target name="clean"
+        description="clean up" >
+    <delete dir="${build.dir}"/>
+    <delete dir="${dist.dir}"/>
+  </target>
+
+</project>

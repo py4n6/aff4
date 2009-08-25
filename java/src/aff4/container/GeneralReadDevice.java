@@ -5,13 +5,13 @@ import java.nio.ByteBuffer;
 import java.text.ParseException;
 import java.util.ArrayList;
 
+import aff4.datamodel.MapReader;
+import aff4.datamodel.Reader;
+import aff4.infomodel.AFFObject;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
-import aff4.storage.AFFObject;
-import aff4.storage.MapReader;
-import aff4.storage.StreamReader;
-import aff4.storage.Reader;
-import aff4.storage.ReadOnlyZipVolume;
+import aff4.storage.zip.ReadOnlyZipVolume;
+import aff4.storage.zip.StreamReader;
 
 public class GeneralReadDevice extends AFFObject implements Reader{
 
@@ -20,7 +20,6 @@ public class GeneralReadDevice extends AFFObject implements Reader{
 	
 	public GeneralReadDevice(ReadOnlyZipVolume vol, String urn) throws IOException, ParseException {
 		volume = vol;
-		String URN = getURN();
 		
 		QuadList res = volume.query(null, urn, "aff4:type", null);
 		ArrayList<String> typeList = new ArrayList<String>();
@@ -35,19 +34,23 @@ public class GeneralReadDevice extends AFFObject implements Reader{
 		}
 	}
 
-	public ByteBuffer read(long length) throws IOException, ParseException {
-		// TODO Auto-generated method stub
-		return device.read(length);
-	}
 
 
-	public void seek(long s) {
-		device.seek(s);
+	public void position(long s) throws IOException{
+		device.position(s);
 		
 	}
 	
-	public void close() {
+	public void close() throws IOException {
 		device.close();
+	}
+
+	public long position() {
+		return device.position();
+	}
+
+	public int read(ByteBuffer buf) throws IOException, ParseException {
+		return device.read(buf);
 	}
 
 }

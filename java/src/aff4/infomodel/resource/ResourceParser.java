@@ -1,12 +1,23 @@
 package aff4.infomodel.resource;
 
-import aff4.infomodel.serialization.Point;
 
 public class ResourceParser {
 
+	public static Resource parse(String res) {
+		int startBracket = res.indexOf('[');
+		int comma = res.indexOf(':',startBracket+1);
+		int endBracket = res.indexOf(']',comma+1);
+		
+		if (startBracket > 0 && endBracket > startBracket) {
+			return parseSlice(res);
+		} else {
+			return new Resource(res);
+		}
+	}
+	
 	public static SliceResource parseSlice(String res) {
 		int startBracket = res.indexOf('[');
-		int comma = res.indexOf(',',startBracket+1);
+		int comma = res.indexOf(':',startBracket+1);
 		int endBracket = res.indexOf(']',comma+1);
 		String urn = res.substring(0,startBracket);
 		String offset = res.substring(startBracket+1,comma);

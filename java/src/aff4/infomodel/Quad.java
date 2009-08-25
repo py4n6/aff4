@@ -1,6 +1,6 @@
 package aff4.infomodel;
 
-public class Quad {
+public class Quad implements Comparable<Quad> {
 	String graph = null;
 	public String getGraph() {
 		return graph;
@@ -58,6 +58,14 @@ public class Quad {
 
 
 		return sb.toString();
+	}
+
+	public int compareTo(Quad o) {
+		if (o == null) {
+			throw new NullPointerException();
+		}
+		
+		return toString().compareTo(o.toString());
 	}
 }
 

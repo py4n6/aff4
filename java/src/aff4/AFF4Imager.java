@@ -14,16 +14,17 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 
-import aff4.container.LinkWriter;
-import aff4.storage.StreamWriter;
-import aff4.storage.WritableZipVolumeImpl;
+import aff4.commonobjects.LinkWriter;
+import aff4.storage.zip.StreamWriter;
+import aff4.storage.zip.WritableZipVolume;
 
-public class AFF4Imager {
+public class aff4imager {
 
 	/**
 	 * @param args
+	 * @throws java.text.ParseException 
 	 */
-	public static void main(String[] args) {
+	public static void main(String[] args) throws java.text.ParseException {
 		
 		Options options = new Options();
 
@@ -62,7 +63,7 @@ public class AFF4Imager {
 			// has the buildfile argument been passed?
 			if( line.hasOption( "help" ) ) {
 				HelpFormatter formatter = new HelpFormatter();
-				formatter.printHelp( "aff4imager", options );
+				formatter.printHelp( "aff4imager -o imagefile source", options );
 			    System.exit(0);
 			}
 			
@@ -73,7 +74,7 @@ public class AFF4Imager {
 					File in = new File(inputFile);
 					RandomAccessFile raf = new RandomAccessFile(in, "r");
 					
-					WritableZipVolumeImpl zv = new WritableZipVolumeImpl(outputFile);
+					WritableZipVolume zv = new WritableZipVolume(outputFile);
 					StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 					
 					byte[] buf = new byte[64*1024];

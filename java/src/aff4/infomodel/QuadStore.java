@@ -115,10 +115,6 @@ public class QuadStore {
 	public QuadList query(String g, String s, String p, String o) {
 		QuadList res = null; 
 		
-		//for (String k : sindex.keySet()) {
-		//	System.out.println(k);
-		//}
-		
 		Set<Integer> gindexes = null;
 		if (g == null ) {
 			/*

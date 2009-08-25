@@ -1,14 +1,6 @@
 package aff4.infomodel.resource;
 
-public class SliceResource {
-	public String getURN() {
-		return URN;
-	}
-
-	public void setURN(String urn) {
-		URN = urn;
-	}
-
+public class SliceResource extends Resource {
 	public long getOffset() {
 		return offset;
 	}
@@ -25,12 +17,11 @@ public class SliceResource {
 		this.length = length;
 	}
 
-	String URN;
 	long offset;
 	long length;
 	
 	public SliceResource(String u, long o, long l) {
-		URN = u;
+		super(u);
 		offset = o;
 		length = l;
 	}

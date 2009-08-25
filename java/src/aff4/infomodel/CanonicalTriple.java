@@ -1,7 +1,7 @@
 package aff4.infomodel;
 
 
-public class CanonicalTriple extends Object implements Comparable {
+public class CanonicalTriple extends Object implements Comparable<CanonicalTriple> {
 	public String subject;
 	public String predicate;
 	public String object;
@@ -25,12 +25,12 @@ public class CanonicalTriple extends Object implements Comparable {
 
 	}
 
-	public int compareTo(Object arg) throws ClassCastException {
+	public int compareTo(CanonicalTriple arg) throws ClassCastException {
 		String current = subject.toString() + predicate.toString()
 				+ object.toString();
-		CanonicalTriple cs = (CanonicalTriple) arg;
-		String ext = cs.subject.toString() + cs.predicate.toString()
-				+ cs.object.toString();
+
+		String ext = arg.subject.toString() + arg.predicate.toString()
+				+ arg.object.toString();
 		return current.compareTo(ext);
 	}
 

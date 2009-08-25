@@ -8,22 +8,27 @@ import org.bouncycastle.crypto.digests.MD5Digest;
 import org.bouncycastle.util.encoders.Hex;
 
 import junit.framework.TestCase;
-import aff4.container.AuthorityWriter;
+import aff4.commonobjects.AuthorityWriter;
+import aff4.commonobjects.LinkWriter;
+import aff4.commonobjects.WarrantReader;
+import aff4.commonobjects.WarrantWriter;
+import aff4.container.Container;
 import aff4.container.GeneralReadDevice;
-import aff4.container.LinkWriter;
-import aff4.container.WarrantReader;
-import aff4.container.WarrantWriter;
+import aff4.container.WritableStore;
+import aff4.datamodel.AddressResolutionException;
+import aff4.datamodel.DiscontiguousMapWriter;
+import aff4.datamodel.Reader;
+import aff4.datamodel.Writer;
 
 
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
-import aff4.storage.AddressResolutionException;
-import aff4.storage.DiscontiguousMapWriter;
-import aff4.storage.StreamReader;
-import aff4.storage.StreamWriter;
-import aff4.storage.Reader;
-import aff4.storage.ReadOnlyZipVolume;
-import aff4.storage.WritableZipVolumeImpl;
+import aff4.infomodel.QueryTools;
+import aff4.storage.zip.AFF4SegmentOutputStream;
+import aff4.storage.zip.ReadOnlyZipVolume;
+import aff4.storage.zip.StreamReader;
+import aff4.storage.zip.StreamWriter;
+import aff4.storage.zip.WritableZipVolume;
 import aff4.util.HexFormatter;
 import de.schlichtherle.io.File;
 
@@ -58,7 +63,7 @@ public class TestContainer extends TestCase {
 		return testData;
 	}
 
-	ByteBuffer getTestData(String str) {
+	static ByteBuffer getTestData(String str) {
 		ByteBuffer data = ByteBuffer.allocate(32*1024);
 			for (int j=0 ; j < 32*1024/str.getBytes().length ; j++) {
 				data.put(str.getBytes());
@@ -83,6 +88,35 @@ public class TestContainer extends TestCase {
 		return true;
 	}
 	
+	static ByteBuffer a = getTestData("a");
+	static ByteBuffer b = getTestData("b");
+	
+	public void testCreateCorrectInformation() throws ParseException {
+		try {
+			String tempDir = System.getenv("TEMP");
+			String name = tempDir + "\\testWrite.zip";
+			
+			assertTrue(deleteTestFile());
+			
+			WritableZipVolume zv = new WritableZipVolume(name);
+			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+
+			for (int i=0 ; i < 2048 ; i++){
+				fd.write(getTestData());
+			}
+			fd.flush();
+			fd.close();
+			zv.close();
+			
+			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
+			QuadList quads = rzv.query(null, null, null, null);
+			assertEquals(12, quads.size());
+			rzv.close();
+		} catch (IOException e) {
+			fail();
+		}
+	}
+	
 	public void testCreateImage2ChunkBigWrite() {
 		try {
 			String tempDir = System.getenv("TEMP");
@@ -90,13 +124,13 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			String urn = fd.getURN();
 			
 			ByteBuffer buf = ByteBuffer.allocate(64*1024);
-			buf.put(getTestData("a"));
-			buf.put(getTestData("b"));
+			buf.put(a);
+			buf.put(b);
 			
 			fd.write(buf);
 
@@ -106,12 +140,145 @@ public class TestContainer extends TestCase {
 			
 			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
 			Reader dev = new GeneralReadDevice(rzv,urn);
-			ByteBuffer b = dev.read(getTestData().limit());
-			assertNotNull(b);
-			assertEquals(0, b.compareTo(getTestData("a")));
-			b = dev.read(getTestData().limit());
-			assertNotNull(b);
-			assertEquals(0, b.compareTo(getTestData("b")));
+			ByteBuffer readbuf = ByteBuffer.allocate(getTestData().limit());
+			int read = dev.read(readbuf);
+			assertEquals(getTestData().limit(), read);
+			a.clear();
+			assertEquals(0, readbuf.compareTo(a));
+			readbuf.clear();
+			read = dev.read(readbuf);
+			assertNotNull(readbuf);
+			b.clear();
+			assertEquals(0, readbuf.compareTo(b));
+			dev.close();
+			rzv.close();
+			
+		} catch (IOException e) {
+			fail();
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			fail();
+		}
+	}
+	
+	public void testCreateImage2ChunkBigWriteAndRead() {
+		try {
+			String tempDir = System.getenv("TEMP");
+			String name = tempDir + "\\testWrite.zip";
+			
+			assertTrue(deleteTestFile());
+			
+			WritableZipVolume zv = new WritableZipVolume(name);
+			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			String urn = fd.getURN();
+			
+			ByteBuffer buf = ByteBuffer.allocate(64*1024);
+			buf.put(a);
+			buf.put(b);
+			
+			fd.write(buf);
+
+			fd.flush();
+			fd.close();
+			zv.close();
+			
+			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
+			Reader dev = new GeneralReadDevice(rzv,urn);
+			a.clear();
+			ByteBuffer readbuf = ByteBuffer.allocate(a.limit()*2);
+			int read = dev.read(readbuf);
+			a.clear();
+			assertEquals(a.limit()*2, read);
+			assertEquals(0, readbuf.compareTo(buf));
+			dev.close();
+			rzv.close();
+			
+		} catch (IOException e) {
+			fail();
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			fail();
+		} 
+	}
+	
+	public void testCreateImage2ChunkBigWriteAndReadSmall() {
+		try {
+			String tempDir = System.getenv("TEMP");
+			String name = tempDir + "\\testWrite.zip";
+			
+			assertTrue(deleteTestFile());
+			
+			WritableZipVolume zv = new WritableZipVolume(name);
+			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			String urn = fd.getURN();
+			
+			ByteBuffer buf = ByteBuffer.allocate(64*1024);
+			buf.put(a);
+			buf.put(b);
+			
+			fd.write(buf);
+
+			fd.flush();
+			fd.close();
+			zv.close();
+			
+			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
+			Reader dev = new GeneralReadDevice(rzv,urn);
+			a.clear();
+			ByteBuffer readbuf = ByteBuffer.allocate(16*1024);
+			int read = dev.read(readbuf);
+			assertEquals(16*1024, read);
+			read = dev.read(readbuf);
+			assertEquals(16*1024, read);
+			read = dev.read(readbuf);
+			assertEquals(16*1024, read);
+			read = dev.read(readbuf);
+			assertEquals(16*1024, read);
+			read = dev.read(readbuf);
+			assertEquals(-1, read);
+			dev.close();
+			rzv.close();
+			
+		} catch (IOException e) {
+			fail();
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			fail();
+		} 
+	}
+	public void testCreateImage2ChunkBigWriteAndReadSeek() {
+		try {
+			String tempDir = System.getenv("TEMP");
+			String name = tempDir + "\\testWrite.zip";
+			
+			assertTrue(deleteTestFile());
+			
+			WritableZipVolume zv = new WritableZipVolume(name);
+			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			String urn = fd.getURN();
+			
+			ByteBuffer buf = ByteBuffer.allocate(64*1024);
+			a.rewind();
+			b.rewind();
+			buf.put(a);
+			buf.put(b);
+			
+			fd.write(buf);
+
+			fd.flush();
+			fd.close();
+			zv.close();
+			
+			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
+			Reader dev = new GeneralReadDevice(rzv,urn);
+			ByteBuffer readbuf = ByteBuffer.allocate(getTestData().limit()*2);
+			dev.position(a.limit());
+			int read = dev.read(readbuf);
+			assertEquals(b.limit(), read);
+			b.rewind();
+			System.out.println(HexFormatter.convertBytesToString(readbuf.array()));
+			assertEquals(0, readbuf.compareTo(b));
+			
 			dev.close();
 			rzv.close();
 			
@@ -129,17 +296,17 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			fd.setChunksInSegment(2);
 			String urn = fd.getURN();
 
-			ByteBuffer a =  getTestData("a");
-			ByteBuffer bb =  getTestData("b");
 			ByteBuffer c =  getTestData("c");
 			ByteBuffer d =  getTestData("d");
+			a.rewind();
+			b.rewind();
 			fd.write(a);
-			fd.write(bb);
+			fd.write(b);
 			fd.write(c);
 			fd.write(d);
 			fd.write(ByteBuffer.wrap(new String("a few more bytes").getBytes()));
@@ -156,7 +323,7 @@ public class TestContainer extends TestCase {
 			
 			hash.update(a.array(), 0, a.limit());
 			hash.doFinal(hasha, 0);
-			hash.update(bb.array(), 0, bb.limit());
+			hash.update(b.array(), 0, b.limit());
 			hash.doFinal(hashb, 0);
 			hash.update(c.array(), 0, c.limit());
 			hash.doFinal(hashc, 0);
@@ -171,41 +338,50 @@ public class TestContainer extends TestCase {
 			dev.setChunksInSegment(2);
 			byte[] hashBytes = new byte[16];
 			
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			hash.update(b.array(),0,b.limit());
+			ByteBuffer readBuffer = ByteBuffer.allocate(32*1024);
+			int res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+			hash.update(readBuffer.array(),0,readBuffer.limit());
 			hash.doFinal(hashBytes, 0);
 			assertTrue(hashesEqual(hasha, hashBytes));
 			
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			hash.update(b.array(),0,b.limit());
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+			hash.update(readBuffer.array(),0,readBuffer.limit());
 			hash.doFinal(hashBytes, 0);
 			assertTrue(hashesEqual(hashb, hashBytes));		
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			hash.update(b.array(),0,b.limit());
+			
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+			hash.update(readBuffer.array(),0,readBuffer.limit());
 			hash.doFinal(hashBytes, 0);
 			assertTrue(hashesEqual(hashc, hashBytes));		
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			hash.update(b.array(),0,b.limit());
+			
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+			hash.update(readBuffer.array(),0,readBuffer.limit());
 			hash.doFinal(hashBytes, 0);
 			assertTrue(hashesEqual(hashd, hashBytes));			
-			b = dev.read(16);
-			assertNotNull(b);
-			assertEquals(16, b.limit());
-			String out = new String(b.array());
+			
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(16, readBuffer.limit());
+			String out = new String(readBuffer.array(),0,16);
 			assertEquals("a few more bytes", out);
 			
-			b = dev.read(1);
-			assertNull(b);
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertEquals(res, -1);
 			dev.close();
-			String readHash = rzv.queryValue(null, dev.getURN(), "aff4:hash");
+			String readHash = QueryTools.queryValue(rzv, null, dev.getURN(), "aff4:hash");
 			assertEquals(storedHash, readHash);
 			dev.close();
 			rzv.close();
@@ -224,7 +400,7 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			fd.setChunksInSegment(2);
 			String urn = fd.getURN();
@@ -241,32 +417,49 @@ public class TestContainer extends TestCase {
 
 			StreamReader dev = new StreamReader(rzv,urn);
 			dev.setChunksInSegment(2);
-			ByteBuffer b = dev.read(8);
-			String out = new String(b.array());
+			ByteBuffer readBuffer = ByteBuffer.allocate(8);
+			
+			int res = dev.read(readBuffer);
+			String out = new String(readBuffer.array());
 			assertEquals("abcdefgh", out);
 			dev.close();
 			
 			dev = new StreamReader(rzv,urn);
 			dev.setChunksInSegment(2);
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			b = dev.read(32*1024);
-			assertNotNull(b);
-			assertEquals(32*1024, b.limit());
-			b = dev.read(16);
-			assertNotNull(b);
-			assertEquals(16, b.limit());
-			out = new String(b.array());
+			
+			readBuffer = ByteBuffer.allocate(32*1024);
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(32*1024, readBuffer.limit());
+			
+
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertNotNull(readBuffer);
+			assertEquals(16, readBuffer.limit());
+			out = new String(readBuffer.array(),0,16);
 			assertEquals("a few more bytes", out);
-			b = dev.read(1);
-			assertNull(b);
+			
+
+			readBuffer.clear();
+			res = dev.read(readBuffer);
+			assertEquals(-1, res);
 			dev.close();
 
 			dev.close();
@@ -286,7 +479,7 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			String urn = fd.getURN();
 			
@@ -298,11 +491,12 @@ public class TestContainer extends TestCase {
 			
 			ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(name);
 			Reader dev = new GeneralReadDevice(rzv,urn);
-			ByteBuffer b = dev.read(getTestData().limit());
-			b = dev.read(getTestData().limit());
+			ByteBuffer b = ByteBuffer.allocate(getTestData().limit());
+			int res = dev.read(b);
+			res = dev.read(b);
 			assertNotNull(b);
-			b = dev.read(getTestData().limit());
-			assertNull(b);
+			res = dev.read(b);
+			assertEquals(-1, res);
 			dev.close();
 			rzv.close();
 			
@@ -321,7 +515,7 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			DiscontiguousMapWriter mw = new DiscontiguousMapWriter(zv, fd);
 			
@@ -344,19 +538,19 @@ public class TestContainer extends TestCase {
 			QuadList res = v.query(null, null, "aff4:type", "map");
 			for (Quad q : res ) {
 				String urn = q.getSubject();
-				
+				ByteBuffer readBuffer = ByteBuffer.allocate(32*1024);
 				Reader dev = v.open(urn);
-				ByteBuffer b = dev.read(32*1024);
+				int r = dev.read(readBuffer);
 				try {
-					b = dev.read(32*1024);
+					r = dev.read(readBuffer);
 					fail();
 				} catch (AddressResolutionException ex) {
 					
 				}
-				dev.seek(32*1024*2);
-				b = dev.read(32*1024);
+				dev.position(32*1024*2);
+				r = dev.read(readBuffer);
 				try {
-					b = dev.read(32*1024);
+					r = dev.read(readBuffer);
 					fail();
 				} catch (AddressResolutionException ex) {
 					
@@ -378,8 +572,8 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
-			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			WritableStore zv = new Container(null,name);
+			StreamWriter fd =  zv.createWriter();
 
 			for (int i=0 ; i < 2049 ; i++){
 				fd.write(getTestData());
@@ -420,8 +614,8 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
-			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			Container zv = new Container(null, name);
+			StreamWriter fd = zv.createWriter();
 
 			for (int i=0 ; i < 2049 ; i++){
 				fd.write(getTestData());
@@ -447,15 +641,15 @@ public class TestContainer extends TestCase {
 		}
 	}
 	
-	public void testCreateImageBevvyPlusOne() {
+	public void testCreateImageBevvyPlusOne() throws ParseException {
 		try {
 			String tempDir = System.getenv("TEMP");
 			String name = tempDir + "\\testWrite.zip";
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
-			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
+			Container zv = new Container(null, name);
+			StreamWriter fd = zv.createWriter();
 
 			for (int i=0 ; i < 2049 ; i++){
 				fd.write(getTestData());
@@ -481,7 +675,7 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 
 			for (int i=0 ; i < 2048 ; i++){
@@ -505,7 +699,7 @@ public class TestContainer extends TestCase {
 			
 			assertTrue(deleteTestFile());
 			
-			WritableZipVolumeImpl zv = new WritableZipVolumeImpl(name);
+			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			
 			fd.write(getTestData());
@@ -521,7 +715,8 @@ public class TestContainer extends TestCase {
 		try {
 			ReadOnlyZipVolume v = new ReadOnlyZipVolume("C:\\mysrc\\AFF4.1\\aff4\\python\\test.zip");
 			Reader dev = new GeneralReadDevice(v,"urn:aff4:da0d1948-846f-491d-8183-34ae691e8293");
-			ByteBuffer buf = dev.read(10);
+			ByteBuffer buf = ByteBuffer.allocate(10);
+				dev.read(buf);
 			System.out.println(HexFormatter.convertBytesToString(buf.array()));
 		} catch (IOException e) {
 			fail();
