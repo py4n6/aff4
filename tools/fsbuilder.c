@@ -11,6 +11,8 @@
 #include "talloc.h"
 #include "zip.h"
 
+#define TSK_IMG_TYPE_AFF4 0x21
+
 ZipFile create_volume(char *driver) {
   if(!strcmp(driver, AFF4_ZIP_VOLUME)) {
     return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);

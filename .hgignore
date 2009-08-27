@@ -32,3 +32,7 @@ src/lib/sgzip
 src/mailtools/readpst
 src/regtools/reglookup
 *.Tpo
+tools/aff4imager
+tools/affuse
+tools/common.h
+tools/fsbuilder
