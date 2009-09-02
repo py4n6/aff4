@@ -5,18 +5,14 @@ Verify your java version by typing:
 Try:
 
 aff4imager - imager
-  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezi
-p-6.jar aff4.aff4imager -o image.zip sourcefile
+  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezip-6.jar;.\lib\antlr-2.7.5.jar aff4.aff4imager -o image.zip sourcefile
 
 aff4hasher - verify md5 of image and generate sha256 piecewise hashes at the same time
-  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezi
-p-6.jar aff4.aff4hasher -o container2.zip image.zip
+  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezip-6.jar;.\lib\antlr-2.7.5.jar aff4.aff4hasher -o container2.zip image.zip
 
 aff4signer - cryptographically sign a set of containers
-  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezi
-p-6.jar aff4.aff4signer -o container3.zip -k privkey.pem -p pubkey.pem containerdir
+  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezip-6.jar;.\lib\antlr-2.7.5.jar aff4.aff4signer -o container3.zip -k privkey.pem -p pubkey.pem containerdir
 
 aff4verifier - verify signatures and hashes in a set of containers
-  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezi
-p-6.jar aff4.aff4verifier containerdir
+  > java -Xmx512M -cp .\dist\aff4.jar;.\lib\bcprov-jdk15-143.jar;.\lib\commons-cli-1.2.jar;.\lib\truezip-6.jar;.\lib\antlr-2.7.5.jar aff4.aff4verifier containerdir
 
