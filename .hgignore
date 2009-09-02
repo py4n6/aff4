@@ -36,4 +36,7 @@ glob:*.class
 glob:*.log
 glob:*.dd
 glob:*.zip
-glob:*.bak
+tools/aff4imager
+tools/affuse
+tools/common.h
+tools/fsbuilder

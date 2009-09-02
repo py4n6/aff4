@@ -131,7 +131,9 @@ if test "x$have_libcurl" = "xyes"; then
 			have_libcurl=yes
 	], have_libcurl=no)
 	], have_libcurl=no)
+fi
 
+if test "${have_libcurl}" = "yes"; then
    AC_DEFINE(HAVE_LIBCURL, 1, [ Do we support curl ])
 fi
 
