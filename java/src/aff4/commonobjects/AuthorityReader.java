@@ -15,14 +15,16 @@ import org.bouncycastle.openssl.PEMReader;
 import aff4.container.ReadOnlyContainer;
 import aff4.datamodel.Reader;
 import aff4.datamodel.ReaderInputStream;
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
 import aff4.storage.zip.ReadOnlyZipVolume;
 
 public class AuthorityReader {
 	ReadOnlyContainer volume;
 	PublicKey publicKey = null;
-	String URN = null;
+	Resource URN = null;
 	
-	public AuthorityReader(ReadOnlyContainer v, String URN) throws IOException, ParseException {
+	public AuthorityReader(ReadOnlyContainer v, Resource URN) throws IOException, ParseException {
 		volume = v;
 		this.URN = URN;
 		init();
@@ -30,7 +32,7 @@ public class AuthorityReader {
 	
 	public void init() throws IOException, ParseException {
 		Security.addProvider(new BouncyCastleProvider());
-		Reader dev = volume.open(URN + "/cert.pem");
+		Reader dev = volume.open(Node.createURI(URN.getURI() + "/cert.pem"));
 		PEMReader pemReader = new PEMReader(new InputStreamReader(new ReaderInputStream(dev)));
 		X509Certificate cert = (X509Certificate)pemReader.readObject();
 		dev.close();

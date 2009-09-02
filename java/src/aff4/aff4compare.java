@@ -13,7 +13,9 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 
+import aff4.infomodel.Node;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import aff4.storage.zip.StreamReader;
 
@@ -52,7 +54,7 @@ public class aff4compare {
 				FileInputStream raf = new FileInputStream(source);
 				FileChannel channel = raf.getChannel();
 				
-				QuadList res = rzv.query(null, null, "aff4:type", "image");
+				QuadList res = rzv.query(Node.ANY, Node.ANY, AFF4.type, AFF4.image);
 				
 				StreamReader reader = new StreamReader(rzv, res.get(0).getSubject());
 				ByteBuffer sourceBuf = ByteBuffer.allocate(64*1024);

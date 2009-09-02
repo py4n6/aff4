@@ -8,6 +8,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
 import aff4.infomodel.AFFObject;
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.Point;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.storage.zip.WritableZipVolume;
@@ -29,7 +33,7 @@ public class DiscontiguousMapWriter extends AFFObject implements SeekableWriter 
 	public void seek(long s) throws IOException {
 		//currentPoint.setLength(writePtr - currentPoint.getOffset());
 		points.add(currentPoint);
-		currentPoint = new Point(writePtr, s-writePtr, -1, "urn:aff4:UnknownData");
+		currentPoint = new Point(writePtr, s-writePtr, -1, Node.createURI("urn:aff4:UnknownData"));
 		points.add(currentPoint);
 		currentPoint = new Point(s, 0, backingStore.position(), backingStore.getURN());
 		writePtr = s;
@@ -37,25 +41,26 @@ public class DiscontiguousMapWriter extends AFFObject implements SeekableWriter 
 	}
 
 	public void close() throws FileNotFoundException, IOException {
-		String URN = getURN();
+		Resource URN = getURN();
 		
-		volume.add(URN + "/properties", URN, "aff4:size", Long.toString(writePtr));
-		volume.add(URN + "/properties", URN, "aff4:type", "map");
+		volume.add(volume.getGraph(), URN, AFF4.size, Node.createLiteral(Long.toString(writePtr),null,DataType.integer));
+		volume.add(volume.getGraph(), URN, AFF4.type, AFF4.map);
 		
 		for (Point p : points) {
-			String source = URN + "[" + p.getOffset() + ":" + p.getLength() + "]";
+			String source = URN.getURI() + "[" + p.getOffset() + ":" + p.getLength() + "]";
 			String dest;
-			if (!p.getTargetURN().equals("urn:aff4:UnknownData")) {
-				dest = p.getTargetURN() + "[" + p.getTargetOffset() + ":" + p.getLength() + "]";
+			if (!p.getTargetURN().getURI().equals("urn:aff4:UnknownData")) {
+				dest = p.getTargetURN().getURI() + "[" + p.getTargetOffset() + ":" + p.getLength() + "]";
 			} else {
-				dest = p.getTargetURN() ;
+				dest = p.getTargetURN().getURI() ;
 			}
-			volume.add(URN + "/properties", URN, "aff4:contains", source);
-			volume.add(URN + "/properties", source, "aff4:sameAs", dest);
+			volume.add(volume.getGraph(), URN, AFF4.contains, Node.createURI(source));
+			volume.add(volume.getGraph(), Node.createURI(source), AFF4.sameAs, Node.createURI(dest));
 		}
 		
-		volume.add(URN + "/properties", URN, "aff4:stored", volume.getURN());
+		volume.add(volume.getGraph(), URN, AFF4.stored, volume.getURN());
 		
+		/*
 		String name =  URLEncoder.encode(URN, "UTF-8")	+ "/properties";
 		
 		PropertiesWriter writer = new PropertiesWriter(URN);
@@ -64,7 +69,7 @@ public class DiscontiguousMapWriter extends AFFObject implements SeekableWriter 
 		OutputStream f = volume.createOutputStream(name, true, res.length());
 		f.write(res.getBytes());
 		f.close();
-		
+		*/
 		backingStore.close();
 		
 	}

@@ -4,7 +4,8 @@ import java.io.IOException;
 import java.text.ParseException;
 
 import aff4.infomodel.Queryable;
+import aff4.infomodel.Resource;
 
 public interface Readable extends Queryable {
-	public Reader open(String segment) throws IOException, ParseException;
+	public Reader open(Resource segment) throws IOException, ParseException;
 }

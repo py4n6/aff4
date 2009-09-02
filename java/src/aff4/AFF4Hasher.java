@@ -18,14 +18,21 @@ import org.bouncycastle.crypto.digests.MD5Digest;
 import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.util.encoders.Hex;
 
+import com.sun.org.apache.xml.internal.utils.NodeVector;
+
 import aff4.commonobjects.LinkWriter;
 import aff4.commonobjects.ToolWriter;
 import aff4.commonobjects.WarrantReader;
 import aff4.datamodel.Reader;
 import aff4.hash.HashDigestAdapter;
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.datatypes.AFF4Datatype;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import aff4.storage.zip.StreamWriter;
 import aff4.storage.zip.WritableZipVolume;
@@ -85,11 +92,11 @@ public class aff4hasher {
 					
 					ToolWriter tr = new ToolWriter(zv);
 					
-					QuadList res = v.query(null, null, "aff4:type", "image");
+					QuadList res = v.query(Node.ANY, Node.ANY, AFF4.type, AFF4.image);
 					for (Quad q : res ) {
 						long readPtr = 0;
 						Reader r = v.open(q.getSubject());
-						String storedMD5 = QueryTools.queryValue(v, q.getGraph(), q.getSubject(), "aff4:hash");
+						Literal storedMD5 = (Literal) QueryTools.queryValue(v, q.getGraph(), q.getSubject(), AFF4.hash);
 						HashDigestAdapter md5 = new HashDigestAdapter(new MD5Digest());
 						HashDigestAdapter sha256 = new HashDigestAdapter(new SHA256Digest());
 						ByteBuffer buf = ByteBuffer.allocate(64*1024);
@@ -100,20 +107,25 @@ public class aff4hasher {
 							sha256.update(buf);
 							sha256.doFinal();
 							String calculatedSHA256  = sha256.getStringValue();
-							zv.add(zv.getURN() + "/properties", q.getSubject() + "[" + readPtr + ":" + (buf.limit() - buf.position()) + "]" , "aff4:sha256hash", calculatedSHA256);
+							zv.add(zv.getGraph(), 
+									Node.createURI(q.getSubject().getURI() + "#[" + readPtr + ":" + (buf.limit() - buf.position()) + "]") , 
+									AFF4.hash, 
+									Node.createLiteral(calculatedSHA256, null, AFF4Datatype.sha256));
 							readPtr += buf.limit() - buf.position();
 						}
 						
-						byte[] md5bytes =  new byte[md5.getDigestSize()];
-						md5.doFinal(md5bytes,0);
-						String calculatedMD5  = new String(Hex.encode(md5bytes),"UTF-8");
-						if (storedMD5.equals(calculatedMD5)) {
+						//byte[] md5bytes =  new byte[md5.getDigestSize()];
+						//md5.doFinal(md5bytes,0);
+						md5.doFinal();
+						//String calculatedMD5  = new String(Hex.encode(md5bytes),"UTF-8");
+						String calculatedMD5  = md5.getStringValue();
+						if (storedMD5.asString().equals(calculatedMD5)) {
 							System.out.println("MD5 verified: " + storedMD5);
 						} else {
-							System.out.println("MD5 verifification faild");
+							System.out.println("MD5 verifification failed");
 						}
 					}
-					tr.addAssertion(zv.getURN() + "/properties");
+					tr.addAssertion(zv.getGraph());
 					tr.setToolName("aff4hasher");
 					tr.setToolURL("http://aff.org/java/aff4hasher");
 					tr.setToolVersion("0.1");

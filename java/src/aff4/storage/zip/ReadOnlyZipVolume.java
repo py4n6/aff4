@@ -2,6 +2,8 @@ package aff4.storage.zip;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -16,20 +18,32 @@ import aff4.container.ReadOnlyContainer;
 import aff4.datamodel.MapReader;
 import aff4.datamodel.Readable;
 import aff4.datamodel.Reader;
+import aff4.infomodel.Literal;
+import aff4.infomodel.NamedGraphSet;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QuadStore;
 import aff4.infomodel.Queryable;
+import aff4.infomodel.Resource;
+import aff4.infomodel.aff4il.NamedGraphSetPopulator;
+import aff4.infomodel.aff4il.parser.AFF4ILParser;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.MapResolver;
 import aff4.infomodel.serialization.Properties2Resolver;
 import aff4.infomodel.serialization.PropertiesResolver;
+import antlr.RecognitionException;
+import antlr.TokenStreamException;
 import de.schlichtherle.util.zip.ZipEntry;
 import de.schlichtherle.util.zip.ZipFile;
 
 
 public class ReadOnlyZipVolume implements ReadOnlyContainer {
-	String volumeURN = null;
-	ArrayList<String> instances = null;
+	Resource volumeURN = null;
+	Resource graph = null;
+	
+	ArrayList<Resource> instances = null;
 	QuadStore store = null;
 	ZipFile zf = null;
 	HashSet<ZipEntry> propertiesEntries = null;
@@ -39,18 +53,18 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 
 	public ReadOnlyZipVolume(String path) throws IOException {
 		zf = new ZipFile(path);
-		volumeURN = zf.getComment();
+		volumeURN = Node.createURI(zf.getComment());
 		this.path = path;
 	}
 	
 	public ReadOnlyZipVolume(File path) throws IOException {
 		zf = new ZipFile(path);
-		volumeURN = zf.getComment();
+		volumeURN = Node.createURI(zf.getComment());
 		this.path = path.getName();
 	}
 	
 	
-	public QuadList query(String g, String s, String p, String o) throws IOException, ParseException {
+	public QuadList query(Node g, Node s, Node p, Node o) throws IOException, ParseException {
 		if (store == null) {
 			// first query we cache all of the results in the quadstore
 			store = new QuadStore();
@@ -62,9 +76,9 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 	}
 	
 
-	public QuadList queryNoCache(String g, String s, String p, String o) throws IOException, ParseException {
+	public QuadList queryNoCache(Node g, Node s, Node p, Node o) throws IOException, ParseException {
 		ZipEntry e = null;
-		instances = new ArrayList<String>();
+		instances = new ArrayList<Resource>();
 		Enumeration<ZipEntry> it = zf.entries();
 		ArrayList<ZipEntry> entries = new ArrayList<ZipEntry>();
 		while (it.hasMoreElements()) {
@@ -79,12 +93,21 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		mapEntries = new HashSet<ZipEntry>();
 		otherEntries = new HashSet<ZipEntry>();
 		for (ZipEntry ent : entries) {
-			if (ent.getName().endsWith("properties")) {
-				List<Quad> result = queryPropertiesSegment(g,s,p,o,zf, ent);
+			if (ent.getName().endsWith("info")) {
+				List<Quad> result = queryInfoSegment(g,s,p,o,zf, ent);
 				propertiesEntries.add(ent);
 				results.addAll(result);
 			} else if (ent.getName().endsWith("map")) {
 				mapEntries.add(ent);
+			} else if (ent.getName().endsWith(".idx")){
+				int lastSlash = ent.getName().lastIndexOf('/');
+				String instancePath = ent.getName().substring(0,lastSlash);
+				Resource instance = Node.createURI(URLDecoder.decode(instancePath, "UTF-8"));
+				if (!instances.contains(instance)) {
+					instances.add(instance);
+				}
+				otherEntries.add(ent);
+				
 			} else {
 				otherEntries.add(ent);
 			}
@@ -98,13 +121,13 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		}
 		
 		// for each image pull out metadata
-		for (String i : instances) {
-			if (store.query(null, i, "aff4:type", "image").size() == 1) {
+		for (Resource i : instances) {
+			//if (store.query(Node.ANY, i, AFF4.type, AFF4.image).size() == 1) {
 				// this is an image instance
 				StreamResolver sr = new StreamResolver(this, otherEntries);
-				QuadList result = sr.query(null, i, null, null);
+				QuadList result = sr.query(Node.ANY, i, Node.ANY, Node.ANY);
 				results.addAll(result);
-			}
+			//}
 			
 		}
 		
@@ -114,7 +137,7 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		return results;
 	}
 	
-	QuadList queryBevvies(String g, String s, String p, String o) throws UnsupportedEncodingException {
+	QuadList queryBevvies(Node g, Node s, Node p, Node o) throws UnsupportedEncodingException {
 		HashSet<String> indexeNames = new HashSet<String>();
 		HashSet<ZipEntry> indexes = new HashSet<ZipEntry>();
 		HashSet<ZipEntry> bevvySegments = new HashSet<ZipEntry>();
@@ -127,17 +150,24 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 				// this is a bevvy index
 				indexeNames.add(e.getName());
 				indexes.add(e);
-				inferredProperties.add(new Quad(new String("aff4:transient"), URLDecoder.decode(e.getName(), "UTF-8"), "aff4:size", Long.toString(e.getSize())));
-				inferredProperties.add(new Quad(new String("aff4:transient"), URLDecoder.decode(e.getName(), "UTF-8"), "aff4:type", "aff4:BevvyIndex"));
+				inferredProperties.add(new Quad(AFF4.trans, 
+						Node.createURI(URLDecoder.decode(e.getName(), "UTF-8")), 
+						AFF4.size, Node.createLiteral(Long.toString(e.getSize()), null, DataType.integer)));
+				inferredProperties.add(new Quad(AFF4.trans, 
+						Node.createURI(URLDecoder.decode(e.getName(), "UTF-8")), 
+						AFF4.type, AFF4.BevvyIndex));
 			}
 		}
 		
 		for (ZipEntry e : otherEntries) {
 			if (indexeNames.contains(e.getName() + ".idx")) {
 				bevvySegments.add(e);
-				inferredProperties.add(new Quad(new String("aff4:transient"), URLDecoder.decode(e.getName(), "UTF-8"), "aff4:size", Long.toString(e.getSize())));
-				inferredProperties.add(new Quad(new String("aff4:transient"), URLDecoder.decode(e.getName(), "UTF-8"), "aff4:type", "aff4:BevvySegment"));
-			}
+				inferredProperties.add(new Quad(AFF4.trans, 
+						Node.createURI(URLDecoder.decode(e.getName(), "UTF-8")), 
+						AFF4.size, Node.createLiteral(Long.toString(e.getSize()), null, DataType.integer)));
+				inferredProperties.add(new Quad(AFF4.trans, 
+						Node.createURI(URLDecoder.decode(e.getName(), "UTF-8")), 
+						AFF4.type, AFF4.BevvySegment));			}
 		}
 		
 		QuadStore qs = new QuadStore(inferredProperties);
@@ -145,7 +175,32 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		
 		
 	}
+
+	QuadList queryInfoSegment(Node g, Node s, Node p, Node o, ZipFile zf, ZipEntry e) throws IOException, ParseException {
+		try {
+			java.io.Reader r = new InputStreamReader(zf.getInputStream(e));
+			NamedGraphSet ngs = new NamedGraphSet();
+			NamedGraphSetPopulator ngsp = new NamedGraphSetPopulator(ngs, "foo", "foo");
+			AFF4ILParser parser = new AFF4ILParser(r, ngsp);
+			parser.parse();
+			r.close();
+			QuadStore qs = new QuadStore(ngs);
+			QuadList res = qs.query(Node.ANY, volumeURN, AFF4.type, AFF4.zip_volume);
+			if (res.size() == 1) {
+				graph = res.get(0).getGraph();
+			}
+			return qs.query(g, s, p, o);
+		} catch (TokenStreamException ex) {
+			throw new ParseException(ex.getLocalizedMessage(), -1);
+		} catch (RecognitionException ex2) {
+			// TODO Auto-generated catch block
+			throw new ParseException(ex2.getLocalizedMessage(), ex2.getLine());
+		}
+		
+	}
+
 	
+	/*
 	QuadList queryPropertiesSegment(String g, String s, String p, String o, ZipFile zf, ZipEntry e) throws IOException, ParseException {
 		String path = e.getName();
 		path = URLDecoder.decode(path, "UTF-8");
@@ -172,27 +227,27 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 
 		return res;
 	}
-	
-	QuadList queryMapSegment(String g, String s, String p, String o, ZipFile zf, ZipEntry e) throws IOException, ParseException {
+	*/
+	QuadList queryMapSegment(Node g, Node s, Node p, Node o, ZipFile zf, ZipEntry e) throws IOException, ParseException {
 		String path = e.getName();
 		path = URLDecoder.decode(path, "UTF-8");
-		String instanceURN = null;
+		Resource instanceURN = null;
 		
 		
 		if (path.endsWith("/map")) {
 			if (path.startsWith("urn:aff4")) {
 				// regular instance
 				int pos = path.indexOf("/map");
-				instanceURN = path.substring(0,pos);
+				instanceURN = Node.createURI(path.substring(0,pos));
 			} 
 		}
 		
 		// get size of map
-		List<Quad> r = queryPropertiesSegment(g, instanceURN, "aff4:size", o, zf, zf.getEntry(URLEncoder.encode(instanceURN, "UTF-8")+"/properties"));
+		List<Quad> r = queryInfoSegment(g, instanceURN, AFF4.size, o, zf, zf.getEntry(URLEncoder.encode(instanceURN.getURI(), "UTF-8")+"/info"));
 		long mapSize;
 		
 		if (r.size() == 1) {
-			mapSize = Long.parseLong(r.get(0).getObject());
+			mapSize = ((Literal)r.get(0).getObject()).asLong();
 		} else {
 			throw new RuntimeException("expected size attribute in " + instanceURN);
 		}
@@ -202,7 +257,7 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		if (s == null) {
 			res = pr.query(s,p, o);
 			//TODO: Check the below line
-		} else if (s.startsWith(instanceURN + "[") || s.equals(instanceURN) ) {
+		} else if (s.getURI().startsWith(instanceURN.getURI() + "[") || s.equals(instanceURN) ) {
 			res = pr.query(s,p, o);
 		} else {
 			res = new QuadList();
@@ -219,15 +274,15 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		return URLEncoder.encode(url, "UTF-8").replaceAll("%2F", "/");
 	}
 	
-	public Reader open(String urn) throws IOException, ParseException {
+	public Reader open(Resource urn) throws IOException, ParseException {
 		
-		QuadList res = query(null, urn, "aff4:type", null);
-		ArrayList<String> typeList = new ArrayList<String>();
+		QuadList res = query(Node.ANY, urn, AFF4.type, Node.ANY);
+		ArrayList<Node> typeList = new ArrayList<Node>();
 		for (Quad q : res) {
 			typeList.add(q.getObject());
 		}
 		
-		if (typeList.contains("image")){
+		if (typeList.contains(AFF4.image)){
 			return new StreamReader(this, urn);
 		} else if (typeList.contains("map")){
 			return new MapReader(this,urn);
@@ -235,7 +290,7 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 			return new RawReader(this,urn);
 		}
 		
-		String segmentEncodedURN = encode(urn);
+		String segmentEncodedURN = encode(urn.getURI());
 		for (ZipEntry entry : otherEntries) {
 			if (entry.getName().equals(segmentEncodedURN)) {
 				return new RawReader(this,urn, entry.getSize());
@@ -244,7 +299,7 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 		return null;
 	}
 	
-	public String getURN() {
+	public Resource getURN() {
 		return volumeURN;
 	}
 	
@@ -258,6 +313,10 @@ public class ReadOnlyZipVolume implements ReadOnlyContainer {
 	
 	public ZipFile getZipFile() {
 		return zf;
+	}
+	
+	public Resource getGraph() {
+		return graph;
 	}
 }
 

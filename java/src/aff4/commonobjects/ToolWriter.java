@@ -6,11 +6,14 @@ import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.storage.zip.WritableZipVolume;
 
 public class ToolWriter extends Instance {
-	ArrayList<String> assertions = new ArrayList<String>();
+	ArrayList<Resource> assertions = new ArrayList<Resource>();
 	String toolName;
 	String toolURL;
 	String toolVersion;
@@ -20,7 +23,7 @@ public class ToolWriter extends Instance {
 		volume = v;
 	}
 
-	public void addAssertion(String graph) {
+	public void addAssertion(Resource graph) {
 		assertions.add(graph);
 	}
 	
@@ -50,26 +53,28 @@ public class ToolWriter extends Instance {
 	}
 
 	public void close() throws FileNotFoundException, IOException{
-		String URN = getURN();
-		for (String urn : assertions) {
-			volume.add(URN + "/properties", urn, "aff4:assertedBy", URN );
+		Resource URN = getURN();
+		for (Resource urn : assertions) {
+			volume.add(volume.getGraph(), urn, AFF4.assertedBy, URN );
 
 		}
 
-		volume.add(URN + "/properties", URN , "aff4:type", "aff4:Tool");
-		volume.add(URN + "/properties", URN + "/properties", "aff4:assertedBy", URN );
-		volume.add(URN + "/properties", URN, "aff4:name", toolName);
-		volume.add(URN + "/properties", URN, "aff4:version", toolVersion);
-		volume.add(URN + "/properties", URN, "aff4:toolURL", toolURL);
+		volume.add(volume.getGraph(), URN , AFF4.type, AFF4.Tool);
+		volume.add(volume.getGraph(), volume.getGraph(), AFF4.assertedBy, URN );
+		volume.add(volume.getGraph(), URN, AFF4.name, Node.createLiteral(toolName, null, null));
+		volume.add(volume.getGraph(), URN, AFF4.version, Node.createLiteral(toolVersion,null,null));
+		volume.add(volume.getGraph(), URN, AFF4.toolURI, Node.createURI(toolURL));
 
-		String name = URLEncoder.encode(URN, "UTF-8")	+ "/properties";
+		/*
+		String name = URLEncoder.encode(URN.getURI(), "UTF-8")	+ "/properties";
 		
 		PropertiesWriter writer = new PropertiesWriter(URN);
 		String res = writer
-					.write(volume.query(URN + "/properties", null, null, null));
+					.write(volume.query(Node.createURI(URN + "/properties"), Node.ANY, Node.ANY, Node.ANY));
 		OutputStream f = volume.createOutputStream(name, true, res.length());
 		f.write(res.getBytes());
 		f.close();
+		*/
 
 	}
 }

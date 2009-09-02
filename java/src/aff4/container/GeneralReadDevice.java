@@ -8,8 +8,11 @@ import java.util.ArrayList;
 import aff4.datamodel.MapReader;
 import aff4.datamodel.Reader;
 import aff4.infomodel.AFFObject;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import aff4.storage.zip.StreamReader;
 
@@ -18,13 +21,13 @@ public class GeneralReadDevice extends AFFObject implements Reader{
 	Reader device = null;
 	ReadOnlyZipVolume volume = null;
 	
-	public GeneralReadDevice(ReadOnlyZipVolume vol, String urn) throws IOException, ParseException {
+	public GeneralReadDevice(ReadOnlyZipVolume vol, Resource urn) throws IOException, ParseException {
 		volume = vol;
 		
-		QuadList res = volume.query(null, urn, "aff4:type", null);
-		ArrayList<String> typeList = new ArrayList<String>();
+		QuadList res = volume.query(Node.ANY, urn, AFF4.type, Node.ANY);
+		ArrayList<Resource> typeList = new ArrayList<Resource>();
 		for (Quad q : res) {
-			typeList.add(q.getObject());
+			typeList.add((Resource)q.getObject());
 		}
 		
 		if (typeList.contains("image")){

@@ -8,6 +8,7 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SignatureException;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -24,8 +25,11 @@ import aff4.commonobjects.WarrantWriter;
 import aff4.container.Container;
 import aff4.container.DirectoryCorpus;
 import aff4.container.WritableStore;
+import aff4.infomodel.Node;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.StreamWriter;
 import aff4.storage.zip.WritableZipVolume;
 
@@ -96,9 +100,9 @@ public class aff4signer {
 					WarrantWriter w = new WarrantWriter(v);
 					w.setAuthority(a);
 					
-					List<String> uniqueGraphs = QueryTools.getUniqueGraphs(v.query(null, null, null, null));
-					for (String graph : uniqueGraphs) {
-						if (!graph.equals("aff4:transient")) {
+					Set<Resource> uniqueGraphs = QueryTools.getUniqueGraphs(v.query(Node.ANY, Node.ANY, Node.ANY, Node.ANY));
+					for (Resource graph : uniqueGraphs) {
+						if (!graph.equals(AFF4.trans)) {
 							w.addAssertion(graph);
 						}
 					}

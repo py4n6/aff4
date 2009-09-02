@@ -12,7 +12,11 @@ import java.util.zip.Inflater;
 
 import aff4.datamodel.Readable;
 import aff4.datamodel.Reader;
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 import de.schlichtherle.util.zip.ZipEntry;
 
 public class StreamReader  implements Reader {
@@ -21,7 +25,7 @@ public class StreamReader  implements Reader {
 	int chunk_size = 32*1024;
 	int chunks_in_segment = 2048;
 	int compression = 8;
-	String urn;
+	Resource urn;
 	int bevvy_number = 0;
 	long size;
 	long readptr;
@@ -29,27 +33,29 @@ public class StreamReader  implements Reader {
 	List<Long> bevvyOffsets;
 	long bevvy = -1;
 	
-	public StreamReader(Readable v, String u) throws IOException, ParseException {
+	public StreamReader(Readable v, Resource u) throws IOException, ParseException {
 		volume = v;
 		this.urn = u;
 	
-		String chunk_size_s = QueryTools.queryValue(volume, null, urn, "chunk_size");
-		if (chunk_size_s != null) {
-			chunk_size = Integer.parseInt(chunk_size_s);
-		} 
-		String chunks_in_segment_s = QueryTools.queryValue(volume, null, urn, "chunks_in_segment");
-		if (chunks_in_segment_s != null) {
-			chunks_in_segment = Integer.parseInt(chunks_in_segment_s);
-		} 
-	
-		String size_s = QueryTools.queryValue(volume, null, urn, "aff4:size");
-		if (size_s != null) {
-			size = Integer.parseInt(size_s);
-		} 
-		String compression_s = QueryTools.queryValue(volume, null, urn, "compression");
-		if (compression_s != null) {
-			compression = Integer.parseInt(compression_s);
-		} 
+		Literal cs = (Literal) QueryTools.queryValue(volume, Node.ANY, urn, AFF4.chunk_size );
+		if (cs != null) {
+			chunk_size = (int)cs.asLong();
+		}
+
+		Literal cis = (Literal)QueryTools.queryValue(volume, null, urn, AFF4.chunks_in_segment);
+		if (cis != null) {
+			chunks_in_segment = (int)cis.asLong();
+		}
+
+		Literal sz = (Literal)QueryTools.queryValue(volume, null, urn, AFF4.size);
+		if (sz != null) {
+			size = (int) sz.asLong();
+		}
+
+		Literal comp = (Literal)QueryTools.queryValue(volume, null, urn, AFF4.compression);
+		if (comp != null) {
+			compression = (int)comp.asLong();
+		}
 	}
 	
 	void open(String path) {
@@ -87,8 +93,8 @@ public class StreamReader  implements Reader {
         
         try {
             if (thisBevvy != bevvy) {
-            	int offsetsCount = Integer.parseInt(QueryTools.queryValue(volume, null, bevy_urn + ".idx", "aff4:size"));
-            	Reader is = volume.open(bevy_urn + ".idx");
+            	int offsetsCount = (int) ((Literal)QueryTools.queryValue(volume, Node.ANY, new Resource(bevy_urn + ".idx"), AFF4.size)).asLong();
+            	Reader is = volume.open(Node.createURI(bevy_urn + ".idx"));
             	ByteBuffer offsetBuf = ByteBuffer.allocate(offsetsCount);
             	int res = is.read(offsetBuf);
             	bevvyOffsets = new ArrayList<Long>(offsetsCount/4);
@@ -103,7 +109,7 @@ public class StreamReader  implements Reader {
         	long offset_end = bevvyOffsets.get((int)chunk_in_bevy + 1);
             length = Math.min((int)(offset_end - offset), available_to_read);
 
-            Reader is = volume.open(bevy_urn);
+            Reader is = volume.open(Node.createURI(bevy_urn));
             is.position((long)offset);
             int res = -1;
             if (compression != ZipEntry.STORED) {
@@ -274,9 +280,9 @@ public class StreamReader  implements Reader {
     	
     }
     
-	public String getURN() {
+	public Resource getURN() {
 		if (urn == null) {
-			urn = "urn:aff4:" + UUID.randomUUID().toString();
+			urn = new Resource("urn:aff4:" + UUID.randomUUID().toString());
 		}
 		return urn;
 	}

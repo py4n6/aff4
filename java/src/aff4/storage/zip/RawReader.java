@@ -9,34 +9,35 @@ import java.text.ParseException;
 import java.util.UUID;
 
 import aff4.datamodel.Reader;
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 
 public class RawReader  implements Reader {
 	ReadOnlyZipVolume volume;
 
-	String urn;
+	Resource urn;
 	int bevvy_number = 0;
 	long size;
 	InputStream stream = null;
 	long readPtr = 0;
 	
-	public RawReader(ReadOnlyZipVolume v, String u) throws IOException, ParseException {
+	public RawReader(ReadOnlyZipVolume v, Resource u) throws IOException, ParseException {
 		volume = v;
 		this.urn = u;
 	
-		String size_s = QueryTools.queryValue(volume, null, urn, "aff4:size");
-		if (size_s != null) {
-			size = Integer.parseInt(size_s);
-		} 
-		stream = v.getZipFile().getInputStream(encode(u));
+		long size = ((Literal)QueryTools.queryValue(volume, Node.ANY, urn, AFF4.size)).asLong();
+		stream = v.getZipFile().getInputStream(encode(u.getURI()));
 	}
 	
-	public RawReader(ReadOnlyZipVolume v, String u, long size) throws IOException, ParseException {
+	public RawReader(ReadOnlyZipVolume v, Resource u, long size) throws IOException, ParseException {
 		volume = v;
 		this.urn = u;
 	
 		this.size = size;
-		stream = v.getZipFile().getInputStream(encode(u));
+		stream = v.getZipFile().getInputStream(encode(u.getURI()));
 	}
 	
 	void open(String path) {
@@ -87,9 +88,9 @@ public class RawReader  implements Reader {
     	
     }
     
-	public String getURN() {
+	public Resource getURN() {
 		if (urn == null) {
-			urn = "urn:aff4:" + UUID.randomUUID().toString();
+			urn = new Resource("urn:aff4:" + UUID.randomUUID().toString());
 		}
 		return urn;
 	}

@@ -13,6 +13,7 @@ import java.security.Signature;
 import java.security.SignatureException;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.UUID;
 
 import org.bouncycastle.crypto.Digest;
 import org.bouncycastle.crypto.digests.SHA256Digest;
@@ -25,19 +26,28 @@ import aff4.container.Container;
 import aff4.container.WritableStore;
 import aff4.hash.HashDigestAdapter;
 import aff4.infomodel.GraphCanonicalizer;
+import aff4.infomodel.Node;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.Resource;
+import aff4.infomodel.datatypes.AFF4Datatype;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.storage.zip.WritableZipVolume;
 
 public class WarrantWriter extends ReadWriteInstance{
-	ArrayList<String> assertions = new ArrayList<String>();
+	ArrayList<Resource> assertions = new ArrayList<Resource>();
 	AuthorityWriter authority = null;
+	Resource warrantGraph = null;
 	
 	public WarrantWriter(WritableStore v) {
 		super(v);
+
+		warrantGraph = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
+
 	}
 
-	public void addAssertion(String graph) {
+	public void addAssertion(Resource graph) {
 		assertions.add(graph);
 	}
 	
@@ -67,25 +77,24 @@ public class WarrantWriter extends ReadWriteInstance{
 	}
 	
 	public void close() throws FileNotFoundException, IOException, InvalidKeyException, NoSuchAlgorithmException, SignatureException, ParseException {
-		String URN = getURN();
-		for (String urn : assertions) {
-			QuadList statements = container.query(urn, null, null, null);
+		Resource warrant = getURN();
+		for (Resource assertion : assertions) {
+			QuadList statements = container.query(assertion, Node.ANY, Node.ANY, Node.ANY);
 			GraphCanonicalizer standardiser = new GraphCanonicalizer(statements);
 			String canonicalData= standardiser.getCanonicalString();
 			
 			
 			String digest = digest(canonicalData);
-			container.add(URN + "/properties" , urn, "aff4:digestMethod", "canonical-sha256");
-			container.add(URN + "/properties" , urn, "aff4:digest", digest);
-			container.add(URN + "/properties" , urn, "aff4:assertedBy", URN );
+			container.add(warrantGraph , assertion, AFF4.hash, Node.createLiteral(digest, null,AFF4Datatype.canonical_sha256));
+			container.add(warrantGraph , assertion, AFF4.assertedBy, warrant );
 
 		}
-		container.add(URN + "/properties", URN , "aff4:authority", authority.getURN());
-		container.add(URN + "/properties", URN , "aff4:type", "aff4:Warrant");
-		container.add(URN + "/properties", URN + "/properties", "aff4:assertedBy", URN );
-		container.add(URN + "/properties", URN, "aff4:signatureMethod", "canonical-sha256-rsa");
+		container.add(warrantGraph, warrant , AFF4.authority, authority.getURN());
+		container.add(warrantGraph, warrant , AFF4.type, AFF4.Warrant);
+		container.add(warrantGraph, warrantGraph, AFF4.assertedBy, warrant );
+		//container.add(warrantGraph, warrant, AFF4.signatureMethod, Node.createLiteral("canonical-sha256-rsa", null, a));
 		
-		QuadList statements = container.query(URN + "/properties", null, null, null);
+		QuadList statements = container.query(warrantGraph, null, null, null);
 		GraphCanonicalizer standardiser = new GraphCanonicalizer(statements);
 		StringBuffer canonicalData = new StringBuffer();
 		for (String line: standardiser.getCanonicalStringsArray()) {
@@ -93,8 +102,9 @@ public class WarrantWriter extends ReadWriteInstance{
 			canonicalData.append(",");
 		}
 
-		container.add(URN + "/properties", URN + "/properties", "aff4:signature", calculateSignature(canonicalData.toString(), authority.getPrivateKey()));
+		container.add(warrantGraph, warrantGraph, AFF4.signature, Node.createLiteral(calculateSignature(canonicalData.toString(), authority.getPrivateKey()),null,AFF4Datatype.canonical_sha256_rsa));
 
+		/*
 		String name = URLEncoder.encode(URN, "UTF-8")	+ "/properties";
 		
 		PropertiesWriter writer = new PropertiesWriter(URN);
@@ -103,6 +113,7 @@ public class WarrantWriter extends ReadWriteInstance{
 		OutputStream f = container.createOutputStream(name, true, res.length());
 		f.write(res.getBytes());
 		f.close();
+		*/
 
 	}
 }

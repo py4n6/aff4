@@ -5,39 +5,43 @@ import java.nio.ByteBuffer;
 import java.text.ParseException;
 import java.util.ArrayList;
 
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
-import aff4.infomodel.resource.ResourceParser;
-import aff4.infomodel.resource.SliceResource;
+import aff4.infomodel.Resource;
+import aff4.infomodel.SliceResource;
+import aff4.infomodel.lexicon.AFF4;
+
 import aff4.infomodel.serialization.Point;
 
 public class MapReader implements Reader{
 	ArrayList<Point> points = null;
-	String URN = null;
+	Resource URN = null;
 	long size;
 	long readptr;
 	Readable volume = null;
 	
-	public MapReader(Readable v, String u) throws IOException, ParseException {
+	public MapReader(Readable v, Resource u) throws IOException, ParseException {
 		URN = u;
 		volume = v;
 		points = new ArrayList<Point>();
-		QuadList res = v.query(null, URN, "aff4:contains", null);
+		QuadList res = v.query(Node.ANY, URN, AFF4.contains, Node.ANY);
 		for (Quad q : res) {
-			SliceResource part = ResourceParser.parseSlice(q.getObject());
-			String targetStr = QueryTools.queryValue(v, null, q.getObject(), "aff4:sameAs");
+			SliceResource part = (SliceResource) q.getObject();
+			Resource targetStr = (Resource) QueryTools.queryValue(v, Node.ANY, q.getObject(), AFF4.sameAs);
 			Point p = null;
 			if (targetStr.equals("urn:aff4:UnknownData")) {
-				p = new Point(part.getOffset(), part.getLength(), -1,"urn:aff4:UnknownData");
+				p = new Point(part.getOffset(), part.getLength(), -1, Node.createURI("urn:aff4:UnknownData"));
 			} else {
-				SliceResource target = ResourceParser.parseSlice(targetStr);
-				p = new Point(part.getOffset(), part.getLength(), target.getOffset(), target.getBaseURN());
+				SliceResource target = (SliceResource) targetStr;
+				p = new Point(part.getOffset(), part.getLength(), target.getOffset(), target);
 			}
 			points.add(p);
 		}
 		
-		size = Long.parseLong(QueryTools.queryValue(v, null, URN, "aff4:size"));
+		size = ((Literal)QueryTools.queryValue(v, Node.ANY, URN, AFF4.size)).asLong();
 		readptr = 0;
 	}
 	

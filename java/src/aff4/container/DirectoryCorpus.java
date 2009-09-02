@@ -11,19 +11,21 @@ import java.util.Map;
 
 import aff4.datamodel.Readable;
 import aff4.datamodel.Reader;
+import aff4.infomodel.Node;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
 import aff4.infomodel.Queryable;
+import aff4.infomodel.Resource;
 import aff4.storage.zip.ReadOnlyZipVolume;
 
 public class DirectoryCorpus implements ReadOnlyContainer {
 	String directory;
 	List<Readable> volumes;
-	Map<String, Readable> graphSource = null;
+	Map<Resource, Readable> graphSource = null;
 	public DirectoryCorpus(String directory) {
 		this.directory = directory;
 		File dir = new File(directory);
-		graphSource = new HashMap<String, Readable>();
+		graphSource = new HashMap<Resource, Readable>();
 		if (dir.isDirectory()) {
 			volumes = new ArrayList<Readable>();
 			File[] volumeFiles = dir.listFiles(new FileFilter() {
@@ -41,7 +43,7 @@ public class DirectoryCorpus implements ReadOnlyContainer {
 					ReadOnlyZipVolume zv = new ReadOnlyZipVolume(volume);
 					volumes.add(zv);
 					QuadList res = zv.query(null, null, null, null);
-					for (String graph : QueryTools.getUniqueGraphs(res)) {
+					for (Resource graph : QueryTools.getUniqueGraphs(res)) {
 						graphSource.put(graph, zv);
 					}
 					
@@ -57,7 +59,7 @@ public class DirectoryCorpus implements ReadOnlyContainer {
 		}
 	}
 
-	public Reader open(String urn) throws IOException, ParseException {
+	public Reader open(Resource urn) throws IOException, ParseException {
 		for (Readable v : volumes) {
 			Reader r = v.open(urn);
 			if (r != null)
@@ -73,7 +75,7 @@ public class DirectoryCorpus implements ReadOnlyContainer {
 
 	}
 
-	public QuadList query(String g, String s, String p, String o)
+	public QuadList query(Node g, Node s, Node p, Node o)
 			throws IOException, ParseException {
 		QuadList res = null;
 		for (Readable v : volumes) {
@@ -87,7 +89,11 @@ public class DirectoryCorpus implements ReadOnlyContainer {
 		return res;
 	}
 
-	public String getURN() {
+	public Resource getURN() {
+		throw new RuntimeException();
+	}
+	
+	public Resource getGraph() {
 		throw new RuntimeException();
 	}
 }

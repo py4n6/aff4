@@ -4,16 +4,18 @@ import java.io.IOException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 
 public class QueryTools {
-	public static List<String> queryValues(Queryable volume, String g, String s, String p) throws IOException, ParseException{
+	public static List<Node> queryValues(Queryable volume, Node g, Node s, Node p) throws IOException, ParseException{
 		QuadList res = volume.query(g, s, p, null);
 		return res.getObjects();
 	}
 	
-	public static String queryValue(Queryable volume, String g, String s, String p) throws IOException, TooManyValuesException, ParseException{
+	public static Node queryValue(Queryable volume, Node g, Node s, Node p) throws IOException, TooManyValuesException, ParseException{
 		QuadList res = volume.query(g, s, p, null);
 		if (res.size() == 1){
 			return res.getObjects().get(0);
@@ -24,10 +26,15 @@ public class QueryTools {
 		}
 	}
 	
-	public static List<String> getUniqueGraphs(List<Quad> list) {
+	public static Set<Resource> getUniqueGraphs(Set<Quad> list) {
+		ArrayList<Quad> l = new ArrayList<Quad>(list);
+		return getUniqueGraphs(l);
+	}
+	
+	public static Set<Resource> getUniqueGraphs(List<Quad> list) {
 		Collections.sort(list);
-		ArrayList<String> res = new ArrayList<String>();
-		String last = null;
+		HashSet<Resource> res = new HashSet<Resource>();
+		Resource last = null;
 		for (Quad s : list) {
 			if (last == null) {
 				res.add(s.getGraph());
@@ -41,21 +48,22 @@ public class QueryTools {
 		return res;
 	}
 	
-	public static List<String> getUniqueSubjects(List<Quad> list) {
+	public static List<Resource> getUniqueSubjects(List<Quad> list) {
 		Collections.sort(list);
-		ArrayList<String> res = new ArrayList<String>();
-		String last = null;
+		ArrayList<Resource> res = new ArrayList<Resource>();
+		Resource last = null;
 		for (Quad s : list) {
 			if (last == null) {
 				res.add(s.getSubject());
 
 			} else {
-				if (s.getSubject() != last) {
+				if (!last.equals(s.getSubject())) {
 					res.add(s.getSubject());
 				}
 			}
 			last = s.getSubject();
 		}
+		Collections.sort(res);
 		return res;
 	}
 }

@@ -1,5 +1,7 @@
 package aff4.infomodel.serialization;
 
+import aff4.infomodel.Resource;
+
 public class Point {
 	public long getOffset() {
 		return offset;
@@ -25,20 +27,20 @@ public class Point {
 		this.targetOffset = targetOffset;
 	}
 
-	public String getTargetURN() {
+	public Resource getTargetURN() {
 		return targetURN;
 	}
 
-	public void setTargetURN(String targetURN) {
+	public void setTargetURN(Resource targetURN) {
 		this.targetURN = targetURN;
 	}
 
 	long offset;
 	long length;
 	long targetOffset;
-	String targetURN;
+	Resource targetURN;
 	
-	public Point(long offset, long length, long targetOffset, String targetURN ) {
+	public Point(long offset, long length, long targetOffset, Resource targetURN ) {
 		this.offset = offset;
 		this.length = length;
 		this.targetOffset = targetOffset;

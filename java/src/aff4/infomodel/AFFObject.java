@@ -3,11 +3,11 @@ package aff4.infomodel;
 import java.util.UUID;
 
 public class AFFObject {
-	String URN = null;
+	Resource URN = null;
 	
-	public String getURN() {
+	public Resource getURN() {
 		if (URN == null) {
-			URN = "urn:aff4:" + UUID.randomUUID().toString();
+			URN = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
 		}
 		return URN;
 	}

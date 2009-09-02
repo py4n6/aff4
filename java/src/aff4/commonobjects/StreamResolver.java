@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.util.Set;
 
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import de.schlichtherle.util.zip.ZipEntry;
 
@@ -18,8 +20,8 @@ public class StreamResolver {
 		this.otherEntries = otherEntries;
 	}
 	
-	public QuadList query(String g, String s, String p, String o) throws IOException {
-		String prefix = URLEncoder.encode(s, "UTF-8");
+	public QuadList query(Node g, Node s, Node p, Node o) throws IOException {
+		String prefix = URLEncoder.encode(s.getURI(), "UTF-8");
 		QuadList results = new QuadList();
 		for (ZipEntry e : otherEntries) {
 			if (e.getName().startsWith(prefix)) {
@@ -28,9 +30,9 @@ public class StreamResolver {
 				if ( res.length == 2 || res.length == 1) {
 					// this is a direct child
 					if (rest.endsWith(".idx")) {
-						results.add(new Quad(vol.getURN(), s, "aff4:containsSegmentIndex", e.getName()));
+						results.add(new Quad(vol.getGraph(), s, AFF4.containsSegmentIndex, Node.createLiteral(e.getName(), null, null)));
 					} else {
-						results.add(new Quad(vol.getURN(), s, "aff4:containsSegment", e.getName()));
+						results.add(new Quad(vol.getGraph(), s, AFF4.containsSegment, Node.createLiteral(e.getName(), null,null)));
 					}
 				}
 			}

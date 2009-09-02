@@ -3,6 +3,8 @@ package aff4.infomodel;
 import java.util.ArrayList;
 import java.util.Collections;
 
+import aff4.infomodel.lexicon.AFF4;
+
 
 public class GraphCanonicalizer {
 
@@ -26,7 +28,7 @@ public class GraphCanonicalizer {
 		// filter out any signature triples
 		ArrayList<CanonicalTriple> am = new ArrayList<CanonicalTriple>();
 		for (Quad tmp : a) {
-			if (!tmp.getPredicate().equals("aff4:signature")) {
+			if (!tmp.getPredicate().equals(AFF4.signature)) {
 				am.add(new CanonicalTriple(tmp));
 			}
 		}

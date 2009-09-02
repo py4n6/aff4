@@ -2,11 +2,12 @@ package aff4.infomodel.serialization;
 
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.Resource;
 
 public class PropertiesWriter {
 
-	String URN;
-	public PropertiesWriter(String URN) {
+	Resource URN;
+	public PropertiesWriter(Resource URN) {
 		this.URN = URN;
 	}
 	

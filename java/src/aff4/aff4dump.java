@@ -15,7 +15,9 @@ import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
 
 import aff4.commonobjects.LinkWriter;
+import aff4.infomodel.Node;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import aff4.storage.zip.StreamReader;
 import aff4.storage.zip.StreamWriter;
@@ -71,7 +73,7 @@ public class aff4dump {
 					ReadOnlyZipVolume rzv = new ReadOnlyZipVolume(inputFile);
 					RandomAccessFile raf = new RandomAccessFile(outputFile, "rw");
 					
-					QuadList res = rzv.query(null, null, "aff4:type", "image");
+					QuadList res = rzv.query(Node.ANY, Node.ANY, AFF4.type, AFF4.image);
 					
 					StreamReader reader = new StreamReader(rzv, res.get(0).getSubject());
 					

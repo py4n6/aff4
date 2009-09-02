@@ -32,3 +32,8 @@ src/lib/sgzip
 src/mailtools/readpst
 src/regtools/reglookup
 *.Tpo
+glob:*.class
+glob:*.log
+glob:*.dd
+glob:*.zip
+glob:*.bak

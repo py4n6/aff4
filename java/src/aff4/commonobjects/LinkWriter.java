@@ -7,6 +7,10 @@ import java.text.ParseException;
 
 import aff4.container.Container;
 import aff4.container.WritableStore;
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.storage.zip.StreamWriter;
 import aff4.storage.zip.WritableZipVolume;
@@ -22,13 +26,14 @@ public class LinkWriter extends ReadWriteInstance {
 	}
 
 	public void close() throws FileNotFoundException, IOException, ParseException {
-		String URN = getURN();
-		container.add(URN + "/properties", URN, "aff4:size", Long.toString(target.getSize()));
-		container.add(URN + "/properties", URN, "aff4:type", "link");
-		container.add(URN + "/properties", URN, "aff4:target", target.getURN());
-		container.add(URN + "/properties", URN, "aff4:stored", container.getURN());
-		container.add(container.getURN(), container.getURN(), "aff4:contains", URN + "/properties");
+		Resource URN = getURN();
+		container.add(container.getGraph(), URN, AFF4.size, Node.createLiteral(Long.toString(target.getSize()), null, DataType.integer));
+		container.add(container.getGraph(), URN, AFF4.type, Node.createLiteral("link", null, null));
+		container.add(container.getGraph(), URN, AFF4.target, target.getURN());
+		container.add(container.getGraph(), URN, AFF4.stored, container.getURN());
+		container.add(container.getGraph(), container.getURN(), AFF4.contains, Node.createURI(URN.getURI() + "/properties"));
 		
+		/*
 		String name =  linkName	+ "/properties";
 		
 		PropertiesWriter writer = new PropertiesWriter(URN);
@@ -37,6 +42,7 @@ public class LinkWriter extends ReadWriteInstance {
 		OutputStream f = container.createOutputStream(name, true, res.length());
 		f.write(res.getBytes());
 		f.close();
+		*/
 	}
 }
 

@@ -3,23 +3,31 @@ package aff4.storage.zip;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.util.UUID;
 
 import aff4.container.WritableStore;
 import aff4.datamodel.Writable;
 import aff4.datamodel.Writer;
+import aff4.infomodel.Literal;
+import aff4.infomodel.NamedGraphSet;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QuadStore;
 import aff4.infomodel.Queryable;
+import aff4.infomodel.Resource;
 import aff4.infomodel.Storable;
+import aff4.infomodel.aff4il.AFF4ILWriter;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.PropertiesWriter;
 import de.schlichtherle.util.zip.ZipEntry;
 import de.schlichtherle.util.zip.ZipOutputStream;
 
 public class WritableZipVolume implements WritableStore {
 	String path;
-	String volumeURN;
+	Resource volumeURN;
+	Resource graphURN;
 	ZipOutputStream zipfile = null;
 	String archiveName = null;
 	QuadStore quadStore = null;
@@ -29,33 +37,47 @@ public class WritableZipVolume implements WritableStore {
 		path = p;
 		int lastSlash = p.lastIndexOf(File.separator);
 		archiveName = p.substring(lastSlash + 1);
-		volumeURN = "urn:aff4:" + UUID.randomUUID().toString();
+		volumeURN = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
 		zipStream = new FileOutputStream(path);
 		zipfile = new ZipOutputStream(zipStream);
 		quadStore = new QuadStore();
+		
+		add(getGraph(), volumeURN, AFF4.type, AFF4.zip_volume);
+		add(getGraph(), volumeURN, AFF4.iface, AFF4.volume);
+		add(getGraph(), volumeURN, AFF4.stored, new Literal(archiveName));
 	}
 	
-	public String getURN() {
+	public Resource getURN() {
 		if (volumeURN == null) {
-			volumeURN = "urn:aff4:" + UUID.randomUUID().toString();
+			volumeURN = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
 		}
 		return volumeURN;
 	}
 	
+	public Resource getGraph() {
+		if (graphURN == null) {
+			graphURN = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
+		}
+		return graphURN;
+	}
+	
 	public void close() throws IOException {
-		zipfile.setComment(getURN());
+		zipfile.setComment(getURN().getURI());
 		//ZipFile zf = new ZipFile(path);
-		add(volumeURN+ "/properties", volumeURN, "aff4:type", "zip_volume");
-		add(volumeURN+ "/properties", volumeURN, "aff4:interface", "aff4:volume");
-		add(volumeURN+ "/properties", volumeURN, "aff4:stored", archiveName);
+
 		
-		String name =  "properties";
+		String name =  "info";
 		ZipEntry ze = new ZipEntry(name);
 		zipfile.putNextEntry(ze);
 		
-		PropertiesWriter writer = new PropertiesWriter(volumeURN);
-		String res = writer.write(quadStore.query(volumeURN + "/properties", null, null, null));
-		zipfile.write(res.getBytes());
+		StringWriter sw = new StringWriter();
+		AFF4ILWriter tw = new AFF4ILWriter();
+		tw.addNamespace("aff4", AFF4.baseURI);
+		tw.write(quadStore, sw, "http://foo.net/");
+		sw.toString();
+		
+
+		zipfile.write(sw.toString().getBytes());
 		zipfile.closeEntry();
 		zipfile.finish();
 		zipfile.close();
@@ -66,11 +88,11 @@ public class WritableZipVolume implements WritableStore {
 		//azs.close();
 	}
 	
-	public void add(String graph, String subject, String property, String object) {
+	public void add(Node graph, Node subject, Node property, Node object) {
 		quadStore.add(new Quad(graph, subject, property, object));
 	}
 	
-	public QuadList query(String g, String s, String p, String o) throws IOException {
+	public QuadList query(Node g, Node s, Node p, Node o) throws IOException {
 		return quadStore.query(g, s, p, o);
 	}
 	

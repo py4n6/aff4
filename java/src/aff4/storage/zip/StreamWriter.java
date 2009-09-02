@@ -12,13 +12,18 @@ import org.bouncycastle.crypto.digests.MD5Digest;
 
 import aff4.datamodel.Writer;
 import aff4.hash.HashDigestAdapter;
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
+import aff4.infomodel.datatypes.AFF4Datatype;
+import aff4.infomodel.datatypes.DataType;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.util.StructConverter;
 import de.schlichtherle.util.zip.ZipOutputStream;
 
 public class StreamWriter implements Writer {
 	WritableZipVolume volume = null;
-	String URN = null;
+	Resource URN = null;
 	int chunk_size = 32 * 1024;
 	int chunks_in_segment = 2048;
 	int compression = 8;
@@ -36,7 +41,7 @@ public class StreamWriter implements Writer {
 	HashDigestAdapter hash = null;
 	
 	public StreamWriter(WritableZipVolume v, ZipOutputStream zipfile) {
-		URN = "urn:aff4:" + UUID.randomUUID().toString();
+		URN = Node.createURI("urn:aff4:" + UUID.randomUUID().toString());
 		volume = v;
 		this.zipfile = zipfile;
 
@@ -97,14 +102,15 @@ public class StreamWriter implements Writer {
 		if (! closed) {
 			flushed = true;
 			hash.doFinal();
-			volume.add(URN + "/properties", URN, "aff4:size", Long.toString(writeptr));
-			volume.add(URN + "/properties", URN, "aff4:type", "image");
-			volume.add(URN + "/properties", URN, "aff4:interface", "aff4:stream");
-			volume.add(URN + "/properties", URN, "aff4:stored", volume.getURN());
-			volume.add(URN + "/properties", URN, "aff4:hash", hash.getStringValue());
-			volume.add(volume.getURN(), volume.getURN(), "aff4:contains", URN + "/properties");
+			volume.add(volume.getGraph(), URN, AFF4.size, Node.createLiteral(Long.toString(writeptr), null, DataType.integer));
+			volume.add(volume.getGraph(), URN, AFF4.type, AFF4.image);
+			volume.add(volume.getGraph(), URN, AFF4.iface, AFF4.stream);
+			volume.add(volume.getGraph(), URN, AFF4.stored, volume.getURN());
+			volume.add(volume.getGraph(), URN, AFF4.hash, Node.createLiteral(hash.getStringValue(), null, AFF4Datatype.md5));
+			volume.add(volume.getGraph(), volume.getURN(), AFF4.contains, Node.createURI(URN.getURI() + "/properties"));
 			
-			String name =  URLEncoder.encode(URN, "UTF-8")
+			/*
+			String name =  URLEncoder.encode(URN.getURI(), "UTF-8")
 					+ "/properties";
 			
 			
@@ -114,6 +120,7 @@ public class StreamWriter implements Writer {
 			OutputStream os = volume.createOutputStream(name, true, res.length());
 			os.write(res.getBytes());
 			os.close();
+			*/
 			closed = true;
 		}
 	}
@@ -158,7 +165,7 @@ public class StreamWriter implements Writer {
 			//buf.position((int) offset);
 		}
 		bevvy_index.putInt(-1);
-		String subject = URLEncoder.encode(URN, "UTF-8") + "/"
+		String subject = URLEncoder.encode(URN.getURI(), "UTF-8") + "/"
 				+ String.format("%1$08d", bevvy_number);
 		String bevvyFileName = subject;
 		String bevvyIndexFileName = subject + ".idx";
@@ -168,8 +175,8 @@ public class StreamWriter implements Writer {
 		f.close();
 		
 		// the following informaiton is currently required by Michael's implementations
-		volume.add(volume.getURN(), volume.getURN(), "aff4:contains", URN + "/" + subject);
-		volume.add(volume.getURN(), volume.getURN(), "aff4:contains", URN + "/" + subject + ".idx");
+		volume.add(volume.getGraph(), volume.getURN(), AFF4.contains, Node.createURI(URN.getURI() + "/" + String.format("%1$08d", bevvy_number)));
+		volume.add(volume.getGraph(), volume.getURN(), AFF4.contains, Node.createURI(URN.getURI() + "/" + String.format("%1$08d", bevvy_number) + ".idx"));
 		
 		f = volume.createOutputStream(bevvyIndexFileName,true,bevvy_index.position());
 		f.write(bevvy_index.array(), 0, bevvy_index.position());
@@ -182,7 +189,7 @@ public class StreamWriter implements Writer {
 		flushed = true;
 	}
 
-	public String getURN() {
+	public Resource getURN() {
 		return URN;
 	}
 	

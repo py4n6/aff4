@@ -21,9 +21,13 @@ import aff4.datamodel.Reader;
 import aff4.datamodel.Writer;
 
 
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.AFF4SegmentOutputStream;
 import aff4.storage.zip.ReadOnlyZipVolume;
 import aff4.storage.zip.StreamReader;
@@ -126,7 +130,7 @@ public class TestContainer extends TestCase {
 			
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 			
 			ByteBuffer buf = ByteBuffer.allocate(64*1024);
 			buf.put(a);
@@ -170,7 +174,7 @@ public class TestContainer extends TestCase {
 			
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 			
 			ByteBuffer buf = ByteBuffer.allocate(64*1024);
 			buf.put(a);
@@ -210,7 +214,7 @@ public class TestContainer extends TestCase {
 			
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 			
 			ByteBuffer buf = ByteBuffer.allocate(64*1024);
 			buf.put(a);
@@ -255,7 +259,7 @@ public class TestContainer extends TestCase {
 			
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 			
 			ByteBuffer buf = ByteBuffer.allocate(64*1024);
 			a.rewind();
@@ -299,7 +303,7 @@ public class TestContainer extends TestCase {
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			fd.setChunksInSegment(2);
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 
 			ByteBuffer c =  getTestData("c");
 			ByteBuffer d =  getTestData("d");
@@ -312,7 +316,7 @@ public class TestContainer extends TestCase {
 			fd.write(ByteBuffer.wrap(new String("a few more bytes").getBytes()));
 			fd.flush();
 			fd.close();
-			String storedHash = zv.query(null, fd.getURN(), "aff4:hash", null).get(0).getObject();
+			String storedHash = ((Literal)zv.query(Node.ANY, fd.getURN(), AFF4.hash, null).get(0).getObject()).asString();
 			zv.close();
 			
 			MD5Digest hash = new MD5Digest();
@@ -381,7 +385,9 @@ public class TestContainer extends TestCase {
 			res = dev.read(readBuffer);
 			assertEquals(res, -1);
 			dev.close();
-			String readHash = QueryTools.queryValue(rzv, null, dev.getURN(), "aff4:hash");
+			
+			
+			String readHash = ((Literal)QueryTools.queryValue(rzv, Node.ANY, dev.getURN(), AFF4.hash)).asString();
 			assertEquals(storedHash, readHash);
 			dev.close();
 			rzv.close();
@@ -403,7 +409,7 @@ public class TestContainer extends TestCase {
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
 			fd.setChunksInSegment(2);
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 
 			for (int i=0 ; i < 4 ; i++){
 				fd.write(getTestData());
@@ -481,7 +487,7 @@ public class TestContainer extends TestCase {
 			
 			WritableZipVolume zv = new WritableZipVolume(name);
 			StreamWriter fd = new StreamWriter(zv, zv.getZipFile());
-			String urn = fd.getURN();
+			Resource urn = fd.getURN();
 			
 			fd.write(getTestData());
 			fd.write(getTestData());
@@ -535,9 +541,9 @@ public class TestContainer extends TestCase {
 
 			
 			ReadOnlyZipVolume v = new ReadOnlyZipVolume(name);
-			QuadList res = v.query(null, null, "aff4:type", "map");
+			QuadList res = v.query(Node.ANY, Node.ANY, AFF4.type, AFF4.map);
 			for (Quad q : res ) {
-				String urn = q.getSubject();
+				Resource urn = q.getSubject();
 				ByteBuffer readBuffer = ByteBuffer.allocate(32*1024);
 				Reader dev = v.open(urn);
 				int r = dev.read(readBuffer);
@@ -590,12 +596,12 @@ public class TestContainer extends TestCase {
 			
 			WarrantWriter w = new WarrantWriter(zv);
 			w.setAuthority(a);
-			w.addAssertion(fd.getURN() + "properties");
+			w.addAssertion(zv.getGraph());
 			w.close();
 			zv.close();
 			
 			ReadOnlyZipVolume v = new ReadOnlyZipVolume(name);
-			QuadList res = v.query(null, null, "aff4:type", "aff4:Warrant");
+			QuadList res = v.query(Node.ANY, Node.ANY, AFF4.type, AFF4.Warrant);
 			for (Quad q : res ) {
 				WarrantReader wr = new WarrantReader(v, q.getSubject());
 				assertTrue(wr.isValid());
@@ -632,7 +638,7 @@ public class TestContainer extends TestCase {
 			
 			WarrantWriter w = new WarrantWriter(zv);
 			w.setAuthority(a);
-			w.addAssertion(fd.getURN() + "/properties");
+			w.addAssertion(zv.getGraph());
 			w.close();
 			
 			zv.close();
@@ -714,7 +720,7 @@ public class TestContainer extends TestCase {
 	public void testMap() {
 		try {
 			ReadOnlyZipVolume v = new ReadOnlyZipVolume("C:\\mysrc\\AFF4.1\\aff4\\python\\test.zip");
-			Reader dev = new GeneralReadDevice(v,"urn:aff4:da0d1948-846f-491d-8183-34ae691e8293");
+			Reader dev = new GeneralReadDevice(v,Node.createURI("urn:aff4:da0d1948-846f-491d-8183-34ae691e8293"));
 			ByteBuffer buf = ByteBuffer.allocate(10);
 				dev.read(buf);
 			System.out.println(HexFormatter.convertBytesToString(buf.array()));
@@ -751,7 +757,7 @@ public class TestContainer extends TestCase {
 	public void testContent1() {
 		try {
 			ReadOnlyZipVolume v = new ReadOnlyZipVolume("C:\\mysrc\\AFF4.1\\aff4\\python\\smallNTFS.zip");
-			Reader dev = new GeneralReadDevice(v,"urn:aff4:07ae2fc9-2ba7-46b2-930c-a7f2df14c9f4/storage");
+			Reader dev = new GeneralReadDevice(v,Node.createURI("urn:aff4:07ae2fc9-2ba7-46b2-930c-a7f2df14c9f4/storage"));
 			//ByteBuffer buf = dev.read();
 			//System.out.println(HexFormatter.convertBytesToString(buf.array()));
 		} catch (IOException e) {

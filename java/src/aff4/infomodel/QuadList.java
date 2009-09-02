@@ -2,37 +2,38 @@ package aff4.infomodel;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class QuadList extends ArrayList<Quad> {
 
 	private static final long serialVersionUID = -4202270932802128048L;
 
-	public List<String> getGraphs() {
-		ArrayList<String> res = new ArrayList<String>();
+	public List<Resource> getGraphs() {
+		ArrayList<Resource> res = new ArrayList<Resource>();
 		for (Quad q : this) {
 			res.add(q.graph);
 		}
 		return res;
 	}
 	
-	public List<String> getSubjects() {
-		ArrayList<String> res = new ArrayList<String>();
+	public List<Resource> listSubjects() {
+		ArrayList<Resource> res = new ArrayList<Resource>();
 		for (Quad q : this) {
 			res.add(q.subject);
 		}
 		return res;
 	}
 	
-	public List<String> getPredicates() {
-		ArrayList<String> res = new ArrayList<String>();
+	public List<Resource> getPredicates() {
+		ArrayList<Resource> res = new ArrayList<Resource>();
 		for (Quad q : this) {
 			res.add(q.predicate);
 		}
 		return res;
 	}
 	
-	public List<String> getObjects() {
-		ArrayList<String> res = new ArrayList<String>();
+	public List<Node> getObjects() {
+		ArrayList<Node> res = new ArrayList<Node>();
 		for (Quad q : this) {
 			res.add(q.object);
 		}

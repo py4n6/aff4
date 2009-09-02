@@ -5,9 +5,10 @@ import java.text.ParseException;
 
 
 public interface Queryable {
-	public QuadList query(String g, String s, String p, String o) throws IOException, ParseException;
+	public QuadList query(Node g, Node s, Node p, Node o) throws IOException, ParseException;
 	public void close() throws IOException;
-	public String getURN();
+	public Resource getURN();
+	public Resource getGraph();
 }
 
 /*

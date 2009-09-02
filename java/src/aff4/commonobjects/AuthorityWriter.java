@@ -17,6 +17,10 @@ import org.bouncycastle.openssl.PEMReader;
 
 import aff4.container.Container;
 import aff4.container.WritableStore;
+import aff4.infomodel.Node;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
+import aff4.infomodel.lexicon.FOAF;
 import aff4.infomodel.serialization.PropertiesWriter;
 import aff4.storage.zip.WritableZipVolume;
 
@@ -49,8 +53,8 @@ public class AuthorityWriter extends ReadWriteInstance {
 		dev.close();
 		dev = new FileInputStream(certificateFilePath);
 		
-		String URN = getURN();
-		String name =  URLEncoder.encode(URN, "UTF-8")	+ "/cert.pem";
+		Resource URN = getURN();
+		String name =  URLEncoder.encode(URN.getURI(), "UTF-8")	+ "/cert.pem";
 		
 		OutputStream certwriter = container.createOutputStream(name, true, dev.available());
 		byte[] buf = new byte[1024];
@@ -60,19 +64,19 @@ public class AuthorityWriter extends ReadWriteInstance {
 		}
 		dev.close();
 		certwriter.close();
-		container.add(URN + "/properties", URN, "aff4:publicKeyCertificate", URN + "/cert.pem");
+		container.add(container.getGraph(), URN, AFF4.publicKeyCertificate, Node.createURI(URN.getURI() + "/cert.pem"));
 		//PublicKey pk = cert.getPublicKey();
 	}
 	
 	public void close() throws FileNotFoundException, IOException, ParseException {
-		String URN = getURN();
-		container.add(URN + "/properties", URN, "aff4:type", "identity");
-		container.add(URN + "/properties", URN, "aff4:stored", container.getURN());
-		container.add(URN + "/properties", URN, "foaf:mbox", email);
+		Resource URN = getURN();
+		container.add(container.getGraph(), URN, AFF4.type, AFF4.identity);
+		container.add(container.getGraph(), URN, AFF4.stored, container.getURN());
+		container.add(container.getGraph(), URN, FOAF.mbox, Node.createLiteral(email, null, null));
 
 
 		//container.add(container.getURN(), container.getURN(), "aff4:contains", URN + "/properties");
-		
+		/*
 		String name =  URLEncoder.encode(URN, "UTF-8")	+ "/properties";
 		
 		PropertiesWriter writer = new PropertiesWriter(URN);
@@ -81,6 +85,7 @@ public class AuthorityWriter extends ReadWriteInstance {
 		OutputStream f = container.createOutputStream(name, true, res.length());
 		f.write(res.getBytes());
 		f.close();
+		*/
 	}
 }
 

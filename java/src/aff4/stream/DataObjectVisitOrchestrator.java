@@ -10,18 +10,19 @@ import java.util.LinkedList;
 import java.util.List;
 
 import aff4.datamodel.Readable;
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
+import aff4.infomodel.SliceResource;
 import aff4.infomodel.TooManyValuesException;
-import aff4.infomodel.resource.Resource;
-import aff4.infomodel.resource.ResourceParser;
-import aff4.infomodel.resource.SliceResource;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.StreamReader;
 
 public class DataObjectVisitOrchestrator {
 	
 	HashMap<String,List<SequentialPath>> orderedPaths = null;
 	Readable volume;
-	String urn = null;
 	
 	long lastOffset = 0;
 	int validatedCount = 0;
@@ -31,9 +32,9 @@ public class DataObjectVisitOrchestrator {
 		this.volume = volume;
 	}
 	
-	public void add(String dataObjectURN, OrderedDataStreamVisitor visitor) throws ParseException, NumberFormatException, TooManyValuesException, IOException {
-		Resource r = ResourceParser.parse(dataObjectURN);
-		urn = r.getBaseURN();
+	public void add(Resource dataObjectURN, OrderedDataStreamVisitor visitor) throws ParseException, NumberFormatException, TooManyValuesException, IOException {
+
+		String urn = dataObjectURN.getBaseURI();
 		
 		if (!orderedPaths.containsKey(urn)) {
 			orderedPaths.put(urn, new ArrayList<SequentialPath>());
@@ -41,11 +42,11 @@ public class DataObjectVisitOrchestrator {
 		List<SequentialPath> pathList = orderedPaths.get(urn);
 		
 		
-		if (r instanceof SliceResource) {
-			SliceResource rr = (SliceResource) r;
+		if (dataObjectURN instanceof SliceResource) {
+			SliceResource rr = (SliceResource) dataObjectURN;
 			pathList.add(new SequentialPath(rr.getOffset(), rr.getLength(), visitor));
 		} else {
-			long size = Long.parseLong(QueryTools.queryValue(volume, null, dataObjectURN, "aff4:size"));
+			long size = ((Literal)QueryTools.queryValue(volume, Node.ANY, dataObjectURN, AFF4.size)).asLong();
 			pathList.add(new SequentialPath(0, size, visitor));
 		}
 	}
@@ -73,7 +74,7 @@ public class DataObjectVisitOrchestrator {
 		
 		long lastTime = System.currentTimeMillis();
 		
-		IOBandwidthMeasurementReader reader = new IOBandwidthMeasurementReader(new StreamReader(volume, urn));
+		IOBandwidthMeasurementReader reader = new IOBandwidthMeasurementReader(new StreamReader(volume, Node.createURI(deviceUrn)));
 
 		if (paths.size() > 1) {
 			readPtr = paths.get(cursor).start / 64*1024;
@@ -111,6 +112,8 @@ public class DataObjectVisitOrchestrator {
 			}
 			readPtr += data.limit();
 		}
+		lastTime = System.currentTimeMillis();
+		summarise(reader, readPtr);
 
 	}
 	

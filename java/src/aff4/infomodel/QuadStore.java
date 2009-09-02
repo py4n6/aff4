@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class QuadStore {
@@ -15,9 +16,14 @@ public class QuadStore {
 	HashMap<String, Set<Integer>> pindex = new HashMap<String, Set<Integer>>();
 	HashMap<String, Set<Integer>> oindex = new HashMap<String, Set<Integer>>();
 	
+
+	
 	public QuadStore(List<Quad> quads) {
 		add(quads);
-
+	}
+	
+	public QuadStore(NamedGraphSet quads) {
+		add(quads);
 	}
 	
 	public QuadStore() {
@@ -34,12 +40,23 @@ public class QuadStore {
 		add(new Quad(g,s,p,o));
 	}
 	
+	public void add(NamedGraphSet ngs) {
+		for (Quad q : ngs) {
+			add(q);
+		}
+	}
 	public void add(Quad q) {
 		store.add(q);
-		String g = q.graph;
-		String s = q.subject;
-		String p = q.predicate;
-		String o = q.object;
+		String g = q.graph.getURI();
+		String s = q.subject.getURI();
+		String p = q.predicate.getURI();
+		
+		String o = null;
+		if (q.object instanceof Resource) {
+			o = ((Resource)q.object).getURI();
+		} else {
+			o = ((Literal)q.object).getLexicalForm();
+		}
 		int pos = store.size() -1;
 		
 		Set<Integer> gentrys = null;
@@ -112,6 +129,29 @@ public class QuadStore {
 		return sb.toString();
 	}
 	
+	public QuadList query(Node g, Node s, Node p, Node o) {
+		String g2 = null;
+		if (g != null && g != Node.ANY)
+			g2 = g.getURI();
+		String s2 = null;
+		if (s != null && s != Node.ANY)
+			s2 = s.getURI();
+		String p2 = null;
+		if (p != null && p != Node.ANY) 
+			p2 = p.getURI();
+		
+		String o2 = null;
+		if (o != null && o != Node.ANY) {
+			if (o instanceof Resource) {
+				o2 = ((Resource)o).getURI();
+			} else if (o instanceof Literal) {
+				o2 = ((Literal)o).getLexicalForm();
+			}
+		}
+		
+		return query(g2, s2, p2, o2);
+		
+	}
 	public QuadList query(String g, String s, String p, String o) {
 		QuadList res = null; 
 		

@@ -2,120 +2,122 @@ package aff4.infomodel.test;
 
 import java.util.List;
 
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadStore;
+import aff4.infomodel.Resource;
 
 import junit.framework.TestCase;
 
 public class TestQuadStore extends TestCase {
 	public void testEmptyQuery() {
 		QuadStore q = new QuadStore();
-		//q.add("a", "b", "c", "d");
-		List<Quad> res = q.query(null, null, null, null);
+		//q.add("a", new Resource("b"), new Resource("c"), new Resource("d"));
+		List<Quad> res = q.query(Node.ANY, Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
 	}
 	
 	public void testOneEntry() {
 		QuadStore q = new QuadStore();
-		q.add("a", "b", "c", "d");
-		List<Quad> res = q.query(null, null, null, null);
+		q.add(new Quad(new Resource("a"), new Resource("b"), new Resource("c"), new Resource("d")));
+		List<Quad> res = q.query(Node.ANY, Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query("b", null, null, null);
+		res = q.query(new Resource("b"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "b", null, null);
+		res = q.query(Node.ANY, new Resource("b"), Node.ANY, Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query(null, null, "b", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("b"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "b");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("b"));
 		assertEquals(0, res.size());
-		res = q.query("a", null, null, null);
+		res = q.query(new Resource("a"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query(null, "a", null, null);
+		res = q.query(Node.ANY, new Resource("a"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "a", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("a"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "a");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("a"));
 		assertEquals(0, res.size());
-		res = q.query("c", null, null, null);
+		res = q.query(new Resource("c"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "c", null, null);
+		res = q.query(Node.ANY, new Resource("c"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "c", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("c"), Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query(null, null, null, "c");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("c"));
 		assertEquals(0, res.size());
-		res = q.query("d", null, null, null);
+		res = q.query(new Resource("d"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "d", null, null);
+		res = q.query(Node.ANY, new Resource("d"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "d", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("d"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "d");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("d"));
 		assertEquals(1, res.size());
-		res = q.query("a", "b", null, null);
+		res = q.query(new Resource("a"), new Resource("b"), Node.ANY, Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query(null, "b", "c", null);
+		res = q.query(Node.ANY, new Resource("b"), new Resource("c"), Node.ANY);
 		assertEquals(1, res.size());
-		res = q.query(null, null, "c", "d");
+		res = q.query(Node.ANY, Node.ANY, new Resource("c"), new Resource("d"));
 		assertEquals(1, res.size());
 	}
 	
 	public void testTwoEntry() {
 		QuadStore q = new QuadStore();
-		q.add("a", "b", "c", "d");
-		q.add("a", "b", "c", "f");
-		List<Quad> res = q.query(null, null, null, null);
+		q.add(new Quad(new Resource("a"), new Resource("b"), new Resource("c"), new Resource("d")));
+		q.add(new Quad(new Resource("a"), new Resource("b"), new Resource("c"), new Resource("f")));
+		List<Quad> res = q.query(Node.ANY, Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query("b", null, null, null);
+		res = q.query(new Resource("b"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "b", null, null);
+		res = q.query(Node.ANY, new Resource("b"), Node.ANY, Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query(null, null, "b", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("b"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "b");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("b"));
 		assertEquals(0, res.size());
-		res = q.query("a", null, null, null);
+		res = q.query(new Resource("a"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query(null, "a", null, null);
+		res = q.query(Node.ANY, new Resource("a"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "a", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("a"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "a");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("a"));
 		assertEquals(0, res.size());
-		res = q.query("c", null, null, null);
+		res = q.query(new Resource("c"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "c", null, null);
+		res = q.query(Node.ANY, new Resource("c"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "c", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("c"), Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query(null, null, null, "c");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("c"));
 		assertEquals(0, res.size());
-		res = q.query("d", null, null, null);
+		res = q.query(new Resource("d"), Node.ANY, Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, "d", null, null);
+		res = q.query(Node.ANY, new Resource("d"), Node.ANY, Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, "d", null);
+		res = q.query(Node.ANY, Node.ANY, new Resource("d"), Node.ANY);
 		assertEquals(0, res.size());
-		res = q.query(null, null, null, "d");
+		res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("d"));
 		assertEquals(1, res.size());
-		res = q.query("a", "b", null, null);
+		res = q.query(new Resource("a"), new Resource("b"), Node.ANY, Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query(null, "b", "c", null);
+		res = q.query(Node.ANY, new Resource("b"), new Resource("c"), Node.ANY);
 		assertEquals(2, res.size());
-		res = q.query(null, null, "c", "d");
+		res = q.query(Node.ANY, Node.ANY, new Resource("c"), new Resource("d"));
 		assertEquals(1, res.size());
 	}
 	
 	public void testResult() {
 		QuadStore q = new QuadStore();
-		q.add("a", "b", "c", "d");
-		q.add("a", "b", "c", "f");
-		List<Quad> res = q.query(null, null, null, "f");
+		q.add(new Quad(new Resource("a"), new Resource("b"), new Resource("c"), new Resource("d")));
+		q.add(new Quad(new Resource("a"), new Resource("b"), new Resource("c"), new Resource("f")));
+		List<Quad> res = q.query(Node.ANY, Node.ANY, Node.ANY, new Resource("f"));
 		assertEquals(1, res.size());
 		Quad r = res.get(0);
-		assertEquals("a", r.getGraph());
-		assertEquals("b", r.getSubject());
-		assertEquals("c", r.getPredicate());
-		assertEquals("f", r.getObject());
+		assertEquals(new Resource("a"), r.getGraph());
+		assertEquals(new Resource("b"), r.getSubject());
+		assertEquals(new Resource("c"), r.getPredicate());
+		assertEquals(new Resource("f"), r.getObject());
 	}
 }

@@ -9,13 +9,14 @@ import org.bouncycastle.crypto.digests.SHA256Digest;
 import org.bouncycastle.util.encoders.Hex;
 
 import aff4.hash.HashDigestAdapter;
+import aff4.infomodel.Resource;
 
 public class HashStreamVerifier implements OrderedDataStreamVisitor{
 	HashDigestAdapter hashAlgorithm;
 	String hash = null;
-	String dataObject; 
+	Resource dataObject; 
 	
-	public HashStreamVerifier(Digest digest, String dataObject, String hash) {
+	public HashStreamVerifier(Digest digest, Resource dataObject, String hash) {
 		this.hash = hash;
 		hashAlgorithm = new HashDigestAdapter(digest);
 		this.dataObject = dataObject;

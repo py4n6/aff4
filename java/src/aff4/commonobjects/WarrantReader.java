@@ -15,36 +15,41 @@ import org.bouncycastle.util.encoders.Base64;
 import aff4.container.ReadOnlyContainer;
 import aff4.hash.HashDigestAdapter;
 import aff4.infomodel.GraphCanonicalizer;
+import aff4.infomodel.Literal;
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
 import aff4.infomodel.QueryTools;
+import aff4.infomodel.Resource;
 import aff4.infomodel.TooManyValuesException;
+import aff4.infomodel.lexicon.AFF4;
 import aff4.storage.zip.ReadOnlyZipVolume;
 
 public class WarrantReader {
 	ReadOnlyContainer volume;
-	String URN = null;
+	Resource URN = null;
 	
-	ArrayList<String> assertions = new ArrayList<String>();
+	ArrayList<Resource> assertions = new ArrayList<Resource>();
 	
-	public WarrantReader(ReadOnlyContainer v, String u) {
+	public WarrantReader(ReadOnlyContainer v, Resource u) {
 		volume = v;
 		URN = u;
 	}
 	
-	public ArrayList<String> getAssertions() {
+	public ArrayList<Resource> getAssertions() {
 		return assertions;
 	}
 	
 	public boolean isValid() throws IOException, NoSuchAlgorithmException, InvalidKeyException, SignatureException, TooManyValuesException, ParseException {
 
-			String warrantURN = URN;
-			String authority = QueryTools.queryValue(volume, null, warrantURN, "aff4:authority");
+			Resource warrantURN = URN;
+			Resource authority = (Resource) QueryTools.queryValue(volume, Node.ANY, warrantURN, AFF4.authority);
 
 			boolean verified = false;
 			
-			String warrantGraph = warrantURN + "/properties";
-			QuadList signedStatements = volume.query(warrantGraph, null, null, null);
+			Resource warrantGraph = volume.query(Node.ANY, warrantURN, AFF4.type, AFF4.Warrant).get(0).getGraph();
+			
+			QuadList signedStatements = volume.query(warrantGraph, Node.ANY, Node.ANY, Node.ANY);
 			GraphCanonicalizer standardiser = new GraphCanonicalizer(signedStatements);
 			String canonicalData= standardiser.getCanonicalString();
 
@@ -55,19 +60,19 @@ public class WarrantReader {
 			signature.initVerify(authorityReader.publicKey);
 			signature.update(bytes);
 			
-			String sig = QueryTools.queryValue(volume, null, warrantURN + "/properties", "aff4:signature");
+			String sig = ((Literal) QueryTools.queryValue(volume, Node.ANY, warrantGraph, AFF4.signature)).asString();
 			byte[] signatureBytes = Base64.decode(sig);
 			if (!signature.verify(signatureBytes)) {
 				return false; 
 			}
 
 			HashDigestAdapter hasher = new HashDigestAdapter(new SHA256Digest());
-			QuadList graphs = volume.query( null, null, "aff4:assertedBy", warrantURN);
+			QuadList graphs = volume.query( Node.ANY, Node.ANY, AFF4.assertedBy, warrantURN);
 			for (Quad graph : graphs) {
-				String subjectGraph = graph.getSubject();
+				Resource subjectGraph = graph.getSubject();
 				if (!subjectGraph.equals(warrantGraph)) {
-					String digestMethod = QueryTools.queryValue(volume, null, subjectGraph, "aff4:digestMethod");
-					String digest = QueryTools.queryValue(volume, null, subjectGraph, "aff4:digest");
+					//String digestMethod = ((Literal)QueryTools.queryValue(volume, Node.ANY, subjectGraph, AFF4.digestMethod)).asString();
+					String digest = ((Literal)QueryTools.queryValue(volume, Node.ANY, subjectGraph, AFF4.hash)).asString();
 					
 					QuadList statements = volume.query(subjectGraph, null, null, null);
 					standardiser = new GraphCanonicalizer(statements);
@@ -75,7 +80,8 @@ public class WarrantReader {
 					hasher.update(standardiser.getCanonicalString());
 					hasher.doFinal();
 	
-					if (!hasher.getStringValue().equals(digest)) {
+					String calculatedHash =hasher.getStringValue();
+					if (!calculatedHash.equals(digest)) {
 						return false;
 					} else {
 						assertions.add(subjectGraph);

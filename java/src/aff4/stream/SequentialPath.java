@@ -1,7 +1,9 @@
 package aff4.stream;
 
+import aff4.infomodel.Resource;
+
 public class SequentialPath implements Comparable{
-	String device = null;
+	Resource device = null;
 	long start;
 	long length;
 	OrderedDataStreamVisitor visitor;

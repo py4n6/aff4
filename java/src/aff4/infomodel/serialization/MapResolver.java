@@ -5,29 +5,32 @@ import java.io.InputStream;
 import java.text.ParseException;
 import java.util.ArrayList;
 
+import aff4.infomodel.Node;
 import aff4.infomodel.Quad;
 import aff4.infomodel.QuadList;
+import aff4.infomodel.Resource;
+import aff4.infomodel.lexicon.AFF4;
 
 public class MapResolver extends PropertiesReader {
 	
 
 	
 	ArrayList<Point> result = null;
-	String p;
-	String o;
+	Node p;
+	Node o;
 	long lastOffset = 0;
 	boolean firstLine = true;
 	Point currentPoint = null;
 	long streamSize = -1;
-	String selfURN;
+	Resource selfURN;
 	
-	public MapResolver(String selfURN, long size, InputStream stream) {
+	public MapResolver(Resource selfURN, long size, InputStream stream) {
 		super(stream);
 		this.selfURN = selfURN;
 		this.streamSize = size;
 	}
 	
-	public QuadList query(String s, String p, String o) throws IOException, ParseException {
+	public QuadList query(Node s, Node p, Node o) throws IOException, ParseException {
 		result = new ArrayList<Point>();
 		QuadList res = new QuadList();
 		firstLine = true;
@@ -38,12 +41,12 @@ public class MapResolver extends PropertiesReader {
 		finish();
 		
 		if ((p == null && o == null) || 
-				((p.equals("aff4:sameAs") || p.equals("aff4:contains")) && o == null)) {
+				((p.equals(AFF4.sameAs) || p.equals(AFF4.contains)) && o == null)) {
 			for (Point point : result) {
 				if (point.length != 0) {
 					
 					StringBuffer target = new StringBuffer();
-					target.append(point.targetURN);
+					target.append(point.targetURN.getURI());
 					target.append("[");
 					target.append(point.targetOffset);
 					target.append(",");
@@ -51,19 +54,19 @@ public class MapResolver extends PropertiesReader {
 					target.append("]");
 
 					StringBuffer source = new StringBuffer();
-					source.append(selfURN);
+					source.append(selfURN.getURI());
 					source.append("[");
 					source.append(point.offset);
 					source.append(",");
 					source.append(point.length);
 					source.append("]");
 					if (s == null && p == null) {
-						res.add(new Quad(null,selfURN, "aff4:contains", source.toString()));
-						res.add(new Quad(null,source.toString(), "aff4:sameAs", target.toString()));
+						res.add(new Quad(Node.ANY,selfURN, AFF4.contains, Node.createURI(source.toString())));
+						res.add(new Quad(Node.ANY,Node.createURI(source.toString()), AFF4.sameAs, Node.createURI(target.toString())));
 					} else if (s.equals(source.toString())) {
-						res.add(new Quad(null,source.toString(), "aff4:sameAs", target.toString()));
-					} else if (s.equals(selfURN) && p.equals("aff4:contains")) {
-						res.add(new Quad(null,selfURN, "aff4:contains", source.toString()));
+						res.add(new Quad(Node.ANY,Node.createURI(source.toString()), AFF4.sameAs, Node.createURI(target.toString())));
+					} else if (s.equals(selfURN) && p.equals(AFF4.contains)) {
+						res.add(new Quad(Node.ANY,selfURN, AFF4.contains, Node.createURI(source.toString())));
 					}
 				}
 			}
@@ -82,12 +85,12 @@ public class MapResolver extends PropertiesReader {
 		String targetURN = line.substring(secondComma+1);
 		
 		if (firstLine) {
-			currentPoint = new Point(offset, 0, targetOffset, targetURN);
+			currentPoint = new Point(offset, 0, targetOffset, Node.createURI(targetURN));
 			firstLine = false;
 		} else {
 			currentPoint.length = offset - currentPoint.offset;
 			result.add(currentPoint);
-			currentPoint = new Point(offset, 0, targetOffset, targetURN);
+			currentPoint = new Point(offset, 0, targetOffset, Node.createURI(targetURN));
 		}
 	}
 	

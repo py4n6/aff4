@@ -1,47 +1,63 @@
 package aff4.infomodel;
 
 public class Quad implements Comparable<Quad> {
-	String graph = null;
-	public String getGraph() {
+	Resource graph = null;
+	Resource subject = null;
+	Resource predicate = null;
+	Node object = null;
+	
+	public Resource getGraph() {
 		return graph;
 	}
 
-	public void setGraph(String graph) {
+	public void setGraph(Resource graph) {
 		this.graph = graph;
 	}
 
-	public String getSubject() {
+	public Resource getSubject() {
 		return subject;
 	}
 
-	public void setSubject(String subject) {
+	public void setSubject(Resource subject) {
 		this.subject = subject;
 	}
 
-	public String getPredicate() {
+	public Resource getPredicate() {
 		return predicate;
 	}
 
-	public void setPredicate(String predicate) {
+	public void setPredicate(Resource predicate) {
 		this.predicate = predicate;
 	}
 
-	public String getObject() {
+	public void setPredicate(String predicate) {
+		this.predicate = (Resource) Node.createURI(predicate);
+	}
+	
+	public Node getObject() {
 		return object;
 	}
 
-	public void setObject(String object) {
-		this.object = object;
-	}
 
-	String subject = null;
-	String predicate = null;
-	String object = null;
 	
 	public Quad(String g, String s, String p, String o) {
+		this.graph = (Resource) Node.createURI(g);
+		this.subject = (Resource) Node.createURI(s);
+		this.predicate = (Resource) Node.createURI(p);
+		this.object = Node.createLiteral(o, null, null);
+	}
+	
+	public Quad(Resource g, Resource s, Resource p, Node o) {
 		graph = g;
 		subject = s;
 		predicate = p;
+		object = o;
+	}
+	
+	public Quad(Node g, Node s, Node p, Node o) {
+		graph = (Resource)g;
+		subject = (Resource)s;
+		predicate = (Resource)p;
 		object = o;
 	}
 	
