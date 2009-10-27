@@ -19,13 +19,13 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
 static void Identity_Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
   /* we only care about hashes here */
   if(strstr(attribute, AFF4_SHA) == attribute) {
-    char *hash = CALL(self, resolve, uri, attribute);
+    char *hash = CALL(self, resolve, NULL, uri, attribute);
 
     if(hash && strcmp(hash, value)) {
       printf("**** Hash for %s is incorrect according to %s\n", uri, URNOF(self));
     } else {
       // Call the proper resolver add method
-      __Resolver.add(self, uri, attribute, value);
+      __Resolver.add(self, uri, attribute, value, 1);
     };
   };
 };
@@ -217,7 +217,7 @@ static AFFObject Identity_AFFObject_Con(AFFObject self, char *uri, char mode) {
     goto error;
   };
 
-  priv_key = CALL(oracle, resolve, uri, AFF4_PRIV_KEY);
+  priv_key = CALL(oracle, resolve, NULL, uri, AFF4_PRIV_KEY);
   this->info = NULL;
   list_for_each_entry(i, &oracle->identities, identities) {
     if(!strcmp(URNOF(i), uri)) {
@@ -267,8 +267,8 @@ static void Identity_store(Identity self, char *volume_urn) {
     i++;
   };
 
-  CALL(oracle, add, fqn, AFF4_TYPE, AFF4_IDENTITY);
-  CALL(oracle, add, fqn, AFF4_STATEMENT, filename);
+  CALL(oracle, add, fqn, AFF4_TYPE, AFF4_IDENTITY, 1);
+  CALL(oracle, add, fqn, AFF4_STATEMENT, filename, 1);
   PrintError();
 
   snprintf(filename, BUFF_SIZE, "%s/%08d", URNOF(self), i);
@@ -312,7 +312,7 @@ static void Identity_store(Identity self, char *volume_urn) {
 	CALL(fd, write, buff, len);
       };
 
-      CALL(oracle, add, URNOF(self), AFF4_CERT, cert_name);
+      CALL(oracle, add, URNOF(self), AFF4_CERT, cert_name, 1);
     };
     BIO_free(xbp);
   };
@@ -397,11 +397,12 @@ static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *ur
 };
 
 static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)) {
+#if 0
   Cache i;
 
   list_for_each_entry(i, &self->info->urn->cache_list, cache_list) {
     char *urn = (char *)i->key;
-    char *hash = CALL(self->info, resolve, urn, AFF4_SHA);
+    char *hash = CALL(self->info, resolve, self, urn, AFF4_SHA);
 
     if(hash) {
       FileLikeObject fd = (FileLikeObject)CALL(oracle, open, urn, 'r');
@@ -441,6 +442,7 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
   // allows to be updated. We make the Identity resolver read only by
   // substituting a NULL del method.
   self->info->del = Identity_Resolver_del;
+#endif 
 };
 
 VIRTUAL(Identity, AFFObject)

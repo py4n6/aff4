@@ -1,6 +1,8 @@
 /** This file implemnts the resolver */
 #include "zip.h"
 #include <uuid/uuid.h>
+#include <tdb.h>
+#include <raptor.h>
 
 /** This is a dispatcher of stream classes depending on their name.
 */

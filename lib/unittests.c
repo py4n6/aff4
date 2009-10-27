@@ -5,22 +5,93 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <time.h>
-
+#include <assert.h>
 
 #define TEST_FILE "test.zip"
 
-/** First test builds a new zip file from /bin/ls */
-void test1() {
-  // Make a new zip file
-  ZipFile zip = (ZipFile)CONSTRUCT(ZipFile, ZipFile, Con, NULL, NULL, 'w');
+#define ZIPFILE_TESTS 1
 
-  // Make a new file
+#ifdef RESOLVER_TESTS
+#define URN "aff4://hello"
+#define ATTRIBUTE "aff4://cruel"
+#define VALUE "world"
+
+void resolver_test_1() {
+  char *ctx = talloc_size(NULL, 1);
+  char **result;
+  char **i;
+  char *value;
+
+  // Clearing the urn
+  CALL(oracle, del, URN, ATTRIBUTE);
+
+  // Set an attribute
+  printf("Setting value \n");
+  CALL(oracle, set, URN, ATTRIBUTE, VALUE);
+  
+  // Retrieve it
+  value =CALL(oracle, resolve, ctx, URN, ATTRIBUTE);
+  printf("Retrieved value: %s\n", value);
+  
+  // Retrieved back what we put in
+  assert(!strcmp(VALUE, value));
+
+  // Add another value
+  CALL(oracle, add, URN, ATTRIBUTE, "world2");
+
+  // Grab the list of values
+  result = CALL(oracle,resolve_list, ctx, URN, ATTRIBUTE);
+  for(i=result; *i; i++) {
+    printf("Retrieved values: %s\n", *i);
+  };
+
+  talloc_free(ctx);
+};
+
+// Test locking:
+void resolver_test_locks() {
+  int pid = fork();
+  // Parent
+  if(pid) {
+    uint32_t now = time(NULL);
+
+    printf("Parent %lu Getting lock on %s\n", now, URN);
+    CALL(oracle, lock, URN, 'w');
+    printf("Parent %lu Got lock on %s\n", time(NULL) - now, URN);
+    sleep(5);
+    printf("Parent %lu Releasing lock on %s\n", time(NULL) - now, URN);
+    CALL(oracle, unlock, URN, 'w');
+  } else {
+    uint32_t now = time(NULL);
+
+    // Children have to get their own Resolver
+    talloc_free(oracle);
+    oracle = CONSTRUCT(Resolver, Resolver, Con, NULL);
+
+    // Give the parent a chance
+    sleep(1);
+    printf("Child %lu Getting lock on %s\n", now, URN);
+    CALL(oracle, lock, URN, 'w');
+    printf("Child %lu Got lock on %s\n", time(NULL) - now, URN);
+    sleep(5);
+    printf("Child %lu Releasing lock on %s\n", time(NULL) - now, URN);
+    CALL(oracle, unlock, URN, 'w');    
+    // Done
+    exit(0);
+  };
+};
+
+#endif
+
+#ifdef ZIPFILE_TESTS
+#define FILENAME "test.zip"
+/** First test builds a new zip file from /bin/ls */
+void zipfile_test1() {
+  // Make a new zip file
+  ZipFile zip = open_volume(FILENAME, 'w');
   FileLikeObject out_fd;
 
-  // Create a new Zip volume for writing
-  CALL(zip, create_new_volume, TEST_FILE);
-
-  CALL(zip, writestr, "hello", ZSTRING_NO_NULL("hello world"), NULL, 0, 0);
+  CALL(zip, writestr, "hello", ZSTRING("hello world"), NULL, 0, 0);
 
   // Open the member foobar for writing
   out_fd = CALL(zip, open_member, "foobar", 'w', NULL, 0,
@@ -143,6 +214,9 @@ void test2() {
 	 ((float)diff)/TIMES);
 };
 
+#endif
+
+#ifdef IMAGE_TESTS
 /** This test writes a two part AFF2 file.
 
 First we ask the oracle to create a FileBackedObject then attach that
@@ -307,7 +381,12 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   return URNOF(image);
 };
 
+#endif
+
 #define CHUNK_SIZE 32*1024
+
+
+#ifdef MAP_TESTS
 
 /** This tests the Map Image - we create an AFF file containing 3
     seperate streams and build a map. Then we read the map off and
@@ -413,8 +492,9 @@ void test_map_read(char *filename) {
   CALL(oracle, cache_return, (AFFObject)map);
   return;
 };
+#endif
 
-#ifdef HAVE_LIBCURL
+#if HTTP_TESTS==1 && HAVE_LIBCURL==1
 void test_http_handle() {
   FileLikeObject http = (FileLikeObject)CONSTRUCT(HTTPObject, HTTPObject, 
 						  Con, NULL, "http://127.0.0.1/test.c");
@@ -423,10 +503,9 @@ void test_http_handle() {
   CALL(http, read, buff, 100);
 
 };
-#else
-void test_http_handle(){};
 #endif
 
+#ifdef ENCTYPTED_TESTS
 void test_encrypted(char *filename) {
   ZipFile container = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
   FileLikeObject encrypted_stream, embedded_stream;
@@ -505,9 +584,21 @@ void test_encrypted(char *filename) {
   CALL(container, close);
   CALL(oracle, cache_return, (AFFObject)container);
 };
+#endif
 
 int main() {
-  //  talloc_enable_leak_report_full();
+  talloc_enable_leak_report_full();
+  AFF4_Init();
+
+#ifdef RESOLVER_TESTS
+  resolver_test_1();
+  resolver_test_locks();
+#endif
+
+#ifdef ZIPFILE_TESTS
+  zipfile_test1();
+#endif
+
   /*
   AFF2_Init();
   ClearError();
@@ -544,11 +635,11 @@ int main() {
   ClearError();
   test_map_read("http://127.0.0.1/" TEST_FILE);
   PrintError();
-  */
+
   AFF2_Init();
   ClearError();
   test_encrypted(TEST_FILE);
   PrintError();
-  
+  */  
   return 0;
 };

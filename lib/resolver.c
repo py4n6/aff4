@@ -2,6 +2,9 @@
 #include "zip.h"
 #include <uuid/uuid.h>
 #include <pthread.h>
+#include <tdb.h>
+#include <raptor.h>
+#include <errno.h>
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
@@ -60,15 +63,16 @@ Resolver oracle = NULL;
     references wont work.
 */
 /** Our own special add routine */
-static void oracle_add(Resolver self, char *uri, char *attribute, char *value) {
+static void oracle_add(Resolver self, char *uri, char *attribute, 
+		       char *value, int unique) {
   Resolver i;
 
   // Call the real add method for the oracle itself
-  __Resolver.add(self, uri, attribute, value);
+  __Resolver.add(self, uri, attribute, value, unique);
 
   // Add these to all the other identities
   list_for_each_entry(i, &self->identities, identities) {
-    CALL(i, add, uri, attribute, value);
+    CALL(i, add, uri, attribute, value, unique);
   };
 };
 
@@ -84,7 +88,7 @@ static void oracle_del(Resolver self, char *uri, char *attribute) {
   };
 };
 
-void AFF2_Init(void) {
+void AFF4_Init(void) {
   FileLikeObject_init();
   FileBackedObject_init();
   ZipFile_init();
@@ -92,7 +96,6 @@ void AFF2_Init(void) {
   Image_init();
   MapDriver_init();
   Resolver_init();
-  Link_init();
 
 #ifdef HAVE_LIBCURL
   HTTPObject_init();
@@ -275,89 +278,492 @@ VIRTUAL(Cache, Object)
      VMETHOD(get_item) = Cache_get_item;
 END_VIRTUAL
 
+/**********************************************************
+   The following are utilities that will be needed later
+***********************************************************/
+#define MAX_KEY "__MAX"
+#define VOLATILE_NS "aff4volatile:"
+
+// The data store is basically a singly linked list of these records:
+typedef struct TDB_DATA_LIST {
+  uint64_t next_offset;
+  uint16_t length;
+  uint16_t encoding_type;
+} TDB_DATA_LIST;
+
+/** Some constants */
+static TDB_DATA INHERIT = {
+  .dptr = (unsigned char *)"aff4:inherit",
+  .dsize = 12
+};
+
+static TDB_DATA WLOCK = {
+  .dptr = (unsigned char *)VOLATILE_NS "WLOCK",
+  .dsize = 18
+};
+
+static TDB_DATA RLOCK = {
+  .dptr = (unsigned char *)VOLATILE_NS "RLOCK",
+  .dsize = 18
+};
+
+static TDB_DATA LOCK = {
+  .dptr = (unsigned char *)"LOCK",
+  .dsize = 4
+};
+
+/* Given an int serialise into the buffer */
+static int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
+  return snprintf(buff, buff_len, "__%lld", i);
+};
+
+/** Given a buffer unserialise an int from it */
+static uint64_t tdb_to_int(TDB_DATA string) {
+  unsigned char buff[BUFF_SIZE];
+  int buff_len = min(string.dsize, BUFF_SIZE-1);
+
+  if(buff_len < 2) return 0;
+
+  memcpy(buff, string.dptr, buff_len);
+
+  //Make sure its null terminated
+  buff[buff_len]=0;
+
+  return strtoll((char *)buff+2, NULL, 0);
+};
+
+/** Fetches the id for the given key from the database tdb - if
+    create_new is set and there is no id present, we create a new id
+    and return id.
+*/
+static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
+  char buff[BUFF_SIZE];
+  TDB_DATA urn_id;
+  uint32_t max_id=0;
+  uint32_t result=0;
+  
+  /* We get given an ID and we retrieve the URN it belongs to */
+  tdb_lockall(tdb);
+  urn_id = tdb_fetch(tdb, key);
+
+  if(urn_id.dptr) {
+    result = tdb_to_int(urn_id);
+    free(urn_id.dptr);
+
+    tdb_unlockall(tdb);
+    return result;
+  } else if(create_new) {
+    TDB_DATA max_key;
+
+    max_key.dptr = (unsigned char *)MAX_KEY;
+    max_key.dsize = strlen(MAX_KEY);
+
+    urn_id = tdb_fetch(tdb, max_key);
+    if(urn_id.dptr) {
+      max_id = tdb_to_int(urn_id);
+      free(urn_id.dptr);
+    };
+
+    max_id++;
+    
+    // Update the new MAX_KEY
+    urn_id.dptr = (unsigned char *)buff;
+    urn_id.dsize = tdb_serialise_int(max_id, buff, BUFF_SIZE);
+    tdb_store(tdb, key, urn_id, TDB_REPLACE);
+    tdb_store(tdb, max_key, urn_id, TDB_REPLACE);
+    tdb_store(tdb, urn_id, key, TDB_REPLACE);
+
+    tdb_unlockall(tdb);
+    return max_id;
+  };
+
+  tdb_unlockall(tdb);
+  // This will only happen if create_new is false and the key is not
+  // found:
+  return 0;
+};
+
 /***********************************************************
    This is the implementation of the resolver.
 ***********************************************************/
+static int Resolver_destructor(void *this) {
+  Resolver self = (Resolver) this;
+  // Close all the tdb handles
+  tdb_close(self->urn_db);
+  self->urn_db = NULL;
+  
+  tdb_close(self->attribute_db);
+  self->attribute_db = NULL;
+
+  tdb_close(self->data_db);
+  self->data_db = NULL;
+
+  close(self->data_store_fd);
+  self->data_store_fd = 0;
+
+  return 0;
+};
 
 static Resolver Resolver_Con(Resolver self) {
-  // This is a persistent cache for all object relations we know about
-  self->urn = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
-  talloc_set_name_const(self->urn, "Main Resolver");
+  char buff[BUFF_SIZE];
+  // The location of the TDB databases
+  char *path = getenv("AFF4_TDB_PATH");
+  
+  if(!path)  path = ".";
 
-  // This is a cache for frequently used objects
-  self->cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
-  talloc_set_name_const(self->cache, "Temporary Cache");
+  // Open the TDB databases
+  if(snprintf(buff, BUFF_SIZE, "%s/urn.tdb", path) >= BUFF_SIZE)
+    goto error;
+  
+  self->urn_db = tdb_open(buff, 1024,
+			  0,
+			  O_RDWR | O_CREAT, 0644);
+  if(!self->urn_db)
+    goto error;
 
-  // This is a cache for writers:
-  self->writers = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 50);
-  talloc_set_name_const(self->writers, "Writer Cache");
+  if(snprintf(buff, BUFF_SIZE, "%s/attribute.tdb", path) >= BUFF_SIZE)
+    goto error1;
+
+  self->attribute_db = tdb_open(buff, 1024,
+				0,
+				O_RDWR | O_CREAT, 0644);
+  
+  if(!self->attribute_db) 
+    goto error1;
+
+  if(snprintf(buff, BUFF_SIZE, "%s/data.tdb", path) >= BUFF_SIZE)
+    goto error2;
+
+  self->data_db = tdb_open(buff, 1024,
+			   0,
+			   O_RDWR | O_CREAT, 0644);
+  
+  if(!self->data_db)
+    goto error2;
+  
+  if(snprintf(buff, BUFF_SIZE, "%s/data_store.tdb", path) >= BUFF_SIZE)
+    goto error3;
+  
+  self->data_store_fd = open(buff, O_RDWR | O_CREAT, 0644);
+  if(self->data_store_fd < 0)
+    goto error3;
+
+  // This ensures that the data store never has an offset of 0 (This
+  // indicates an error)
+  // Access to the tdb_store is managed via locks on the data.tdb
+  tdb_lockall(self->data_db);
+  if(lseek(self->data_store_fd, 0, SEEK_END)==0) {
+    (void)write(self->data_store_fd, "data",4);
+  };
+  tdb_unlockall(self->data_db);
+
+  // Create local read and write caches
+  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
+  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);  
 
   INIT_LIST_HEAD(&self->identities);
 
-  // This is a global lock for access to the resolver
-  pthread_mutexattr_init(&self->mta);
-  pthread_mutexattr_settype(&self->mta, PTHREAD_MUTEX_RECURSIVE_NP);
-  pthread_mutex_init(&self->mutex, &self->mta);
+  // Make sure we close our files when we get freed
+  talloc_set_destructor((void *)self, Resolver_destructor);
 
   return self;
+
+ error3:
+  tdb_close(self->data_db);
+  self->data_db = NULL;
+ error2:
+  tdb_close(self->attribute_db);
+  self->attribute_db = NULL;
+ error1:
+  tdb_close(self->urn_db);
+  self->urn_db = NULL;
+ error:
+  RaiseError(ERuntimeError, "Unable to open tdb files in '%s'", path);
+
+  return NULL;
 };
 
-static char *Resolver_resolve(Resolver self, char *urn, char *attribute) {
-  Cache i;
-  char *result;
+/** Writes the data key onto the buffer - this is a combination of the
+    uri_id and the attribute_id 
+*/
+static int calculate_key(Resolver self, TDB_DATA uri, 
+			 TDB_DATA attribute, char *buff,
+			 int buff_len, int create_new) {
+  uint32_t urn_id = get_id(self->urn_db, uri, create_new);
+  uint32_t attribute_id = get_id(self->attribute_db, attribute, create_new);
 
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return NULL;
+  // urn or attribute not found
+  if(urn_id == 0 || attribute_id == 0) return 0;
 
-  i=CALL(self->urn, get_item, urn);
-
-  if(!i) {
-    /*
-    RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
-	       attribute, urn);
-    */
-    pthread_mutex_unlock(&self->mutex);
-    return NULL;
-  };
-
-  result = CALL(i, get_item, attribute);
-  pthread_mutex_unlock(&self->mutex);
-  DEBUG("Getting %s, %s, %s\n", urn, attribute, result);
-
-  return result;
+  return snprintf(buff, buff_len, "%d:%d", urn_id, attribute_id);
 };
 
-static char **Resolver_resolve_list(Resolver self, void *ctx, char *urn, char *attribute) {
-  Cache i=CALL(self->urn, get_item, urn);
-  StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
-  Cache j;
-  int hash;
+/** returns the list head in the data file for the uri and attribute
+    specified. Return 1 if found, 0 if not found. 
+*/
+static uint32_t get_data_head(Resolver self, TDB_DATA uri, TDB_DATA attribute, 
+			      TDB_DATA_LIST *result) {
+  char buff[BUFF_SIZE];
+  TDB_DATA data_key;
 
-  if(!i) {
-    RaiseError(ERuntimeError, "Unable to locate attribute %s for urn %s",
-	       attribute, urn);
-    goto exit;
-  };
+  data_key.dptr = (unsigned char *)buff;
+  data_key.dsize = calculate_key(self, uri, attribute, buff, BUFF_SIZE, 0);
 
-  hash = CALL(i, hash, attribute);
-  if(i->hash_table && i->hash_table[hash]) {
-    list_for_each_entry(j, &i->hash_table[hash]->hash_list, hash_list) {
-      char *key = (char *)j->key;
-      char **existing = (char **)((char *)&j->data);
-      if(!strcmp(key, attribute)) {
-	// Push the string onto the result - note that we rely on the
-	// fact that the existing string will never be freed.
-	CALL(result, write, (char *)existing, sizeof(existing));
+  if(data_key.dsize > 0) {
+    // We found these attribute/urn
+    TDB_DATA offset_serialised = tdb_fetch(self->data_db, data_key);
+    if(offset_serialised.dptr) {
+      // We found the head - read the struct
+      uint32_t offset = tdb_to_int(offset_serialised);
+      lseek(self->data_store_fd, offset, SEEK_SET);
+      if(read(self->data_store_fd, result, sizeof(*result)) == sizeof(*result)) {
+	return offset;
       };
+      
+      free(offset_serialised.dptr);
     };
   };
 
+  return 0;
+};
+
+static inline int get_data_next(Resolver self, TDB_DATA_LIST *i){
+  if(i->next_offset > 0) {
+    lseek(self->data_store_fd, i->next_offset, SEEK_SET);
+    if(read(self->data_store_fd, i, sizeof(*i)) == sizeof(*i)) {
+      return 1;
+    };
+  };
+
+  return 0;
+};
+
+/** Resolves a single attribute and fills into value. Value needs to
+    be initialised with a valid dptr and dsize will indicate the
+    buffer size
+*/
+static int resolve(Resolver self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value) {
+  TDB_DATA_LIST i;
+  
+  if(get_data_head(self, urn, attribute, &i)) {
+    int length = min(value->dsize, i.length);
+    
+    // Read this much from the file
+    if(read(self->data_store_fd, value->dptr, length) < length) {
+      // Oops cant read enough
+      goto error;
+    };
+
+    value->dsize= length;
+    return 1;
+  };
+
+ error:
+  value->dsize = 0;
+
+  return 0;
+};
+
+
+/** Resolves a single attribute and returns the value. Value will be
+    talloced with the context of ctx.
+*/
+static char *Resolver_resolve(Resolver self, void *ctx, char *urn_str, char *attribute_str) {
+  TDB_DATA_LIST i;
+  TDB_DATA urn, attribute, value;
+  char *result;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+
+  DEBUG("Getting %s, %s, %s\n", urn, attribute, result);
+  if(get_data_head(self, urn, attribute, &i)) {
+    char *result = talloc_size(ctx, i.length+1);
+
+    // Read this much from the file
+    if(read(self->data_store_fd, result, i.length) < i.length) {
+      // Oops cant read enough
+      talloc_free(result);
+      return NULL;
+    };
+
+    // NULL terminate it
+    result[i.length]=0;
+    return result;
+  };
+  
+  return NULL;
+};
+
+// check if the value is already set for urn and attribute - honors inheritance
+static int is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
+			    TDB_DATA value, int follow_inheritence) {
+  TDB_DATA_LIST i;
+  char buff[BUFF_SIZE];
+  TDB_DATA tmp;
+
+  while(1) {
+    // Check the current urn,attribute set
+    if(get_data_head(self, urn, attribute, &i)) {
+      do {
+	if(value.dsize == i.length && i.length < 100000) {
+	  char buff[value.dsize];
+	  
+	  // Read this much from the file
+	  if(read(self->data_store_fd, buff, i.length) < i.length) {
+	    return 0;
+	  };
+	  
+	  if(!memcmp(buff, value.dptr, value.dsize)) {
+	    // Found it:
+	    return 1;
+	  };
+	};
+      } while(get_data_next(self, &i));
+    };
+
+    if(!follow_inheritence) break;
+
+    // Follow inheritence - FIXME - limit recursion here!!!
+    tmp.dptr = (unsigned char *)buff;
+    tmp.dsize = BUFF_SIZE;
+    // Substitute our urn with a possible inherited URN
+    if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
+      // Copy the urn
+      urn.dptr = (unsigned char *)buff;
+      urn.dsize = tmp.dsize;
+    } else {
+      break;
+    };
+
+    // Do it all again with the inherited URN
+  };
+    
+  return 0;
+};
+
+static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute, 
+			 TDB_DATA value) {
+  TDB_DATA key,offset;
+  char buff[BUFF_SIZE];
+  char buff2[BUFF_SIZE];
+  uint32_t new_offset;
+  TDB_DATA_LIST i;
+
+  // Update the value in the db and replace with new value
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
+
+  // Lock the database
+  tdb_lockall(self->data_db);
+
+  // Go to the end and write the new record
+  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  // The offset to the next item in the list
+  i.next_offset = 0;
+  i.length = value.dsize;
+  // FIXME:
+  i.encoding_type = 0;
+
+  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, value.dptr, value.dsize);
+
+  offset.dptr = (unsigned char *)buff2;
+  offset.dsize = tdb_serialise_int(new_offset, buff2, BUFF_SIZE);
+
+  tdb_store(self->data_db, key, offset, TDB_REPLACE);
+
+  //Done
+  tdb_unlockall(self->data_db);
+
+  return 1;
+};
+
+/** This sets a single triple into the resolver replacing previous
+    values set for this attribute
+*/
+static void Resolver_set(Resolver self, char *urn_str, 
+			 char *attribute_str, char *value_str) {
+  TDB_DATA urn, attribute, value;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+  value.dptr = (unsigned char *)value_str;
+  value.dsize = strlen(value_str);
+
+  // Grab the lock
+  tdb_lockall(self->data_db);
+
+  /** If the value is already in the list, we just ignore this
+      request.
+  */
+  if(!is_value_present(self, urn, attribute, value, 1)) {
+    set_new_value(self, urn, attribute, value);
+  };
+
+  tdb_unlockall(self->data_db);
+};
+
+/** Given a head, this function will traverse the data_store list and
+    append the values to the attribute list in result (which is really
+    a char **.
+
+    We assume self->data_store_fd is seeked to the right place when we
+    start.
+*/
+static int retrieve_attribute_list(Resolver self, 
+				   StringIO result, TDB_DATA_LIST head) {
+  int count = 0;
+  do {
+    char *buff = talloc_size(result, head.length+1);
+
+    // Read this much from the file
+    if(read(self->data_store_fd, buff, head.length) < head.length) {
+      // Oops cant read enough
+      goto exit;
+    };
+
+    count++;
+    buff[head.length]=0;
+
+    // Add the data to the list
+    CALL(result, write, (char *)&buff, sizeof(char *));
+  } while(get_data_next(self, &head));
+  
+ exit:
+  return count;
+};
+
+/** 
+    Returns a list of values belonging to the urn, attribute. The list
+    is allocated to the ctx provided.
+*/
+static char **Resolver_resolve_list(Resolver self, void *ctx,
+				    char *urn_str, char *attribute_str) {
+  StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
+  TDB_DATA urn,attribute;
+  TDB_DATA_LIST i;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+
+  if(get_data_head(self, urn, attribute, &i)) {
+       retrieve_attribute_list(self, result, i);
+  };
+  
  exit:
   // NULL terminate it
-  i=0;
-  CALL(result, write, (char *)&i, sizeof(i));
-  talloc_steal(ctx, result->data);
+  {
+    int i=0;
+    CALL(result, write, (char *)&i, sizeof(i));
+    talloc_steal(ctx, result->data);
+  };
 
   return (char **)result->data;
 };
@@ -377,15 +783,11 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 
   if(!urn) return NULL;
 
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return NULL;
-
   // Is this object cached?
   if(mode =='r') {
-    tmp = CALL(self->cache, get, urn);
+    tmp = CALL(self->read_cache, get, urn);
   } else {
-    tmp = CALL(self->writers, get, urn);
+    tmp = CALL(self->write_cache, get, urn);
   };
 
   if(tmp) {
@@ -393,7 +795,8 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
     talloc_steal(NULL, result);
     talloc_free(tmp);
 
-    pthread_mutex_unlock(&self->mutex);
+    // Lock it
+    CALL(self, lock, URNOF(result), mode);
     return result;
   };
 
@@ -407,7 +810,7 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 
   // Nope - maybe its stated explicitely
   if(!dispatch_ptr) {
-    stream_type = CALL(self, resolve, urn, AFF4_TYPE);
+    stream_type = CALL(self, resolve, self, urn, AFF4_TYPE);
     if(stream_type) {
       // Find it in the dispatcher struct and instantiate it
       for(i=0; dispatch[i].type !=NULL; i++) {
@@ -435,13 +838,16 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 				    Con, NULL, urn, mode);
   
   // Make sure the object mode is set
-  if(result)
+  if(result) {
     ((AFFObject)result)->mode = mode;
-  pthread_mutex_unlock(&self->mutex);
+    
+    // Lock it
+    CALL(self, lock, URNOF(result), mode);
+  };
+
   return result; 
 
  error:
-  pthread_mutex_unlock(&self->mutex);
   return NULL;
 };
 
@@ -449,254 +855,163 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
     to it after that.
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
-
-  // For testing we force all objects to be recreated
-  if(0) {
-    talloc_free(obj);
-    return;
-  };
-
   // Cache it
   if(!obj) return;
 
   // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return;
-
   if(obj->mode == 'r') {
-    CALL(self->cache, put, talloc_strdup(self, obj->urn),
-	 obj, sizeof(*obj));
+    char *urn = talloc_strdup(self, obj->urn);
+    CALL(self->read_cache, put, urn, obj, sizeof(*obj));
   } else if(obj->mode == 'w') {
-    CALL(self->writers, put, talloc_strdup(self, obj->urn),
-	 obj, sizeof(*obj));
+    char *urn = talloc_strdup(self, obj->urn);
+    Cache_put(self->write_cache, urn, obj, sizeof(*obj));
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
-
-  pthread_mutex_unlock(&self->mutex);
+  
+  // Unlock the URN
+  CALL(self, unlock, URNOF(obj), obj->mode);
 };
 
-static void Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
-  Cache tmp;
+static void Resolver_add(Resolver self, char *urn_str, 
+			 char *attribute_str, char *value_str,
+			 int unique) {
+  TDB_DATA urn, attribute, value, key;
+  TDB_DATA_LIST i;
+  uint32_t previous_offset=0;
+  uint32_t new_offset;
+  TDB_DATA offset;
+  char buff[BUFF_SIZE];
+  char buff2[BUFF_SIZE];
+  
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+  value.dptr = (unsigned char *)value_str;
+  value.dsize = strlen(value_str);
 
   DEBUG("Adding %s, %s, %s\n", uri, attribute, value);
 
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return;
-
-  if(CALL(self, is_set, uri, attribute, value)) goto error;
-
-  tmp = CALL(self->urn, get_item, uri);
-  if(!tmp) {
-    // Create a new URI
-    tmp = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
-    CALL(self->urn, put, talloc_strdup(NULL, uri),
-	 tmp, sizeof(*tmp));
+  /** If the value is already in the list, we just ignore this
+      request.
+  */
+  if(unique && is_value_present(self, urn, attribute, value, 1)) {
+    goto exit;
   };
 
-  // Make a copy for us to keep
-  value = talloc_strdup(NULL, value);
-  CALL(tmp, put, talloc_strdup(NULL, attribute), 
-       ZSTRING_NO_NULL(value));
+  // Ok if we get here, the value is not already stored there.
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
 
- error:
-  pthread_mutex_unlock(&self->mutex);
+  // Lock the data_db to synchronise access to the store:
+  tdb_lockall(self->data_db);
+
+  offset = tdb_fetch(self->data_db, key);
+  if(offset.dptr) {
+    previous_offset = tdb_to_int(offset);
+    free(offset.dptr);
+  };
+
+  // Go to the end and write the new record
+  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  i.next_offset = previous_offset;
+  i.length = value.dsize;
+  // FIXME
+  i.encoding_type = 0;
+
+  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, value.dptr, value.dsize);
+
+  // Now store the offset to this in the tdb database
+  value.dptr = (unsigned char *)buff2;
+  value.dsize = tdb_serialise_int(new_offset, buff2, BUFF_SIZE);
+
+  tdb_store(self->data_db, key, value, TDB_REPLACE);
+
+  // Done
+  tdb_unlockall(self->data_db);
+
+ exit:
   return;
 };
 
 static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *value) {
-  // See if the same value is already in there, if so we dont want it
-  // again (use the hash table for some speed)
-  Cache tmp;
-  int hash;
-  Cache i;
-
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return -1;
-
-  tmp =  CALL(self->urn, get_item, uri);
-  if(!tmp) 
-    goto error;
-
-  hash = CALL(tmp, hash, attribute);
-  if(tmp->hash_table && tmp->hash_table[hash]) {
-    list_for_each_entry(i, &tmp->hash_table[hash]->hash_list, hash_list) {
-      char *key = (char *)i->key;
-      char *existing = (char *)i->data;
-      if(!strcmp(key, attribute) && !strcmp(existing, value)){
-	pthread_mutex_unlock(&self->mutex);
-	return 1;
-      };
-    };
-  };
-
- error:
-  pthread_mutex_unlock(&self->mutex);
-  return 0;
 };
 
 /** Format all the attributes of the object specified by urn */
 static char *Resolver_export_urn(Resolver self, char *urn, char *context) {
-  char *result=talloc_strdup(NULL, "");
-  Cache i = CALL(self->urn, get_item, urn);
-  Cache j;
-
-  if(!i) return result;
-
-  list_for_each_entry(j, &i->cache_list, cache_list) {
-    char *attribute = (char *)j->key;
-    char *value = (char *)j->data;
-
-    // Do not write volatile data
-    if(memcmp(attribute, ZSTRING_NO_NULL(VOLATILE_NS))) {
-      if(!strcmp(urn, context)) {
-	// Relative form
-	result = talloc_asprintf_append(result, "%s=%s\n",
-					attribute, value);
-      } else {
-	// Absolute form
-        result = talloc_asprintf_append(result, "%s %s=%s\n", urn, 
-					attribute, value);
-      };
-    };
-  };
-
-  return result;
 };
 
 static char *Resolver_export_all(Resolver self, char *context) {
-  Cache i;
-  char *result=talloc_strdup(NULL, "");  
-
-  list_for_each_entry(i, &self->urn->cache_list, cache_list) {
-    char *urn = (char *)i->key;
-    char *tmp =Resolver_export_urn(self, urn, context);
-
-    result = talloc_asprintf_append(result, "%s", tmp);
-    talloc_free(tmp);
-  };
-  return result;
 };
 
 static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
-  AFFObject result;
-  if(!class_reference || !*class_reference) return NULL;
-
-  result = CONSTRUCT_FROM_REFERENCE((*class_reference), Con, self, NULL, 'w');
-  talloc_set_name(result, "%s: %s (" __location__ ")\n              ", NAMEOF(result), URNOF(result));
-  return result;
 };
 
-static void Resolver_del(Resolver self, char *uri, char *attribute) {
-  Cache tmp,j;
+static void Resolver_del(Resolver self, char *urn_str, char *attribute_str) {
+  TDB_DATA urn;
+  TDB_DATA attribute;
+  TDB_DATA key;
+  char buff[BUFF_SIZE];
 
-  DEBUG("Removing %s, %s\n", uri, attribute);
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
 
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return;
+  key.dptr = (unsigned char *)buff;
+  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 0);
 
-  tmp = CALL(self->urn, get_item, uri);
-  if(!tmp) goto exit;
-  
-  while(1) {
-    j = CALL(tmp, get, attribute);
-    if(!j) break;
-    //    LogWarnings("Removing %s %s",uri, attribute);
-    talloc_free(j);
-  };
-
- exit:
-  pthread_mutex_unlock(&self->mutex);
-  return;
+  // Remove the key from the database
+  tdb_delete(self->data_db, key);
 };
   
-static void Resolver_set(Resolver self, char *uri, char *attribute, char *value) {
-  // Grab the lock
-  if(pthread_mutex_lock(&self->mutex) != 0)
-    return;
-
-  CALL(self, del, uri, attribute);
-  CALL(self, add, uri, attribute, value);
-  pthread_mutex_unlock(&self->mutex);
-};
-
 // Parse a properties file (implicit context is context - if the file
 // does not specify a subject URN we use context instead).
 static void Resolver_parse(Resolver self, char *context_urn, char *text, int len) {
-  int i,j,k;
-  // Make our own local copy so we can modify it (the original is
-  // cached and doesnt belong to us).
-  char *tmp;
-  char *tmp_text;
-  char *source;
-  char *attribute;
-  char *value;
-  
-  tmp = talloc_memdup(self, text, len+1);
-  tmp[len]=0;
-  tmp_text = tmp;
-  
-  // Find the next line:
-  while((i=strcspn(tmp_text, "\r\n"))) {
-    tmp_text[i]=0;
-    
-    // Locate the =
-    j=strcspn(tmp_text,"=");
-    if(j==i) goto exit;
-    
-    tmp_text[j]=0;
-    value = tmp_text + j + 1;
-    
-    // Locate the space
-    k=strcspn(tmp_text," ");
-    if(k==j) {
-      // No absolute URN specified, we use the current filename:
-      source = talloc_strdup(tmp, context_urn);
-      attribute = tmp_text;
-    } else {
-      source = tmp_text;
-      attribute = tmp_text + k+1;
-    };
-    tmp_text[k]=0;
-    
-    /** If source is not a FQN, we use the context_urn instead */
-    if(strstr(source, FQN) != source) {
-      source = context_urn;
-    };
-        
-    // Now add to the global resolver (These will all be possibly
-    // stolen).
-    CALL(self, add, 
-	 talloc_strdup(tmp, source),
-	 talloc_strdup(tmp, attribute),
-	 talloc_strdup(tmp, value));
-    
-    // Move to the next line
-    tmp_text = tmp_text + i+1;
+};
+
+/** Synchronization methods. */
+int Resolver_lock(Resolver self, char *urn_str, char mode) {
+  TDB_DATA attribute;
+  uint64_t offset;
+  TDB_DATA_LIST data_list;
+  TDB_DATA urn;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+
+  if(mode == 'r') attribute=RLOCK;
+  else if(mode =='w') attribute=WLOCK;
+  else {
+    RaiseError(ERuntimeError, "Invalid mode %c", mode);
+    return 0;
   };
-  
- exit:
-  talloc_free(tmp);
+
+  offset = get_data_head(self, urn, attribute, &data_list);
+  if(!offset){
+    // The attribute is not set - make it now:
+    set_new_value(self,urn, attribute, LOCK);
+    offset = get_data_head(self, urn, attribute, &data_list);
+    if(!offset) {
+      RaiseError(ERuntimeError, "Unable to set lock attribute");
+      return 0;
+    };
+  };
+
+  // If we get here data_list should be valid:
+  lseek(self->data_store_fd, offset, SEEK_SET);
+  if(lockf(self->data_store_fd, F_LOCK, data_list.length)==-1){
+    RaiseError(ERuntimeError, "Unable to lock: %s", strerror(errno));
+    return 0;
+  };
+
+  return 1;
 };
 
-struct resolver_mutex {
-  int ref_count;
-  pthread_mutexattr_t mta;
-  pthread_mutex_t mutex;
-};
+int Resolver_unlock(Resolver self, char *urn, char mode) {
 
-
-/** Synchronization methods. FIXME - implement fine grained
-    locking. For now the whole resolver is locked */
-int Resolver_lock(Resolver self, char *urn, char *name) {
-  return pthread_mutex_lock(&self->mutex);
-};
-
-int Resolver_unlock(Resolver self, char *urn, char *name) {
-  return pthread_mutex_unlock(&self->mutex);
 };
 
 /** Here we implement the resolver */
@@ -765,10 +1080,10 @@ END_VIRTUAL
 
 /** Some useful helper functions */
 char *resolver_get_with_default(Resolver self, char *urn, char *attribute, char *default_value) {
-  char *result = CALL(self, resolve, urn, attribute);
+  char *result = CALL(self, resolve, self, urn, attribute);
 
   if(!result) {
-    CALL(self, add, urn, attribute, default_value);
+    CALL(self, add, urn, attribute, default_value, 1);
     result = default_value;
   };
   return result;

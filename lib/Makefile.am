@@ -1,4 +1,4 @@
-#bin_PROGRAMS            = unittests
+bin_PROGRAMS            = unittests
 noinst_LTLIBRARIES      = liboo.la
 lib_LTLIBRARIES 	= libaff4.la
 
@@ -6,12 +6,12 @@ liboo_la_SOURCES	= class.c talloc.c
 liboo_la_CPPFLAGS 	= -DHAVE_VA_COPY
 
 # specifics (bins)
-#unittests_LDADD           = libaff4.la
-#unittests_SOURCES         = unittests.c
+unittests_LDADD           = libaff4.la
+unittests_SOURCES         = unittests.c
 
 libaff4_la_SOURCES       = misc.c zip.c stringio.c resolver.c image.c link.c map.c dirvol.c libaff4.c identity.c encode.c queue.c
 libaff4_la_LIBADD	= liboo.la
-libaff4_la_LDFLAGS       = -lz -luuid
+libaff4_la_LDFLAGS       = -lz -luuid -ltdb
 
 if HAVE_LIBCURL
 libaff4_la_LDFLAGS       += -lcurl

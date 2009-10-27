@@ -8,6 +8,7 @@ ZipFile open_volume(char *urn, char mode) {
   ZipFile result=NULL;
   char *filename;
   struct dispatch_t *i=volume_handlers;
+  char *ctx = talloc_size(NULL, 1);
 
   if(startswith(urn, FQN)) {
     filename = urn;
@@ -19,7 +20,7 @@ ZipFile open_volume(char *urn, char mode) {
 
   // Try to pull it from cache
   {
-    char *volume = CALL(oracle, resolve, filename, AFF4_CONTAINS);
+    char *volume = CALL(oracle, resolve, ctx, filename, AFF4_CONTAINS);
     if(volume)
       result = (ZipFile)CALL(oracle, open, volume, mode);
   };
@@ -75,6 +76,7 @@ ZipFile open_volume(char *urn, char mode) {
     };
   };
 
+  talloc_free(ctx);
   return result;
 };
 
@@ -82,7 +84,7 @@ char **aff4_load(char **images) {
   char **i;
   StringIO result;
 
-  AFF2_Init();
+  AFF4_Init();
 
   result = CONSTRUCT(StringIO, StringIO, Con, NULL);
 
@@ -112,8 +114,9 @@ AFF4_HANDLE aff4_open(char **images) {
   char **i;
   // By default we try to open the stream named default
   char *stream="default";
+  char *ctx = talloc_size(NULL, 1);
 
-  AFF2_Init();
+  AFF4_Init();
 
   for(i=images; *i; i++) {
     // We try to load each image as a URL in itself:
@@ -158,7 +161,7 @@ AFF4_HANDLE aff4_open(char **images) {
     int i;
     
     for(i=0; result_set[i]; i++) {
-      char *type = CALL(oracle, resolve, result_set[i]->urn, AFF4_TYPE);
+      char *type = CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE);
       if(type && !strcmp(type, AFF4_IMAGE)) {
 	result = (FileLikeObject)CALL(oracle, open, 
 				      result_set[i]->urn, 'r');
@@ -168,7 +171,7 @@ AFF4_HANDLE aff4_open(char **images) {
 
     if(!result)
       for(i=0; result_set[i]; i++) {
-	char *type = CALL(oracle, resolve, result_set[i]->urn, AFF4_TYPE);
+	char *type = CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE);
 	if(type && !strcmp(type, AFF4_MAP)) {
 	  result = (FileLikeObject)CALL(oracle, open, 
 					result_set[i]->urn, 'r');
@@ -184,6 +187,7 @@ AFF4_HANDLE aff4_open(char **images) {
     LogWarnings("No suitable stream found");
   };
 
+  talloc_free(ctx);
   return result;
 };
 
@@ -216,39 +220,39 @@ void aff4_close(AFF4_HANDLE self) {
 
 struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn, 
 				char *attribute, char *value) {
-  Cache i,j;
-  StringIO result = CONSTRUCT(StringIO, StringIO, Con, self);
-  struct aff4_tripple **final_result=NULL;
-  struct aff4_tripple *tmp;
+/*   Cache i,j; */
+/*   StringIO result = CONSTRUCT(StringIO, StringIO, Con, self); */
+/*   struct aff4_tripple **final_result=NULL; */
+/*   struct aff4_tripple *tmp; */
 
-  list_for_each_entry(i, &oracle->urn->cache_list, cache_list) {
-    char *oracle_urn = (char *)i->key;
-    Cache attributes = i->data;
-    if(urn && !startswith(oracle_urn, urn)) continue;
+/*   list_for_each_entry(i, &oracle->urn->cache_list, cache_list) { */
+/*     char *oracle_urn = (char *)i->key; */
+/*     Cache attributes = i->data; */
+/*     if(urn && !startswith(oracle_urn, urn)) continue; */
 
-    list_for_each_entry(j, &attributes->cache_list, cache_list) {
-      char *oracle_attribute = (char *)j->key;
-      char *oracle_value = (char *)j->data;
+/*     list_for_each_entry(j, &attributes->cache_list, cache_list) { */
+/*       char *oracle_attribute = (char *)j->key; */
+/*       char *oracle_value = (char *)j->data; */
 
-      if(attribute && !startswith(oracle_attribute, attribute)) continue;
-      if(value && !startswith(oracle_value, value)) continue;
+/*       if(attribute && !startswith(oracle_attribute, attribute)) continue; */
+/*       if(value && !startswith(oracle_value, value)) continue; */
 
-      // Add the match to the result
-      tmp = talloc(result->data, struct aff4_tripple);
-      tmp->urn = talloc_strdup(tmp, oracle_urn); 
-      tmp->attribute = talloc_strdup(tmp, oracle_attribute); 
-      tmp->value = talloc_strdup(tmp, oracle_value); 
-      CALL(result, write, (char *)&tmp, sizeof(tmp));
-    };
-  };
+/*       // Add the match to the result */
+/*       tmp = talloc(result->data, struct aff4_tripple); */
+/*       tmp->urn = talloc_strdup(tmp, oracle_urn);  */
+/*       tmp->attribute = talloc_strdup(tmp, oracle_attribute);  */
+/*       tmp->value = talloc_strdup(tmp, oracle_value);  */
+/*       CALL(result, write, (char *)&tmp, sizeof(tmp)); */
+/*     }; */
+/*   }; */
 
-  // NULL terminate the result
-  CALL(result, write, (char *)&final_result, sizeof(&final_result));
-  final_result = (struct aff4_tripple **)result->data;
-  talloc_steal(self, final_result);
-  talloc_free(result);
+/*   // NULL terminate the result */
+/*   CALL(result, write, (char *)&final_result, sizeof(&final_result)); */
+/*   final_result = (struct aff4_tripple **)result->data; */
+/*   talloc_steal(self, final_result); */
+/*   talloc_free(result); */
 
-  return final_result;
+/*   return final_result; */
 };
 
 /** Loads certificate cert and creates a new identify. All segments

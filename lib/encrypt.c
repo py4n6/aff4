@@ -22,11 +22,11 @@
     4) We save the IV in the resolver using AFF4_CRYPTO_IV
 */
 static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_length) {
-  char *passphrase = CALL(oracle, resolve, CONFIGURATION_NS, AFF4_VOLATILE_PASSPHRASE);
+  char *passphrase = CALL(oracle, resolve, self, CONFIGURATION_NS, AFF4_VOLATILE_PASSPHRASE);
   
   if(passphrase) {
     int passphrase_len = strlen(passphrase);
-    uint32_t fortification_count = parse_int(CALL(oracle, resolve, URNOF(self),
+    uint32_t fortification_count = parse_int(CALL(oracle, resolve, self, URNOF(self),
 						  AFF4_CRYPTO_FORTIFICATION_COUNT));
     EVP_MD_CTX digest;
     unsigned char buffer[BUFF_SIZE];
@@ -139,7 +139,7 @@ static int load_AES_key(Encrypted this) {
   char *key;
 
   // Is the key in the resolver already?
-  key = CALL(oracle, resolve, URNOF(this), AFF4_VOLATILE_KEY);
+  key = CALL(oracle, resolve, this, URNOF(this), AFF4_VOLATILE_KEY);
 
   if(key) {
     decode64((unsigned char *)ZSTRING_NO_NULL(key), affkey, sizeof(affkey));
@@ -152,10 +152,10 @@ static int load_AES_key(Encrypted this) {
     unsigned char buffer[BUFF_SIZE];
     
     if(prepare_passphrase(this, passphrase_key, sizeof(passphrase_key))) {
-      char *encoded_iv = CALL(oracle, resolve, URNOF(this), AFF4_CRYPTO_IV);
+      char *encoded_iv = CALL(oracle, resolve, this, URNOF(this), AFF4_CRYPTO_IV);
 
       if(encoded_iv) {
-	char *encoded_key = CALL(oracle, resolve, URNOF(this), AFF4_CRYPTO_PASSPHRASE_KEY);
+	char *encoded_key = CALL(oracle, resolve, this,  URNOF(this), AFF4_CRYPTO_PASSPHRASE_KEY);
 	AES_KEY aes_key;
       
 	decode64((unsigned char*)ZSTRING_NO_NULL(encoded_iv), iv, sizeof(iv));
@@ -198,7 +198,7 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
     value = resolver_get_with_default(oracle, self->urn, AFF4_BLOCKSIZE, "4k");
     this->block_size = parse_int(value);
 
-    this->target_urn = CALL(oracle, resolve, URNOF(self), AFF4_TARGET);
+    this->target_urn = CALL(oracle, resolve, self,  URNOF(self), AFF4_TARGET);
     if(!this->target_urn) {
       RaiseError(ERuntimeError, "No target stream specified");
       goto error;
@@ -215,7 +215,7 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
     ((FileLikeObject)self)->size = parse_int(
                  resolver_get_with_default(oracle, self->urn, NAMESPACE "size", "0"));
 
-    this->volume = CALL(oracle, resolve, URNOF(self), AFF4_STORED);
+    this->volume = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
     if(!this->volume) {
       RaiseError(ERuntimeError, "No idea where im stored?");
       goto error;

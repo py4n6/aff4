@@ -98,7 +98,7 @@ static int dump_bevy(ImageWorker this) {
   {
     char tmp[BUFF_SIZE];
     ZipFile parent;
-    char *parent_urn = CALL(oracle, resolve, URNOF(this), AFF4_STORED);
+    char *parent_urn = CALL(oracle, resolve, this, URNOF(this), AFF4_STORED);
 
     if(!parent_urn) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
@@ -482,7 +482,7 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
 void dump_stream_properties(FileLikeObject self) {
   char tmp[BUFF_SIZE];
   char *properties;
-  char *volume = CALL(oracle, resolve, URNOF(self), AFF4_STORED);
+  char *volume = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
 
   // Set the stream size
   snprintf(tmp, BUFF_SIZE, "%lld", self->size);

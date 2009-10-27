@@ -1,7 +1,7 @@
 #include "zip.h"
 
 static AFFObject MapDriver_finish(AFFObject self) {
-  char *stored = CALL(oracle, resolve, URNOF(self), AFF4_STORED);
+  char *stored = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
   MapDriver this = (MapDriver)self;
 
   if(!stored) {
@@ -29,7 +29,7 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
     int blocksize;
 
     URNOF(self) = talloc_strdup(self, uri);
-    this->parent_urn = CALL(oracle, resolve, uri, AFF4_STORED);
+    this->parent_urn = CALL(oracle, resolve, self, uri, AFF4_STORED);
     if(!this->parent_urn) {
       RaiseError(ERuntimeError, "No storage for map %s?", uri);
       goto error;
@@ -43,15 +43,18 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
 				     URNOF(self), AFF4_BLOCKSIZE, "1"));
     
     // Load some parameters
-    this->image_period = blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
-						   AFF4_IMAGE_PERIOD));
+    this->image_period = blocksize * parse_int(CALL(oracle, resolve, self, 
+						    URNOF(self),
+						    AFF4_IMAGE_PERIOD));
     
-    this->target_period =  blocksize * parse_int(CALL(oracle, resolve, URNOF(self),
-						     AFF4_TARGET_PERIOD));
+    this->target_period =  blocksize * parse_int(CALL(oracle, resolve, self, 
+						      URNOF(self),
+						      AFF4_TARGET_PERIOD));
     if(!this->target_period) this->target_period=-1;
     if(!this->image_period) this->image_period=-1;
     
-    ((FileLikeObject)self)->size = parse_int(CALL(oracle, resolve, URNOF(self),
+    ((FileLikeObject)self)->size = parse_int(CALL(oracle, resolve, self, 
+						  URNOF(self),
 						  AFF4_SIZE));
 
     /** Try to load the map from the stream */
@@ -300,7 +303,8 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
     if(read_length==0) break;
     if(read_length < 0) {
       // An error occurred - we need to decide if to pad or not
-      char *pad = CALL(oracle, resolve, CONFIGURATION_NS, CONFIG_PAD);
+      char *pad = CALL(oracle, resolve, self, 
+		       CONFIGURATION_NS, CONFIG_PAD);
 
       if(pad) {
 	memset(buffer + i ,0, length -i);

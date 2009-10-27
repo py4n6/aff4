@@ -5,8 +5,8 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
   FileLikeObject result;
 
   if(urn) {
-    char *target = CALL(oracle, resolve, urn, AFF4_TARGET);
-    char *interface = CALL(oracle, resolve, target, AFF4_INTERFACE);
+    char *target = CALL(oracle, resolve, self, urn, AFF4_TARGET);
+    char *interface = CALL(oracle, resolve, self, target, AFF4_INTERFACE);
 
     if(interface)
       CALL(oracle, set, urn, AFF4_INTERFACE, interface);
@@ -45,8 +45,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
     char tmp[BUFF_SIZE];
     FileLikeObject fd;
     char *properties;
-    char *interface = CALL(oracle, resolve, target, AFF4_INTERFACE);
-    char *size = CALL(oracle, resolve, target, AFF4_SIZE);
+    char *interface = CALL(oracle, resolve, self, target, AFF4_INTERFACE);
+    char *size = CALL(oracle, resolve, self, target, AFF4_SIZE);
 
     if(!zipfile) {
       RaiseError(ERuntimeError, "Unable to get storage container %s", storage_urn);

@@ -62,7 +62,8 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
   };
   
   // Now iterate over all the contained members in this directory:
-  urn = CALL(oracle->urn, get_item, URNOF(self));
+  //FIXME?
+  //  urn = CALL(oracle->urn, get_item, URNOF(self));
   if(urn) {
     first = CALL(urn, get, AFF4_CONTAINS);
   };
@@ -120,7 +121,7 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
   result = (FileLikeObject)CALL(oracle, open, buff, mode);
 
   if(result && mode == 'w'){
-    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
+    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, 1);
   };
 
   talloc_free(escaped_filename);
@@ -152,7 +153,7 @@ static int DirVolume_writestr(ZipFile self, char *filename,
     return -1;
   };
 
-  CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename);
+  CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, 1);
   CALL(fd, truncate, 0);
   len = CALL(fd, write, data, len);
   CALL(fd, close);

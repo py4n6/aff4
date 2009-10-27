@@ -293,8 +293,8 @@ int main(int argc, char **argv)
      // Fix up the stream names if they are relative to any volume
      for(i=query; *i; i++) {
        info.urn = (*i)->urn;
-       info.size = parse_int(CALL(oracle, resolve, info.urn, AFF4_SIZE));
-       info.mtime = parse_int(CALL(oracle, resolve, info.urn, AFF4_TIMESTAMP));
+       info.size = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_SIZE));
+       info.mtime = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_TIMESTAMP));
        
        // If a urn is relative to any of our volumes we merge it:
        for(j=volumes; *j; j++) {

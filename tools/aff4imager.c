@@ -55,14 +55,16 @@ void aff2_print_info(int verbose) {
       printf("\t%s = %s\n", key, value);
       /** Now print which identity vouches for this fact */
       list_for_each_entry(i, &oracle->identities, identities) {
-	char *hash = CALL(i, resolve, urn, key);
-
+	char *hash = CALL(i, resolve, NULL, urn, key);
+	
 	if(hash) {
 	  if(!strcmp(hash, value)) {
 	    printf("\t\t---> Signed by %s\n", URNOF(i));
 	  } else {
 	    printf("\t\t---> Incorrect %s says it should be %s\n", URNOF(i), hash);
 	  };
+	  
+	  talloc_free(hash);
 	};
       };
     };
@@ -201,7 +203,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   return -1;
 };
 
-int aff2_image(char *driver, char *output_file, char *stream_name, 
+int aff4_image(char *driver, char *output_file, char *stream_name, 
 	       char *chunks_in_segment,
 	       uint64_t max_size,
 	       char *source) {
@@ -271,7 +273,8 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
   while(in_fd >= 0) {
     // Check if we need to change volumes:
     if(max_size > 0) {
-      uint64_t directory_offset = parse_int(CALL(oracle, resolve, zipfile_urn, 
+      uint64_t directory_offset = parse_int(CALL(oracle, resolve, NULL, 
+						 zipfile_urn, 
 						 AFF4_DIRECTORY_OFFSET));
       if(directory_offset > max_size) {
 	ZipFile zip = (ZipFile)CALL(oracle, open, zipfile_urn, 'w');
@@ -315,18 +318,6 @@ int aff2_image(char *driver, char *output_file, char *stream_name,
 		      fully_qualified_name(zipfile, stream_name, URNOF(image)),
 		      'r');
     ClearError();
-    if(!link) {
-      printf("Creating a link object '%s' for stream '%s'\n", stream_name, URNOF(image));
-      link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
-      // The link will be stored in this zipfile
-      CALL((AFFObject)link, set_property, AFF4_STORED, zipfile_urn);
-      CALL(link, link, oracle, zipfile_urn, URNOF(image), stream_name);
-      CALL((AFFObject)link, finish);
-      CALL(oracle, cache_return, (AFFObject)link);
-    } else {
-      char *target = CALL(oracle, resolve, URNOF(link), AFF4_STORED);
-      printf("A link '%s' already exists to object '%s'. I will not create a link at the moment - you can make a new link later via the --link command.", URNOF(link), target);
-    };
   };
 
   // Sign if needed
@@ -396,17 +387,18 @@ static char *current_uri = NULL;
 
 static int progress_cb(uint64_t progress, char *urn) {
   int tmp = progress >> 20;
+  char *ctx = talloc_size(NULL, 1);
 
   if(current_uri==NULL) current_uri=urn;
 
   if(current_uri != urn) {
-    char *type = CALL(oracle, resolve, urn, AFF4_TYPE);
-    char *real_hash = CALL(oracle, resolve, current_uri, AFF4_SHA);
+    char *type = CALL(oracle, resolve, ctx, urn, AFF4_TYPE);
+    char *real_hash = CALL(oracle, resolve, ctx, current_uri, AFF4_SHA);
     Resolver i;
     char *result="";
 
     list_for_each_entry(i, &oracle->identities, identities) {
-      char *signed_uri = CALL(i, resolve, current_uri, AFF4_SHA);
+      char *signed_uri = CALL(i, resolve, ctx, current_uri, AFF4_SHA);
 
       if(signed_uri && real_hash) {
 	if(!strcmp(signed_uri, real_hash)) {
@@ -429,7 +421,7 @@ static int progress_cb(uint64_t progress, char *urn) {
   };
 
   if(current_pos != tmp) {
-    char *type = CALL(oracle, resolve, urn, AFF4_TYPE);
+    char *type = CALL(oracle, resolve, ctx, urn, AFF4_TYPE);
     if(type) {
       printf("\r%s (%s): %d MB", urn, type, tmp);
     } else {
@@ -440,6 +432,7 @@ static int progress_cb(uint64_t progress, char *urn) {
 
   fflush(stdout);
 
+  talloc_free(ctx);
   return 1;
 };
 
@@ -453,13 +446,15 @@ void aff2_verify() {
     char *key = (char *)i->key;
 
     if(startswith(key, AFF4_IDENTITY_PREFIX)) {
+      char *ctx = talloc_size(NULL, 1);
       // Make sure its actually an Identity object:
-      if(!strcmp(AFF4_IDENTITY, CALL(oracle, resolve, key, AFF4_TYPE))) {
+      if(!strcmp(AFF4_IDENTITY, CALL(oracle, resolve, ctx, key, AFF4_TYPE))) {
 	Identity id = (Identity)CALL(oracle, open, key, 'r');
 	
 	CALL(id, verify, progress_cb);
 	CALL(oracle, cache_return, (AFFObject)id);
       };
+      talloc_free(ctx);
     };
   };
 };
@@ -543,7 +538,7 @@ int main(int argc, char **argv)
 	chunks_per_segment = optarg;
 	break;
       } if(!strcmp(option, "no_autoload")) {
-	CALL(oracle, set, AFF4_CONFIG_NAMESPACE, AFF4_CONFIG_AUTOLOAD, "0");
+	CALL(oracle, set, GLOBAL, CONFIG_AUTOLOAD, "0");
 	break;
       } if(!strcmp(option, "max_size")) {
 	max_size = parse_int(optarg);
@@ -583,7 +578,7 @@ int main(int argc, char **argv)
 
     case 'p':
       setenv("AFF4_PASSPHRASE", optarg, 1);
-      CALL(oracle, set, AFF4_CONFIG_NAMESPACE, AFF4_VOLATILE_PASSPHRASE, optarg);
+      CALL(oracle, set, GLOBAL, AFF4_VOLATILE_PASSPHRASE, optarg);
       break;
 
     case 'i':
@@ -643,7 +638,7 @@ int main(int argc, char **argv)
 			       append,
 			       argv[optind++]);
 	} else {
-	  aff2_image(driver, output_file, stream_name, 
+	  aff4_image(driver, output_file, stream_name, 
 		     chunks_per_segment,
 		     max_size,
 		     argv[optind++]);

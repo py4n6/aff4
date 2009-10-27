@@ -16,6 +16,12 @@ extern "C" {
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <pthread.h>
+#include <tdb.h>
+#include <setjmp.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
@@ -193,35 +199,28 @@ END_CLASS
 CLASS(Resolver, AFFObject)
 // This is a global cache of URN and their values - we try to only
 // have small URNs here and keep everything in memory.
-     Cache urn;
+       struct tdb_context *urn_db;
+       struct tdb_context *attribute_db;
+       struct tdb_context *data_db;
+       int data_store_fd;
+       uint32_t hashsize;
+       
+       /** This is used to restore state if the RDF parser fails */
+       jmp_buf env;
+       char *message;
+       
+       // Read and write caches
+       Cache read_cache;
+       Cache write_cache;
 
-     // This is a cache of AFFObject objects (keyed by URI) which have
-     // been constructed previously. This cache is quite small and can
-     // expire objects at any time. All clients of the open() method
-     // get references back from this cache. They do not own any of
-     // the objects and must not maintain references to them. Clients
-     // may keep references to each object's urn and re-fetch the
-     // object from the open method each time they want to use
-     // it. This implies that clients do not need to generally do any
-     // caching at all.
-     Cache cache;
-
-     // This is a cache of writers
-     Cache writers;
-
-     // Resolvers contain the identity behind them (see below):
-     struct Identity_t *identity;
-
-     // All accesses to the resolver use this mutex for
-     // synchronization
-     pthread_mutexattr_t mta;
-     pthread_mutex_t mutex;
-
-     Resolver METHOD(Resolver, Con);
-
-     // Resolvers are all in a list. Each resolver in the list is another
-     // identity which can be signed.
-     struct list_head identities;
+       // Resolvers contain the identity behind them (see below):
+       struct Identity_t *identity;
+       
+       Resolver METHOD(Resolver, Con);
+  
+       // Resolvers are all in a list. Each resolver in the list is another
+       // identity which can be signed.
+       struct list_head identities;
 
 /* This method tries to resolve the provided uri and returns an
  instance of whatever the URI refers to (As an AFFObject which is the
@@ -246,14 +245,14 @@ CLASS(Resolver, AFFObject)
 /* Returns an attribute about a particular uri if known. This may
      consult an external data source.
 */
-     char *METHOD(Resolver, resolve, char *uri, char *attribute);
+     char *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute);
 
 /** This returns a null terminated list of matches. */
      char **METHOD(Resolver, resolve_list, void *ctx, char *uri, char *attribute);
 
 //Stores the uri and the value in the resolver. The value and uri will
 //be stolen.
-     void METHOD(Resolver, add, char *uri, char *attribute, char *value);
+     void METHOD(Resolver, add, char *uri, char *attribute, char *value, int unique);
 
      // Exports all the properties to do with uri - user owns the
      // buffer. context is the URN which will ultimately hold the
@@ -326,7 +325,7 @@ END_CLASS
 
 // This function must be called to initialise the library - we prepare
 // all the classes and intantiate an oracle.
-void AFF2_Init(void);
+void AFF4_Init(void);
 
 // A link simply returns the URI its pointing to
 CLASS(Link, AFFObject)
@@ -614,8 +613,9 @@ END_CLASS
 CLASS(ZipFileStream, FileLikeObject)
      z_stream strm;
      uint64_t file_offset;
+     char *file_urn;
      char *container_urn;
-     char *parent_urn;
+     FileLikeObject file_fd;
      uint32_t crc32;
      uint32_t compress_size;
      uint32_t compression;
