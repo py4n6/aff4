@@ -13,7 +13,8 @@ static AFFObject DirVolume_finish(AFFObject self) {
   CALL(oracle, set, 
        URNOF(self), 	       /* Source URI */
        AFF4_TYPE,            /* Attributte */
-       AFF4_DIRECTORY_VOLUME);           /* Value */
+       AFF4_DIRECTORY_VOLUME,
+       RESOLVER_DATA_STRING);
 
   return result;
 };
@@ -83,8 +84,8 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
       properties_length = strlen("properties");
       
       // Record the segment objects:
-      CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT);
-      CALL(oracle, set, filename, AFF4_STORED, URNOF(self));
+      CALL(oracle, set, filename, AFF4_TYPE, AFF4_SEGMENT, RESOLVER_DATA_STRING);
+      CALL(oracle, set, filename, AFF4_STORED, URNOF(self), RESOLVER_DATA_URN);
       
       // We identify streams by their filename ending with "properties"
       // and parse out their properties:
@@ -121,7 +122,7 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
   result = (FileLikeObject)CALL(oracle, open, buff, mode);
 
   if(result && mode == 'w'){
-    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, 1);
+    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, RESOLVER_DATA_URN, 1);
   };
 
   talloc_free(escaped_filename);
@@ -153,7 +154,7 @@ static int DirVolume_writestr(ZipFile self, char *filename,
     return -1;
   };
 
-  CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, 1);
+  CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, RESOLVER_DATA_URN, 1);
   CALL(fd, truncate, 0);
   len = CALL(fd, write, data, len);
   CALL(fd, close);

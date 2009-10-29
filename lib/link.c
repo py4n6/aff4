@@ -5,11 +5,8 @@ static AFFObject Link_Con(AFFObject self, char *urn, char mode) {
   FileLikeObject result;
 
   if(urn) {
-    char *target = CALL(oracle, resolve, self, urn, AFF4_TARGET);
-    char *interface = CALL(oracle, resolve, self, target, AFF4_INTERFACE);
-
-    if(interface)
-      CALL(oracle, set, urn, AFF4_INTERFACE, interface);
+    char *target = (char *)CALL(oracle, resolve, self, urn, AFF4_TARGET,
+				RESOLVER_DATA_URN);
 
     if(!target) {
       RaiseError(ERuntimeError, "%s unable to resolve the " AFF4_TARGET " property?", urn);
@@ -45,8 +42,8 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
     char tmp[BUFF_SIZE];
     FileLikeObject fd;
     char *properties;
-    char *interface = CALL(oracle, resolve, self, target, AFF4_INTERFACE);
-    char *size = CALL(oracle, resolve, self, target, AFF4_SIZE);
+    uint64_t *size = (uint64_t *)CALL(oracle, resolve, self, target, AFF4_SIZE,
+				      RESOLVER_DATA_UINT64);
 
     if(!zipfile) {
       RaiseError(ERuntimeError, "Unable to get storage container %s", storage_urn);
@@ -56,17 +53,18 @@ static void Link_link(Link self, Resolver oracle, char *storage_urn,
     friendly_name = fully_qualified_name(self, friendly_name, storage_urn);
 
     // Note the time when the link was made
-    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
+    {
+      uint32_t tmp = time(NULL);
 
-    // Add a reverse connection
-    CALL(oracle, set, friendly_name, AFF4_TARGET, target);
-    CALL(oracle, set, friendly_name, AFF4_TYPE, AFF4_LINK);
-    if(interface) {
-      CALL(oracle, set, friendly_name, AFF4_INTERFACE, interface);
+      CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
     };
 
+    // Add a reverse connection
+    CALL(oracle, set, friendly_name, AFF4_TARGET, target, RESOLVER_DATA_URN);
+    CALL(oracle, set, friendly_name, AFF4_TYPE, AFF4_LINK, RESOLVER_DATA_STRING);
+
     if(size) {
-      CALL(oracle, set, friendly_name, AFF4_SIZE, size);
+      CALL(oracle, set, friendly_name, AFF4_SIZE, size, RESOLVER_DATA_UINT64);
     };
 
     snprintf(tmp, BUFF_SIZE, "%s/properties", friendly_name);

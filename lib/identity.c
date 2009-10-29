@@ -16,16 +16,19 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
 /** This function is a resolver filter which only allows SHA
     attributes. 
 */
-static void Identity_Resolver_add(Resolver self, char *uri, char *attribute, char *value) {
+static void Identity_Resolver_add(Resolver self, char *uri, char *attribute, 
+				  void *value,
+				  enum resolver_data_type type) {
   /* we only care about hashes here */
   if(strstr(attribute, AFF4_SHA) == attribute) {
-    char *hash = CALL(self, resolve, NULL, uri, attribute);
+    TDB_DATA *hash = CALL(self, resolve, NULL, uri, attribute, 
+			  RESOLVER_DATA_TDB_DATA);
 
-    if(hash && strcmp(hash, value)) {
+    if(hash && strcmp(hash->dptr, value)) {
       printf("**** Hash for %s is incorrect according to %s\n", uri, URNOF(self));
     } else {
       // Call the proper resolver add method
-      __Resolver.add(self, uri, attribute, value, 1);
+      __Resolver.add(self, uri, attribute, value, type, 1);
     };
   };
 };
@@ -185,7 +188,7 @@ static Identity Identity_Con(Identity self, char *cert, char *priv_key, char mod
 
   /** Now we adjust our URN from the certs */
   if(X509_NAME_oneline(X509_get_subject_name(this->x509), name, sizeof(name))) {
-    CALL(oracle, set, URNOF(self), AFF4_COMMON_NAME, name);
+    CALL(oracle, set, URNOF(self), AFF4_COMMON_NAME, name, RESOLVER_DATA_STRING);
   };
 
 
@@ -210,14 +213,15 @@ static Identity Identity_Con(Identity self, char *cert, char *priv_key, char mod
 static AFFObject Identity_AFFObject_Con(AFFObject self, char *uri, char mode) {
   Identity this = (Identity)self;
   Resolver i;
-  char *priv_key;
+  TDB_DATA *priv_key;
 
   if(!uri) {
     RaiseError(ERuntimeError, "You must construct the Identity yourself");
     goto error;
   };
 
-  priv_key = CALL(oracle, resolve, NULL, uri, AFF4_PRIV_KEY);
+  priv_key = (TDB_DATA *)CALL(oracle, resolve, NULL, uri, AFF4_PRIV_KEY,
+			      RESOLVER_DATA_TDB_DATA);
   this->info = NULL;
   list_for_each_entry(i, &oracle->identities, identities) {
     if(!strcmp(URNOF(i), uri)) {
@@ -262,13 +266,13 @@ static void Identity_store(Identity self, char *volume_urn) {
   // Try to find a signing segment
   while(1) {
     snprintf(filename, BUFF_SIZE, "%08d", i);
-    if(!CALL(oracle, is_set, fqn, AFF4_STATEMENT, filename))
+    if(!CALL(oracle, is_set, fqn, AFF4_STATEMENT, filename, RESOLVER_DATA_URN))
       break;
     i++;
   };
 
-  CALL(oracle, add, fqn, AFF4_TYPE, AFF4_IDENTITY, 1);
-  CALL(oracle, add, fqn, AFF4_STATEMENT, filename, 1);
+  CALL(oracle, add, fqn, AFF4_TYPE, AFF4_IDENTITY, RESOLVER_DATA_STRING, 1);
+  CALL(oracle, add, fqn, AFF4_STATEMENT, filename, RESOLVER_DATA_URN, 1);
   PrintError();
 
   snprintf(filename, BUFF_SIZE, "%s/%08d", URNOF(self), i);
@@ -312,7 +316,7 @@ static void Identity_store(Identity self, char *volume_urn) {
 	CALL(fd, write, buff, len);
       };
 
-      CALL(oracle, add, URNOF(self), AFF4_CERT, cert_name, 1);
+      CALL(oracle, add, URNOF(self), AFF4_CERT, cert_name, RESOLVER_DATA_STRING, 1);
     };
     BIO_free(xbp);
   };
@@ -427,10 +431,14 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
 	};
 
 	memset(buff, 0, BUFF_SIZE);
-	EVP_DigestFinal(&digest, buff,&len);
-	encode64(buff, len, hash_base64, sizeof(hash_base64));
+	{
+	  TDB_DATA tmp;
+	  
+	  tmp.dptr = buff;
+	  EVP_DigestFinal(&digest, buff,&tmp.dsize);
 
-	CALL(oracle, set, urn, AFF4_SHA, (char *)hash_base64);
+	  CALL(oracle, set, urn, AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
+	};
       };
     };
   };

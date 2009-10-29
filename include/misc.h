@@ -40,7 +40,7 @@ int endswith(const char *haystack, char *needle);
 
 char *normalise_url(char *url);
 
-#if 0
+#if 1
 #define DEBUG(x, ...) printf("%s:%d %d: " x, \
 			     __FUNCTION__, __LINE__, (int)pthread_self(), ## __VA_ARGS__);
 #else

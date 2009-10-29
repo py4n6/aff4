@@ -1,7 +1,8 @@
 #include "zip.h"
 
 static AFFObject MapDriver_finish(AFFObject self) {
-  char *stored = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
+  char *stored = (char *)CALL(oracle, resolve, self, URNOF(self), AFF4_STORED,
+			      RESOLVER_DATA_URN);
   MapDriver this = (MapDriver)self;
 
   if(!stored) {
@@ -27,35 +28,43 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
     FileLikeObject fd;
     char buff[BUFF_SIZE];
     int blocksize;
+    uint32_t tmp;
 
     URNOF(self) = talloc_strdup(self, uri);
-    this->parent_urn = CALL(oracle, resolve, self, uri, AFF4_STORED);
+    this->parent_urn = (char *)CALL(oracle, resolve, self, uri, AFF4_STORED,
+				    RESOLVER_DATA_URN);
     if(!this->parent_urn) {
       RaiseError(ERuntimeError, "No storage for map %s?", uri);
       goto error;
     };
 
-    CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_MAP);
-    CALL(oracle, set, URNOF(self), AFF4_INTERFACE, AFF4_STREAM);
-    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
+    CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_MAP, RESOLVER_DATA_STRING);
+    tmp = time(NULL);
+    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
 
-    blocksize = parse_int(resolver_get_with_default(oracle, 
-				     URNOF(self), AFF4_BLOCKSIZE, "1"));
+    tmp = 1;
+    blocksize = *(uint64_t *)resolver_get_with_default(oracle, 
+						       URNOF(self), 
+						       AFF4_BLOCKSIZE, &tmp,
+						       RESOLVER_DATA_UINT64);
     
     // Load some parameters
-    this->image_period = blocksize * parse_int(CALL(oracle, resolve, self, 
-						    URNOF(self),
-						    AFF4_IMAGE_PERIOD));
+    this->image_period = blocksize * *(uint64_t *)CALL(oracle, resolve, self, 
+						       URNOF(self),
+						       AFF4_IMAGE_PERIOD,
+						       RESOLVER_DATA_UINT64);
     
-    this->target_period =  blocksize * parse_int(CALL(oracle, resolve, self, 
-						      URNOF(self),
-						      AFF4_TARGET_PERIOD));
+    this->target_period =  blocksize * *(uint64_t *)CALL(oracle, resolve, self, 
+							 URNOF(self),
+							 AFF4_TARGET_PERIOD,
+							 RESOLVER_DATA_UINT64);
     if(!this->target_period) this->target_period=-1;
     if(!this->image_period) this->image_period=-1;
     
-    ((FileLikeObject)self)->size = parse_int(CALL(oracle, resolve, self, 
-						  URNOF(self),
-						  AFF4_SIZE));
+    ((FileLikeObject)self)->size = *(uint64_t *)CALL(oracle, resolve, self, 
+						     URNOF(self),
+						     AFF4_SIZE,
+						     RESOLVER_DATA_UINT64);
 
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
@@ -303,8 +312,9 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
     if(read_length==0) break;
     if(read_length < 0) {
       // An error occurred - we need to decide if to pad or not
-      char *pad = CALL(oracle, resolve, self, 
-		       CONFIGURATION_NS, CONFIG_PAD);
+      char *pad = (char *)CALL(oracle, resolve, self, 
+			       CONFIGURATION_NS, CONFIG_PAD,
+			       RESOLVER_DATA_STRING);
 
       if(pad) {
 	memset(buffer + i ,0, length -i);

@@ -98,7 +98,8 @@ static int dump_bevy(ImageWorker this) {
   {
     char tmp[BUFF_SIZE];
     ZipFile parent;
-    char *parent_urn = CALL(oracle, resolve, this, URNOF(this), AFF4_STORED);
+    char *parent_urn = (char *)CALL(oracle, resolve, this, URNOF(this), AFF4_STORED,
+				    RESOLVER_DATA_URN);
 
     if(!parent_urn) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
@@ -167,23 +168,35 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
   char *value;
 
   if(uri) {
+    uint32_t tmp = time(NULL);
+
     self->urn = talloc_strdup(self, uri);
 
     // These are the essential properties:
-    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, from_int(time(NULL)));
-    value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNK_SIZE, "32k");
-    this->chunk_size = parse_int(value);
+    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
+
+    tmp = 32 * 1024;
+    this->chunk_size = *(uint32_t *)resolver_get_with_default
+      (oracle, self->urn, AFF4_CHUNK_SIZE, &tmp,
+       RESOLVER_DATA_UINT32);
+
+    tmp = 8;
+    this->compression = *(uint32_t *)resolver_get_with_default
+      (oracle, self->urn, AFF4_COMPRESSION, &tmp,
+       RESOLVER_DATA_UINT32);
     
-    value = resolver_get_with_default(oracle, self->urn, AFF4_COMPRESSION, "8");
-    this->compression = parse_int(value);
-    
-    value = resolver_get_with_default(oracle, self->urn, AFF4_CHUNKS_IN_SEGMENT, "2048");
-    this->chunks_in_segment = parse_int(value);
+    tmp = 2048;
+    this->chunks_in_segment = *(uint32_t *)resolver_get_with_default
+      (oracle, self->urn, AFF4_CHUNKS_IN_SEGMENT, &tmp,
+       RESOLVER_DATA_UINT32);
 
     this->bevy_size = this->chunks_in_segment * this->chunk_size;
 
-    value = resolver_get_with_default(oracle, self->urn, AFF4_SIZE, "0");
-    this->super.size = parse_int(value);
+    tmp = 0;
+    this->super.size = *(uint32_t *)resolver_get_with_default
+      (oracle, self->urn, AFF4_SIZE, &tmp,
+       RESOLVER_DATA_UINT32);
+
     this->segment_count = 0;
     
     // Build writer workers
@@ -222,8 +235,7 @@ static AFFObject Image_finish(AFFObject self) {
   self->mode = 'w';
 
   // Make sure the oracle knows we are an image
-  CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE);
-  CALL(oracle, set, self->urn, AFF4_INTERFACE, AFF4_STREAM);
+  CALL(oracle, set, self->urn, AFF4_TYPE, AFF4_IMAGE, RESOLVER_DATA_STRING);
 
   EVP_DigestInit(&this->digest, EVP_sha256());
   //EVP_DigestInit(&this->digest, EVP_md5());
@@ -263,7 +275,7 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
   };
 
   self->size += length;
-  CALL(oracle, set, URNOF(self), AFF4_SIZE, from_int(self->size));
+  CALL(oracle, set, URNOF(self), AFF4_SIZE, &self->size, RESOLVER_DATA_UINT64);
   
   return length;
 };
@@ -304,9 +316,14 @@ static void Image_close(FileLikeObject self) {
 
   dump_stream_properties(self);
 
-  EVP_DigestFinal(&this->digest, buff, &len);
-  encode64(buff, len, hash_base64, sizeof(hash_base64));
-  CALL(oracle, set, URNOF(self), AFF4_SHA, (char *)hash_base64);
+  {
+    TDB_DATA tmp;
+    
+    tmp.dptr = buff;
+    EVP_DigestFinal(&this->digest, buff, &tmp.dsize);
+
+    CALL(oracle, set, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
+  };
 
   this->__super__->close(self);
 };
@@ -482,11 +499,12 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
 void dump_stream_properties(FileLikeObject self) {
   char tmp[BUFF_SIZE];
   char *properties;
-  char *volume = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
+  char *volume = (char *)CALL(oracle, resolve, self, URNOF(self), AFF4_STORED,
+			      RESOLVER_DATA_URN);
 
   // Set the stream size
-  snprintf(tmp, BUFF_SIZE, "%lld", self->size);
-  CALL(oracle, set, ((AFFObject)self)->urn, AFF4_SIZE, tmp);
+  CALL(oracle, set, URNOF(self), AFF4_SIZE, 
+       &self->size, RESOLVER_DATA_UINT64);
 
   // Write out a properties file
   properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));

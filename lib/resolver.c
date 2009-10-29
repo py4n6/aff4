@@ -64,18 +64,21 @@ Resolver oracle = NULL;
 */
 /** Our own special add routine */
 static void oracle_add(Resolver self, char *uri, char *attribute, 
-		       char *value, int unique) {
+		       void *value, enum resolver_data_type type,
+		       int unique) {
   Resolver i;
 
   // Call the real add method for the oracle itself
-  __Resolver.add(self, uri, attribute, value, unique);
+  __Resolver.add(self, uri, attribute, value, type, unique);
 
   // Add these to all the other identities
   list_for_each_entry(i, &self->identities, identities) {
-    CALL(i, add, uri, attribute, value, unique);
+    CALL(i, add, uri, attribute, value, type, unique);
   };
 };
 
+// If attribute is NULL - it means we remove all attributes for this
+// URN and then the URN itself
 static void oracle_del(Resolver self, char *uri, char *attribute) {
   Resolver i;
 
@@ -314,7 +317,9 @@ static TDB_DATA LOCK = {
 
 /* Given an int serialise into the buffer */
 static int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
-  return snprintf(buff, buff_len, "__%lld", i);
+  int result = snprintf(buff, buff_len, "__%lld", i);
+
+  return min(result, buff_len);
 };
 
 /** Given a buffer unserialise an int from it */
@@ -568,17 +573,17 @@ static int resolve(Resolver self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *va
 /** Resolves a single attribute and returns the value. Value will be
     talloced with the context of ctx.
 */
-static char *Resolver_resolve(Resolver self, void *ctx, char *urn_str, char *attribute_str) {
+static void *Resolver_resolve(Resolver self, void *ctx, char *urn_str, char *attribute_str,
+			      enum resolver_data_type type) {
   TDB_DATA_LIST i;
-  TDB_DATA urn, attribute, value;
-  char *result;
+  TDB_DATA urn, attribute;
 
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
 
-  DEBUG("Getting %s, %s, %s\n", urn, attribute, result);
+  DEBUG("Getting %s, %s\n", urn_str, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
     char *result = talloc_size(ctx, i.length+1);
 
@@ -757,7 +762,6 @@ static char **Resolver_resolve_list(Resolver self, void *ctx,
        retrieve_attribute_list(self, result, i);
   };
   
- exit:
   // NULL terminate it
   {
     int i=0;
@@ -795,6 +799,11 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
     talloc_steal(NULL, result);
     talloc_free(tmp);
 
+    // If its a FileLikeObject seek it to 0
+    if(ISSUBCLASS(result, FileLikeObject)) {
+      CALL((FileLikeObject)result, seek, 0, SEEK_SET);
+    };
+
     // Lock it
     CALL(self, lock, URNOF(result), mode);
     return result;
@@ -810,7 +819,8 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
 
   // Nope - maybe its stated explicitely
   if(!dispatch_ptr) {
-    stream_type = CALL(self, resolve, self, urn, AFF4_TYPE);
+    stream_type = (char *)CALL(self, resolve, self, urn, AFF4_TYPE,
+			       RESOLVER_DATA_URN);
     if(stream_type) {
       // Find it in the dispatcher struct and instantiate it
       for(i=0; dispatch[i].type !=NULL; i++) {
@@ -839,8 +849,9 @@ static AFFObject Resolver_open(Resolver self, char *urn, char mode) {
   
   // Make sure the object mode is set
   if(result) {
+    talloc_set_name(result, "%s %s", NAMEOF(result), URNOF(result));
     ((AFFObject)result)->mode = mode;
-    
+
     // Lock it
     CALL(self, lock, URNOF(result), mode);
   };
@@ -874,7 +885,8 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 };
 
 static void Resolver_add(Resolver self, char *urn_str, 
-			 char *attribute_str, char *value_str,
+			 char *attribute_str, void *value_str,
+			 enum resolver_data_type type,
 			 int unique) {
   TDB_DATA urn, attribute, value, key;
   TDB_DATA_LIST i;
@@ -883,15 +895,64 @@ static void Resolver_add(Resolver self, char *urn_str,
   TDB_DATA offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
+  char buff3[BUFF_SIZE];
   
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
-  value.dptr = (unsigned char *)value_str;
-  value.dsize = strlen(value_str);
 
-  DEBUG("Adding %s, %s, %s\n", uri, attribute, value);
+
+  // Now serialise the data according to its type
+  switch(type) {
+  case RESOLVER_DATA_URN:
+  case RESOLVER_DATA_STRING: {
+    value.dptr = (unsigned char *)value_str;
+    value.dsize = strlen(value_str);
+    break;
+  };
+
+  case RESOLVER_DATA_TDB_DATA: {
+    TDB_DATA *data = (TDB_DATA *)value_str;
+
+    value.dptr = data->dptr;
+    value.dsize = data->dsize;
+    break;
+  };
+
+  case RESOLVER_DATA_UINT16: {
+    uint16_t *data = (uint16_t *)value_str;
+
+    memcpy(buff3, data, sizeof(uint16_t));
+    value.dptr = buff3;
+    value.dsize = sizeof(uint16_t);
+    break;
+  };
+
+  case RESOLVER_DATA_UINT32: {
+    uint32_t *data = (uint32_t *)value_str;
+
+    memcpy(buff3, data, sizeof(uint32_t));
+    value.dptr = buff3;
+    value.dsize = sizeof(uint32_t);
+    break;
+  };
+
+  case RESOLVER_DATA_UINT64: {
+    uint64_t *data = (uint64_t *)value_str;
+
+    memcpy(buff3, data, sizeof(uint64_t));
+    value.dptr = buff3;
+    value.dsize = sizeof(uint64_t);
+    break;
+  };
+    
+  default:
+    RaiseError(ERuntimeError, "Unable to serialise items of value %d\n", type);
+    return;
+  };
+
+  DEBUG("Adding %s, %s\n", urn_str, attribute_str);
 
   /** If the value is already in the list, we just ignore this
       request.
@@ -917,11 +978,10 @@ static void Resolver_add(Resolver self, char *urn_str,
   new_offset = lseek(self->data_store_fd, 0, SEEK_END);
   i.next_offset = previous_offset;
   i.length = value.dsize;
-  // FIXME
-  i.encoding_type = 0;
+  i.encoding_type = type;
 
   write(self->data_store_fd, &i, sizeof(i));
-  write(self->data_store_fd, value.dptr, value.dsize);
+  write(self->data_store_fd, value.dptr, value.dsize);    
 
   // Now store the offset to this in the tdb database
   value.dptr = (unsigned char *)buff2;
@@ -957,14 +1017,39 @@ static void Resolver_del(Resolver self, char *urn_str, char *attribute_str) {
 
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
-  attribute.dptr = (unsigned char *)attribute_str;
-  attribute.dsize = strlen(attribute_str);
+  if(attribute_str) {
+    attribute.dptr = (unsigned char *)attribute_str;
+    attribute.dsize = strlen(attribute_str);
 
-  key.dptr = (unsigned char *)buff;
-  key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 0);
+    key.dptr = (unsigned char *)buff;
+    key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 0);
 
-  // Remove the key from the database
-  tdb_delete(self->data_db, key);
+    // Remove the key from the database
+    tdb_delete(self->data_db, key);
+  } else {
+    TDB_DATA max_key;
+    int max_id,i;
+
+    max_key.dptr = (unsigned char *)MAX_KEY;
+    max_key.dsize = strlen(MAX_KEY);
+
+    max_key = tdb_fetch(self->attribute_db, max_key);
+    if(max_key.dptr) {
+      max_id = tdb_to_int(max_key);
+      free(max_key.dptr);
+    };
+    
+    for(i=0;i<max_id;i++) {
+      char buff[BUFF_SIZE];
+      int urn_id =get_id(self->urn_db, urn, 0);
+      
+      key.dptr = (unsigned char *)buff;
+      key.dsize = snprintf(buff, BUFF_SIZE, "%d:%d", urn_id, i);
+
+      // Remove the key from the database
+      tdb_delete(self->data_db, key);
+    };
+  };
 };
   
 // Parse a properties file (implicit context is context - if the file
@@ -1060,10 +1145,11 @@ static AFFObject AFFObject_Con(AFFObject self, char *uri, char mode) {
 };
 
 
-static void AFFObject_set_property(AFFObject self, char *attribute, char *value) {
+static void AFFObject_set_property(AFFObject self, char *attribute, void *value,
+				   enum resolver_data_type type) {
   CALL(oracle, set,
        self->urn,
-       attribute, value);
+       attribute, value, type);
 };
 
 // Prepares an object to be used
@@ -1079,13 +1165,16 @@ VIRTUAL(AFFObject, Object)
 END_VIRTUAL
 
 /** Some useful helper functions */
-char *resolver_get_with_default(Resolver self, char *urn, char *attribute, char *default_value) {
-  char *result = CALL(self, resolve, self, urn, attribute);
+void *resolver_get_with_default(Resolver self, char *urn, char *attribute, 
+				void *default_value,
+				enum resolver_data_type type) {
+  void *result = CALL(self, resolve, self, urn, attribute, type);
 
   if(!result) {
-    CALL(self, add, urn, attribute, default_value, 1);
+    CALL(self, add, urn, attribute, default_value, type, 1);
     result = default_value;
   };
+
   return result;
 };
 

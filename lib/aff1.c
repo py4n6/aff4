@@ -4,7 +4,8 @@
 
 AFFObject AFFObject_AFF1Volume_Con(AFFObject self, char *urn, char mode) {
   // Where are we stored?
-  char *filename = CALL(oracle, resolve, self, urn, AFF4_STORED);
+  char *filename = (char *)CALL(oracle, resolve, self, urn, AFF4_STORED,
+				RESOLVER_DATA_URN);
 
   if(filename) { 
     return (AFFObject)CALL((ZipFile)self, Con, filename, mode);
@@ -119,7 +120,8 @@ AFFObject AFFObject_AFF1Stream_Con(AFFObject self, char *urn, char mode) {
     goto error;
   };
   
-  this->volume_urn = CALL(oracle, resolve, self, urn, AFF4_STORED);
+  this->volume_urn = (char *)CALL(oracle, resolve, self, urn, AFF4_STORED,
+				  RESOLVER_DATA_URN);
   if(!this->volume_urn) {
     RaiseError(ERuntimeError, "No "AFF4_STORED" property for URN %s", urn);
     goto error;
@@ -135,8 +137,9 @@ AFFObject AFFObject_AFF1Stream_Con(AFFObject self, char *urn, char mode) {
   self->mode = mode;
   
   // Find out our size
-  CLASS_ATTR(self, FileLikeObject, size) = parse_int(CALL(oracle, resolve,self,  
-							  URNOF(self), AFF4_SIZE));
+  CLASS_ATTR(self, FileLikeObject, size) = *(uint64_t *)CALL(oracle, resolve,self,  
+							     URNOF(self), AFF4_SIZE,
+							     RESOLVER_DATA_UINT64);
   
   return self;
 

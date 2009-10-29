@@ -17,10 +17,16 @@ ZipFile open_volume(char *urn, char mode) {
   };
 
   ClearError();
-
-  // Try to pull it from cache
+  // First see if we can even open the file.
   {
-    char *volume = CALL(oracle, resolve, ctx, filename, AFF4_CONTAINS);
+    AFFObject fd = CALL(oracle, open, filename, mode);
+    if(!fd) return NULL;
+    CALL(oracle, cache_return, fd);
+  };
+
+  {
+    char *volume = (char *)CALL(oracle, resolve, ctx, filename, AFF4_CONTAINS,
+				RESOLVER_DATA_URN);
     if(volume)
       result = (ZipFile)CALL(oracle, open, volume, mode);
   };
@@ -36,8 +42,9 @@ ZipFile open_volume(char *urn, char mode) {
 
   // Check for autoload in this volume
   if(result && mode=='r') {
-    char *autoload = resolver_get_with_default(oracle, CONFIGURATION_NS,
-					       CONFIG_AUTOLOAD, "1");
+    char *autoload = (char *)resolver_get_with_default(oracle, CONFIGURATION_NS,
+						       CONFIG_AUTOLOAD, "1",
+						       RESOLVER_DATA_UINT64);
     char base_path[BUFF_SIZE]; 
     char *dirpath;
 
@@ -161,7 +168,8 @@ AFF4_HANDLE aff4_open(char **images) {
     int i;
     
     for(i=0; result_set[i]; i++) {
-      char *type = CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE);
+      char *type = (char *)CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE,
+				RESOLVER_DATA_URN);
       if(type && !strcmp(type, AFF4_IMAGE)) {
 	result = (FileLikeObject)CALL(oracle, open, 
 				      result_set[i]->urn, 'r');
@@ -171,7 +179,8 @@ AFF4_HANDLE aff4_open(char **images) {
 
     if(!result)
       for(i=0; result_set[i]; i++) {
-	char *type = CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE);
+	char *type = (char *)CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE,
+				  RESOLVER_DATA_URN);
 	if(type && !strcmp(type, AFF4_MAP)) {
 	  result = (FileLikeObject)CALL(oracle, open, 
 					result_set[i]->urn, 'r');

@@ -25,6 +25,21 @@ extern "C" {
 
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
+  
+  /** These are the various data types which can be stored in the
+      resolver. The returned (void *) pointer will be the
+      corresponding type as described.
+  */
+  enum resolver_data_type {
+    RESOLVER_DATA_UNKNOWN,   /* void */
+    RESOLVER_DATA_STRING,    /* char * (null terminated) */
+    RESOLVER_DATA_TDB_DATA,  /* TDB_DATA * */
+    RESOLVER_DATA_UINT16,    /* uint16_t * */
+    RESOLVER_DATA_UINT32,    /* uint32_t * */
+    RESOLVER_DATA_UINT64,    /* uint64_t * */
+    RESOLVER_DATA_URN        /* char * (null terminated) */
+  };
+
 
 // A helper to access the URN of an object.
 #define URNOF(x)  ((AFFObject)x)->urn
@@ -244,15 +259,22 @@ CLASS(Resolver, AFFObject)
 
 /* Returns an attribute about a particular uri if known. This may
      consult an external data source.
+
+     You should indicate the expected type of the attribute as
+     type. If the actual type is different or not found we return NULL
+     here.
 */
-     char *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute);
+  void *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute, 
+	       enum resolver_data_type type);
 
 /** This returns a null terminated list of matches. */
      char **METHOD(Resolver, resolve_list, void *ctx, char *uri, char *attribute);
 
 //Stores the uri and the value in the resolver. The value and uri will
 //be stolen.
-     void METHOD(Resolver, add, char *uri, char *attribute, char *value, int unique);
+     void METHOD(Resolver, add, char *uri, char *attribute, void *value, 
+		 enum resolver_data_type type,
+		 int unique);
 
      // Exports all the properties to do with uri - user owns the
      // buffer. context is the URN which will ultimately hold the
@@ -267,7 +289,8 @@ CLASS(Resolver, AFFObject)
      void METHOD(Resolver, del, char *uri, char *attribute);
 
      // This updates the value or adds it if needed
-     void METHOD(Resolver, set, char *uri, char *attribute, char *value);
+     void METHOD(Resolver, set, char *uri, char *attribute, void *value,
+		 enum resolver_data_type type);
   
      //This returns 1 if the statement is set
      int METHOD(Resolver, is_set, char *uri, char *attribute, char *value);
@@ -292,8 +315,8 @@ CLASS(Resolver, AFFObject)
      Note that locks have names and so many locks can be set on the
      same URN.
   */
-  int METHOD(Resolver, lock, char *urn, char *name);
-  int METHOD(Resolver, unlock, char *urn, char *name);
+  int METHOD(Resolver, lock, char *urn, char name);
+  int METHOD(Resolver, unlock, char *urn, char name);
 
 END_CLASS
 
@@ -484,8 +507,9 @@ CLASS(Encrypted, FileLikeObject)
      int block_number;
 END_CLASS
 
- char *resolver_get_with_default(Resolver self, char *urn, 
-				 char *attribute, char *default_value);
+void *resolver_get_with_default(Resolver self, char *urn, 
+				char *attribute, void *default_value,
+				enum resolver_data_type type);
 
   // This is the largest file size which may be represented by a
   // regular zip file without using Zip64 extensions.
@@ -623,13 +647,14 @@ CLASS(ZipFileStream, FileLikeObject)
      // We calculate the SHA256 hash of each archive member
      EVP_MD_CTX digest;
 
-// This is the constructor for the file like object. Note that we
-// steal the underlying file pointer which should be the underlying
-// zip file and should be given to us already seeked to the right
-// place.
+     /* This is the constructor for the file like object. 
+	file_urn is the storage file for the volume in
+	container_urn. If the stream is opened for writing the file_fd
+	may be passed in. It remains locked until we are closed.
+     */
      ZipFileStream METHOD(ZipFileStream, Con, char *filename, 
-			  char *parent_urn, char *container_urn,
-			  char mode);
+			  char *file_urn, char *container_urn,
+			  char mode, FileLikeObject file_fd);
 END_CLASS
 
 // A directory volume implementation - all elements live in a single

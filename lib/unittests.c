@@ -9,7 +9,8 @@
 
 #define TEST_FILE "test.zip"
 
-#define ZIPFILE_TESTS 1
+#define RESOLVER_TESTS 1
+//#define ZIPFILE_TESTS 1
 
 #ifdef RESOLVER_TESTS
 #define URN "aff4://hello"
@@ -30,14 +31,15 @@ void resolver_test_1() {
   CALL(oracle, set, URN, ATTRIBUTE, VALUE);
   
   // Retrieve it
-  value =CALL(oracle, resolve, ctx, URN, ATTRIBUTE);
+  value = (char *)CALL(oracle, resolve, ctx, URN, ATTRIBUTE,
+		       RESOLVER_DATA_STRING);
   printf("Retrieved value: %s\n", value);
   
   // Retrieved back what we put in
   assert(!strcmp(VALUE, value));
 
   // Add another value
-  CALL(oracle, add, URN, ATTRIBUTE, "world2");
+  CALL(oracle, add, URN, ATTRIBUTE, "world2", 1);
 
   // Grab the list of values
   result = CALL(oracle,resolve_list, ctx, URN, ATTRIBUTE);
@@ -592,7 +594,7 @@ int main() {
 
 #ifdef RESOLVER_TESTS
   resolver_test_1();
-  resolver_test_locks();
+  //resolver_test_locks();
 #endif
 
 #ifdef ZIPFILE_TESTS

@@ -5,10 +5,10 @@
 */
 
 // This is the URI namespace for the AFF4 scheme
-#define NAMESPACE "aff4:"
+#define NAMESPACE "aff4://"
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"
-#define FQN "urn:" NAMESPACE
+#define FQN NAMESPACE
 
 // This object holds parameters pertinent to the running instance
 #define GLOBAL VOLATILE_NS "global"

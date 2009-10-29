@@ -22,12 +22,15 @@
     4) We save the IV in the resolver using AFF4_CRYPTO_IV
 */
 static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_length) {
-  char *passphrase = CALL(oracle, resolve, self, CONFIGURATION_NS, AFF4_VOLATILE_PASSPHRASE);
+  char *passphrase = (char *)CALL(oracle, resolve, self, CONFIGURATION_NS, 
+				  AFF4_VOLATILE_PASSPHRASE,
+				  RESOLVER_DATA_STRING);
   
   if(passphrase) {
     int passphrase_len = strlen(passphrase);
-    uint32_t fortification_count = parse_int(CALL(oracle, resolve, self, URNOF(self),
-						  AFF4_CRYPTO_FORTIFICATION_COUNT));
+    uint32_t fortification_count = *(uint64_t *)CALL(oracle, resolve, self, URNOF(self),
+						     AFF4_CRYPTO_FORTIFICATION_COUNT,
+						     RESOLVER_DATA_UINT64);
     EVP_MD_CTX digest;
     unsigned char buffer[BUFF_SIZE];
     unsigned int buffer_length=BUFF_SIZE;
@@ -136,14 +139,11 @@ static int load_AES_key(Encrypted this) {
   unsigned char affkey[32];
   // This is an encoded representation of the key (so it in suitable
   // to go in the resolver).
-  char *key;
+  TDB_DATA *key;
 
   // Is the key in the resolver already?
-  key = CALL(oracle, resolve, this, URNOF(this), AFF4_VOLATILE_KEY);
-
-  if(key) {
-    decode64((unsigned char *)ZSTRING_NO_NULL(key), affkey, sizeof(affkey));
-  };
+  key = (TDB_DATA *)CALL(oracle, resolve, this, URNOF(this), AFF4_VOLATILE_KEY,
+			 RESOLVER_DATA_TDB_DATA);
 
   // Maybe its a passphrase
   if(!key) {
@@ -152,15 +152,19 @@ static int load_AES_key(Encrypted this) {
     unsigned char buffer[BUFF_SIZE];
     
     if(prepare_passphrase(this, passphrase_key, sizeof(passphrase_key))) {
-      char *encoded_iv = CALL(oracle, resolve, this, URNOF(this), AFF4_CRYPTO_IV);
+      TDB_DATA *encoded_iv = (TDB_DATA *)CALL(oracle, resolve, 
+					      this, URNOF(this), 
+					      AFF4_CRYPTO_IV,
+					      RESOLVER_DATA_TDB_DATA);
 
       if(encoded_iv) {
-	char *encoded_key = CALL(oracle, resolve, this,  URNOF(this), AFF4_CRYPTO_PASSPHRASE_KEY);
+	TDB_DATA *encoded_key = (TDB_DATA *)CALL(oracle, 
+						 resolve, this,  
+						 URNOF(this), 
+						 AFF4_CRYPTO_PASSPHRASE_KEY,
+						 RESOLVER_DATA_TDB_DATA);
 	AES_KEY aes_key;
       
-	decode64((unsigned char*)ZSTRING_NO_NULL(encoded_iv), iv, sizeof(iv));
-	decode64((unsigned char*)ZSTRING_NO_NULL(encoded_key), affkey, sizeof(affkey));
-
 	// The passphrase key is now used to decrypt the stream key
 	AES_set_decrypt_key(passphrase_key, 256, &aes_key);
 
@@ -194,11 +198,13 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
 
   if(urn) {
     URNOF(self) = talloc_strdup(self, urn);
+    
+    this->block_size = *(uint64_t *)resolver_get_with_default
+      (oracle, self->urn, AFF4_BLOCKSIZE, "4k",
+       RESOLVER_DATA_UINT64);
 
-    value = resolver_get_with_default(oracle, self->urn, AFF4_BLOCKSIZE, "4k");
-    this->block_size = parse_int(value);
-
-    this->target_urn = CALL(oracle, resolve, self,  URNOF(self), AFF4_TARGET);
+    this->target_urn = (char *)CALL(oracle, resolve, self,  URNOF(self), 
+				    AFF4_TARGET, RESOLVER_DATA_URN);
     if(!this->target_urn) {
       RaiseError(ERuntimeError, "No target stream specified");
       goto error;
@@ -212,10 +218,11 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
     CALL(oracle, cache_return, (AFFObject)fd);
 
     // Set our size 
-    ((FileLikeObject)self)->size = parse_int(
-                 resolver_get_with_default(oracle, self->urn, NAMESPACE "size", "0"));
+    ((FileLikeObject)self)->size = *(uint64_t *)resolver_get_with_default
+      (oracle, self->urn, NAMESPACE "size", "0", RESOLVER_DATA_UINT64);
 
-    this->volume = CALL(oracle, resolve, self, URNOF(self), AFF4_STORED);
+    this->volume = (char *)CALL(oracle, resolve, self, URNOF(self), AFF4_STORED,
+				RESOLVER_DATA_URN);
     if(!this->volume) {
       RaiseError(ERuntimeError, "No idea where im stored?");
       goto error;
