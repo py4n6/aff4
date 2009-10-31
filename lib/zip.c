@@ -621,15 +621,15 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
   char fd_urn[BUFF_SIZE];
 
   CALL(oracle, resolve2, filename, AFF4_SIZE, 
-       &file_size, sizeof(file_size),
+       AS_BUFFER(file_size),
        RESOLVER_DATA_UINT64);
   
   CALL(oracle, resolve2, filename, AFF4_VOLATILE_COMPRESSION,
-       &compression_method, sizeof(compression_method),
+       AS_BUFFER(compression_method),
        RESOLVER_DATA_UINT16);
   
   CALL(oracle, resolve2, filename, AFF4_VOLATILE_FILE_OFFSET,
-       &file_offset, sizeof(file_offset),
+       AS_BUFFER(file_offset),
        RESOLVER_DATA_UINT64);
   
   // This is the volume the filename is stored in
@@ -660,7 +660,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
     z_stream strm;
     
     CALL(oracle, resolve2, filename, AFF4_VOLATILE_COMPRESSED_SIZE,
-	 &compressed_length, sizeof(compressed_length),
+	 AS_BUFFER(compressed_length),
 	 RESOLVER_DATA_UINT32);
 
     tmp = talloc_size(buffer, compressed_length);
@@ -909,13 +909,15 @@ static void ZipFile_close(ZipFile self) {
     // Dump the central directory for this volume
     {
       // Get all the URNs contained within this volume
-      char **contents = CALL(oracle, resolve_list, self, URNOF(self), AFF4_CONTAINS);
-      char **urn;
+      RESOLVER_ITER iter;
+      char urn[BUFF_SIZE];
       StringIO zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
       
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
-      for(urn=contents; *urn; urn++) {
+      // Iterate over all the AFF4_CONTAINS URNs
+      CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS, RESOLVER_DATA_URN);
+      while(CALL(oracle, iter_next, &iter, urn, BUFF_SIZE)) {
 	struct CDFileHeader cd;
 	// We use type to anchor temporary allocations
 	char type[BUFF_SIZE];
@@ -924,16 +926,16 @@ static void ZipFile_close(ZipFile self) {
 
 	// This gets the relative name of the fqn
 	char *escaped_filename = escape_filename(self, 
-		       relative_name(self, *urn, URNOF(self)));	
+		       relative_name(self, urn, URNOF(self)));	
 
-	CALL(oracle, resolve2, *urn, AFF4_TIMESTAMP,
+	CALL(oracle, resolve2, urn, AFF4_TIMESTAMP,
 	     AS_BUFFER(epoch_time),
 	     RESOLVER_DATA_UINT32);
 
 	now = localtime(&epoch_time);
 
 	// Only store segments here
-	if(CALL(oracle, resolve2, *urn, AFF4_TYPE,
+	if(CALL(oracle, resolve2, urn, AFF4_TYPE,
 		type, BUFF_SIZE,
 		RESOLVER_DATA_URN) && strcmp(type, AFF4_SEGMENT))
 	  continue;
@@ -948,7 +950,7 @@ static void ZipFile_close(ZipFile self) {
 	cd.version_needed = 0x14;
 	cd.compression_method = ZIP_STORED;
 	
-	CALL(oracle, resolve2, *urn, AFF4_VOLATILE_COMPRESSION,
+	CALL(oracle, resolve2, urn, AFF4_VOLATILE_COMPRESSION,
 	     &cd.compression_method, sizeof(cd.compression_method),
 	     RESOLVER_DATA_UINT16);
 	
@@ -956,7 +958,7 @@ static void ZipFile_close(ZipFile self) {
 	cd.flags = 0x8;
 	cd.crc32 = 0;
 	
-	CALL(oracle, resolve2, *urn, AFF4_VOLATILE_CRC,
+	CALL(oracle, resolve2, urn, AFF4_VOLATILE_CRC,
 	     &cd.crc32, sizeof(cd.crc32),
 	     RESOLVER_DATA_UINT32);
 	
@@ -969,7 +971,7 @@ static void ZipFile_close(ZipFile self) {
 	
 	// The following are optional zip64 fields. They must appear
 	// in this order:
-	CALL(oracle, resolve2, *urn, AFF4_SIZE,
+	CALL(oracle, resolve2, urn, AFF4_SIZE,
 	     &tmp, sizeof(tmp),
 	     RESOLVER_DATA_UINT64);
 
@@ -982,12 +984,12 @@ static void ZipFile_close(ZipFile self) {
 	
 	// AFF4 does not support very large segments since they are
 	// unseekable.
-	CALL(oracle, resolve2, *urn, AFF4_VOLATILE_COMPRESSED_SIZE,
+	CALL(oracle, resolve2, urn, AFF4_VOLATILE_COMPRESSED_SIZE,
 	     AS_BUFFER(cd.compress_size),
 	     RESOLVER_DATA_UINT32);
 	
 	tmp=0;	
-	CALL(oracle, resolve2, *urn, AFF4_VOLATILE_HEADER_OFFSET,
+	CALL(oracle, resolve2, urn, AFF4_VOLATILE_HEADER_OFFSET,
 	     &tmp, sizeof(tmp),
 	     RESOLVER_DATA_UINT64);
 

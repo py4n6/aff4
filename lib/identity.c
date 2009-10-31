@@ -18,7 +18,8 @@ static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)
 */
 static void Identity_Resolver_add(Resolver self, char *uri, char *attribute, 
 				  void *value,
-				  enum resolver_data_type type) {
+				  enum resolver_data_type type, 
+				  int unique) {
   /* we only care about hashes here */
   if(strstr(attribute, AFF4_SHA) == attribute) {
     TDB_DATA *hash = CALL(self, resolve, NULL, uri, attribute, 
@@ -28,7 +29,7 @@ static void Identity_Resolver_add(Resolver self, char *uri, char *attribute,
       printf("**** Hash for %s is incorrect according to %s\n", uri, URNOF(self));
     } else {
       // Call the proper resolver add method
-      __Resolver.add(self, uri, attribute, value, type, 1);
+      __Resolver.add(self, uri, attribute, value, type, unique);
     };
   };
 };
@@ -347,19 +348,21 @@ with an indication of the current progress and the currently processed
 URN.
 */
 static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *urn)) {
-  char **statements = CALL(oracle, resolve_list, NULL, URNOF(self), AFF4_STATEMENT);
-  char **statement_urn;
-  
-  for(statement_urn=statements; *statement_urn; statement_urn++) {
+  RESOLVER_ITER iter;
+  char statement_urn[BUFF_SIZE];
+
+  // Iterate over all the AFF4_STATEMENT urns
+  CALL(oracle, get_iter, &iter, URNOF(self), AFF4_STATEMENT, RESOLVER_DATA_URN);
+  while(CALL(oracle, iter_next, &iter, statement_urn, BUFF_SIZE)) {
     char buff[BUFF_SIZE];
-    char *fq_name = fully_qualified_name(self, *statement_urn, URNOF(self));
+    char *fq_name = fully_qualified_name(self, statement_urn, URNOF(self));
     FileLikeObject statement = (FileLikeObject)CALL(oracle, open, fq_name,'r');
 			   
     EVP_MD_CTX md;
     FileLikeObject oracle_signature;
 
     if(!statement) {
-      RaiseError(ERuntimeError, "Unable to open statement %s", *statement);
+      RaiseError(ERuntimeError, "Unable to open statement %s", statement_urn);
       continue;
     };
 
@@ -396,8 +399,6 @@ static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *ur
   error_continue:
     CALL(oracle, cache_return, (AFFObject)statement);
   };
-  
-  talloc_free(statements);
 };
 
 static void verify_hashes(Identity self, int (*cb)(uint64_t progress, char *urn)) {

@@ -40,6 +40,17 @@ extern "C" {
     RESOLVER_DATA_URN        /* char * (null terminated) */
   };
 
+// The data store is basically a singly linked list of these records:
+typedef struct TDB_DATA_LIST {
+  uint64_t next_offset;
+  uint16_t length;
+  uint16_t encoding_type;
+} TDB_DATA_LIST;
+
+typedef struct RESOLVER_ITER {
+  TDB_DATA_LIST head;
+  uint64_t offset;
+} RESOLVER_ITER;
 
 // A helper to access the URN of an object.
 #define URNOF(x)  ((AFFObject)x)->urn
@@ -277,8 +288,30 @@ CLASS(Resolver, AFFObject)
 	     void *result, int length,
 	     enum resolver_data_type type);
 
-/** This returns a null terminated list of matches. */
-     char **METHOD(Resolver, resolve_list, void *ctx, char *uri, char *attribute);
+  /** This returns a null terminated list of matches. The matches will
+      all be of the type specified, memory will be allocated with
+      reference to the ctx specified.
+  */
+  void **METHOD(Resolver, resolve_list, void *ctx, char *uri, 
+		char *attribute, enum resolver_data_type type);
+
+  /* This is a version of the above which uses an iterator to iterate
+     over the list. 
+
+     The iterator is obtained using get_iter first. This function
+     returns 1 if an iterator can be found (i.e. at least one result
+     exists) or 0 if no results exist.
+
+     Each call to iter_next will write a new value into the buffer set
+     up by result with maximal length length. Only results matching
+     the type specified are returned. We return length written for
+     each successful iteration, and zero when we have no more items.
+  */
+  int METHOD(Resolver, get_iter, RESOLVER_ITER *iter, char *uri,
+	     char *attribute, enum resolver_data_type type);
+  
+  int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, void *result, 
+	     int length);
 
 //Stores the uri and the value in the resolver. The value and uri will
 //be stolen.

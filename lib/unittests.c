@@ -9,7 +9,7 @@
 
 #define TEST_FILE "test.zip"
 
-//#define RESOLVER_TESTS 0
+//#define RESOLVER_TESTS 1
 #define ZIPFILE_TESTS 1
 
 #ifdef RESOLVER_TESTS
@@ -51,9 +51,14 @@ void resolver_test_1() {
   CALL(oracle, add, URN, ATTRIBUTE, "world2", RESOLVER_DATA_STRING, 1);
 
   // Grab the list of values
-  result = CALL(oracle,resolve_list, ctx, URN, ATTRIBUTE);
-  for(i=result; *i; i++) {
-    printf("Retrieved values: %s\n", *i);
+  {
+    RESOLVER_ITER iter;
+    char result[BUFF_SIZE];
+
+    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, RESOLVER_DATA_STRING);
+    while(CALL(oracle, iter_next, &iter, result, BUFF_SIZE)) {
+      printf("Retrieved values: %s\n", result);
+    };
   };
 
   talloc_free(ctx);

@@ -287,13 +287,6 @@ END_VIRTUAL
 #define MAX_KEY "__MAX"
 #define VOLATILE_NS "aff4volatile:"
 
-// The data store is basically a singly linked list of these records:
-typedef struct TDB_DATA_LIST {
-  uint64_t next_offset;
-  uint16_t length;
-  uint16_t encoding_type;
-} TDB_DATA_LIST;
-
 /** Some constants */
 static TDB_DATA INHERIT = {
   .dptr = (unsigned char *)"aff4:inherit",
@@ -823,22 +816,25 @@ static void Resolver_set(Resolver self, char *urn_str,
     start.
 */
 static int retrieve_attribute_list(Resolver self, 
-				   StringIO result, TDB_DATA_LIST head) {
+				   StringIO result, TDB_DATA_LIST head,
+				   enum resolver_data_type type) {
   int count = 0;
   do {
-    char *buff = talloc_size(result, head.length+1);
+    if(head.encoding_type == type) {
+      char *buff = talloc_size(result, head.length+1);
 
-    // Read this much from the file
-    if(read(self->data_store_fd, buff, head.length) < head.length) {
-      // Oops cant read enough
-      goto exit;
+      // Read this much from the file
+      if(read(self->data_store_fd, buff, head.length) < head.length) {
+	// Oops cant read enough
+	goto exit;
+      };
+      
+      count++;
+      buff[head.length]=0;
+      
+      // Add the data to the list
+      CALL(result, write, (char *)&buff, sizeof(char *));
     };
-
-    count++;
-    buff[head.length]=0;
-
-    // Add the data to the list
-    CALL(result, write, (char *)&buff, sizeof(char *));
   } while(get_data_next(self, &head));
   
  exit:
@@ -849,8 +845,9 @@ static int retrieve_attribute_list(Resolver self,
     Returns a list of values belonging to the urn, attribute. The list
     is allocated to the ctx provided.
 */
-static char **Resolver_resolve_list(Resolver self, void *ctx,
-				    char *urn_str, char *attribute_str) {
+static void **Resolver_resolve_list(Resolver self, void *ctx,
+				    char *urn_str, char *attribute_str,
+				    enum resolver_data_type type) {
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
   TDB_DATA urn,attribute;
   TDB_DATA_LIST i;
@@ -861,7 +858,7 @@ static char **Resolver_resolve_list(Resolver self, void *ctx,
   attribute.dsize = strlen(attribute_str);
 
   if(get_data_head(self, urn, attribute, &i)) {
-       retrieve_attribute_list(self, result, i);
+    retrieve_attribute_list(self, result, i, type);
   };
   
   // NULL terminate it
@@ -871,7 +868,75 @@ static char **Resolver_resolve_list(Resolver self, void *ctx,
     talloc_steal(ctx, result->data);
   };
 
-  return (char **)result->data;
+  return (void **)result->data;
+};
+
+static int Resolver_get_iter(Resolver self, 
+			     RESOLVER_ITER *iter, 
+			     char *urn_str,
+			     char *attribute_str,
+			     enum resolver_data_type type) {
+  TDB_DATA urn, attribute;
+  int result;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+
+  result = get_data_head(self, urn, attribute, &iter->head);
+
+  // Note the current offset of the data_store
+  iter->offset = lseek(self->data_store_fd, 0, SEEK_CUR);
+
+  // Make sure that if the iterator is used in iter_next we ignore it
+  // since its invalid.
+  if(!result || iter->head.encoding_type != type) {
+    iter->head.encoding_type = RESOLVER_DATA_UNKNOWN;
+  };
+
+  return iter->head.encoding_type != RESOLVER_DATA_UNKNOWN;
+};
+
+static int Resolver_iter_next(Resolver self,
+			      RESOLVER_ITER *iter, 
+			      void *result, int length) {
+  // We assume the iter is valid and we write the contents of the iter
+  // on here.
+  int to_read = min(length-1, iter->head.length);
+  int type = iter->head.encoding_type;
+
+  // This is our iteration exit condition
+  if(type == RESOLVER_DATA_UNKNOWN) 
+    return 0;
+
+  // Read this much from the file
+  if(lseek(self->data_store_fd, iter->offset, SEEK_SET) == iter->offset) {
+    if(read(self->data_store_fd, result, to_read) < to_read) {
+      // Oops cant read enough
+      return 0;
+    };
+  };
+
+  // NULL terminate it if its a string like type
+  switch(type) {
+  case RESOLVER_DATA_URN:
+  case RESOLVER_DATA_STRING:
+    ((char *)result)[to_read++] = 0;
+    break;
+  default:
+    break;
+  };
+
+  // Update the iterator to the next value
+  if(iter->head.next_offset == 0) {
+    iter->head.encoding_type = RESOLVER_DATA_UNKNOWN;
+  } else {
+    get_data_next(self, &iter->head);
+    iter->offset = lseek(self->data_store_fd, 0, SEEK_CUR);
+  };
+
+  return 1;
 };
 
 /** Instantiates a single instance of the class using this
@@ -1160,6 +1225,8 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(resolve) = Resolver_resolve;
      VMETHOD(resolve2) = Resolver_resolve2;
      VMETHOD(resolve_list) = Resolver_resolve_list;
+     VMETHOD(get_iter) = Resolver_get_iter;
+     VMETHOD(iter_next) = Resolver_iter_next;
      VMETHOD(add)  = Resolver_add;
      VMETHOD(export_urn) = Resolver_export_urn;
      VMETHOD(export_all) = Resolver_export_all;
