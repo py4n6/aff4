@@ -267,6 +267,16 @@ CLASS(Resolver, AFFObject)
   void *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute, 
 	       enum resolver_data_type type);
 
+  /** This version does not allocate any memory it just overwrite the
+      preallocated memory in result (of length specified) with the
+      first element returned and return the number of bytes written to
+      the result.  If there are no elements we dont touch the result
+      and return 0.
+  */
+  int METHOD(Resolver, resolve2, char *uri, char *attribute, 
+	     void *result, int length,
+	     enum resolver_data_type type);
+
 /** This returns a null terminated list of matches. */
      char **METHOD(Resolver, resolve_list, void *ctx, char *uri, char *attribute);
 
@@ -617,7 +627,7 @@ CLASS(ZipFile, AFFObject)
 // called with create_new_volume or append_volume before.
      FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
 			   char *extra, uint16_t extra_field_len,
-			   int compression);
+			   uint16_t compression);
 
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
@@ -627,7 +637,7 @@ CLASS(ZipFile, AFFObject)
 // basically calls open_member, writes the string then closes it).
      int METHOD(ZipFile, writestr, char *filename, char *data, int len,
 		 char *extra, int extra_field_len,
-		 int compression);
+		 uint16_t compression);
 END_CLASS
 
 #define ZIP_STORED 0
@@ -642,7 +652,7 @@ CLASS(ZipFileStream, FileLikeObject)
      FileLikeObject file_fd;
      uint32_t crc32;
      uint32_t compress_size;
-     uint32_t compression;
+     uint16_t compression;
 
      // We calculate the SHA256 hash of each archive member
      EVP_MD_CTX digest;

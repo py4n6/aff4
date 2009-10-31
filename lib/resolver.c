@@ -602,6 +602,53 @@ static void *Resolver_resolve(Resolver self, void *ctx, char *urn_str, char *att
   return NULL;
 };
 
+/** Resolves a single attribute and returns the value. Value will be
+    talloced with the context of ctx.
+*/
+static int Resolver_resolve2(Resolver self, char *urn_str, char *attribute_str,
+			     void *result, int length,
+			     enum resolver_data_type type) {
+  TDB_DATA_LIST i;
+  TDB_DATA urn, attribute;
+
+  urn.dptr = (unsigned char *)urn_str;
+  urn.dsize = strlen(urn_str);
+  attribute.dptr = (unsigned char *)attribute_str;
+  attribute.dsize = strlen(attribute_str);
+
+  DEBUG("Getting %s, %s\n", urn_str, attribute_str);
+  if(get_data_head(self, urn, attribute, &i)) {
+    int to_read = min(length, i.length);
+
+    // Make sure its the type our caller expects
+    if(i.encoding_type != type) {
+      RaiseError(ERuntimeError, "Request for attribute %s with type %d - but its stored with type %d\n", attribute_str, type, i.encoding_type);
+      goto not_found;
+    };
+
+    // Read this much from the file
+    if(read(self->data_store_fd, result, to_read) < to_read) {
+      // Oops cant read enough
+      goto not_found;
+    };
+
+    // NULL terminate it if its a string like type
+    switch(type) {
+    case RESOLVER_DATA_URN:
+    case RESOLVER_DATA_STRING:
+      ((char *)result)[to_read++] = 0;
+      break;
+    default:
+      break;
+    };
+
+    return to_read;
+  };
+
+ not_found:  
+  return 0;
+};
+
 // check if the value is already set for urn and attribute - honors inheritance
 static int is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
 			    TDB_DATA value, int follow_inheritence) {
@@ -650,7 +697,7 @@ static int is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
 };
 
 static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute, 
-			 TDB_DATA value) {
+			 TDB_DATA value, enum resolver_data_type type) {
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
@@ -669,8 +716,7 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   // The offset to the next item in the list
   i.next_offset = 0;
   i.length = value.dsize;
-  // FIXME:
-  i.encoding_type = 0;
+  i.encoding_type = type;
 
   write(self->data_store_fd, &i, sizeof(i));
   write(self->data_store_fd, value.dptr, value.dsize);
@@ -686,19 +732,73 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   return 1;
 };
 
+
+static TDB_DATA *make_tdb_value(void *ctx, void *value_str, 
+			       enum resolver_data_type type) {
+  TDB_DATA *value = talloc_size(ctx, sizeof(TDB_DATA));
+
+  // Now serialise the data according to its type
+  switch(type) {
+  case RESOLVER_DATA_URN:
+  case RESOLVER_DATA_STRING: {
+    value->dptr = (unsigned char *)value_str;
+    value->dsize = strlen(value_str);
+    break;
+  };
+
+  case RESOLVER_DATA_TDB_DATA: {
+    TDB_DATA *data = (TDB_DATA *)value_str;
+
+    value->dptr = data->dptr;
+    value->dsize = data->dsize;
+    break;
+  };
+
+  case RESOLVER_DATA_UINT16: {
+    value->dptr = talloc_size(value, sizeof(uint16_t));
+    *(uint16_t *)(value->dptr) = *(uint16_t *)value_str;
+
+    value->dsize = sizeof(uint16_t);
+    break;
+  };
+
+  case RESOLVER_DATA_UINT32: {
+    value->dptr = talloc_size(value, sizeof(uint32_t));
+    *(uint32_t *)(value->dptr) = *(uint32_t *)value_str;
+
+    value->dsize = sizeof(uint32_t);
+
+    break;
+  };
+
+  case RESOLVER_DATA_UINT64: {
+    value->dptr = talloc_size(value, sizeof(uint64_t));
+    *(uint64_t *)(value->dptr) = *(uint64_t *)value_str;
+
+    value->dsize = sizeof(uint64_t);
+    break;
+  };
+    
+  default:
+    RaiseError(ERuntimeError, "Unable to serialise items of value %d\n", type);
+  };
+
+  return value;
+};
+
 /** This sets a single triple into the resolver replacing previous
     values set for this attribute
 */
 static void Resolver_set(Resolver self, char *urn_str, 
-			 char *attribute_str, char *value_str) {
-  TDB_DATA urn, attribute, value;
+			 char *attribute_str, char *value_str,
+			 enum resolver_data_type type) {
+  TDB_DATA urn, attribute, *value;
 
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
-  value.dptr = (unsigned char *)value_str;
-  value.dsize = strlen(value_str);
+  value = make_tdb_value(NULL, value_str, type);
 
   // Grab the lock
   tdb_lockall(self->data_db);
@@ -706,11 +806,13 @@ static void Resolver_set(Resolver self, char *urn_str,
   /** If the value is already in the list, we just ignore this
       request.
   */
-  if(!is_value_present(self, urn, attribute, value, 1)) {
-    set_new_value(self, urn, attribute, value);
+  if(!is_value_present(self, urn, attribute, *value, 1)) {
+    set_new_value(self, urn, attribute, *value, type);
   };
 
   tdb_unlockall(self->data_db);
+
+  talloc_free(value);
 };
 
 /** Given a head, this function will traverse the data_store list and
@@ -888,76 +990,26 @@ static void Resolver_add(Resolver self, char *urn_str,
 			 char *attribute_str, void *value_str,
 			 enum resolver_data_type type,
 			 int unique) {
-  TDB_DATA urn, attribute, value, key;
+  TDB_DATA urn, attribute, *value, key;
   TDB_DATA_LIST i;
   uint32_t previous_offset=0;
   uint32_t new_offset;
   TDB_DATA offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
-  char buff3[BUFF_SIZE];
   
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
-
-
-  // Now serialise the data according to its type
-  switch(type) {
-  case RESOLVER_DATA_URN:
-  case RESOLVER_DATA_STRING: {
-    value.dptr = (unsigned char *)value_str;
-    value.dsize = strlen(value_str);
-    break;
-  };
-
-  case RESOLVER_DATA_TDB_DATA: {
-    TDB_DATA *data = (TDB_DATA *)value_str;
-
-    value.dptr = data->dptr;
-    value.dsize = data->dsize;
-    break;
-  };
-
-  case RESOLVER_DATA_UINT16: {
-    uint16_t *data = (uint16_t *)value_str;
-
-    memcpy(buff3, data, sizeof(uint16_t));
-    value.dptr = buff3;
-    value.dsize = sizeof(uint16_t);
-    break;
-  };
-
-  case RESOLVER_DATA_UINT32: {
-    uint32_t *data = (uint32_t *)value_str;
-
-    memcpy(buff3, data, sizeof(uint32_t));
-    value.dptr = buff3;
-    value.dsize = sizeof(uint32_t);
-    break;
-  };
-
-  case RESOLVER_DATA_UINT64: {
-    uint64_t *data = (uint64_t *)value_str;
-
-    memcpy(buff3, data, sizeof(uint64_t));
-    value.dptr = buff3;
-    value.dsize = sizeof(uint64_t);
-    break;
-  };
-    
-  default:
-    RaiseError(ERuntimeError, "Unable to serialise items of value %d\n", type);
-    return;
-  };
+  value = make_tdb_value(NULL, value_str, type);
 
   DEBUG("Adding %s, %s\n", urn_str, attribute_str);
 
   /** If the value is already in the list, we just ignore this
       request.
   */
-  if(unique && is_value_present(self, urn, attribute, value, 1)) {
+  if(unique && is_value_present(self, urn, attribute, *value, 1)) {
     goto exit;
   };
 
@@ -977,22 +1029,23 @@ static void Resolver_add(Resolver self, char *urn_str,
   // Go to the end and write the new record
   new_offset = lseek(self->data_store_fd, 0, SEEK_END);
   i.next_offset = previous_offset;
-  i.length = value.dsize;
+  i.length = value->dsize;
   i.encoding_type = type;
 
   write(self->data_store_fd, &i, sizeof(i));
-  write(self->data_store_fd, value.dptr, value.dsize);    
+  write(self->data_store_fd, value->dptr, value->dsize);    
 
   // Now store the offset to this in the tdb database
-  value.dptr = (unsigned char *)buff2;
-  value.dsize = tdb_serialise_int(new_offset, buff2, BUFF_SIZE);
+  value->dptr = (unsigned char *)buff2;
+  value->dsize = tdb_serialise_int(new_offset, buff2, BUFF_SIZE);
 
-  tdb_store(self->data_db, key, value, TDB_REPLACE);
+  tdb_store(self->data_db, key, *value, TDB_REPLACE);
 
   // Done
   tdb_unlockall(self->data_db);
 
  exit:
+  talloc_free(value);
   return;
 };
 
@@ -1077,7 +1130,7 @@ int Resolver_lock(Resolver self, char *urn_str, char mode) {
   offset = get_data_head(self, urn, attribute, &data_list);
   if(!offset){
     // The attribute is not set - make it now:
-    set_new_value(self,urn, attribute, LOCK);
+    set_new_value(self,urn, attribute, LOCK, RESOLVER_DATA_STRING);
     offset = get_data_head(self, urn, attribute, &data_list);
     if(!offset) {
       RaiseError(ERuntimeError, "Unable to set lock attribute");
@@ -1105,6 +1158,7 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(create) = Resolver_create;
 
      VMETHOD(resolve) = Resolver_resolve;
+     VMETHOD(resolve2) = Resolver_resolve2;
      VMETHOD(resolve_list) = Resolver_resolve_list;
      VMETHOD(add)  = Resolver_add;
      VMETHOD(export_urn) = Resolver_export_urn;

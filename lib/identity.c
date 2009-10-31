@@ -266,7 +266,7 @@ static void Identity_store(Identity self, char *volume_urn) {
   // Try to find a signing segment
   while(1) {
     snprintf(filename, BUFF_SIZE, "%08d", i);
-    if(!CALL(oracle, is_set, fqn, AFF4_STATEMENT, filename, RESOLVER_DATA_URN))
+    if(!CALL(oracle, is_set, fqn, AFF4_STATEMENT, filename))
       break;
     i++;
   };

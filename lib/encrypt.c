@@ -28,7 +28,7 @@ static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_le
   
   if(passphrase) {
     int passphrase_len = strlen(passphrase);
-    uint32_t fortification_count = *(uint64_t *)CALL(oracle, resolve, self, URNOF(self),
+    uint64_t fortification_count = *(uint64_t *)CALL(oracle, resolve, self, URNOF(self),
 						     AFF4_CRYPTO_FORTIFICATION_COUNT,
 						     RESOLVER_DATA_UINT64);
     EVP_MD_CTX digest;
@@ -47,7 +47,7 @@ static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_le
 
       // Store it
       CALL(oracle, set, URNOF(self), AFF4_CRYPTO_FORTIFICATION_COUNT, 
-	   from_int(fortification_count));
+	   &fortification_count, RESOLVER_DATA_UINT64);
     };
 
     /* Fortify the passphrase (This is basically done in order to
@@ -81,20 +81,30 @@ static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
   
   // This places an encryption key in key derived from the passphrase:
   if(prepare_passphrase(self, key, sizeof(key))) {
+    TDB_DATA iv_data, encrypted_key_data;
+
     // Make a new iv
     RAND_pseudo_bytes(iv, sizeof(iv));
-
+    
+    iv_data.dptr = iv;
+    iv_data.dsize = sizeof(iv);
+    
     // And we store them in the resolver
-    encode64((unsigned char *)iv, sizeof(iv), buffer, sizeof(buffer));
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_IV, (char *)buffer);
+    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_IV, &iv_data, RESOLVER_DATA_TDB_DATA);
     
     // The passphrase key is now used to encrypt the stream key
     AES_set_encrypt_key(key, 256, &aes_key);
     AES_cbc_encrypt(affkey, encrypted_key, 32, &aes_key, iv, AES_ENCRYPT);
     
     encode64((unsigned char *)encrypted_key, 32, buffer, sizeof(buffer));
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE_KEY, (char *)buffer);
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_ALGORITHM, AFF4_CRYPTO_ALGORITHM_AES_SHA254);
+    encrypted_key_data.dptr = encrypted_key;
+    encrypted_key_data.dsize = 32;
+
+    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE_KEY, 
+	 &encrypted_key_data, RESOLVER_DATA_TDB_DATA);
+
+    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_ALGORITHM, 
+	 AFF4_CRYPTO_ALGORITHM_AES_SHA254, RESOLVER_DATA_STRING);
     
     saved = 1;
   };
@@ -113,7 +123,8 @@ static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
 static unsigned char *generate_AES_key(Encrypted self) {
   char buff[BUFF_SIZE];  
   unsigned char *affkey = talloc_size(self, 32);
-  
+  TDB_DATA affkey_data;
+
   int r = RAND_bytes(affkey,32); // makes a random key; with REAL random bytes
   if(r!=1) r = RAND_pseudo_bytes(affkey,32); // true random not supported
   if(r!=1) {
@@ -123,7 +134,11 @@ static unsigned char *generate_AES_key(Encrypted self) {
   
   encode64((unsigned char *)affkey, 32, (unsigned char*)buff, sizeof(buff));
   // Set the key
-  CALL(oracle, set, URNOF(self), AFF4_VOLATILE_KEY, buff);
+  affkey_data.dptr = affkey;
+  affkey_data.dsize = 32;
+
+  CALL(oracle, set, URNOF(self), AFF4_VOLATILE_KEY, &affkey_data,
+       RESOLVER_DATA_TDB_DATA);
 
   // Now we have a key - we need to initialise our AES_key:
   AES_set_encrypt_key(affkey, 256, &self->ekey);
@@ -171,9 +186,10 @@ static int load_AES_key(Encrypted this) {
 	// Now this should be the actual key
 	AES_cbc_encrypt(affkey, affkey, 32, &aes_key, iv, AES_DECRYPT);
 
+	// FIXME:
 	// We put it in the volatile namespace:
 	encode64((unsigned char*)affkey, 32, buffer, sizeof(buffer));
-	CALL(oracle, set, URNOF(this), AFF4_VOLATILE_KEY, (char *)buffer);
+	//CALL(oracle, set, URNOF(this), AFF4_VOLATILE_KEY,  *)buffer);
 
 	key = (char *)buffer;
       };

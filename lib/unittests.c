@@ -9,8 +9,8 @@
 
 #define TEST_FILE "test.zip"
 
-#define RESOLVER_TESTS 1
-//#define ZIPFILE_TESTS 1
+//#define RESOLVER_TESTS 0
+#define ZIPFILE_TESTS 1
 
 #ifdef RESOLVER_TESTS
 #define URN "aff4://hello"
@@ -22,24 +22,33 @@ void resolver_test_1() {
   char **result;
   char **i;
   char *value;
+  uint32_t integer, *integer_p = 0x18;
 
   // Clearing the urn
   CALL(oracle, del, URN, ATTRIBUTE);
 
   // Set an attribute
-  printf("Setting value \n");
-  CALL(oracle, set, URN, ATTRIBUTE, VALUE);
+  printf("Setting string \n");
+  CALL(oracle, set, URN, ATTRIBUTE, VALUE, RESOLVER_DATA_STRING);
   
   // Retrieve it
   value = (char *)CALL(oracle, resolve, ctx, URN, ATTRIBUTE,
 		       RESOLVER_DATA_STRING);
   printf("Retrieved value: %s\n", value);
-  
+
+  printf("Setting uint32_t\n");
+  integer = 0x18;
+  CALL(oracle, set, URN, "integer", &integer, RESOLVER_DATA_UINT32);
+
+  integer_p = (uint32_t *) CALL(oracle, resolve, ctx, URN, "integer",
+				RESOLVER_DATA_UINT32);
+  printf("Retrieved value: %X\n", *integer_p);
+
   // Retrieved back what we put in
   assert(!strcmp(VALUE, value));
 
   // Add another value
-  CALL(oracle, add, URN, ATTRIBUTE, "world2", 1);
+  CALL(oracle, add, URN, ATTRIBUTE, "world2", RESOLVER_DATA_STRING, 1);
 
   // Grab the list of values
   result = CALL(oracle,resolve_list, ctx, URN, ATTRIBUTE);
