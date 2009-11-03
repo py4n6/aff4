@@ -27,15 +27,23 @@ ZipFile open_volume(char *urn, char mode) {
   {
     char *volume = (char *)CALL(oracle, resolve, ctx, filename, AFF4_CONTAINS,
 				RESOLVER_DATA_URN);
-    if(volume)
+    // Volume already exits on this filename
+    if(volume) {
       result = (ZipFile)CALL(oracle, open, volume, mode);
+    };
   };
 
-  // Go through all the volume handlers until one works
+  // Go through all the volume handlers trying to create a new
+  // volume, until one works
   while(!result && i->class_ptr) {
-    result = (ZipFile)CONSTRUCT_FROM_REFERENCE(((ZipFile)i->class_ptr), 
+    result = (ZipFile)CONSTRUCT_FROM_REFERENCE(((AFFObject)i->class_ptr), 
 					       Con, NULL, filename, mode);
-    if(result) LogWarnings("Loaded %s volume %s", i->type, filename);
+    if(result) {
+      LogWarnings("Loaded %s volume %s", i->type, filename);
+      CALL(oracle, set, URNOF(result), AFF4_STORED, filename, RESOLVER_DATA_URN);
+      result = CALL((AFFObject)result, finish);
+      break;
+    };
     i++;
   };
   PrintError();

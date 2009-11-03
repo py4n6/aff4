@@ -13,6 +13,33 @@
 #include <libgen.h>
 #include "aff4.h"
 #include "zip.h"
+#include "rdf.h"
+
+// This is a FileLikeObject which is used to provide access to zip
+// archive members. Currently only accessible through
+// ZipFile.open_member()
+CLASS(ZipFileStream, FileLikeObject)
+     z_stream strm;
+     uint64_t file_offset;
+     char *file_urn;
+     char *container_urn;
+     FileLikeObject file_fd;
+     uint32_t crc32;
+     uint32_t compress_size;
+     uint16_t compression;
+
+     // We calculate the SHA256 hash of each archive member
+     EVP_MD_CTX digest;
+
+     /* This is the constructor for the file like object. 
+	file_urn is the storage file for the volume in
+	container_urn. If the stream is opened for writing the file_fd
+	may be passed in. It remains locked until we are closed.
+     */
+     ZipFileStream METHOD(ZipFileStream, Con, char *filename, 
+			  char *file_urn, char *container_urn,
+			  char mode, FileLikeObject file_fd);
+END_CLASS
 
 /** Implementation of FileBackedObject.
 
@@ -22,80 +49,74 @@ itself.
 /** Note that files we create will always be escaped using standard
     URN encoding.
 */
-static FileBackedObject FileBackedObject_Con(FileBackedObject self, 
-					     char *urn, char mode) {
-  int flags;
-  char *buffer;
+static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, char *urn, char mode) {
+  FileBackedObject self = (FileBackedObject)this;
   char *filename;
 
-  if(!startswith(urn, "file://")) {
-    RaiseError(ERuntimeError,"You must have a fully qualified urn here, not '%s'", urn);
-    return NULL;
-  };
+  this->mode = mode;
 
-  filename = talloc_strdup(self, urn + strlen("file://"));
-
-  // Set our urn - always fqn
-  URNOF(self) = talloc_strdup(self, urn);
-
-  if(mode == 'r') {
-    flags = O_RDONLY | O_BINARY;
-  } else {
-    flags = O_CREAT | O_RDWR | O_BINARY;
-    buffer = escape_filename(filename, filename);
-    // Try to create leading directories
-    _mkdir(dirname(buffer));
-  };
-
-  // Now try to create the file within the new directory
-  buffer = escape_filename(filename,filename);
-  self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
-  if(self->fd<0){
-    RaiseError(EIOError, "Can't open %s (%s)", urn, strerror(errno));
-    goto error;
-  };
-
-  // Work out what the file size is:
-  self->super.size = lseek(self->fd, 0, SEEK_END);
-  // Check that its what we expected
-  {
-    uint64_t result=self->super.size;
+  if(urn) {
+    int flags;
+    char *buffer;
     
-    CALL(oracle, resolve2,URNOF(self), AFF4_SIZE,
-	 AS_BUFFER(result),
-	 RESOLVER_DATA_UINT64);
-
-    if(self->super.size != result) {
-      // The size is not what we expect. Therefore the data stored in
-      // the resolver for this file is incorrect - we need to clear it
-      // all.
-      CALL(oracle, del, URNOF(self), NULL);
+    // FIXME - correct URN handling here
+    if(!startswith(urn, "file://")) {
+      RaiseError(ERuntimeError,"You must have a fully qualified urn here, not '%s'", urn);
+      return NULL;
     };
+    
+    filename = talloc_strdup(self, urn + strlen("file://"));
+    
+    // Set our urn - always fqn
+    URNOF(self) = talloc_strdup(self, urn);
+    
+    if(mode == 'r') {
+      flags = O_RDONLY | O_BINARY;
+    } else {
+      flags = O_CREAT | O_RDWR | O_BINARY;
+      buffer = escape_filename(filename, ZSTRING_NO_NULL(filename));
+      // Try to create leading directories
+      _mkdir(dirname(buffer));
+    };
+    
+    // Now try to create the file within the new directory
+    buffer = escape_filename(filename,ZSTRING_NO_NULL(filename));
+    self->fd = open(buffer, flags, S_IRWXU | S_IRWXG | S_IRWXO);
+    if(self->fd<0){
+      RaiseError(EIOError, "Can't open %s (%s)", urn, strerror(errno));
+      goto error;
+    };
+    
+    // Work out what the file size is:
+    self->super.size = lseek(self->fd, 0, SEEK_END);
+    // Check that its what we expected
+    {
+      uint64_t result=self->super.size;
+    
+      CALL(oracle, resolve2,URNOF(self), AFF4_SIZE,
+	   AS_BUFFER(result),
+	   RESOLVER_DATA_UINT64);
+      
+      if(self->super.size != result) {
+	// The size is not what we expect. Therefore the data stored in
+	// the resolver for this file is incorrect - we need to clear it
+	// all.
+	CALL(oracle, del, URNOF(self), NULL);
+      };
+    };
+    
+    CALL(oracle, set, URNOF(self), AFF4_SIZE, &self->super.size, RESOLVER_DATA_UINT64);
+    talloc_free(filename);
+  } else {
+    this = self->__super__->super.Con(this, urn, mode);
   };
-  
-  CALL(oracle, set, URNOF(self), AFF4_SIZE, &self->super.size, RESOLVER_DATA_UINT64);
-  talloc_free(filename);
-  return self;
+
+  return this;
 
  error:
   talloc_free(filename);
   talloc_free(self);
   return NULL;
-};
-
-// This is the low level constructor for FileBackedObject.
-static AFFObject FileBackedObject_AFFObject_Con(AFFObject self, char *urn, char mode) {
-  FileBackedObject this = (FileBackedObject)self;
-
-  self->mode = mode;
-
-  if(urn) {
-    self = (AFFObject)this->Con(this, urn, mode);
-  } else {
-    self = this->__super__->super.Con((AFFObject)this, urn, mode);
-  };
-
-  return self;
 };
 
 static int FileLikeObject_truncate(FileLikeObject self, uint64_t offset) {
@@ -167,14 +188,14 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 
 static void FileLikeObject_close(FileLikeObject self) {
   CALL(oracle, set, URNOF(self), AFF4_SIZE, &self->size, RESOLVER_DATA_UINT64);
-  //talloc_free(self);
+  talloc_free(self);
 };
 
 static void FileBackedObject_close(FileLikeObject self) {
   FileBackedObject this=(FileBackedObject)self;
 
   close(this->fd);
-  talloc_free(self);
+  this->__super__->close(self);
 };
 
 static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
@@ -237,7 +258,6 @@ static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
 
 /** A file backed object extends FileLikeObject */
 VIRTUAL(FileBackedObject, FileLikeObject)
-     VMETHOD(Con) = FileBackedObject_Con;
      VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
      VMETHOD(super.super.finish) = FileBackedObject_finish;
 
@@ -247,6 +267,10 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
      VMETHOD(super.truncate) = FileBackedObject_truncate;
 END_VIRTUAL;
+
+
+// Some prototypes
+static ZipFile ZipFile_load_from(ZipFile self, char *fd_urn, char mode);
 
 /** This is the constructor which will be used when we get
     instantiated as an AFFObject.
@@ -260,41 +284,29 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, char *urn, char mode) {
     // Ok, we need to create ourselves from a URN. We need a
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
-    self->urn = (char *)CALL(oracle, resolve, self, urn, AFF4_STORED, RESOLVER_DATA_URN);
-    // We have no idea where we are stored:
-    if(!self->urn) {
+    char stored[BUFF_SIZE];
+    if(!CALL(oracle, resolve2, urn, AFF4_STORED, stored, 
+	     BUFF_SIZE, RESOLVER_DATA_URN)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
       goto error;
     };
+    
+    URNOF(self) = talloc_strdup(self, urn);
 
-    // Call our other constructor to actually read this file:
-    self = (AFFObject)this->Con((ZipFile)this, self->urn, mode);
+    // Try to load this volume
+    ZipFile_load_from(this, stored, mode);
+    CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME, RESOLVER_DATA_STRING);
+
   } else {
     // Call ZipFile's AFFObject constructor.
     this->__super__->Con(self, urn, mode);
   };
 
   return self;
+
  error:
   talloc_free(self);
   return NULL;
-};
-
-static AFFObject ZipFile_finish(AFFObject self) {
-  ZipFile this = (ZipFile)self;
-  char *file_urn = (char *)CALL(oracle, resolve, self, self->urn, AFF4_STORED,
-				RESOLVER_DATA_URN);
-
-  // Make sure the constructor knows we want to create a new Zip
-  // file if one doesnt already exist.
-  self->mode = 'w';
-
-  if(!file_urn) {
-    RaiseError(ERuntimeError, "Volume %s has no " NAMESPACE "stored property?", self->urn);
-    return NULL;
-  };
-    
-  return (AFFObject)CALL((ZipFile)this, Con, file_urn, 'w');
 };
 
 // Seeks fd to start of CD
@@ -384,7 +396,10 @@ static int parse_extra_field(ZipFile self, FileLikeObject fd,unsigned int length
   return 0;
 };
 
-static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
+/** tries to open fd_urn as a zip file and populate the resolver with
+    what it found 
+*/
+static ZipFile ZipFile_load_from(ZipFile self, char *fd_urn, char mode) {
   char buffer[BUFF_SIZE+1];
   int length,i;
   FileLikeObject fd=NULL;
@@ -392,17 +407,12 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
   memset(buffer,0,BUFF_SIZE+1);
 
-  // Make sure we have a URN
-  CALL((AFFObject)self, Con, NULL, mode);
-
   // Is there a file we need to read?
-  fd = (FileLikeObject)CALL(oracle, open, fd_urn, mode);
+  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
   if(!fd) {
     RaiseError(ERuntimeError, "Unable to open %s", fd_urn);
     goto error;
   };
-
-  self->parent_urn = talloc_strdup(self, fd_urn);
 
   // FIXME - check the directory_offset - what should we do if its not
   // valid? We should check the signatures.
@@ -465,11 +475,12 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
       char *filename;
       char *escaped_filename;
       uint32_t tmp;
+      uint64_t tmp64;
 
       // The length of the struct up to the filename
       // Only read up to the filename member
       if(sizeof(cd_header) != 
-	 CALL(fd, read, (char *)&cd_header, sizeof(cd_header)))
+	 CALL(fd, read, (char *)AS_BUFFER(cd_header)))
 	goto error_reason;
 
       // Does the magic match?
@@ -518,9 +529,9 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 	   &cd_header.crc32, RESOLVER_DATA_UINT32);
 
       // The following checks for zip64 values
-      tmp = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
+      tmp64 = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
       CALL(oracle, set, filename, AFF4_SIZE, 
-	   &tmp, RESOLVER_DATA_UINT32);
+	   &tmp64, RESOLVER_DATA_UINT64);
 
       tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
 	: cd_header.compress_size;
@@ -587,20 +598,17 @@ static ZipFile ZipFile_Con(ZipFile self, char *fd_urn, char mode) {
 
   CALL(oracle, set, URNOF(self), AFF4_DIRECTORY_OFFSET, 
        &directory_offset, RESOLVER_DATA_UINT64);
- exit:
-  CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_ZIP_VOLUME, RESOLVER_DATA_STRING);
-
-  CALL(oracle, cache_return, (AFFObject)fd);
-  return self;
 
  error_reason:
   RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
+  
+ exit:
  error:
   if(fd) {
     CALL(oracle, cache_return, (AFFObject)fd);
   };
-  talloc_free(self);
-  return NULL;
+  
+  return self;
 };
 
 /*** NOTE - The buffer callers receive will not be owned by the
@@ -738,7 +746,15 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 				   uint16_t compression) {
   FileLikeObject result=NULL;
   char *ctx=talloc_size(NULL, 1);
+  char storage_urn[BUFF_SIZE];
 
+  // Where are we stored?
+  if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+	   storage_urn, BUFF_SIZE, RESOLVER_DATA_URN)) {
+    RaiseError(ERuntimeError, "No storage for %s?", URNOF(self));
+    goto error;
+  };
+  
   switch(mode) {
   case 'w': {
     struct ZipFileHeader header;
@@ -751,7 +767,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     // Make sure the filename we write on the archive is relative, and
     // the filename we use with the resolver is fully qualified
-    escaped_filename = escape_filename(self, relative_name(self, filename, URNOF(self)));
+    escaped_filename = escape_filename(self, relative_name(self, filename, URNOF(self)), 0);
     filename = fully_qualified_name(escaped_filename, filename, URNOF(self));
 
     CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
@@ -763,7 +779,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
     CALL(oracle, set, URNOF(self), AFF4_VOLATILE_DIRTY, "1", RESOLVER_DATA_STRING);
 
     // Open our current volume for writing:
-    fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
+    fd = (FileLikeObject)CALL(oracle, open, storage_urn, 'w');
     if(!fd) goto error;
 
     // Go to the start of the directory_offset
@@ -801,7 +817,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 				       ZipFileStream, Con, self, 
-				       filename, self->parent_urn, 
+				       filename, storage_urn, 
 				       URNOF(self),
 				       'w', fd);
     break;
@@ -820,7 +836,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *filename, char mod
 
     result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 				       ZipFileStream, Con, self, 
-				       filename, self->parent_urn,
+				       filename, storage_urn,
 				       URNOF(self),
 				       'r', NULL);
     break;
@@ -866,15 +882,20 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
   CALL(fd,write, (char *)&locator, sizeof(locator));
 };
 
+// This function dumps all the URNs contained within this volume
 static void dump_volume_properties(ZipFile self) {
-  char *properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
+  RESOLVER_ITER iter;
+  char urn[BUFF_SIZE];
+  FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
+			   NULL, 0, ZIP_STORED);
+  RDFSerializer serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self, URNOF(self), fd);
 
-  if(strlen(properties)>0) {
-    CALL(self, writestr, "properties", ZSTRING_NO_NULL(properties), 
-	 NULL, 0, ZIP_STORED);
+  CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS, RESOLVER_DATA_URN);
+  while(CALL(oracle, iter_next, &iter, urn, BUFF_SIZE)) {
+    CALL(serializer, serialize_urn, urn);
   };
 
-  talloc_free(properties);
+  CALL(serializer, close);
 };
 
 
@@ -893,11 +914,18 @@ static void ZipFile_close(ZipFile self) {
     FileLikeObject fd;
     uint64_t directory_offset=0;
     uint64_t tmp;
+    char storage_urn[BUFF_SIZE];
+
+    if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, storage_urn, 
+	     BUFF_SIZE, RESOLVER_DATA_URN)) {
+      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
+      return;
+    };
 
     // Write a properties file if needed
-    //dump_volume_properties(self);
+    dump_volume_properties(self);
 
-    fd = (FileLikeObject)CALL(oracle, open, self->parent_urn, 'w');
+    fd = (FileLikeObject)CALL(oracle, open, storage_urn, 'w');
     if(!fd) return;
     
     CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
@@ -925,8 +953,8 @@ static void ZipFile_close(ZipFile self) {
 	struct tm *now;
 
 	// This gets the relative name of the fqn
-	char *escaped_filename = escape_filename(self, 
-		       relative_name(self, urn, URNOF(self)));	
+	char *escaped_filename = escape_filename(self,
+		     relative_name(self, urn, URNOF(self)),0);	
 
 	CALL(oracle, resolve2, urn, AFF4_TIMESTAMP,
 	     AS_BUFFER(epoch_time),
@@ -937,7 +965,7 @@ static void ZipFile_close(ZipFile self) {
 	// Only store segments here
 	if(CALL(oracle, resolve2, urn, AFF4_TYPE,
 		type, BUFF_SIZE,
-		RESOLVER_DATA_URN) && strcmp(type, AFF4_SEGMENT))
+		RESOLVER_DATA_STRING) && strcmp(type, AFF4_SEGMENT))
 	  continue;
 	
 	// Clear temporary data
@@ -1048,6 +1076,8 @@ static void ZipFile_close(ZipFile self) {
     // Close the fd
     CALL(fd, close);
   };
+  
+  talloc_free(self);
 };
 
 /** This is just a convenience function - real simple now */
@@ -1065,13 +1095,15 @@ static int ZipFile_writestr(ZipFile self, char *filename,
 };
 
 VIRTUAL(ZipFile, AFFObject)
-     VMETHOD(Con) = ZipFile_Con;
+//VMETHOD(Con) = ZipFile_Con;
      VMETHOD(read_member) = ZipFile_read_member;
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
      VMETHOD(super.Con) = ZipFile_AFFObject_Con;
-     VMETHOD(super.finish) = ZipFile_finish;
+
+// Initialise our private classes
+     ZipFileStream_init();
 END_VIRTUAL
 
 /** 

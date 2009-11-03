@@ -29,8 +29,6 @@ static ZipFile DirVolume_Con(ZipFile self, char *fd_urn, char mode) {
   // Make sure we have a URN
   CALL((AFFObject)self, Con, NULL, mode);
 
-  self->parent_urn = talloc_strdup(self, fd_urn);
-
   // We check that there is no URN there already:
   PrintError();
   text = CALL(self, read_member, ctx, "__URN__", &len);
@@ -116,11 +114,18 @@ static FileLikeObject DirVolume_open_member(ZipFile self, char *filename, char m
 				   int compression) {
   char buff[BUFF_SIZE];
   FileLikeObject result;
-  char *escaped_filename = escape_filename(self, filename);
+  char *escaped_filename = escape_filename(self, filename, 0);
+  char storage_urn[BUFF_SIZE];
+  
+  if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, storage_urn, 
+	   BUFF_SIZE, RESOLVER_DATA_URN)) {
+    RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
+    return NULL;
+  };
 
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);
+  snprintf(buff, BUFF_SIZE, "%s/%s", storage_urn, escaped_filename);
   result = (FileLikeObject)CALL(oracle, open, buff, mode);
-
+  
   if(result && mode == 'w'){
     CALL(oracle, add, URNOF(self), AFF4_CONTAINS, filename, RESOLVER_DATA_URN, 1);
   };
@@ -144,9 +149,16 @@ static int DirVolume_writestr(ZipFile self, char *filename,
 		      int compression) {
   char buff[BUFF_SIZE];
   FileLikeObject fd;
-  char *escaped_filename = escape_filename(self, filename);
+  char *escaped_filename = escape_filename(self, filename, 0);
+  char storage_urn[BUFF_SIZE];
+  
+  if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, storage_urn, 
+	   BUFF_SIZE, RESOLVER_DATA_URN)) {
+    RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
+    return 0;
+  };
 
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);  
+  snprintf(buff, BUFF_SIZE, "%s/%s", storage_urn, escaped_filename);  
   
   fd = (FileLikeObject)CALL(oracle, open, buff, 'w');
   if(!fd) {
@@ -169,9 +181,16 @@ static char *DirVolume_read_member(ZipFile self, void *ctx,
   char buff[BUFF_SIZE];
   FileLikeObject fd;
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, ctx);
-  char *escaped_filename = escape_filename(self, filename);
+  char *escaped_filename = escape_filename(self, filename, 0);
+  char storage_urn[BUFF_SIZE];
+  
+  if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, storage_urn, 
+	   BUFF_SIZE, RESOLVER_DATA_URN)) {
+    RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
+    return NULL;
+  };
 
-  snprintf(buff, BUFF_SIZE, "%s/%s", self->parent_urn, escaped_filename);
+  snprintf(buff, BUFF_SIZE, "%s/%s", storage_urn, escaped_filename);
   fd = (FileLikeObject)CALL(oracle, open, buff, 'r');
   if(!fd) {
     goto error;

@@ -12,7 +12,7 @@ struct dispatch_t dispatch[] = {
   // Must be first - fallback position
   { 1, "file://",                 (AFFObject)&__FileBackedObject },
 
-  { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
+  //  { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
   { 0, AFF4_IMAGE,                (AFFObject)&__Image },
   { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
@@ -95,7 +95,7 @@ void AFF4_Init(void) {
   FileLikeObject_init();
   FileBackedObject_init();
   ZipFile_init();
-  ZipFileStream_init();
+  //  ZipFileStream_init();
   Image_init();
   MapDriver_init();
   Resolver_init();
@@ -457,7 +457,10 @@ static Resolver Resolver_Con(Resolver self) {
 
   // Create local read and write caches
   self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
+  talloc_set_name_const(self->read_cache, "Resolver Read Cache");
+
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);  
+  talloc_set_name_const(self->write_cache, "Resolver Write Cache");
 
   INIT_LIST_HEAD(&self->identities);
 
@@ -879,6 +882,9 @@ static int Resolver_get_iter(Resolver self,
   TDB_DATA urn, attribute;
   int result;
 
+  iter->end = 0;
+  iter->search_type = type;
+
   urn.dptr = (unsigned char *)urn_str;
   urn.dsize = strlen(urn_str);
   attribute.dptr = (unsigned char *)attribute_str;
@@ -889,13 +895,17 @@ static int Resolver_get_iter(Resolver self,
   // Note the current offset of the data_store
   iter->offset = lseek(self->data_store_fd, 0, SEEK_CUR);
 
-  // Make sure that if the iterator is used in iter_next we ignore it
-  // since its invalid.
-  if(!result || iter->head.encoding_type != type) {
-    iter->head.encoding_type = RESOLVER_DATA_UNKNOWN;
+  if(iter->offset == 850) {
+    printf("stop\n");
   };
 
-  return iter->head.encoding_type != RESOLVER_DATA_UNKNOWN;
+  // Is this the right type of entry as was requested?
+  if(!result || 
+     (type != RESOLVER_DATA_ANY && iter->head.encoding_type != type)) {
+    iter->end = 1;
+  };
+
+  return iter->head.encoding_type;
 };
 
 static int Resolver_iter_next(Resolver self,
@@ -907,30 +917,34 @@ static int Resolver_iter_next(Resolver self,
   int type = iter->head.encoding_type;
 
   // This is our iteration exit condition
-  if(type == RESOLVER_DATA_UNKNOWN) 
+  if(iter->end) 
     return 0;
 
-  // Read this much from the file
-  if(lseek(self->data_store_fd, iter->offset, SEEK_SET) == iter->offset) {
+  // Read this much from the file. If we have a wildcard match we do
+  // not actually read anything
+  if(iter->search_type != RESOLVER_DATA_ANY && \
+     iter->search_type == iter->head.encoding_type) {
+
+    lseek(self->data_store_fd, iter->offset, SEEK_SET) == iter->offset;
     if(read(self->data_store_fd, result, to_read) < to_read) {
       // Oops cant read enough
       return 0;
     };
-  };
 
-  // NULL terminate it if its a string like type
-  switch(type) {
-  case RESOLVER_DATA_URN:
-  case RESOLVER_DATA_STRING:
-    ((char *)result)[to_read++] = 0;
-    break;
-  default:
-    break;
+    // NULL terminate it if its a string like type
+    switch(iter->head.encoding_type) {
+    case RESOLVER_DATA_URN:
+    case RESOLVER_DATA_STRING:
+      ((char *)result)[to_read++] = 0;
+      break;
+    default:
+      break;
+    };
   };
 
   // Update the iterator to the next value
   if(iter->head.next_offset == 0) {
-    iter->head.encoding_type = RESOLVER_DATA_UNKNOWN;
+    iter->end = 1;
   } else {
     get_data_next(self, &iter->head);
     iter->offset = lseek(self->data_store_fd, 0, SEEK_CUR);
@@ -1124,7 +1138,14 @@ static char *Resolver_export_urn(Resolver self, char *urn, char *context) {
 static char *Resolver_export_all(Resolver self, char *context) {
 };
 
-static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
+// A helper method to construct the class
+static AFFObject Resolver_create(Resolver self, AFFObject class_reference, 
+				 char mode) {
+  AFFObject result = (AFFObject)CONSTRUCT_FROM_REFERENCE(class_reference, 
+							 Con, NULL, NULL, mode);
+  talloc_set_name(result, "%s (created by resolver)", NAMEOF(class_reference));
+
+  return result;
 };
 
 static void Resolver_del(Resolver self, char *urn_str, char *attribute_str) {
@@ -1251,7 +1272,7 @@ static AFFObject AFFObject_Con(AFFObject self, char *uri, char mode) {
     // This function creates a new stream from scratch so the stream
     // name will be a new UUID
     uuid_generate(uuid);
-    uuid_str = talloc_size(self, 40);
+    uuid_str = talloc_size(self, 50);
     uuid_unparse(uuid, uuid_str);
 
     uri = talloc_asprintf(self, FQN "%s", uuid_str);
@@ -1275,7 +1296,7 @@ static void AFFObject_set_property(AFFObject self, char *attribute, void *value,
 
 // Prepares an object to be used
 static AFFObject AFFObject_finish(AFFObject self) {
-  return self;
+  return CALL(self, Con, URNOF(self), self->mode);
 };
 
 VIRTUAL(AFFObject, Object)

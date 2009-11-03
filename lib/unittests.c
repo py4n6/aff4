@@ -127,11 +127,43 @@ void zipfile_test1() {
 
     // Close the member (finalises the member)
     CALL(out_fd, close);
-    // Close the archive
-    CALL(zip, close);
   };
 
+  // Close the archive
+  CALL(zip, close);
   talloc_free(zip);
+};
+
+void zipfile_test2() {
+  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile), 'w');
+  // Now make an image object
+  FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image), 'w');
+  
+  CALL(oracle, set, URNOF(zip), AFF4_STORED, "file://" FILENAME, RESOLVER_DATA_URN);
+  zip = (ZipFile)CALL((AFFObject)zip, finish);
+
+  URNOF(outfd) = talloc_asprintf(outfd, "%s/foobar_image", URNOF(zip));
+
+  CALL(oracle, set, URNOF(outfd), AFF4_STORED, URNOF(zip), RESOLVER_DATA_URN);
+  outfd = (FileLikeObject)CALL((AFFObject)outfd, finish);
+  
+  if(outfd) {
+    char buffer[BUFF_SIZE];
+    int fd=open("/bin/ls",O_RDONLY);
+    int length;
+    while(1) {
+      length = read(fd, buffer, BUFF_SIZE);
+      if(length == 0) break;
+      
+      CALL(outfd, write, buffer, length);
+    };
+    
+    // Close the member (finalises the member)
+    CALL(outfd, close);
+  };
+  
+  // Close the archive
+  CALL(zip, close);
 };
 
 #define TIMES 1000
@@ -153,7 +185,7 @@ void test1_5() {
   ZipFile zipfile;
 
   // Now create a new AFF2 file on top of it
-  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile, 'w');
   CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
 
   if(CALL((AFFObject)zipfile, finish)) {
@@ -612,7 +644,8 @@ int main() {
 #endif
 
 #ifdef ZIPFILE_TESTS
-  zipfile_test1();
+  //  zipfile_test1();
+  zipfile_test2();
 #endif
 
   /*

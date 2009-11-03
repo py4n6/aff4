@@ -169,7 +169,16 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
 
   if(uri) {
     uint32_t tmp = time(NULL);
+    char stored[BUFF_SIZE];
+    uint64_t tmp64;
 
+    if(!CALL(oracle, resolve2, uri, AFF4_STORED, stored, BUFF_SIZE, RESOLVER_DATA_URN)) {
+      RaiseError(ERuntimeError, "Image not stored anywhere?");
+      goto error;
+    };
+
+    // Add ourselves to our volume
+    CALL(oracle, add, stored, AFF4_CONTAINS, uri, RESOLVER_DATA_URN, 1);
     self->urn = talloc_strdup(self, uri);
 
     // These are the essential properties:
@@ -192,10 +201,10 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
 
     this->bevy_size = this->chunks_in_segment * this->chunk_size;
 
-    tmp = 0;
+    tmp64 = 0;
     this->super.size = *(uint32_t *)resolver_get_with_default
-      (oracle, self->urn, AFF4_SIZE, &tmp,
-       RESOLVER_DATA_UINT32);
+      (oracle, self->urn, AFF4_SIZE, &tmp64,
+       RESOLVER_DATA_UINT64);
 
     this->segment_count = 0;
     
@@ -227,6 +236,10 @@ static AFFObject Image_Con(AFFObject self, char *uri, char mode) {
   };
 
   return self;
+
+ error:
+  talloc_free(self);
+  return NULL;
 };
   
 static AFFObject Image_finish(AFFObject self) {
@@ -313,8 +326,6 @@ static void Image_close(FileLikeObject self) {
       pthread_join(worker->thread, NULL);
     };
   };
-
-  dump_stream_properties(self);
 
   {
     TDB_DATA tmp;

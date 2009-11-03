@@ -37,7 +37,12 @@ extern "C" {
     RESOLVER_DATA_UINT16,    /* uint16_t * */
     RESOLVER_DATA_UINT32,    /* uint32_t * */
     RESOLVER_DATA_UINT64,    /* uint64_t * */
-    RESOLVER_DATA_URN        /* char * (null terminated) */
+    RESOLVER_DATA_URN,        /* char * (null terminated) */
+    RESOLVER_DATA_ANY        /* A value used to indicate a wildcard -
+				in this case no data will be written
+				to the result but the iterator will be
+				advanced. 
+			     */
   };
 
 // The data store is basically a singly linked list of these records:
@@ -50,6 +55,8 @@ typedef struct TDB_DATA_LIST {
 typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
+  enum resolver_data_type search_type;
+  int end;
 } RESOLVER_ITER;
 
 // A helper to access the URN of an object.
@@ -60,7 +67,7 @@ typedef struct RESOLVER_ITER {
 */
 uint64_t parse_int(char *string);
 char *from_int(uint64_t arg);
-char *escape_filename(void *ctx, const char *filename);
+char *escape_filename(void *ctx, const char *filename, unsigned int length);
 char *unescape_filename(void *ctx, const char *filename);
 
 /** A cache is an object which automatically expires data which is
@@ -266,7 +273,7 @@ CLASS(Resolver, AFFObject)
       void METHOD(Resolver, cache_return, AFFObject obj);
 
 /* This create a new object of the specified type. */
-     AFFObject METHOD(Resolver, create, AFFObject *class_reference);
+      AFFObject METHOD(Resolver, create, AFFObject *class_reference, char mode);
 
 /* Returns an attribute about a particular uri if known. This may
      consult an external data source.
@@ -639,10 +646,6 @@ CLASS(ZipFile, AFFObject)
      uint64_t compressed_member_size;
      uint64_t offset_of_member_header;
 
-     // This is our own current URN - new files will be appended to
-     // that
-     char *parent_urn;
-
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
 
@@ -675,30 +678,6 @@ END_CLASS
 
 #define ZIP_STORED 0
 #define ZIP_DEFLATE 8
-
-// This is a FileLikeObject which is used from within the Zip file:
-CLASS(ZipFileStream, FileLikeObject)
-     z_stream strm;
-     uint64_t file_offset;
-     char *file_urn;
-     char *container_urn;
-     FileLikeObject file_fd;
-     uint32_t crc32;
-     uint32_t compress_size;
-     uint16_t compression;
-
-     // We calculate the SHA256 hash of each archive member
-     EVP_MD_CTX digest;
-
-     /* This is the constructor for the file like object. 
-	file_urn is the storage file for the volume in
-	container_urn. If the stream is opened for writing the file_fd
-	may be passed in. It remains locked until we are closed.
-     */
-     ZipFileStream METHOD(ZipFileStream, Con, char *filename, 
-			  char *file_urn, char *container_urn,
-			  char mode, FileLikeObject file_fd);
-END_CLASS
 
 // A directory volume implementation - all elements live in a single
 // directory structure

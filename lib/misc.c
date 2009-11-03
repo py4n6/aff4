@@ -55,14 +55,17 @@ void init_luts() {
     illegal_filename_lut[(int)*i]=1;
 };
 
-char *escape_filename(void *ctx, const char *filename) {
-  char buffer[BUFF_SIZE];
+char *escape_filename(void *ctx, const char *filename, unsigned int length) {
+  char *buffer;
   int i,j=0;
-  int length = strlen(filename)+1;
   
+  if(length==0) 
+    length=strlen(filename);
+
+  buffer = talloc_size(ctx, length*3 + 1);
   for(i=0;i<length;i++) {
     char x=filename[i];
-    if(x<0 || illegal_filename_lut[(int)x]) {
+    if(x<32 || illegal_filename_lut[(int)x]) {
       sprintf(buffer+j, "%%%02X", x);
       j+=3;
       if(j>BUFF_SIZE-10) break;
@@ -72,7 +75,8 @@ char *escape_filename(void *ctx, const char *filename) {
     };
   };
 
-  return talloc_strdup(ctx, buffer);
+  buffer[j]=0;
+  return buffer;
 };
 
 char *unescape_filename(void *ctx, const char *filename) {
