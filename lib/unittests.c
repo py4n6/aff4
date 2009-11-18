@@ -18,50 +18,47 @@
 #define VALUE "world"
 
 void resolver_test_1() {
-  char *ctx = talloc_size(NULL, 1);
-  char **result;
-  char **i;
-  char *value;
-  uint32_t integer, *integer_p = 0x18;
+  XSDInteger xsd_integer = CONSTRUCT(XSDInteger, RDFValue, super.Con, NULL);
 
   // Clearing the urn
   CALL(oracle, del, URN, ATTRIBUTE);
 
-  // Set an attribute
-  printf("Setting string \n");
-  CALL(oracle, set, URN, ATTRIBUTE, VALUE, RESOLVER_DATA_STRING);
+  printf("Setting integer\n");
+  CALL(xsd_integer, set, 5);
+  CALL(oracle, add_value, URN, ATTRIBUTE, (RDFValue)xsd_integer);
+  CALL(xsd_integer, set, 15);
+  CALL(oracle, add_value, URN, ATTRIBUTE, (RDFValue)xsd_integer);
+
+  CALL(xsd_integer, set, 0);
   
   // Retrieve it
-  value = (char *)CALL(oracle, resolve, ctx, URN, ATTRIBUTE,
-		       RESOLVER_DATA_STRING);
-  printf("Retrieved value: %s\n", value);
-
-  printf("Setting uint32_t\n");
-  integer = 0x18;
-  CALL(oracle, set, URN, "integer", &integer, RESOLVER_DATA_UINT32);
-
-  integer_p = (uint32_t *) CALL(oracle, resolve, ctx, URN, "integer",
-				RESOLVER_DATA_UINT32);
-  printf("Retrieved value: %X\n", *integer_p);
-
-  // Retrieved back what we put in
-  assert(!strcmp(VALUE, value));
-
-  // Add another value
-  CALL(oracle, add, URN, ATTRIBUTE, "world2", RESOLVER_DATA_STRING, 1);
-
-  // Grab the list of values
   {
     RESOLVER_ITER iter;
-    char result[BUFF_SIZE];
 
-    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, RESOLVER_DATA_STRING);
-    while(CALL(oracle, iter_next, &iter, result, BUFF_SIZE)) {
-      printf("Retrieved values: %s\n", result);
+    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, 0);
+    while(CALL(oracle, iter_next, &iter, (RDFValue)xsd_integer)) {
+      printf("Retrieved value: %llu\n", xsd_integer->value);
     };
   };
 
-  talloc_free(ctx);
+  // Retrieve it using allocation
+  {
+    RESOLVER_ITER iter;
+    RDFValue result;
+
+    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, 0);
+    while(1) {
+      result = CALL(oracle, iter_next_alloc, NULL, &iter);
+      if(!result) break;
+
+      printf("Got value of type '%s', value '%s'\n", result->dataType,
+	     CALL(result, serialise));
+
+      talloc_free(result);
+    };
+  }; 
+
+  return;
 };
 
 // Test locking:
@@ -107,10 +104,10 @@ void zipfile_test1() {
   ZipFile zip = open_volume(FILENAME, 'w');
   FileLikeObject out_fd;
 
-  CALL(zip, writestr, "hello", ZSTRING("hello world"), NULL, 0, 0);
+  CALL(zip, writestr, "hello", ZSTRING("hello world"), 0);
 
   // Open the member foobar for writing
-  out_fd = CALL(zip, open_member, "foobar", 'w', NULL, 0,
+  out_fd = CALL(zip, open_member, "foobar", 'w', 
 		ZIP_DEFLATE);
   
   // It worked - now copy /bin/ls into it
@@ -134,17 +131,24 @@ void zipfile_test1() {
   talloc_free(zip);
 };
 
+#if 0
 void zipfile_test2() {
-  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile), 'w');
+  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
   // Now make an image object
-  FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image), 'w');
+  FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image));
+  RDFURN urn = CONSTRUCT(RDFURN, RDFValue, super.Con, NULL);
+
+
+  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, 
+       urn->set(urn, "file://" FILENAME));
   
-  CALL(oracle, set, URNOF(zip), AFF4_STORED, "file://" FILENAME, RESOLVER_DATA_URN);
   zip = (ZipFile)CALL((AFFObject)zip, finish);
 
   URNOF(outfd) = talloc_asprintf(outfd, "%s/foobar_image", URNOF(zip));
 
-  CALL(oracle, set, URNOF(outfd), AFF4_STORED, URNOF(zip), RESOLVER_DATA_URN);
+  CALL(oracle, set_value, URNOF(outfd), AFF4_STORED, 
+       urn->set(urn, URNOF(zip)));
+  
   outfd = (FileLikeObject)CALL((AFFObject)outfd, finish);
   
   if(outfd) {
@@ -164,6 +168,14 @@ void zipfile_test2() {
   
   // Close the archive
   CALL(zip, close);
+};
+#endif
+
+void zipfile_test_load() {
+  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
+
+  CALL(zip, load_from, "file://" FILENAME, 'r');
+
 };
 
 #define TIMES 1000
@@ -185,7 +197,7 @@ void test1_5() {
   ZipFile zipfile;
 
   // Now create a new AFF2 file on top of it
-  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile, 'w');
+  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
   CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
 
   if(CALL((AFFObject)zipfile, finish)) {
@@ -193,7 +205,7 @@ void test1_5() {
     int fd=open("/bin/ls",O_RDONLY);
     int length;
     FileLikeObject out_fd = CALL((ZipFile)zipfile, 
-				 open_member, "foobar", 'w', NULL, 0, 
+				 open_member, "foobar", 'w', 
 				 ZIP_DEFLATE);
 
     if(!out_fd) return;
@@ -207,7 +219,7 @@ void test1_5() {
     CALL(out_fd,close);
 
     CALL((ZipFile)zipfile, writestr, "hello",
-	 ZSTRING("hello world"), NULL, 0, 0);
+	 ZSTRING("hello world"), 0);
 
     CALL((ZipFile)zipfile,close);
   };
@@ -636,7 +648,19 @@ void test_encrypted(char *filename) {
 
 int main() {
   talloc_enable_leak_report_full();
+  AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+
   AFF4_Init();
+
+  if(1){
+    URLParse p = CONSTRUCT(URLParse, URLParse, Con, NULL,
+			   "hello.txt");
+			   //			   "/foobar/hello.txt");
+    //"http://localhost/foobar.py?a=b#frag");
+    printf("%s\n", CALL(p, string, p));
+    printf("scheme: %s netloc='%s',  query='%s', fragment='%s'\n", 
+	   p->scheme, p->netloc, p->query, p->fragment);
+  };
 
 #ifdef RESOLVER_TESTS
   resolver_test_1();
@@ -644,8 +668,9 @@ int main() {
 #endif
 
 #ifdef ZIPFILE_TESTS
-  //  zipfile_test1();
-  zipfile_test2();
+  zipfile_test1();
+  //zipfile_test2();
+  //zipfile_test_load();
 #endif
 
   /*

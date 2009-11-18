@@ -4,44 +4,38 @@
 #include "aff4.h"
 #include <libgen.h>
 
-ZipFile open_volume(char *urn, char mode) {
+ZipFile open_volume(char *filename, char mode) {
   ZipFile result=NULL;
-  char *filename;
+  RDFURN file_urn = new_RDFURN(NULL);
+  RDFURN volume_urn = new_RDFURN(file_urn);
   struct dispatch_t *i=volume_handlers;
-  char *ctx = talloc_size(NULL, 1);
+  URLParse parser = CONSTRUCT(URLParse, URLParse, Con, file_urn, filename);
 
-  if(startswith(urn, FQN)) {
-    filename = urn;
-  } else {
-    filename =  normalise_url(urn);
-  };
+  // Normalise the URL by parsing it and canonicalising it
+  CALL(file_urn, set, parser->string(parser, file_urn));
 
   ClearError();
   // First see if we can even open the file.
   {
-    AFFObject fd = CALL(oracle, open, filename, mode);
+    AFFObject fd = CALL(oracle, open, file_urn, mode);
     if(!fd) return NULL;
     CALL(oracle, cache_return, fd);
   };
 
-  {
-    char *volume = (char *)CALL(oracle, resolve, ctx, filename, AFF4_CONTAINS,
-				RESOLVER_DATA_URN);
-    // Volume already exits on this filename
-    if(volume) {
-      result = (ZipFile)CALL(oracle, open, volume, mode);
-    };
+  // Is there a known volume contained in this file?
+  if(CALL(oracle, resolve2, file_urn, AFF4_CONTAINS, (RDFValue)volume_urn)) {
+    result = (ZipFile)CALL(oracle, open, volume_urn, mode);
   };
 
   // Go through all the volume handlers trying to create a new
   // volume, until one works
   while(!result && i->class_ptr) {
     result = (ZipFile)CONSTRUCT_FROM_REFERENCE(((AFFObject)i->class_ptr), 
-					       Con, NULL, filename, mode);
+					       Con, NULL, NULL, mode);
     if(result) {
       LogWarnings("Loaded %s volume %s", i->type, filename);
-      CALL(oracle, set, URNOF(result), AFF4_STORED, filename, RESOLVER_DATA_URN);
-      result = CALL((AFFObject)result, finish);
+      CALL(oracle, set_value, URNOF(result), AFF4_STORED, (RDFValue)file_urn);
+      result = (ZipFile)CALL((AFFObject)result, finish);
       break;
     };
     i++;
@@ -49,6 +43,7 @@ ZipFile open_volume(char *urn, char mode) {
   PrintError();
 
   // Check for autoload in this volume
+#if 0
   if(result && mode=='r') {
     char *autoload = (char *)resolver_get_with_default(oracle, CONFIGURATION_NS,
 						       CONFIG_AUTOLOAD, "1",
@@ -90,8 +85,9 @@ ZipFile open_volume(char *urn, char mode) {
       talloc_free(result_set);
     };
   };
+#endif
 
-  talloc_free(ctx);
+  talloc_free(file_urn);
   return result;
 };
 
@@ -279,6 +275,7 @@ struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn,
     memory for openssl - this allows the certs to be stored as URNs
     anywhere (on http:// URIs or inside the volume itself).
 */
+#if 0
 void add_identity(char *key_file, char *cert_file) {
   Identity person;
   char *key = talloc_strdup(NULL, normalise_url(key_file));
@@ -292,3 +289,4 @@ void add_identity(char *key_file, char *cert_file) {
       exit(-1);
   };
 };
+#endif

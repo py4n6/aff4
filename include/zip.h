@@ -11,200 +11,12 @@ extern "C" {
 #include "stringio.h"
 #include "list.h"
 #include <zlib.h>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
 #include <pthread.h>
 #include <tdb.h>
 #include <setjmp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
-
-#define HASH_TABLE_SIZE 256
-#define CACHE_SIZE 15
-  
-  /** These are the various data types which can be stored in the
-      resolver. The returned (void *) pointer will be the
-      corresponding type as described.
-  */
-  enum resolver_data_type {
-    RESOLVER_DATA_UNKNOWN,   /* void */
-    RESOLVER_DATA_STRING,    /* char * (null terminated) */
-    RESOLVER_DATA_TDB_DATA,  /* TDB_DATA * */
-    RESOLVER_DATA_UINT16,    /* uint16_t * */
-    RESOLVER_DATA_UINT32,    /* uint32_t * */
-    RESOLVER_DATA_UINT64,    /* uint64_t * */
-    RESOLVER_DATA_URN,        /* char * (null terminated) */
-    RESOLVER_DATA_ANY        /* A value used to indicate a wildcard -
-				in this case no data will be written
-				to the result but the iterator will be
-				advanced. 
-			     */
-  };
-
-// The data store is basically a singly linked list of these records:
-typedef struct TDB_DATA_LIST {
-  uint64_t next_offset;
-  uint16_t length;
-  uint16_t encoding_type;
-} TDB_DATA_LIST;
-
-typedef struct RESOLVER_ITER {
-  TDB_DATA_LIST head;
-  uint64_t offset;
-  enum resolver_data_type search_type;
-  int end;
-} RESOLVER_ITER;
-
-// A helper to access the URN of an object.
-#define URNOF(x)  ((AFFObject)x)->urn
-
-/** Some helper functions used to serialize int to and from URN
-    attributes
-*/
-uint64_t parse_int(char *string);
-char *from_int(uint64_t arg);
-char *escape_filename(void *ctx, const char *filename, unsigned int length);
-char *unescape_filename(void *ctx, const char *filename);
-
-/** A cache is an object which automatically expires data which is
-    least used - that is the data which is most used is put at the end
-    of the list, and when memory pressure increases we expire data
-    from the front of the list.
-*/
-enum Cache_policy {
-  CACHE_EXPIRE_FIRST,
-  CACHE_EXPIRE_LEAST_USED
-};
-
-CLASS(Cache, Object)
-// The key which is used to access the data
-     void *key;
-
-     // An opaque data object and its length. The object will be
-     // talloc_stealed into the cache object as we will be manging its
-     // memory.
-     void *data;
-     int data_len;
-
-     // Cache objects are put into two lists - the cache_list contains
-     // all the cache objects currently managed by us in order of
-     // least used to most used at the tail of the list. The same
-     // objects are also present on one of the hash lists which hang
-     // off the respective hash table. The hash_list should be shorter
-     // to search linearly as it only contains objects with the same hash.
-     struct list_head cache_list;
-     struct list_head hash_list;
-
-     // This is a pointer to the head of the cache
-     struct Cache_t *cache_head;
-     enum Cache_policy policy;
-
-     // The current number of objects managed by this cache
-     int cache_size;
-
-     // The maximum number of objects which should be managed
-     int max_cache_size;
-
-     // A hash table of the keys
-     int hash_table_width;
-     Cache *hash_table;
-
-     // These functions can be tuned to manage the hash table. The
-     // default implementation assumes key is a null terminated
-     // string.
-     unsigned int METHOD(Cache, hash, void *key);
-     int METHOD(Cache, cmp, void *other);
-
-     Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
-
-// Return a cache object or NULL if its not there. Callers do not own
-// the cache object. If they want to steal the data, they can but they
-// must call talloc_free on the Cache object so it can be removed from
-// the cache.
-// (i.e. talloc_steal(result->data); talloc_free(result); )
-     Cache METHOD(Cache, get, void *key);
-
-// A shorthand for getting the actual data itself rather than the
-// Cache object itself:
-     void *METHOD(Cache, get_item, char *key);
-
-// Store the key, data in a new Cache object. The key and data will be
-// stolen.
-     Cache METHOD(Cache, put, void *key, void *data, int data_len);
-END_CLASS
-
-/** All AFF Objects inherit from this one. The URI must be set to
-    represent the globally unique URI of this object. */
-CLASS(AFFObject, Object)
-     char *urn;
-
-     // Is this object a reader or a writer?
-     char mode;
-     
-     /** Any object may be asked to be constructed from its URI */
-     AFFObject METHOD(AFFObject, Con, char *uri, char mode);
-
-     /** This is called to set properties on the object */
-     void METHOD(AFFObject, set_property, char *attribute, char *value);
-
-     /** Finally the object may be ready for use. We return the ready
-	 object or NULL if something went wrong.
-     */
-     AFFObject METHOD(AFFObject, finish);
-
-/** This is how an AFFObject can be created. First the oracle is asked
-    to create new instance of that object:
-
-    FileLikeObject fd = CALL(oracle, create, CLASSOF(FileLikeObject));
-
-    Now properties can be set on the object:
-    CALL(fd, set_property, "aff2:location", "file://hello.txt")
-
-    Finally we make the object ready for use:
-    CALL(fd, finish)
-
-    and CALL(fd, write, ZSTRING_NO_NULL("foobar"))
-*/
-
-END_CLASS
-
-// Base class for file like objects
-#define MAX_CACHED_FILESIZE 1e6
-
-CLASS(FileLikeObject, AFFObject)
-     int64_t readptr;
-     uint64_t size;
-     char mode;
-     char *data;
-
-     uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
-     int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
-     int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
-     uint64_t METHOD(FileLikeObject, tell);
-  
-  // This can be used to get the content of the FileLikeObject in a
-  // big buffer of data. The data will be cached with the
-  // FileLikeObject. Its only really suitable for smallish amounts of
-  // data - and checks to ensure that file size is less than MAX_CACHED_FILESIZE
-     char *METHOD(FileLikeObject, get_data);
-
-// This method is just like the standard ftruncate call
-     int METHOD(FileLikeObject, truncate, uint64_t offset);
-
-// This closes the FileLikeObject and also frees it - it is not valid
-// to use the FileLikeObject after calling this (it gets free'd).
-     void METHOD(FileLikeObject, close);
-END_CLASS
-
-// This file like object is backed by a real disk file:
-CLASS(FileBackedObject, FileLikeObject)
-     int fd;
-     FileBackedObject METHOD(FileBackedObject, Con, char *filename, char mode);
-END_CLASS
 
 #ifdef HAVE_LIBCURL
 #include <curl/curl.h>
@@ -224,181 +36,6 @@ CLASS(HTTPObject, FileLikeObject)
      HTTPObject METHOD(HTTPObject, Con, char *url);
 END_CLASS
 #endif
-
-     /** The resolver is at the heart of the AFF2 specification - its
-	 responsible with returning various objects from a globally
-	 unique identifier (URI).
-     */
-CLASS(Resolver, AFFObject)
-// This is a global cache of URN and their values - we try to only
-// have small URNs here and keep everything in memory.
-       struct tdb_context *urn_db;
-       struct tdb_context *attribute_db;
-       struct tdb_context *data_db;
-       int data_store_fd;
-       uint32_t hashsize;
-       
-       /** This is used to restore state if the RDF parser fails */
-       jmp_buf env;
-       char *message;
-       
-       // Read and write caches
-       Cache read_cache;
-       Cache write_cache;
-
-       // Resolvers contain the identity behind them (see below):
-       struct Identity_t *identity;
-       
-       Resolver METHOD(Resolver, Con);
-  
-       // Resolvers are all in a list. Each resolver in the list is another
-       // identity which can be signed.
-       struct list_head identities;
-
-/* This method tries to resolve the provided uri and returns an
- instance of whatever the URI refers to (As an AFFObject which is the
- common base class. You should check to see that what you get back is
- actually what you need. For example:
-
- FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);
- if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;
- 
- Once the resolver provides the object it is attached to the context
- ctx and removed from the cache. This ensures that the object can not
- expire from the cache while callers are holding it. For efficiency
- you must return the object to the cache as soon as possible by
- calling cache_return.
-*/ 
-      AFFObject METHOD(Resolver, open, char *uri, char mode);
-      void METHOD(Resolver, cache_return, AFFObject obj);
-
-/* This create a new object of the specified type. */
-      AFFObject METHOD(Resolver, create, AFFObject *class_reference, char mode);
-
-/* Returns an attribute about a particular uri if known. This may
-     consult an external data source.
-
-     You should indicate the expected type of the attribute as
-     type. If the actual type is different or not found we return NULL
-     here.
-*/
-  void *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute, 
-	       enum resolver_data_type type);
-
-  /** This version does not allocate any memory it just overwrite the
-      preallocated memory in result (of length specified) with the
-      first element returned and return the number of bytes written to
-      the result.  If there are no elements we dont touch the result
-      and return 0.
-  */
-  int METHOD(Resolver, resolve2, char *uri, char *attribute, 
-	     void *result, int length,
-	     enum resolver_data_type type);
-
-  /** This returns a null terminated list of matches. The matches will
-      all be of the type specified, memory will be allocated with
-      reference to the ctx specified.
-  */
-  void **METHOD(Resolver, resolve_list, void *ctx, char *uri, 
-		char *attribute, enum resolver_data_type type);
-
-  /* This is a version of the above which uses an iterator to iterate
-     over the list. 
-
-     The iterator is obtained using get_iter first. This function
-     returns 1 if an iterator can be found (i.e. at least one result
-     exists) or 0 if no results exist.
-
-     Each call to iter_next will write a new value into the buffer set
-     up by result with maximal length length. Only results matching
-     the type specified are returned. We return length written for
-     each successful iteration, and zero when we have no more items.
-  */
-  int METHOD(Resolver, get_iter, RESOLVER_ITER *iter, char *uri,
-	     char *attribute, enum resolver_data_type type);
-  
-  int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, void *result, 
-	     int length);
-
-//Stores the uri and the value in the resolver. The value and uri will
-//be stolen.
-     void METHOD(Resolver, add, char *uri, char *attribute, void *value, 
-		 enum resolver_data_type type,
-		 int unique);
-
-     // Exports all the properties to do with uri - user owns the
-     // buffer. context is the URN which will ultimately hold the
-     // exported file. If uri is the same as context, we write the
-     // statement as a relative notation.
-     char *METHOD(Resolver, export_urn, char *uri, char *context);
-
-     // Exports all the properties to do with uri - user owns the buffer.
-     char *METHOD(Resolver, export_all, char *context);
-
-     // Deletes the attribute from the resolver
-     void METHOD(Resolver, del, char *uri, char *attribute);
-
-     // This updates the value or adds it if needed
-     void METHOD(Resolver, set, char *uri, char *attribute, void *value,
-		 enum resolver_data_type type);
-  
-     //This returns 1 if the statement is set
-     int METHOD(Resolver, is_set, char *uri, char *attribute, char *value);
-
-     // Parses the properties file
-     void METHOD(Resolver, parse, char *context, char *text, int len);
-
-  /* The following APIs are used for synchronization. 
-     A thread begins a transaction - this locks the resolver from
-     access from all other threads.
-
-     One thread
-     creates a lock on an object (Using its URN) by calling:
-     
-     oracle->lock(urn, name)
-
-     Other threads can then attempt to also get a lock on the URN but
-     will be blocked until the original thread calls:
-     
-     oracle->unlock(urn, name) 
-
-     Note that locks have names and so many locks can be set on the
-     same URN.
-  */
-  int METHOD(Resolver, lock, char *urn, char name);
-  int METHOD(Resolver, unlock, char *urn, char name);
-
-END_CLASS
-
-// This is a global instance of the oracle. All AFFObjects must
-// communicate with the oracle rather than instantiate their own.
-extern Resolver oracle;
-
-/** This object represents an identify - like a person for example. 
-
-An identity is someone who makes statements about other AFFObjects in
-the universe.
-*/
-CLASS(Identity, AFFObject)
-       Resolver info;
-       
-       EVP_PKEY *priv_key;
-       EVP_PKEY *pub_key;
-       X509 *x509;
-
-       Identity METHOD(Identity, Con, char *cert, char *priv_key, char mode);
-       void METHOD(Identity, store, char *volume_urn);
-  /** This method asks the identity to verify its statements. This
-       essentially populates our Resolver with statements which can be
-       verified from our statements. Our Resolver can then be
-       compared to the oracle to see which objects do not match.
-  */
-       void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
-END_CLASS
-
-// This function must be called to initialise the library - we prepare
-// all the classes and intantiate an oracle.
-void AFF4_Init(void);
 
 // A link simply returns the URI its pointing to
 CLASS(Link, AFFObject)
@@ -646,12 +283,17 @@ CLASS(ZipFile, AFFObject)
      uint64_t compressed_member_size;
      uint64_t offset_of_member_header;
 
+  /** Some commonly used RDF types */
+  XSDInteger directory_offset;
+  RDFURN storage_urn;
+  XSDInteger _didModify;
+
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
 
 // Fetch a member as a string - this is suitable for small memebrs
 // only as we allocate memory for it. The buffer callers receive will
-// owned by ctx. 
+// be owned by ctx. 
      char *METHOD(ZipFile, read_member, void *ctx,
 		  char *filename, int *len);
 
@@ -662,7 +304,6 @@ CLASS(ZipFile, AFFObject)
 // until this member is promptly closed). The ZipFile must have been
 // called with create_new_volume or append_volume before.
      FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
-			   char *extra, uint16_t extra_field_len,
 			   uint16_t compression);
 
 // This method flushes the central directory and finalises the
@@ -672,8 +313,9 @@ CLASS(ZipFile, AFFObject)
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).
      int METHOD(ZipFile, writestr, char *filename, char *data, int len,
-		 char *extra, int extra_field_len,
 		 uint16_t compression);
+
+     int METHOD(ZipFile, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 
 #define ZIP_STORED 0
@@ -716,8 +358,8 @@ ZipFile open_volume(char *urn, char mode);
   // Volume_URN/default. These functions are used to convert from
   // fully qualified to relative names as needed. The result is a
   // static buffer.
-char *fully_qualified_name(void *ctx, char *name, char *volume_urn);
-char *relative_name(void *ctx, char *name, char *volume_urn);
+  //char *fully_qualified_name(void *ctx, char *name, RDFURN volume_urn);
+  //char *relative_name(void *ctx, char *name, RDFURN volume_urn);
 
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

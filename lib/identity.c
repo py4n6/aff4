@@ -353,7 +353,7 @@ static void Identity_verify(Identity self, int (*cb)(uint64_t progress, char *ur
 
   // Iterate over all the AFF4_STATEMENT urns
   CALL(oracle, get_iter, &iter, URNOF(self), AFF4_STATEMENT, RESOLVER_DATA_URN);
-  while(CALL(oracle, iter_next, &iter, statement_urn, BUFF_SIZE)) {
+  while(CALL(oracle, iter_next, &iter, statement_urn)) {
     char buff[BUFF_SIZE];
     char *fq_name = fully_qualified_name(self, statement_urn, URNOF(self));
     FileLikeObject statement = (FileLikeObject)CALL(oracle, open, fq_name,'r');

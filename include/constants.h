@@ -76,6 +76,10 @@
 // A property indicating this object should be highlighted
 #define AFF4_HIGHLIGHT        NAMESPACE   "highlight"  
 
+// Information segments are named starting with this (and ending with
+// the RDF encoding):
+#define AFF4_INFORMATION     "information."
+
 // Encrypted stream attributes
 // Thats the passphrase that will be used to encrypt the session key
 #define AFF4_VOLATILE_PASSPHRASE VOLATILE_NS "passphrase"

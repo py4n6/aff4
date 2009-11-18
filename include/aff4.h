@@ -13,6 +13,12 @@ This file describes the high level interface.
 
 #include <stdint.h>
 #include "constants.h"
+
+// This file defines the rdf side of the AFF4 specification
+#include "aff4_rdf.h"
+#include "aff4_utils.h"
+#include "aff4_resolver.h"
+
 /** 
     Opens the URIs specified in images and uses them to populate the
     resolver. We then try to open the stream.
@@ -72,5 +78,9 @@ extern int talloc_free(void *ptr);
     anywhere (on http:// URIs or inside the volume itself).
 */
 void add_identity(char *key_file, char *cert);
+
+// This function must be called to initialise the library - we prepare
+// all the classes and intantiate an oracle.
+void AFF4_Init(void);
 
 #endif

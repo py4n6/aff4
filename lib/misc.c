@@ -42,7 +42,6 @@ char *from_int(uint64_t arg) {
   return buffer;
 };
 
-
 static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*";
 static char illegal_filename_lut[128];
 void init_luts() {
@@ -79,8 +78,9 @@ char *escape_filename(void *ctx, const char *filename, unsigned int length) {
   return buffer;
 };
 
-char *unescape_filename(void *ctx, const char *filename) {
+TDB_DATA unescape_filename(void *ctx, const char *filename) {
   char buffer[BUFF_SIZE];
+  TDB_DATA result;
 
   int i,j=0;
   int length = strlen(filename)+1;
@@ -100,7 +100,11 @@ char *unescape_filename(void *ctx, const char *filename) {
       j++;
     };
   };
-  return talloc_strdup(ctx, buffer);
+
+  result.dptr = (unsigned char *)talloc_strdup(ctx, buffer);
+  result.dsize = j;
+
+  return result;
 };
 
 int _mkdir(const char *path)
