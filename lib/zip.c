@@ -44,6 +44,15 @@ CLASS(ZipFileStream, FileLikeObject)
 			  char mode, FileLikeObject file_fd);
 END_CLASS
 
+static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
+  FileLikeObject this = (FileLikeObject)self;
+
+  this->size = new_XSDInteger(this);
+
+  return this->__super__->Con(self, urn, mode);
+};
+
+
 /** Implementation of FileBackedObject.
 
 FileBackedObject is a FileLikeObject which uses a real file to back
@@ -55,12 +64,11 @@ itself.
 static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char mode) {
   FileBackedObject self = (FileBackedObject)this;
 
-  this->mode = mode;
-  self->super.size = new_XSDInteger(self);
+  this = self->__super__->super.Con(this, urn, mode);
 
   if(urn) {
     int flags;
-    URLParse parser = CONSTRUCT(URLParse, URLParse, Con, self, urn->value.dptr);
+    URLParse parser = CONSTRUCT(URLParse, URLParse, Con, self, urn->value);
 
     // Make sure that the urn passed has a file scheme
     if(strcmp("file", parser->scheme)) {
@@ -81,7 +89,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
     // Now try to create the file within the new directory
     self->fd = open(parser->query, flags, S_IRWXU | S_IRWXG | S_IRWXO);
     if(self->fd<0){
-      RaiseError(EIOError, "Can't open %s (%s)", urn->value.dptr, strerror(errno));
+      RaiseError(EIOError, "Can't open %s (%s)", urn->value, strerror(errno));
       goto error;
     };
 
@@ -98,9 +106,6 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
     
     CALL(oracle, set_value, URNOF(self), AFF4_SIZE, 
 	 (RDFValue)self->super.size);
-
-  } else {
-    this = self->__super__->super.Con(this, urn, mode);
   };
 
   return this;
@@ -232,6 +237,7 @@ static char *FileLikeObject_get_data(FileLikeObject self) {
 };
 
 VIRTUAL(FileLikeObject, AFFObject)
+     VMETHOD(super.Con) = FileLikeObject_AFFObject_Con;
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
      VMETHOD(close) = FileLikeObject_close;
@@ -448,12 +454,12 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
     // Is there a comment field? We expect the comment field to be
     // exactly a URN. If it is we can update our notion of the URN to
     // be the same as that.
-    if(self->end->comment_len == URNOF(self)->value.dsize) {
+    if(self->end->comment_len == strlen(URNOF(self)->value)+1) {
       char *comment = buffer + i + sizeof(*self->end);
       // Is it a fully qualified name?
       if(!memcmp(comment, ZSTRING_NO_NULL(FQN))) {
 	// Update our URN from the comment.
-	memcpy(URNOF(self),comment, URNOF(self)->value.dsize);
+	CALL(URNOF(self), set, comment);
       };
     };
 
@@ -466,7 +472,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 
     CALL(oracle, add_value, URNOF(fd), AFF4_CONTAINS, 
 	 (RDFValue)URNOF(self));
-
+    
     // Find the CD
     if(!find_cd(self, fd)) 
       goto error_reason;
@@ -497,7 +503,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	goto error_reason;
 
       unescaped = unescape_filename(filename, escaped_filename);
-      CALL(filename, add, (char *)unescaped.dptr, unescaped.dsize);
+      CALL(filename, add, (char *)unescaped.dptr);
 
       // Tell the oracle about this new member
       CALL(oracle, set_value, filename, AFF4_STORED, 
@@ -578,7 +584,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	int properties_length = strlen(AFF4_INFORMATION);
 	char *base_name;
 
-	strncpy(tmp, (char *)filename->value.dptr, BUFF_SIZE);
+	strncpy(tmp, (char *)filename->value, BUFF_SIZE);
 	base_name = basename(tmp);
 
 	// We identify streams by their filename ending with "properties"
@@ -589,7 +595,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	  if(fd) {
 	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
 	    
-	    CALL(parser, parse, fd, (char *)filename->value.dptr + properties_length, base_name);
+	    CALL(parser, parse, fd, (char *)filename->value + properties_length, base_name);
 	    talloc_free(parser);
 	    CALL(oracle, cache_return, (AFFObject)fd);
 	  };
@@ -645,7 +651,7 @@ static char *ZipFile_read_member(ZipFile self, void *ctx,
   RDFURN fd_urn = new_RDFURN(self);
   RDFURN filename = URNOF(self)->copy(URNOF(self), self);
 
-  CALL(filename, add, ZSTRING_NO_NULL(member_name));
+  CALL(filename, add, member_name);
   
   CALL(compression_method, set, ZIP_STORED);  
   CALL(oracle, resolve2, filename, AFF4_SIZE, 
@@ -760,7 +766,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
   RDFURN filename = URNOF(self)->copy(URNOF(self), self);
   
   // Make the filename URN relative to us.
-  CALL(filename, add, ZSTRING_NO_NULL(member_name));
+  CALL(filename, add, member_name);
 
   // Where are we stored?
   if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
@@ -774,21 +780,21 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     struct ZipFileHeader header;
     FileLikeObject fd;
     // We start writing new files at this point
-    char *escaped_filename = member_name;
+    TDB_DATA escaped_filename = CALL(filename, relative_name, URNOF(self));
     time_t epoch_time = time(NULL);
     struct tm *now = localtime(&epoch_time);
 
     CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
+    // Open our current volume for writing:
+    fd = (FileLikeObject)CALL(oracle, open, storage_urn, 'w');
+    if(!fd) goto error;
+
     // Indicate that the file is dirty - This means we will be writing
     // a new CD on it
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, 
 	 (RDFValue)self->directory_offset);
-
-    // Open our current volume for writing:
-    fd = (FileLikeObject)CALL(oracle, open, storage_urn, 'w');
-    if(!fd) goto error;
 
     // Go to the start of the directory_offset
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
@@ -801,18 +807,28 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     // We prefer to write trailing directory structures
     header.flags = 0x08;
     header.compression_method = compression;
-    header.file_name_length = strlen(escaped_filename);
+    header.file_name_length = escaped_filename.dsize;
     header.lastmoddate = (now->tm_year + 1900 - 1980) << 9 | 
       (now->tm_mon + 1) << 5 | now->tm_mday;
     header.lastmodtime = now->tm_hour << 11 | now->tm_min << 5 | 
       now->tm_sec / 2;
 
     CALL(fd, write,(char *)&header, sizeof(header));
-    CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
+    CALL(fd, write, escaped_filename.dptr, escaped_filename.dsize);
 
+    // Store some info about the segment
     CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSION,
 	 rdfvalue_from_int(compression));
-    
+
+    CALL(oracle, set_value, filename, AFF4_TYPE,
+	 rdfvalue_from_string(AFF4_SEGMENT));
+
+    CALL(oracle, set_value, filename, AFF4_STORED,
+	 (RDFValue)URNOF(self));
+
+    //    CALL(oracle, add_value, URNOF(self), AFF4_CONTAINS,
+    //	 (RDFValue)filename);
+
     {
       uint64_t offset = CALL(fd, tell);
  
@@ -919,7 +935,6 @@ static void ZipFile_close(ZipFile self) {
 	  (RDFValue)self->_didModify)) {
     struct EndCentralDirectory end;
     FileLikeObject fd;
-    uint64_t tmp;
 
     // Get where we are stored
     if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
@@ -950,6 +965,8 @@ static void ZipFile_close(ZipFile self) {
       XSDInteger size = new_XSDInteger(urn);
       XSDInteger compressed_size = new_XSDInteger(urn);
       XSDInteger header_offset = new_XSDInteger(urn);
+      XSDString type = new_XSDString(self);
+      XSDInteger epoch_time = new_XSDInteger(self);
 
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
@@ -958,9 +975,12 @@ static void ZipFile_close(ZipFile self) {
       while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
 	// We use type to anchor temporary allocations
-	XSDString type = new_XSDString(self);
-	XSDInteger epoch_time = new_XSDInteger(self);
 	struct tm *now;
+
+	// Only store segments here
+	if(!CALL(oracle, resolve2, urn, AFF4_TYPE, (RDFValue)type) ||
+	   strcmp(type->value, AFF4_SEGMENT))
+	  continue;
 
 	// This gets the relative name of the fqn
 	TDB_DATA escaped_filename = urn->relative_name(urn, URNOF(self));
@@ -969,12 +989,7 @@ static void ZipFile_close(ZipFile self) {
 	     (RDFValue)epoch_time);
 	
 	now = localtime((time_t *)&epoch_time->value);
-	
-	// Only store segments here
-	if(CALL(oracle, resolve2, urn, AFF4_TYPE, (RDFValue)type) &&
-	   strcmp(type->value, AFF4_SEGMENT))
-	  continue;
-	
+		
 	// Clear temporary data
 	CALL(zip64_header, truncate, 4);
 	
@@ -1070,11 +1085,11 @@ static void ZipFile_close(ZipFile self) {
     
     end.total_entries_in_cd_on_disk = k;
     end.total_entries_in_cd = k;
-    end.comment_len = URNOF(self)->value.dsize;
+    end.comment_len = strlen(URNOF(self)->value)+1;
 
     // Make sure to add our URN to the comment field in the end
     CALL(fd, write, (char *)&end, sizeof(end));
-    CALL(fd, write, (char *)URNOF(self)->value.dptr, URNOF(self)->value.dsize);
+    CALL(fd, write, (char *)URNOF(self)->value, end.comment_len);
 
     // Unlock the file
     CALL(oracle, cache_return, (AFFObject)fd);
@@ -1470,7 +1485,7 @@ void print_cache(Cache self) {
   };
 };
 
-char *fully_qualified_name(void *ctx, char *filename, char *volume_urn) {
+char *XXXXfully_qualified_name(void *ctx, char *filename, char *volume_urn) {
   char fqn_filename[BUFF_SIZE];
 
   if(!volume_urn || startswith(filename, FQN)) {

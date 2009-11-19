@@ -157,3 +157,12 @@ char *normalise_url(char *url) {
   };
 
 };
+
+TDB_DATA tdb_data_from_string(char *string) {
+  TDB_DATA result;
+
+  result.dptr = string;
+  result.dsize = strlen(string);
+
+  return result;
+};

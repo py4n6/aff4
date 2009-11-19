@@ -17,6 +17,7 @@ CLASS(URLParse, Object)
       char *fragment;
 
       URLParse METHOD(URLParse, Con, char *url);
+      int METHOD(URLParse, parse, char *url);
       char *METHOD(URLParse, string, void *ctx);
 END_CLASS
 
@@ -85,7 +86,10 @@ CLASS(XSDString, RDFValue)
 END_CLASS
 
 CLASS(RDFURN, RDFValue)
-     TDB_DATA value;
+     char *value;
+
+     // This parser maintains our internal state
+     URLParse parser;
 
      RDFValue METHOD(RDFURN, set, char *urn);
      char *METHOD(RDFURN, get);
@@ -95,7 +99,7 @@ CLASS(RDFURN, RDFValue)
 
      // Add a relative stem to the current value. If uri is a fully
      // qualified URN, we replace the current value with it
-     void METHOD(RDFURN, add, char *urn, int length);
+     void METHOD(RDFURN, add, char *urn);
 
      // This method returns the relative name 
      TDB_DATA METHOD(RDFURN, relative_name, RDFURN volume);

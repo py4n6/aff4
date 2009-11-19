@@ -131,23 +131,24 @@ void zipfile_test1() {
   talloc_free(zip);
 };
 
-#if 0
 void zipfile_test2() {
   ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
   // Now make an image object
   FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image));
-  RDFURN urn = CONSTRUCT(RDFURN, RDFValue, super.Con, NULL);
+  RDFURN file_urn = new_RDFURN(NULL);
+  URLParse parser = CONSTRUCT(URLParse, URLParse, Con, file_urn, FILENAME);
 
+  CALL(file_urn, set, parser->string(parser, parser));
 
-  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, 
-       urn->set(urn, "file://" FILENAME));
+  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)file_urn);
   
   zip = (ZipFile)CALL((AFFObject)zip, finish);
 
-  URNOF(outfd) = talloc_asprintf(outfd, "%s/foobar_image", URNOF(zip));
+  CALL(URNOF(outfd), set, STRING_URNOF(zip));
+  CALL(URNOF(outfd), add, "foobar_image");
 
-  CALL(oracle, set_value, URNOF(outfd), AFF4_STORED, 
-       urn->set(urn, URNOF(zip)));
+  CALL(oracle, set_value, URNOF(outfd), AFF4_STORED,
+       (RDFValue)URNOF(zip));
   
   outfd = (FileLikeObject)CALL((AFFObject)outfd, finish);
   
@@ -169,14 +170,15 @@ void zipfile_test2() {
   // Close the archive
   CALL(zip, close);
 };
-#endif
 
+#if 0
 void zipfile_test_load() {
   ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
 
   CALL(zip, load_from, "file://" FILENAME, 'r');
 
 };
+#endif
 
 #define TIMES 1000
 
@@ -193,6 +195,7 @@ object. If it fails (returns NULL), we may have failed to set some
 parameters.
 
 */
+#if 0
 void test1_5() {
   ZipFile zipfile;
 
@@ -226,6 +229,7 @@ void test1_5() {
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
+#endif
 
 /** This tests the cache for reading zip members.
 
@@ -668,8 +672,8 @@ int main() {
 #endif
 
 #ifdef ZIPFILE_TESTS
-  zipfile_test1();
-  //zipfile_test2();
+  //zipfile_test1();
+  zipfile_test2();
   //zipfile_test_load();
 #endif
 

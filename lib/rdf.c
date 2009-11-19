@@ -19,12 +19,23 @@ enum url_state {
 };
 
 URLParse URLParse_Con(URLParse self, char *url) {
+  CALL(self, parse ,url);
+  return self;
+};
+
+int URLParse_parse(URLParse self, char *url) {
   int i=0,j=0,end=0;
   char buff[BUFF_SIZE];
   enum url_state state = STATE_METHOD;
 
   // Its ok to call us with NULL - we just wont parse anything.
   if(!url) goto exit;
+
+  // Initialise with defaults:
+  self->scheme = "";
+  self->netloc = "";
+  self->query = "";	      
+  self->fragment = "";
 
   while(!end) {
     if(url[i]==0) end=1;
@@ -34,7 +45,6 @@ URLParse URLParse_Con(URLParse self, char *url) {
       // This happens when the url contains no : at all - we interpret
       // it as a file URL with no netloc
       if(url[i]==0 || url[i]=='/') {
-	self->scheme = "file";
 	buff[j]=0; j=0;
 	self->query = talloc_strdup(self,buff);
 	state = STATE_QUERY;
@@ -55,7 +65,7 @@ URLParse URLParse_Con(URLParse self, char *url) {
     };
 
     case STATE_NETLOCK: {
-      if(url[i]=='/') {
+      if(url[i]==0 || url[i]=='/') {
 	state = STATE_QUERY;
 	buff[j]=0; j=0;
 	self->netloc = talloc_strdup(self,buff);
@@ -91,30 +101,32 @@ URLParse URLParse_Con(URLParse self, char *url) {
   };
 
 exit:
-  return self;
+  return 0;
 };
 
 char *URLParse_string(URLParse self, void *ctx) {
   char *fmt;
+  char *scheme = self->scheme;
 
   if(strlen(self->fragment)>0)
     fmt = "%s://%s/%s#%s";
-  else
+  else if(strlen(self->query)>0)
     fmt = "%s://%s/%s";
+  else
+    fmt = "%s://%s";
 
-  return talloc_asprintf(ctx, fmt, self->scheme,
+  if(strlen(scheme)==0)
+    scheme = "file";
+
+  return talloc_asprintf(ctx, fmt, scheme,
 			 self->netloc, self->query,
 			 self->fragment);
 };
 
 VIRTUAL(URLParse, Object)
-    VATTR(scheme) = "";
-    VATTR(netloc) = "";
-    VATTR(query) = "";	      
-    VATTR(fragment) = "";
-
     VMETHOD(Con) = URLParse_Con;
     VMETHOD(string) = URLParse_string;
+    VMETHOD(parse) = URLParse_parse;
 END_VIRTUAL
 
 /** Following is the implementation of the basic RDFValue types */
@@ -192,8 +204,10 @@ static RDFValue XSDString_set(XSDString self, char *string, int length) {
 static int XSDString_decode(RDFValue this, int fd, int length) {
   XSDString self = (XSDString)this;
 
-  self->value = talloc_realloc_size(self->value, self->value, length);
+  self->value = talloc_realloc_size(self, self->value, length + 1);
   self->length = length;
+
+  self->value[length]=0;
 
   return read(fd, self->value, length);
 };
@@ -219,130 +233,107 @@ static TDB_DATA *RDFURN_encode(RDFValue self) {
   RDFURN this = (RDFURN)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
-  result->dptr = (unsigned char *)this->value.dptr;
-  result->dsize = this->value.dsize;
+  result->dptr = (unsigned char *)this->value;
+  result->dsize = strlen(this->value)+1;
 
   return result;
+};
+
+static RDFValue RDFURN_Con(RDFValue self) {
+  RDFURN this = (RDFURN)self;
+  this->parser = CONSTRUCT(URLParse, URLParse, Con, this, NULL);
+
+  return self;
 };
 
 static RDFValue RDFURN_set(RDFURN self, char *string) {
   int length;
 
-  if(string) {
-    self->value.dsize = strlen(string);
-    
-    if(!self->value.dptr) {
-      self->value.dptr = talloc_strdup(self, string);
-    } else {
-      self->value.dptr = talloc_realloc_size(self, self->value.dptr,
-					     self->value.dsize);
-      memcpy(self->value.dptr, string, self->value.dsize);
-    };
-  };
+  CALL(self->parser, parse, string);
 
-  return (RDFValue)self;
+  // Our value is the serialsed version of what the parser got:
+  if(self->value) talloc_free(self->value);
+  self->value = CALL(self->parser, string, self);
+
+  return self;
 };
 
 static int RDFURN_decode(RDFValue this, int fd, int length) {
   RDFURN self = (RDFURN)this;
-  self->value.dptr = talloc_realloc_size(self, self->value.dptr, length);
-  self->value.dsize = length;
+  self->value = talloc_realloc_size(self, self->value, length);
 
-  return read(fd, self->value.dptr, length);
+  read(fd, self->value, length);
+  CALL(self->parser, parse, self->value);
+
+  return length;
 };
 
 /* We serialise the string */
 static char *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
   
-  return talloc_strdup(self, this->value.dptr);
+  return talloc_strdup(self, this->value);
 };
 
 static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
   RDFURN result = CONSTRUCT(RDFURN, RDFValue, super.Con, ctx);
 
-  result->value.dptr = talloc_memdup(ctx, self->value.dptr, self->value.dsize);
-  result->value.dsize = self->value.dsize;
+  CALL(result, set, self->value);
 
   return result;
 };
 
-static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*";
-static char illegal_filename_lut[128];
+static char *illegal_url_chars = "|?[]\\+<>:;\'\",*&";
+static char illegal_url_lut[128];
 static void init_rdf_luts() {
   char *i;
   
-  memset(illegal_filename_lut, 0, 
-	 sizeof(illegal_filename_lut));
+  memset(illegal_url_lut, 0, 
+	 sizeof(illegal_url_lut));
 
-  for(i=illegal_filename_chars;*i;i++) 
-    illegal_filename_lut[(int)*i]=1;
+  for(i=illegal_url_chars;*i;i++) 
+    illegal_url_lut[(int)*i]=1;
 };
 
-// 
-static void RDFURN_add(RDFURN self,  char *filename, int length) {
-  char *buffer;
-  int i,j=0;
-  int maximum_length = length * 3 + 1;
-  // We try to detect a Fully qualified URN here
-  int has_invalid_chars = 0;
-  int has_colon = 0;
+// parse filename as a URL and if its relative, append it to
+// ourselves. If filename is an absolute URL we replace ourselve with
+// it.
+static void RDFURN_add(RDFURN self,  char *filename) {
+  URLParse parser = CONSTRUCT(URLParse, URLParse, Con, self, filename);
+  
+  // Absolute URL
+  if(strlen(parser->scheme)>0) {
+    talloc_free(self->parser);
+    talloc_free(self->value);
 
-  if(length==0) 
-    length=strlen(filename);
-
-  buffer = talloc_size(self, maximum_length);
-  for(i=0;i<length;i++) {
-    char x=filename[i];
-
-    if(x==':') has_colon = 1;
-
-    if(x<32 || illegal_filename_lut[(int)x]) {
-      sprintf(buffer+j, "%%%02X", x);
-      j+=3;
-      has_invalid_chars = 1;
-      if(j>= maximum_length) break;
-    } else {
-      buffer[j]=x;
-      j++;
-    };
-  };
-
-  buffer[j]=0;
-
-  // Probably a valid URN
-  if(has_colon && !has_invalid_chars) {
-    if(self->value.dptr) talloc_free(self->value.dptr);
-
-    self->value.dptr = buffer;
-    self->value.dsize = j;
+    self->parser = parser;
+    self->value = CALL(parser, string, self);
   } else {
-    // Relative to myself just stick it on the end
-    self->value.dptr = talloc_realloc_size(self, self->value.dptr, 
-					   self->value.dsize + j + 10);
-    memcpy(self->value.dptr + self->value.dsize + 1, buffer, j+1);
-    self->value.dptr[self->value.dsize]='/';
-    self->value.dsize += j +1;
-    talloc_free(buffer);
+    char *seperator = "/";
+
+    if(strlen(self->parser->query)==0) seperator="";
+    
+    // Relative URL
+    self->parser->query = talloc_asprintf(self, "%s%s%s",
+					  self->parser->query,
+					  seperator,
+					  parser->query);
+    talloc_free(self->value);
+    self->value = CALL(self->parser, string, self);
+    talloc_free(parser);
   };
 };
 
+/** Compares our current URN to the volume. If we share a common base,
+    return a relative URN */
 TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
-  int len = min(self->value.dsize, volume->value.dsize);
   TDB_DATA result;
 
-  if(!memcmp(self->value.dptr, volume->value.dptr, len)) {
-    result.dptr = self->value.dptr + len;
-    result.dsize = self->value.dsize - len;
-
-    if(*result.dptr=='/') {
-      result.dptr++;
-      result.dsize--;
-    };
-
-  }  else {
-    result.dptr = self->value.dptr;
-    result.dsize = self->value.dsize;
+  if(startswith(self->value, volume->value)) {
+    result.dptr = self->value + strlen(volume->value) + 1;
+    result.dsize = strlen(result.dptr) + 1;
+  } else {
+    result = tdb_data_from_string(self->value);
   };
 
   return result;
@@ -350,6 +341,7 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
 
 VIRTUAL(RDFURN, RDFValue)
    VATTR(super.dataType) = "rdf:urn";
+   VMETHOD(super.Con) = RDFURN_Con;
    VMETHOD(super.encode) = RDFURN_encode;
    VMETHOD(super.decode) = RDFURN_decode;
    VMETHOD(super.serialise) = RDFURN_serialise;
@@ -399,7 +391,6 @@ void rdf_init() {
   register_rdf_value_class((RDFValue)GETCLASS(XSDString));
   register_rdf_value_class((RDFValue)GETCLASS(RDFURN));
 };
-
 
 /** RDF parsing */
 static void triples_handler(RDFParser self, const raptor_statement* triple) 
@@ -680,8 +671,8 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
-  self->raptor_uri = (void*)raptor_new_uri((const unsigned char*)urn->value.dptr);
-  self->urn = talloc_strdup(self, urn->value.dptr);
+  self->raptor_uri = (void*)raptor_new_uri((const unsigned char*)urn->value);
+  self->urn = talloc_strdup(self, urn->value);
   tdb_traverse_read(oracle->attribute_db, tdb_attribute_traverse_func, self);
   raptor_free_uri((raptor_uri*)self->raptor_uri);
 
@@ -704,7 +695,9 @@ VIRTUAL(RDFSerializer, Object)
 END_VIRTUAL
 
 
-		    /*** Convenience functions */
+/*** Convenience functions */
+		    // FIXME - this is not thread safe - remove it -
+		    // use the new_* functions below.
 static XSDInteger integer_cache = NULL;
 static XSDString string_cache = NULL;
 static RDFURN urn_cache = NULL;

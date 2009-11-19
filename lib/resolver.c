@@ -11,11 +11,11 @@
 struct dispatch_t dispatch[] = {
   // Must be first - fallback position
   { 1, "file://",                 (AFFObject)&__FileBackedObject },
+  { 0, AFF4_IMAGE,                (AFFObject)&__Image },
 
   /*
   { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
   { 0, AFF4_LINK,                 (AFFObject)&__Link },
-  { 0, AFF4_IMAGE,                (AFFObject)&__Image },
   { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
   { 0, AFF4_ENCRYTED,             (AFFObject)&__Encrypted},
   { 0, AFF4_IDENTITY,             (AFFObject)&__Identity},
@@ -98,8 +98,9 @@ void AFF4_Init(void) {
   FileLikeObject_init();
   FileBackedObject_init();
   ZipFile_init();
+  Image_init();
+
   //  ZipFileStream_init();
-  //  Image_init();
   // MapDriver_init();
   Resolver_init();
   rdf_init();
@@ -643,11 +644,12 @@ static int Resolver_resolve2(Resolver self, RDFURN urn_str, char *attribute_str,
   TDB_DATA_LIST i;
   TDB_DATA urn, attribute;
 
-  urn = urn_str->value;
+  urn.dptr = (unsigned char *)urn_str->value;
+  urn.dsize = strlen(urn_str->value);
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
 
-  DEBUG("Getting %s, %s\n", urn_str->value.dptr, attribute_str);
+  DEBUG("Getting %s, %s\n", urn_str->value, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
     // Make sure its the type our caller expects
     if(i.encoding_type != result->id) {
@@ -851,15 +853,20 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
     attribute.dptr = (unsigned char *)attribute_str;
     attribute.dsize = strlen(attribute_str);
 
+    DEBUG("Setting %s, %s\n", urn->value, attribute_str);
+
     // Grab the lock
     tdb_lockall(self->data_db);
 
     /** If the value is already in the list, we just ignore this
 	request.
     */
-    previous_offset = is_value_present(self, urn->value, attribute, *encoded_value, 1);
+    previous_offset = is_value_present(self, 
+	     tdb_data_from_string(urn->value), attribute, *encoded_value, 1);
+
     if(previous_offset == 0) {
-      set_new_value(self, urn->value, attribute, *encoded_value, value->id, previous_offset);
+      set_new_value(self, tdb_data_from_string(urn->value), 
+		    attribute, *encoded_value, value->id, previous_offset);
     };
 
     tdb_unlockall(self->data_db);
@@ -878,6 +885,7 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     uint64_t previous_offset;
     TDB_DATA_LIST tmp;
 
+    DEBUG("Adding %s, %s\n", urn->value, attribute_str);
     attribute.dptr = (unsigned char *)attribute_str;
     attribute.dsize = strlen(attribute_str);
 
@@ -887,8 +895,11 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     /** If the value is already in the list, we just ignore this
 	request.
     */
-    previous_offset = get_data_head(self, urn->value, attribute, &tmp);
-    set_new_value(self, urn->value, attribute, *encoded_value, value->id, previous_offset);
+    previous_offset = get_data_head(self, 
+	   tdb_data_from_string(urn->value), attribute, &tmp);
+
+    set_new_value(self, tdb_data_from_string(urn->value), 
+		  attribute, *encoded_value, value->id, previous_offset);
 
     tdb_unlockall(self->data_db);
 
@@ -972,7 +983,8 @@ static int Resolver_get_iter(Resolver self,
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
 
-  iter->offset = get_data_head(self, urn->value, attribute, &iter->head);
+  iter->offset = get_data_head(self, tdb_data_from_string(urn->value), 
+			       attribute, &iter->head);
 
   return iter->offset;
 };
@@ -1068,22 +1080,17 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   char *stream_type;
   struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
-  Cache tmp;
 
   if(!urn) return NULL;
 
   // Is this object cached?
   if(mode =='r') {
-    tmp = CALL(self->read_cache, get, urn->value.dptr, urn->value.dsize);
+    result = CALL(self->read_cache, get_item, ZSTRING_NO_NULL(urn->value));
   } else {
-    tmp = CALL(self->write_cache, get, urn->value.dptr, urn->value.dsize);
+    result = CALL(self->write_cache, get_item, ZSTRING_NO_NULL(urn->value));
   };
 
-  if(tmp) {
-    result = (AFFObject)tmp->data;
-    talloc_steal(NULL, result);
-    //    talloc_free(tmp);
-
+  if(result) {
     // If its a FileLikeObject seek it to 0
     if(ISSUBCLASS(result, FileLikeObject)) {
       CALL((FileLikeObject)result, seek, 0, SEEK_SET);
@@ -1096,7 +1103,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // OK Maybe the type is encoded into the URN:
   for(i=0; dispatch[i].type !=NULL; i++) {
-    if(dispatch[i].scheme && startswith((char *)urn->value.dptr, dispatch[i].type)) {
+    if(dispatch[i].scheme && startswith((char *)urn->value, dispatch[i].type)) {
       dispatch_ptr = &dispatch[i];
       break;
     };
@@ -1151,16 +1158,16 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     to it after that.
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
-  TDB_DATA urn =  URNOF(obj)->value;
+  char *urn = URNOF(obj)->value;
 
   // Cache it
   if(!obj) return;
 
   // Grab the lock
   if(obj->mode == 'r') {
-    CALL(self->read_cache, put, urn.dptr, urn.dsize, obj, sizeof(*obj));
+    CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
   } else if(obj->mode == 'w') {
-    Cache_put(self->write_cache, urn.dptr, urn.dsize, obj, sizeof(*obj));
+    Cache_put(self->write_cache, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
@@ -1179,9 +1186,8 @@ static void Resolver_add(Resolver self, RDFURN urn_str,
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
   
-  urn = urn_str->value;
-  attribute.dptr = (unsigned char *)attribute_str;
-  attribute.dsize = strlen(attribute_str);
+  urn = tdb_data_from_string(urn_str->value);
+  attribute = tdb_data_from_string(attribute_str);
 
   value = CALL(rdfvalue, encode);
 
@@ -1258,7 +1264,8 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
     attribute.dsize = strlen(attribute_str);
 
     key.dptr = (unsigned char *)buff;
-    key.dsize = calculate_key(self, urn->value, attribute, buff, BUFF_SIZE, 0);
+    key.dsize = calculate_key(self, tdb_data_from_string(urn->value),
+			      attribute, buff, BUFF_SIZE, 0);
 
     // Remove the key from the database
     tdb_delete(self->data_db, key);
@@ -1277,7 +1284,8 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
     
     for(i=0;i<max_id;i++) {
       char buff[BUFF_SIZE];
-      int urn_id =get_id(self->urn_db, urn->value, 0);
+      int urn_id =get_id(self->urn_db, 
+			 tdb_data_from_string(urn->value), 0);
       
       key.dptr = (unsigned char *)buff;
       key.dsize = snprintf(buff, BUFF_SIZE, "%d:%d", urn_id, i);
@@ -1306,11 +1314,15 @@ int Resolver_lock(Resolver self, RDFURN urn, char mode) {
     return 0;
   };
 
-  offset = get_data_head(self, urn->value, attribute, &data_list);
+  offset = get_data_head(self, tdb_data_from_string(urn->value),
+			 attribute, &data_list);
   if(!offset){
     // The attribute is not set - make it now:
-    set_new_value(self,urn->value, attribute, LOCK, 0, 0);
-    offset = get_data_head(self, urn->value, attribute, &data_list);
+    set_new_value(self, tdb_data_from_string(urn->value),
+		  attribute, LOCK, 0, 0);
+
+    offset = get_data_head(self, tdb_data_from_string(urn->value),
+			   attribute, &data_list);
     if(!offset) {
       RaiseError(ERuntimeError, "Unable to set lock attribute");
       return 0;

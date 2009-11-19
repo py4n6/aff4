@@ -47,7 +47,10 @@ END_CLASS
 
 CLASS(ImageWorker, AFFObject)
        struct list_head list;
-       char *urn;
+  // The filename where the volume is stored - we fetch that just
+  // prior to writing it
+       RDFURN stored;
+
        int segment_count;
 
        // This is the queue which this worker belongs in
@@ -77,6 +80,12 @@ END_CLASS
 
 /** The Image Stream represents an Image in chunks */
 CLASS(Image, FileLikeObject)
+     // This is where the image is stored
+     RDFURN stored;
+
+  // These are the URNs for the bevy and the bevy index
+  RDFURN bevy_urn;
+
      // Chunks are cached here. We cant use the main zip file cache
      // because the zip file holds the full segment
      Cache chunk_cache;
@@ -91,10 +100,10 @@ CLASS(Image, FileLikeObject)
      // simply dump its bevy and take a new worker here.
      ImageWorker current;
 
-     int chunk_size;
-     int compression;
-     int chunks_in_segment;
-     int bevy_size;
+     XSDInteger chunk_size;
+     XSDInteger compression;
+     XSDInteger chunks_in_segment;
+     uint32_t bevy_size;
 
      int segment_count;
 
@@ -154,11 +163,18 @@ CLASS(MapDriver, FileLikeObject)
      int number_of_points;
      
      // The period offsets repeat within each target
-     uint64_t target_period;
+     XSDInteger target_period;
+
      // The period offsets repear within the logical image
-     uint64_t image_period;
-     
-     char *parent_urn;
+     XSDInteger image_period;
+
+     // The blocksize is a constant multiple for each map offset.
+     XSDInteger blocksize;
+   
+     // This where we get stored
+     RDFURN stored;
+     RDFURN map_urn;
+     RDFURN target;
 
      // Deletes the point at the specified file offset
      void METHOD(MapDriver, del, uint64_t target_pos);
@@ -287,6 +303,15 @@ CLASS(ZipFile, AFFObject)
   XSDInteger directory_offset;
   RDFURN storage_urn;
   XSDInteger _didModify;
+
+  /** attributes of files used for the EndCentralDirectory */
+  XSDInteger type;
+  XSDInteger epoch_time;
+  XSDInteger compression_method;
+  XSDInteger crc;
+  XSDInteger size;
+  XSDInteger compressed_size;
+  XSDInteger header_offset;
 
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);

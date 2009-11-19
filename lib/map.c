@@ -1,26 +1,8 @@
+#include "aff4.h"
 #include "zip.h"
 
-static AFFObject MapDriver_finish(AFFObject self) {
-  char *stored = (char *)CALL(oracle, resolve, self, URNOF(self), AFF4_STORED,
-			      RESOLVER_DATA_URN);
-  MapDriver this = (MapDriver)self;
-
-  if(!stored) {
-    RaiseError(ERuntimeError, "Map object does not have a stored attribute?");
-    goto error;
-  };
-
-  self = CALL((AFFObject)this, Con, URNOF(self),'w');
-
-  // Check that we have a stored property
-  return self;
- error:
-  talloc_free(self);
-  return NULL;
-};
-
 /*** This is the implementation of the MapDriver */
-static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){ 
+static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){ 
   MapDriver this = (MapDriver)self;
 
   // Try to parse existing map object
@@ -30,41 +12,42 @@ static AFFObject MapDriver_Con(AFFObject self, char *uri, char mode){
     int blocksize;
     uint32_t tmp;
 
-    URNOF(self) = talloc_strdup(self, uri);
-    this->parent_urn = (char *)CALL(oracle, resolve, self, uri, AFF4_STORED,
-				    RESOLVER_DATA_URN);
-    if(!this->parent_urn) {
-      RaiseError(ERuntimeError, "No storage for map %s?", uri);
+    URNOF(self) = CALL(uri, copy, self);
+    this->stored = new_RDFURN(self);
+    this->target_period = new_XSDInteger(self);
+    this->image_period = new_XSDInteger(self);
+    this->blocksize = new_XSDInteger(self);
+    this->map_urn = CALL(uri, copy, self);
+    CALL(this->map_urn, add, "/map");
+
+    // Set defaults
+    this->blocksize->value = 1;
+    this->image_period = -1;
+    this->target_period = -1;
+
+    // Check that we have a stored property
+    if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+	     (RDFValue)this->stored)) {
+      RaiseError(ERuntimeError, "Map object does not have a stored attribute?");
       goto error;
     };
 
-    CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_MAP, RESOLVER_DATA_STRING);
-    tmp = time(NULL);
-    CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
+    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(AFF4_MAP));
+    //    tmp = time(NULL);
+    // CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
 
-    tmp = 1;
-    blocksize = *(uint64_t *)resolver_get_with_default(oracle, 
-						       URNOF(self), 
-						       AFF4_BLOCKSIZE, &tmp,
-						       RESOLVER_DATA_UINT64);
-    
+    CALL(oracle, resolve2, URNOF(self), AFF4_BLOCKSIZE,
+	 (RDFValue)this->blocksize);
+
     // Load some parameters
-    this->image_period = blocksize * *(uint64_t *)CALL(oracle, resolve, self, 
-						       URNOF(self),
-						       AFF4_IMAGE_PERIOD,
-						       RESOLVER_DATA_UINT64);
-    
-    this->target_period =  blocksize * *(uint64_t *)CALL(oracle, resolve, self, 
-							 URNOF(self),
-							 AFF4_TARGET_PERIOD,
-							 RESOLVER_DATA_UINT64);
-    if(!this->target_period) this->target_period=-1;
-    if(!this->image_period) this->image_period=-1;
-    
-    ((FileLikeObject)self)->size = *(uint64_t *)CALL(oracle, resolve, self, 
-						     URNOF(self),
-						     AFF4_SIZE,
-						     RESOLVER_DATA_UINT64);
+    CALL(oracle, resolve2, URNOF(self), AFF4_IMAGE_PERIOD,
+	 (RDFValue)this->image_period);
+
+    CALL(oracle, resolve2, URNOF(self), AFF4_TARGET_PERIOD,
+	 (RDFValue)this->target_period);
+
+    CALL(oracle, resolve2, URNOF(self), AFF4_SIZE,
+	 (RDFValue)((FileLikeObject)self)->size);
 
     /** Try to load the map from the stream */
     snprintf(buff, BUFF_SIZE, "%s/map", uri);
@@ -187,9 +170,6 @@ static void MapDriver_close(FileLikeObject self) {
     CALL(oracle, cache_return, (AFFObject)zipfile);
   };
 };
-
-
-
 
 // searches the array of map points and returns the offset in the
 // array such that array[result].file_offset > offset
@@ -332,7 +312,6 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 
 VIRTUAL(MapDriver, FileLikeObject)
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
-     VMETHOD_BASE(AFFObject, finish) = MapDriver_finish;
      VMETHOD(add) = MapDriver_add;
      VMETHOD(save_map) = MapDriver_save_map;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
