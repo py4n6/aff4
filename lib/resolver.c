@@ -187,6 +187,18 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
   Cache new_cache;
   Cache i;
 
+  // First check if the item is already in the Cache
+  Cache tmp = CALL(self, get, key, len);
+  if(tmp) {
+    tmp->data = data;
+    if(!self->static_objects) {
+      talloc_steal(tmp, key);
+      talloc_steal(tmp,data);
+    };
+
+    return tmp;
+  };
+
   // Check to see if we need to expire something else. We do this
   // first to avoid the possibility that we might expire the same key
   // we are about to add.
@@ -274,9 +286,9 @@ static Cache Cache_get(Cache self, void *key, int len) {
 static void *Cache_get_item(Cache self, char *key, int len) {
   Cache tmp = CALL(self, get, key, len);
 
-  if(tmp && tmp->data)
+  if(tmp && tmp->data) {
     return tmp->data;
-
+  };
   return NULL;
 };
 
@@ -1077,11 +1089,11 @@ static RDFValue Resolver_iter_next_alloc(Resolver self, void *ctx,
 */
 static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   int i;
-  char *stream_type;
   struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
+  XSDString stream_type = new_XSDString(self);
 
-  if(!urn) return NULL;
+  if(!urn) goto error;
 
   // Is this object cached?
   if(mode =='r') {
@@ -1098,7 +1110,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
     // Lock it
     CALL(self, lock, URNOF(result), mode);
-    return result;
+    goto exit;
   };
 
   // OK Maybe the type is encoded into the URN:
@@ -1111,8 +1123,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // Nope - maybe its stated explicitely
   if(!dispatch_ptr) {
-    XSDString stream_type = new_XSDString(self);
-
     if(CALL(self, resolve2, urn, AFF4_TYPE, (RDFValue)stream_type)) {
       // Find it in the dispatcher struct and instantiate it
       for(i=0; dispatch[i].type !=NULL; i++) {
@@ -1127,7 +1137,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   // Gee no idea what this is
   if(!dispatch_ptr) {
     if(stream_type) {
-      RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn->value, stream_type);
+      RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn->value, stream_type->value);
       goto error;
     } else {
       RaiseError(ERuntimeError, "Unable to open %s", urn->value);
@@ -1148,9 +1158,12 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     CALL(self, lock, URNOF(result), mode);
   };
 
+ exit:
+  talloc_free(stream_type);
   return result; 
 
  error:
+  talloc_free(stream_type);
   return NULL;
 };
 

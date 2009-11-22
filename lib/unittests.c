@@ -18,16 +18,18 @@
 #define VALUE "world"
 
 void resolver_test_1() {
-  XSDInteger xsd_integer = CONSTRUCT(XSDInteger, RDFValue, super.Con, NULL);
+  RDFURN urn = new_RDFURN(NULL);
+  XSDInteger xsd_integer = new_XSDInteger(urn);
 
   // Clearing the urn
-  CALL(oracle, del, URN, ATTRIBUTE);
+  CALL(urn, set, URN);
+  CALL(oracle, del, urn, ATTRIBUTE);
 
   printf("Setting integer\n");
   CALL(xsd_integer, set, 5);
-  CALL(oracle, add_value, URN, ATTRIBUTE, (RDFValue)xsd_integer);
+  CALL(oracle, add_value, urn, ATTRIBUTE, (RDFValue)xsd_integer);
   CALL(xsd_integer, set, 15);
-  CALL(oracle, add_value, URN, ATTRIBUTE, (RDFValue)xsd_integer);
+  CALL(oracle, add_value, urn, ATTRIBUTE, (RDFValue)xsd_integer);
 
   CALL(xsd_integer, set, 0);
   
@@ -35,7 +37,7 @@ void resolver_test_1() {
   {
     RESOLVER_ITER iter;
 
-    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, 0);
+    CALL(oracle, get_iter, &iter, urn, ATTRIBUTE);
     while(CALL(oracle, iter_next, &iter, (RDFValue)xsd_integer)) {
       printf("Retrieved value: %llu\n", xsd_integer->value);
     };
@@ -46,7 +48,7 @@ void resolver_test_1() {
     RESOLVER_ITER iter;
     RDFValue result;
 
-    CALL(oracle, get_iter, &iter, URN, ATTRIBUTE, 0);
+    CALL(oracle, get_iter, &iter, urn, ATTRIBUTE);
     while(1) {
       result = CALL(oracle, iter_next_alloc, NULL, &iter);
       if(!result) break;
@@ -63,13 +65,15 @@ void resolver_test_1() {
 
 // Test locking:
 void resolver_test_locks() {
+  RDFURN urn = new_RDFURN(NULL);
+
   int pid = fork();
   // Parent
   if(pid) {
     uint32_t now = time(NULL);
 
     printf("Parent %lu Getting lock on %s\n", now, URN);
-    CALL(oracle, lock, URN, 'w');
+    CALL(oracle, lock, urn, 'w');
     printf("Parent %lu Got lock on %s\n", time(NULL) - now, URN);
     sleep(5);
     printf("Parent %lu Releasing lock on %s\n", time(NULL) - now, URN);
@@ -136,9 +140,8 @@ void zipfile_test2() {
   // Now make an image object
   FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image));
   RDFURN file_urn = new_RDFURN(NULL);
-  URLParse parser = CONSTRUCT(URLParse, URLParse, Con, file_urn, FILENAME);
 
-  CALL(file_urn, set, parser->string(parser, parser));
+  CALL(file_urn, set, FILENAME);
 
   CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)file_urn);
   
@@ -149,6 +152,12 @@ void zipfile_test2() {
 
   CALL(oracle, set_value, URNOF(outfd), AFF4_STORED,
        (RDFValue)URNOF(zip));
+
+  CALL(oracle, set_value, URNOF(outfd), AFF4_CHUNK_SIZE,
+       rdfvalue_from_int(file_urn,1024));
+
+  CALL(oracle, set_value, URNOF(outfd), AFF4_CHUNKS_IN_SEGMENT,
+       rdfvalue_from_int(file_urn, 10));
   
   outfd = (FileLikeObject)CALL((AFFObject)outfd, finish);
   
@@ -169,16 +178,18 @@ void zipfile_test2() {
   
   // Close the archive
   CALL(zip, close);
+
+  talloc_free(file_urn);
 };
 
-#if 0
 void zipfile_test_load() {
   ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
+  RDFURN location = new_RDFURN(zip);
 
-  CALL(zip, load_from, "file://" FILENAME, 'r');
+  CALL(location, set, FILENAME);
+  CALL(zip, load_from, location, 'r');
 
 };
-#endif
 
 #define TIMES 1000
 
@@ -667,8 +678,8 @@ int main() {
   };
 
 #ifdef RESOLVER_TESTS
-  resolver_test_1();
-  //resolver_test_locks();
+  //resolver_test_1();
+  resolver_test_locks();
 #endif
 
 #ifdef ZIPFILE_TESTS

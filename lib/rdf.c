@@ -20,6 +20,7 @@ enum url_state {
 
 URLParse URLParse_Con(URLParse self, char *url) {
   CALL(self, parse ,url);
+  self->ctx = talloc_size(self, 1);
   return self;
 };
 
@@ -27,6 +28,9 @@ int URLParse_parse(URLParse self, char *url) {
   int i=0,j=0,end=0;
   char buff[BUFF_SIZE];
   enum url_state state = STATE_METHOD;
+
+  talloc_free(self->ctx);
+  self->ctx = talloc_size(self, 1);
 
   // Its ok to call us with NULL - we just wont parse anything.
   if(!url) goto exit;
@@ -46,12 +50,12 @@ int URLParse_parse(URLParse self, char *url) {
       // it as a file URL with no netloc
       if(url[i]==0 || url[i]=='/') {
 	buff[j]=0; j=0;
-	self->query = talloc_strdup(self,buff);
+	self->query = talloc_strdup(self->ctx,buff);
 	state = STATE_QUERY;
       }else if(url[i] == ':') {
 	buff[j]=0; j=0;
 	state = STATE_COLLON;
-	self->scheme = talloc_strdup(self, buff);
+	self->scheme = talloc_strdup(self->ctx, buff);
       } else buff[j++] = url[i];
       break;
     };
@@ -68,7 +72,7 @@ int URLParse_parse(URLParse self, char *url) {
       if(url[i]==0 || url[i]=='/') {
 	state = STATE_QUERY;
 	buff[j]=0; j=0;
-	self->netloc = talloc_strdup(self,buff);
+	self->netloc = talloc_strdup(self->ctx,buff);
       } else buff[j++] = url[i];
       break;
     };
@@ -77,7 +81,7 @@ int URLParse_parse(URLParse self, char *url) {
       if(url[i]==0 || url[i]=='#') {
 	state = STATE_FRAGMENT;
 	buff[j]=0; j=0;
-	self->query = talloc_strdup(self,buff);
+	self->query = talloc_strdup(self->ctx,buff);
       } else buff[j++] = url[i];
       break;
     };
@@ -86,7 +90,7 @@ int URLParse_parse(URLParse self, char *url) {
       if(url[i]==0) {
 	state = STATE_END;
 	buff[j]=0; j=0;
-	self->fragment = talloc_strdup(self,buff);
+	self->fragment = talloc_strdup(self->ctx,buff);
       } else buff[j++] = url[i];
       break;
     };
@@ -165,12 +169,19 @@ static int XSDInteger_decode(RDFValue this, int fd, int length) {
 
 static char *XSDInteger_serialise(RDFValue self) {
   XSDInteger this = (XSDInteger)self;
+
+  if(this->serialised) 
+    talloc_free(this->serialised);
+
+  this->serialised = talloc_asprintf(self, "%llu", this->value);
   
-  return talloc_asprintf(self, "%llu", this->value);
+  return this->serialised;
 };
 
 VIRTUAL(XSDInteger, RDFValue)
+   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = "xsd:integer";
+
    VMETHOD(super.encode) = XSDInteger_encode;
    VMETHOD(super.decode) = XSDInteger_decode;
    VMETHOD(super.serialise) = XSDInteger_serialise;
@@ -216,11 +227,13 @@ static int XSDString_decode(RDFValue this, int fd, int length) {
 static char *XSDString_serialise(RDFValue self) {
   XSDString this = (XSDString)self;
   
-  return talloc_memdup(self, this->value, this->length);
+  return this->value;
 };
 
 VIRTUAL(XSDString, RDFValue)
+   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = "xsd:string";
+
    VMETHOD(super.encode) = XSDString_encode;
    VMETHOD(super.decode) = XSDString_decode;
    VMETHOD(super.serialise) = XSDString_serialise;
@@ -271,8 +284,11 @@ static int RDFURN_decode(RDFValue this, int fd, int length) {
 /* We serialise the string */
 static char *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
-  
-  return talloc_strdup(self, this->value);
+
+  if(this->serialised) talloc_free(this->serialised);
+  this->serialised = raptor_new_uri((const unsigned char*)this->value);
+
+  return this->serialised;
 };
 
 static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
@@ -340,7 +356,9 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
 };
 
 VIRTUAL(RDFURN, RDFValue)
+   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
    VATTR(super.dataType) = "rdf:urn";
+
    VMETHOD(super.Con) = RDFURN_Con;
    VMETHOD(super.encode) = RDFURN_encode;
    VMETHOD(super.decode) = RDFURN_decode;
@@ -372,8 +390,9 @@ void register_rdf_value_class(RDFValue classref) {
 
   tmp = CALL(RDF_Registry, get, ZSTRING_NO_NULL(classref->dataType));
   if(!tmp) {
-    CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType),
-	 classref, sizeof(classref));
+    Cache tmp =  CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType),
+		      classref, sizeof(classref));
+    talloc_set_name(tmp, "RDFValue type %s", NAMEOF(classref));
   };
 };
 
@@ -597,15 +616,8 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
   CALL(oracle, get_iter, &iter, self->urn, attribute);
   while(1) {
     RDFValue value = CALL(oracle, iter_next_alloc, NULL, &iter);
-    char inbuff[BUFF_SIZE];
-    char outbuf[BUFF_SIZE];
-    char *formatstr = NULL;
 
     if(!value) break;
-
-    memset(inbuff, 0, BUFF_SIZE);
-    lseek(oracle->data_store_fd, iter.offset, SEEK_SET);
-    read(oracle->data_store_fd, inbuff, iter.head.length);
 
     // Now iterate over all the values for this 
     triple.subject = self->raptor_uri;
@@ -613,51 +625,12 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     
     triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute);
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-    triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-    triple.object = outbuf;
-
-    // FIXME
-#if 0
-    switch(iter.head.encoding_type) {
-    case RESOLVER_DATA_URN:
-      triple.object = (void*)raptor_new_uri((const unsigned char*)inbuff);
-      triple.object_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-      break;
-      
-    case RESOLVER_DATA_UINT64:
-      snprintf(outbuf, BUFF_SIZE, "%llu", *(uint64_t *)inbuff);
-      triple.object_literal_datatype = "xsd:long";
-     break;
-    case RESOLVER_DATA_UINT32:
-      snprintf(outbuf, BUFF_SIZE, "%lu", *(uint32_t *)inbuff);
-      triple.object_literal_datatype = "xsd:int";
-      break;
-    case RESOLVER_DATA_UINT16:
-      snprintf(outbuf, BUFF_SIZE, "%lu", *(uint16_t *)inbuff);
-      triple.object_literal_datatype = "xsd:short";
-      break;
-    case RESOLVER_DATA_STRING:
-      snprintf(outbuf, BUFF_SIZE, "%s", (char *)inbuff);
-      break;
-
-    case RESOLVER_DATA_TDB_DATA: {
-      char *outbuf = talloc_size(attribute, iter.head.length * 2);
-      int length = encode64(inbuff, iter.head.length, outbuf, iter.head.length * 2);
-
-      // Need to escape this data
-      triple.object = outbuf;
-      triple.object_literal_datatype = "xsd:base64Binary";
-      break;
-    };
-    default:
-      RaiseError(ERuntimeError, "Unable to serialize type %d", iter.head.encoding_type);
-      goto exit;
-    };
+    triple.object_type = value->raptor_type;
+    triple.object = CALL(value, serialise);
 
     raptor_serialize_statement(self->rdf_serializer, &triple);
-#endif
-
     raptor_free_uri((raptor_uri*)triple.predicate);
+
     if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
       raptor_free_uri((raptor_uri*)triple.object);    
 
@@ -672,9 +645,10 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
   self->raptor_uri = (void*)raptor_new_uri((const unsigned char*)urn->value);
-  self->urn = talloc_strdup(self, urn->value);
+  self->urn = urn;
   tdb_traverse_read(oracle->attribute_db, tdb_attribute_traverse_func, self);
   raptor_free_uri((raptor_uri*)self->raptor_uri);
+  self->urn = NULL;
 
   return 1;
 };
@@ -702,25 +676,24 @@ static XSDInteger integer_cache = NULL;
 static XSDString string_cache = NULL;
 static RDFURN urn_cache = NULL;
 
-RDFValue rdfvalue_from_int(uint64_t value) {
-  if(!integer_cache) 
-    integer_cache = CONSTRUCT(XSDInteger, RDFValue, super.Con, NULL);
+RDFValue rdfvalue_from_int(void *ctx, uint64_t value) {
+  XSDInteger result = new_XSDInteger(ctx);
 
-  return integer_cache->set(integer_cache, value);  
+  return result->set(result, value);  
 };
 
-RDFValue rdfvalue_from_urn(char *value) {
-  if(!urn_cache) 
-    urn_cache = CONSTRUCT(RDFURN, RDFValue, super.Con, NULL);
+RDFValue rdfvalue_from_urn(void *ctx, char *value) {
+  RDFURN result = new_RDFURN(ctx);
 
-  return urn_cache->set(urn_cache, value);  
+  return result->set(result, value);  
 };
 
-RDFValue rdfvalue_from_string(char *value) {
-  if(!string_cache) 
-    string_cache = CONSTRUCT(XSDString, RDFValue, super.Con, NULL);
+RDFValue rdfvalue_from_string(void *ctx, char *value) {
+  XSDString result = CONSTRUCT(XSDString, RDFValue, super.Con, ctx);
 
-  return string_cache->set(string_cache, value, strlen(value));  
+  result->set(result, value, strlen(value));
+
+  return result;
 };
 
 RDFURN new_RDFURN(void *ctx) {

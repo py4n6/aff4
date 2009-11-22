@@ -21,7 +21,7 @@ CLASS(RDFSerializer, Object)
      FileLikeObject fd;
 
      void *raptor_uri;
-     char *urn;
+     RDFURN urn;
 
      RDFSerializer METHOD(RDFSerializer, Con, char *base_urn, FileLikeObject fd);
      int METHOD(RDFSerializer, serialize_urn, RDFURN urn);

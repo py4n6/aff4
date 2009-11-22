@@ -265,8 +265,11 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
       // put the worker in the busy queue
       CALL(this->busy, put, this->current);
-      pthread_create( &this->current->thread, NULL, 
-		      (void *(*) (void *))dump_bevy, (void *)this->current);
+
+      // Just call it in place for now (no multithreading right now).
+      dump_bevy(this->current);
+      //      pthread_create( &this->current->thread, NULL, 
+      //		      (void *(*) (void *))dump_bevy, (void *)this->current);
       this->segment_count++;
 
       // Get another worker from the queue:

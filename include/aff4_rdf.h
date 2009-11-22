@@ -16,6 +16,8 @@ CLASS(URLParse, Object)
       char *query;
       char *fragment;
 
+      void *ctx;
+
       URLParse METHOD(URLParse, Con, char *url);
       int METHOD(URLParse, parse, char *url);
       char *METHOD(URLParse, string, void *ctx);
@@ -32,6 +34,7 @@ END_CLASS
 CLASS(RDFValue, Object)
       char *dataType;
       int id;
+      raptor_identifier_type raptor_type;
 
       RDFValue METHOD(RDFValue, Con);
 
@@ -54,9 +57,9 @@ CLASS(RDFValue, Object)
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be
-	  allocated and should be freed by the caller. 
+	  allocated internally and should not be freed by the caller. 
       */
-      char *METHOD(RDFValue, serialise);
+      void *METHOD(RDFValue, serialise);
 END_CLASS
 
       /** A literal just stores itself */
@@ -71,6 +74,7 @@ END_CLASS
       /** An integer */
 CLASS(XSDInteger, RDFValue)
      uint64_t value;
+     char *serialised;
 
      RDFValue METHOD(XSDInteger, set, uint64_t value);
      uint64_t METHOD(XSDInteger, get);
@@ -87,6 +91,8 @@ END_CLASS
 
 CLASS(RDFURN, RDFValue)
      char *value;
+
+     void *serialised;
 
      // This parser maintains our internal state
      URLParse parser;
@@ -117,9 +123,9 @@ extern Cache RDF_Registry;
      /** The following are convenience functions that allow easy
 	 access to some common types.
      */
-RDFValue rdfvalue_from_int(uint64_t value);
-RDFValue rdfvalue_from_urn(char *value);
-RDFValue rdfvalue_from_string(char *value);
+RDFValue rdfvalue_from_int(void *ctx, uint64_t value);
+RDFValue rdfvalue_from_urn(void *ctx, char *value);
+RDFValue rdfvalue_from_string(void *ctx, char *value);
 
 RDFURN new_RDFURN(void *ctx);
 XSDInteger new_XSDInteger(void *ctx);
