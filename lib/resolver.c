@@ -8,15 +8,16 @@
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
+static Cache type_dispatcher = NULL;
+
 struct dispatch_t dispatch[] = {
   // Must be first - fallback position
   { 1, "file://",                 (AFFObject)&__FileBackedObject },
   { 0, AFF4_IMAGE,                (AFFObject)&__Image },
+  { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
+  { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
 
   /*
-  { 0, AFF4_SEGMENT,              (AFFObject)&__ZipFileStream },
-  { 0, AFF4_LINK,                 (AFFObject)&__Link },
-  { 0, AFF4_MAP,                  (AFFObject)&__MapDriver},
   { 0, AFF4_ENCRYTED,             (AFFObject)&__Encrypted},
   { 0, AFF4_IDENTITY,             (AFFObject)&__Identity},
   */
@@ -94,15 +95,29 @@ static void oracle_del(Resolver self, RDFURN uri, char *attribute) {
   };
 };
 
-void AFF4_Init(void) {
-  FileLikeObject_init();
-  FileBackedObject_init();
-  ZipFile_init();
-  Image_init();
+void register_type_dispatcher(char *type, AFFObject *classref) {
+  Cache tmp;
 
-  //  ZipFileStream_init();
-  // MapDriver_init();
+  // Make the various dispatchers
+  if(!type_dispatcher) {
+    type_dispatcher = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
+    type_dispatcher->static_objects = 1;
+  };
+
+  tmp = CALL(type_dispatcher, get, ZSTRING_NO_NULL(type));
+  if(!tmp) {
+    Cache tmp =  CALL(type_dispatcher, put, ZSTRING_NO_NULL(type),
+		      classref, sizeof(classref));
+    talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
+  };
+};
+
+void AFF4_Init(void) {
   Resolver_init();
+
+  image_init();
+  mapdriver_init();
+  zip_init();
   rdf_init();
 
 #ifdef HAVE_LIBCURL
@@ -511,6 +526,9 @@ static Resolver Resolver_Con(Resolver self) {
 
   // Make sure we close our files when we get freed
   talloc_set_destructor((void *)self, Resolver_destructor);
+
+  // Cache this so we dont need to rebuilt it all the time.
+  self->type = new_XSDString(self);
 
   return self;
 
@@ -1088,10 +1106,9 @@ static RDFValue Resolver_iter_next_alloc(Resolver self, void *ctx,
     stolen again.
 */
 static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
-  int i;
-  struct dispatch_t *dispatch_ptr=NULL;
   AFFObject result;
-  XSDString stream_type = new_XSDString(self);
+  AFFObject classref;
+  char *scheme;
 
   if(!urn) goto error;
 
@@ -1113,41 +1130,26 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     goto exit;
   };
 
-  // OK Maybe the type is encoded into the URN:
-  for(i=0; dispatch[i].type !=NULL; i++) {
-    if(dispatch[i].scheme && startswith((char *)urn->value, dispatch[i].type)) {
-      dispatch_ptr = &dispatch[i];
-      break;
-    };
+  // Here we need to build a new instance of this class using the
+  // dispatcher. We first try the scheme:
+  scheme = urn->parser->scheme;
+
+  // Empty schemes default to file:// URLs
+  if(strlen(scheme)==0) 
+    scheme = "file";
+
+  classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(scheme));
+  if(!classref && CALL(self, resolve2, urn, AFF4_TYPE, (RDFValue)self->type)) {
+    classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(self->type->value));
   };
 
-  // Nope - maybe its stated explicitely
-  if(!dispatch_ptr) {
-    if(CALL(self, resolve2, urn, AFF4_TYPE, (RDFValue)stream_type)) {
-      // Find it in the dispatcher struct and instantiate it
-      for(i=0; dispatch[i].type !=NULL; i++) {
-	if(!strcmp(dispatch[i].type, stream_type->value)) {
-	  dispatch_ptr = &dispatch[i];
-	  break;
-	};
-      };
-    };
-  };
-
-  // Gee no idea what this is
-  if(!dispatch_ptr) {
-    if(stream_type) {
-      RaiseError(ERuntimeError, "Unable to open %s: This implementation can not open objects of type %s?", urn->value, stream_type->value);
-      goto error;
-    } else {
-      RaiseError(ERuntimeError, "Unable to open %s", urn->value);
-      goto error;
-    };
+  if(!classref) {
+    RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
+    goto error;
   };
   
   // A special constructor from a class reference
-  result = CONSTRUCT_FROM_REFERENCE(dispatch[i].class_ptr, 
-				    Con, NULL, urn, mode);
+  result = CONSTRUCT_FROM_REFERENCE(classref, Con, NULL, urn, mode);
   
   // Make sure the object mode is set
   if(result) {
@@ -1159,11 +1161,9 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
  exit:
-  talloc_free(stream_type);
   return result; 
 
  error:
-  talloc_free(stream_type);
   return NULL;
 };
 

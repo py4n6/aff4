@@ -15,40 +15,6 @@
 #include "zip.h"
 #include "aff4_rdf_serialise.h"
 
-// This is a FileLikeObject which is used to provide access to zip
-// archive members. Currently only accessible through
-// ZipFile.open_member()
-CLASS(ZipFileStream, FileLikeObject)
-     z_stream strm;
-     XSDInteger file_offset;
-     // The file backing the container
-     RDFURN file_urn;
-
-     // The container ZIP file we are written in
-     RDFURN container_urn;
-     FileLikeObject file_fd;
-     XSDInteger crc32;
-     XSDInteger compress_size;
-     XSDInteger compression;
-
-     // For now we just decompress the entire segment into memory if
-     // required
-     char *cbuff;
-     char *buff;
-
-     // We calculate the SHA256 hash of each archive member
-     EVP_MD_CTX digest;
-
-     /* This is the constructor for the file like object. 
-	file_urn is the storage file for the volume in
-	container_urn. If the stream is opened for writing the file_fd
-	may be passed in. It remains locked until we are closed.
-     */
-     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn, 
-			  RDFURN file_urn, RDFURN container_urn,
-			  char mode, FileLikeObject file_fd);
-END_CLASS
-
 static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   FileLikeObject this = (FileLikeObject)self;
 
@@ -241,7 +207,7 @@ static char *FileLikeObject_get_data(FileLikeObject self) {
   return NULL;
 };
 
-VIRTUAL(FileLikeObject, AFFObject)
+VIRTUAL(FileLikeObject, AFFObject) {
      VMETHOD(super.Con) = FileLikeObject_AFFObject_Con;
      VMETHOD(seek) = FileLikeObject_seek;
      VMETHOD(tell) = FileLikeObject_tell;
@@ -250,7 +216,7 @@ VIRTUAL(FileLikeObject, AFFObject)
      VMETHOD(get_data) = FileLikeObject_get_data;
 
      VATTR(data) = NULL;
-END_VIRTUAL
+} END_VIRTUAL
 
 static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
   FileBackedObject this=(FileBackedObject)self;
@@ -260,7 +226,7 @@ static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
 };
 
 /** A file backed object extends FileLikeObject */
-VIRTUAL(FileBackedObject, FileLikeObject)
+VIRTUAL(FileBackedObject, FileLikeObject) {
      VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
      VMETHOD(super.super.finish) = FileBackedObject_finish;
 
@@ -269,8 +235,7 @@ VIRTUAL(FileBackedObject, FileLikeObject)
      VMETHOD(super.close) = FileBackedObject_close;
      VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
      VMETHOD(super.truncate) = FileBackedObject_truncate;
-END_VIRTUAL;
-
+} END_VIRTUAL;
 
 // Some prototypes
 static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode);
@@ -625,6 +590,10 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
        (RDFValue)self->directory_offset);
 
  exit:
+  if(fd) {
+    CALL(oracle, cache_return, (AFFObject)fd);
+  };
+
   talloc_free(ctx);
   return 1;
 
@@ -992,7 +961,7 @@ static int ZipFile_writestr(ZipFile self, char *filename,
   } else return -1;
 };
 
-VIRTUAL(ZipFile, AFFObject)
+VIRTUAL(ZipFile, AFFObject) {
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
@@ -1001,7 +970,7 @@ VIRTUAL(ZipFile, AFFObject)
 
 // Initialise our private classes
      ZipFileStream_init();
-END_VIRTUAL
+} END_VIRTUAL
 
 /** 
     ZipFileStream objects may not expire until they are ready - this
@@ -1388,7 +1357,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 };
 
 
-VIRTUAL(ZipFileStream, FileLikeObject)
+VIRTUAL(ZipFileStream, FileLikeObject) {
      VMETHOD(super.super.Con) = ZipFileStream_AFFObject_Con;
      VMETHOD(Con) = ZipFileStream_Con;
      VMETHOD(super.write) = ZipFileStream_write;
@@ -1397,7 +1366,7 @@ VIRTUAL(ZipFileStream, FileLikeObject)
 
 // Initialise the encoding luts
      encode_init();
-END_VIRTUAL
+} END_VIRTUAL
 
 void print_cache(Cache self) {
   Cache i;
@@ -1424,4 +1393,16 @@ char *relative_name(void *ctx, char *name, char *volume_urn) {
   };
 
   return talloc_strdup(ctx,name);
+};
+
+void zip_init() {
+  FileLikeObject_init();
+  FileBackedObject_init();
+  ZipFile_init();
+  ZipFileStream_init();
+  
+  register_type_dispatcher("file", (AFFObject)GETCLASS(FileBackedObject));
+  register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject)GETCLASS(ZipFile));
+  register_type_dispatcher(AFF4_SEGMENT, (AFFObject)GETCLASS(ZipFileStream));
+
 };

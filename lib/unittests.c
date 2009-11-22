@@ -100,8 +100,9 @@ void resolver_test_locks() {
 
 #endif
 
-#ifdef ZIPFILE_TESTS
 #define FILENAME "test.zip"
+
+#ifdef ZIPFILE_TESTS
 /** First test builds a new zip file from /bin/ls */
 void zipfile_test1() {
   // Make a new zip file

@@ -22,8 +22,8 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     // Set defaults
     this->blocksize->value = 1;
-    this->image_period = -1;
-    this->target_period = -1;
+    this->image_period->value = -1;
+    this->target_period->value = -1;
 
     // Check that we have a stored property
     if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
@@ -32,7 +32,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
       goto error;
     };
 
-    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(AFF4_MAP));
+    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
     //    tmp = time(NULL);
     // CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
 
@@ -114,7 +114,7 @@ static void MapDriver_save_map(MapDriver self) {
   struct map_point *point;
   int i;
   FileLikeObject fd;
-  ZipFile zipfile = (ZipFile)CALL(oracle, open, self->parent_urn, 'w');
+  ZipFile zipfile = (ZipFile)CALL(oracle, open, self->stored, 'w');
 
   if(!zipfile) return;
   snprintf(buff, BUFF_SIZE, "%s/map", URNOF(self));
@@ -123,7 +123,7 @@ static void MapDriver_save_map(MapDriver self) {
   qsort(this->points, this->number_of_points, sizeof(*this->points),
 	compare_points);
 
-  fd = CALL(zipfile, open_member, buff, 'w', NULL, 0, ZIP_DEFLATE);
+  fd = CALL(zipfile, open_member, buff, 'w', ZIP_DEFLATE);
   for(i=0;i<self->number_of_points;i++) {
     point = &self->points[i];
     // See if we can reduce adjacent points
@@ -150,25 +150,7 @@ static void MapDriver_save_map(MapDriver self) {
 static void MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
 
-  // Write out a properties file
-  char *properties = CALL(oracle, export_urn, URNOF(self), URNOF(self));
-  if(properties) {
-    ZipFile zipfile = (ZipFile)CALL(oracle, open, this->parent_urn, 'w');
-    char tmp[BUFF_SIZE];
-
-    if(!zipfile) {
-      talloc_free(properties);
-      return;
-    };
-
-    snprintf(tmp, BUFF_SIZE, "%s/properties", URNOF(self));
-    CALL((ZipFile)zipfile, writestr, tmp, ZSTRING_NO_NULL(properties),
-	 NULL, 0, ZIP_STORED);
-
-    talloc_free(properties);
-    // Done with zipfile
-    CALL(oracle, cache_return, (AFFObject)zipfile);
-  };
+  MapDriver_save_map(this);
 };
 
 // searches the array of map points and returns the offset in the
@@ -210,15 +192,15 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
   MapDriver this = (MapDriver)self;
 
   // How many periods we are from the start
-  uint64_t period_number = self->readptr / this->image_period;
+  uint64_t period_number = self->readptr / this->image_period->value;
 
   // How far into this period we are within the image
-  uint64_t image_period_offset = self->readptr % this->image_period;
+  uint64_t image_period_offset = self->readptr % this->image_period->value;
   char direction = 'f';
   
   // The offset within the target we ultimately need
   uint64_t target_offset;
-  uint64_t available_to_read = self->size - self->readptr;
+  uint64_t available_to_read = self->size->value - self->readptr;
   FileLikeObject target;
   int read_bytes;
   int l;
@@ -235,7 +217,7 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
     
     // Here this->points[l].image_offset < image_period_offset
     target_offset = this->points[l].target_offset +			\
-      image_period_offset - this->points[l].image_offset + period_number * this->target_period;
+      image_period_offset - this->points[l].image_offset + period_number * this->target_period->value;
     
     if(l < this->number_of_points-1) {
       available_to_read = this->points[l+1].image_offset - image_period_offset;
@@ -251,9 +233,9 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
     /** Interpolate in reverse */
   } else {
     l = bisect_left(image_period_offset, this->points, this->number_of_points);
-    target_offset = this->points[l].target_offset -	\
+    target_offset = this->points[l].target_offset -	     \
       (this->points[l].image_offset - image_period_offset) + \
-      period_number * this->target_period;
+      period_number * this->target_period->value;
     
     if(l<this->number_of_points) {
       available_to_read = this->points[l].image_offset - image_period_offset;
@@ -317,3 +299,8 @@ VIRTUAL(MapDriver, FileLikeObject)
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
 END_VIRTUAL
+
+void mapdriver_init() {
+  MapDriver_init();
+  register_type_dispatcher(AFF4_MAP, (AFFObject)GETCLASS(MapDriver));
+}

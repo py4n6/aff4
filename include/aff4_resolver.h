@@ -76,7 +76,10 @@ CLASS(Resolver, AFFObject)
 
        // Resolvers contain the identity behind them (see below):
        struct Identity_t *identity;
-       
+
+       // This is used to check the type of new objects
+       XSDString type;
+
        Resolver METHOD(Resolver, Con);
   
        // Resolvers are all in a list. Each resolver in the list is another
@@ -246,5 +249,8 @@ CLASS(Identity, AFFObject)
   */
        void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
 END_CLASS
+
+       /** This is a handler for new types - types get registered here */
+void register_type_dispatcher(char *type, AFFObject *class_ref);
 
 #endif 	    /* !AFF4_RESOLVER_H_ */

@@ -337,6 +337,40 @@ CLASS(ZipFile, AFFObject)
      int METHOD(ZipFile, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 
+// This is a FileLikeObject which is used to provide access to zip
+// archive members. Currently only accessible through
+// ZipFile.open_member()
+CLASS(ZipFileStream, FileLikeObject)
+     z_stream strm;
+     XSDInteger file_offset;
+     // The file backing the container
+     RDFURN file_urn;
+
+     // The container ZIP file we are written in
+     RDFURN container_urn;
+     FileLikeObject file_fd;
+     XSDInteger crc32;
+     XSDInteger compress_size;
+     XSDInteger compression;
+
+     // For now we just decompress the entire segment into memory if
+     // required
+     char *cbuff;
+     char *buff;
+
+     // We calculate the SHA256 hash of each archive member
+     EVP_MD_CTX digest;
+
+     /* This is the constructor for the file like object. 
+	file_urn is the storage file for the volume in
+	container_urn. If the stream is opened for writing the file_fd
+	may be passed in. It remains locked until we are closed.
+     */
+     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn, 
+			  RDFURN file_urn, RDFURN container_urn,
+			  char mode, FileLikeObject file_fd);
+END_CLASS
+
 #define ZIP_STORED 0
 #define ZIP_DEFLATE 8
 
@@ -379,6 +413,10 @@ ZipFile open_volume(char *urn, char mode);
   // static buffer.
   //char *fully_qualified_name(void *ctx, char *name, RDFURN volume_urn);
   //char *relative_name(void *ctx, char *name, RDFURN volume_urn);
+
+void zip_init();
+void image_init();
+void mapdriver_init();
 
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

@@ -77,7 +77,7 @@ END_CLASS
 
       /** An integer */
 CLASS(XSDInteger, RDFValue)
-     uint64_t value;
+     int64_t value;
      char *serialised;
 
      RDFValue METHOD(XSDInteger, set, uint64_t value);

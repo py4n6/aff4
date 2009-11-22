@@ -127,11 +127,11 @@ char *URLParse_string(URLParse self, void *ctx) {
 			 self->fragment);
 };
 
-VIRTUAL(URLParse, Object)
+VIRTUAL(URLParse, Object) {
     VMETHOD(Con) = URLParse_Con;
     VMETHOD(string) = URLParse_string;
     VMETHOD(parse) = URLParse_parse;
-END_VIRTUAL
+} END_VIRTUAL
 
 /** Following is the implementation of the basic RDFValue types */
 /** base class */
@@ -139,9 +139,9 @@ static RDFValue RDFValue_Con(RDFValue self) {
   return self;
 };
 
-VIRTUAL(RDFValue, Object)
+VIRTUAL(RDFValue, Object) {
     VMETHOD(Con) = RDFValue_Con;
-END_VIRTUAL
+} END_VIRTUAL
 
 // Encode integers for storage
 static TDB_DATA *XSDInteger_encode(RDFValue self) {
@@ -186,7 +186,7 @@ static int XSDInteger_parse(RDFValue self, char *serialised) {
   return 1;
 };
 
-VIRTUAL(XSDInteger, RDFValue)
+VIRTUAL(XSDInteger, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
 
    // This is our official data type - or at least what raptor gives us
@@ -200,8 +200,7 @@ VIRTUAL(XSDInteger, RDFValue)
    VMETHOD(super.parse) = XSDInteger_parse;
    
    VMETHOD(set) = XSDInteger_set;
-END_VIRTUAL
-
+} END_VIRTUAL
 
 // Encode strings for storage
 static TDB_DATA *XSDString_encode(RDFValue self) {
@@ -251,7 +250,7 @@ static int XSDString_parse(RDFValue self, char *serialise) {
   return 1;
 };
 
-VIRTUAL(XSDString, RDFValue)
+VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = "XSD:String";
 
@@ -261,7 +260,7 @@ VIRTUAL(XSDString, RDFValue)
    VMETHOD(super.parse) = XSDString_parse;
 
    VMETHOD(set) = XSDString_set;
-END_VIRTUAL
+} END_VIRTUAL 
 
 // Encode urn for storage
 static TDB_DATA *RDFURN_encode(RDFValue self) {
@@ -383,7 +382,7 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
   return result;
 };
 
-VIRTUAL(RDFURN, RDFValue)
+VIRTUAL(RDFURN, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
    VATTR(super.dataType) = "rdf:urn";
 
@@ -397,7 +396,7 @@ VIRTUAL(RDFURN, RDFValue)
    VMETHOD(add) = RDFURN_add;
    VMETHOD(copy) = RDFURN_copy;
    VMETHOD(relative_name) = RDFURN_relative_name;
-END_VIRTUAL
+} END_VIRTUAL
 
 static TDB_DATA *XSDDatetime_encode(RDFValue self) {
   XSDDatetime this = (XSDDatetime)self;
@@ -453,7 +452,7 @@ static int XSDDatetime_parse(RDFValue self, char *serialised) {
   return 1;
 };
 
-VIRTUAL(XSDDatetime, RDFValue)
+VIRTUAL(XSDDatetime, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = "XSD:DateTime";
    VATTR(super.raptor_literal_datatype) = raptor_new_uri(			\
@@ -465,15 +464,22 @@ VIRTUAL(XSDDatetime, RDFValue)
    VMETHOD(super.parse) = XSDDatetime_parse;
 
    VMETHOD(set) = XSDDatetime_set;
-END_VIRTUAL
+} END_VIRTUAL
 
 
 /* This RDF_Registry is a lookup table of class handlers and their
    IDs.
 
    The way this works is that when we initialise all modules register
-   their class handlers in this Registry array
+   their class handlers in this Registry array. If we encounter these
+   dataTypes when parsing an RDF file, we instantiate an object from
+   the class registery and call its parse method to deserialise it.
 
+   You can extend this by creating your own private dataTypes - you
+   will need to subclass RDFValue and call register_rdf_value_class()
+   to ensure your class is registered - this way when we encounter
+   such an item in the information file we will call your class to
+   parse it.
  */
 Cache RDF_Registry = NULL;
 		
@@ -630,13 +636,12 @@ static RDFParser RDFParser_Con(RDFParser self) {
   return self;
 };
 
-VIRTUAL(RDFParser, Object)
+VIRTUAL(RDFParser, Object) {
      VMETHOD(triples_handler) = triples_handler;
      VMETHOD(message_handler) = message_handler;
      VMETHOD(parse) = RDFParser_parse;
      VMETHOD(Con) = RDFParser_Con;
-END_VIRTUAL
-
+} END_VIRTUAL
 
 /*** RDF serialization methods */
 
@@ -763,20 +768,14 @@ static void RDFSerializer_close(RDFSerializer self) {
   CALL(self->fd, close);
 };
 
-VIRTUAL(RDFSerializer, Object)
+VIRTUAL(RDFSerializer, Object) {
      VMETHOD(Con) = RDFSerializer_Con;
      VMETHOD(serialize_urn) = RDFSerializer_serialize_urn;
      VMETHOD(close) = RDFSerializer_close;
-END_VIRTUAL
+} END_VIRTUAL
 
 
 /*** Convenience functions */
-		    // FIXME - this is not thread safe - remove it -
-		    // use the new_* functions below.
-static XSDInteger integer_cache = NULL;
-static XSDString string_cache = NULL;
-static RDFURN urn_cache = NULL;
-
 RDFValue rdfvalue_from_int(void *ctx, uint64_t value) {
   XSDInteger result = new_XSDInteger(ctx);
 

@@ -164,9 +164,9 @@ static int dump_bevy(ImageWorker this) {
   return result;
 };
 
-VIRTUAL(ImageWorker, AFFObject)
+VIRTUAL(ImageWorker, AFFObject) {
      VMETHOD_BASE(ImageWorker, Con) = ImageWorker_Con;
-END_VIRTUAL
+} END_VIRTUAL
 
 static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   Image this=(Image)self;
@@ -532,11 +532,16 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
   return len;
 };
 
-VIRTUAL(Image, FileLikeObject)
+VIRTUAL(Image, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = Image_Con;
 
      VMETHOD_BASE(FileLikeObject, read) = Image_read;
      VMETHOD_BASE(FileLikeObject, write) = Image_write;
      VMETHOD_BASE(FileLikeObject,close) = Image_close;
-END_VIRTUAL
+} END_VIRTUAL
 
+void image_init() {
+  Image_init();
+  register_type_dispatcher(AFF4_IMAGE, (AFFObject)GETCLASS(Image));
+
+};
