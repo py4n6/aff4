@@ -32,6 +32,8 @@ CLASS(RDFParser, Object)
      char message[BUFF_SIZE];
      jmp_buf env;
 
+     RDFURN urn;
+
      void METHOD(RDFParser, triples_handler, const raptor_statement *triple);
      void METHOD(RDFParser, message_handler, raptor_locator* locator, const char *message);
 

@@ -167,7 +167,7 @@ static int XSDInteger_decode(RDFValue this, int fd, int length) {
   return read(fd, &self->value, length);
 };
 
-static char *XSDInteger_serialise(RDFValue self) {
+static void *XSDInteger_serialise(RDFValue self) {
   XSDInteger this = (XSDInteger)self;
 
   if(this->serialised) 
@@ -178,14 +178,27 @@ static char *XSDInteger_serialise(RDFValue self) {
   return this->serialised;
 };
 
+static int XSDInteger_parse(RDFValue self, char *serialised) {
+  XSDInteger this = (XSDInteger)self;
+
+  this->value = strtoll(serialised, NULL, 0);
+
+  return 1;
+};
+
 VIRTUAL(XSDInteger, RDFValue)
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = "xsd:integer";
+
+   // This is our official data type - or at least what raptor gives us
+   VATTR(super.dataType) = "http://www.w3.org/2001/XMLSchema#integer";
+   VATTR(super.raptor_literal_datatype) = raptor_new_uri(		\
+		   (const unsigned char*)VATTR(super.dataType));
 
    VMETHOD(super.encode) = XSDInteger_encode;
    VMETHOD(super.decode) = XSDInteger_decode;
    VMETHOD(super.serialise) = XSDInteger_serialise;
-
+   VMETHOD(super.parse) = XSDInteger_parse;
+   
    VMETHOD(set) = XSDInteger_set;
 END_VIRTUAL
 
@@ -230,13 +243,22 @@ static char *XSDString_serialise(RDFValue self) {
   return this->value;
 };
 
+static int XSDString_parse(RDFValue self, char *serialise) {
+  XSDString this = (XSDString)self;
+
+  this->value = talloc_strdup(self, serialise);
+  
+  return 1;
+};
+
 VIRTUAL(XSDString, RDFValue)
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = "xsd:string";
+   VATTR(super.dataType) = "XSD:String";
 
    VMETHOD(super.encode) = XSDString_encode;
    VMETHOD(super.decode) = XSDString_decode;
    VMETHOD(super.serialise) = XSDString_serialise;
+   VMETHOD(super.parse) = XSDString_parse;
 
    VMETHOD(set) = XSDString_set;
 END_VIRTUAL
@@ -297,6 +319,12 @@ static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
   CALL(result, set, self->value);
 
   return result;
+};
+
+static int RDFURN_parse(RDFValue self, char *serialised) {
+  RDFURN_set(self, serialised);
+
+  return 1;
 };
 
 static char *illegal_url_chars = "|?[]\\+<>:;\'\",*&";
@@ -363,11 +391,80 @@ VIRTUAL(RDFURN, RDFValue)
    VMETHOD(super.encode) = RDFURN_encode;
    VMETHOD(super.decode) = RDFURN_decode;
    VMETHOD(super.serialise) = RDFURN_serialise;
+   VMETHOD(super.parse) = RDFURN_parse;
 
    VMETHOD(set) = RDFURN_set;
    VMETHOD(add) = RDFURN_add;
    VMETHOD(copy) = RDFURN_copy;
    VMETHOD(relative_name) = RDFURN_relative_name;
+END_VIRTUAL
+
+static TDB_DATA *XSDDatetime_encode(RDFValue self) {
+  XSDDatetime this = (XSDDatetime)self;
+  TDB_DATA *result = talloc(self, TDB_DATA);
+
+  result->dptr = (unsigned char *)&this->value;
+  result->dsize = sizeof(this->value);
+
+  return result;
+};
+
+static int XSDDatetime_decode(RDFValue self, int fd, int length) {
+  XSDDatetime this = (XSDDatetime)self;
+
+  return read(fd, &this->value, sizeof(this->value));
+};
+
+static RDFValue XSDDatetime_set(XSDDatetime self, struct timeval time) {
+  XSDDatetime this = (XSDDatetime)self;
+
+  this->value = time;
+
+  return self;
+};
+
+#define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
+
+static char *XSDDatetime_serialise(RDFValue self) {
+  XSDDatetime this = (XSDDatetime)self;
+  char buff[BUFF_SIZE];
+
+  if(this->serialised) talloc_free(this->serialised);
+
+  if(BUFF_SIZE > strftime(buff, BUFF_SIZE, DATETIME_FORMAT_STR,
+			  gmtime(&this->value.tv_sec))) {
+    this->serialised = talloc_asprintf(this, "%s.%06u+%02u:%02u", buff,
+				       this->value.tv_usec,
+				       this->tz.tz_minuteswest / 60,
+				       this->tz.tz_minuteswest % 60);
+    return this->serialised;
+  };
+
+  return NULL;
+};
+
+static int XSDDatetime_parse(RDFValue self, char *serialised) {
+  XSDDatetime this = (XSDDatetime)self;
+  struct tm time;
+  char *next = strptime(serialised, DATETIME_FORMAT_STR, &time);
+
+  this->value.tv_sec = mktime(&time);
+
+  return 1;
+};
+
+VIRTUAL(XSDDatetime, RDFValue)
+   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+   VATTR(super.dataType) = "XSD:DateTime";
+   VATTR(super.raptor_literal_datatype) = raptor_new_uri(			\
+                    (const unsigned char*)VATTR(super.dataType));
+
+   VMETHOD(super.encode) = XSDDatetime_encode;
+   VMETHOD(super.decode) = XSDDatetime_decode;
+   VMETHOD(super.serialise) = XSDDatetime_serialise;
+   VMETHOD(super.parse) = XSDDatetime_parse;
+
+   VMETHOD(set) = XSDDatetime_set;
 END_VIRTUAL
 
 
@@ -399,23 +496,28 @@ void register_rdf_value_class(RDFValue classref) {
 
 /** This function initialises the RDF types registry. */
 void rdf_init() {
+  raptor_init();
   init_rdf_luts();
   RDFValue_init();
   XSDInteger_init();
   XSDString_init();
   RDFURN_init();
+  XSDDatetime_init();
   
   // Register all the known basic types
   register_rdf_value_class((RDFValue)GETCLASS(XSDInteger));
   register_rdf_value_class((RDFValue)GETCLASS(XSDString));
   register_rdf_value_class((RDFValue)GETCLASS(RDFURN));
+  register_rdf_value_class((RDFValue)GETCLASS(XSDDatetime));
 };
 
 /** RDF parsing */
 static void triples_handler(RDFParser self, const raptor_statement* triple) 
 {
-  const char *urn, *attribute, *value;
+  const char *urn_str, *attribute, *value_str, *type_str;
   enum resolver_data_type type;
+  RDFValue class_ref = (RDFValue)GETCLASS(XSDString);
+  RDFValue result = NULL;
 
   // Ignore anonymous and invalid triples.
   if(triple->subject_type != RAPTOR_IDENTIFIER_TYPE_RESOURCE ||
@@ -423,30 +525,28 @@ static void triples_handler(RDFParser self, const raptor_statement* triple)
     return;
 
   /* do something with the triple */
-#if 0
-  urn = (const char *)raptor_uri_as_string(triple->subject);  
+  urn_str = (const char *)raptor_uri_as_string(triple->subject);  
   attribute = (const char *)raptor_uri_as_string(triple->predicate);
+  value_str = (const char *)raptor_uri_as_string(triple->object);
+  type_str = (const char *)raptor_uri_as_string(triple->object_literal_datatype);
 
-  switch(triple->object_type) {
-  case RAPTOR_IDENTIFIER_TYPE_LITERAL:
-  case RAPTOR_IDENTIFIER_TYPE_XML_LITERAL:
-    value = triple->object;
-    type = RESOLVER_DATA_STRING;
-    break;
+  CALL(self->urn, set, urn_str);
 
-  case RAPTOR_IDENTIFIER_TYPE_RESOURCE:
-    value = (const char *)raptor_uri_as_string(triple->object);
-    type = RESOLVER_DATA_URN;
-    break;
+  printf("Parsed %s %s\n", urn_str, attribute);
 
-  default:
-    DEBUG("Unable to parse object type %u", triple->object_type);
-    return;
+  if(triple->object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
+    class_ref = (RDFValue)GETCLASS(RDFURN);
+  } else if(triple->object_literal_datatype) {
+    class_ref = CALL(RDF_Registry, get_item, 
+		     ZSTRING_NO_NULL(type_str));
   };
-  
-  CALL(oracle, set, urn, attribute, value, type);
-#endif
 
+  result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
+  if(result) {
+    CALL(result, parse, value_str);
+    CALL(oracle, add_value, self->urn, attribute, (RDFValue)result);
+    talloc_free(result);
+  };
 }
 
 static void message_handler(RDFParser self, raptor_locator* locator, 
@@ -525,6 +625,8 @@ static int RDFParser_parse(RDFParser self, FileLikeObject fd, char *format, char
 };
 
 static RDFParser RDFParser_Con(RDFParser self) {
+  self->urn = new_RDFURN(self);
+
   return self;
 };
 
@@ -627,6 +729,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
     triple.object_type = value->raptor_type;
     triple.object = CALL(value, serialise);
+    triple.object_literal_datatype = value->raptor_literal_datatype;
 
     raptor_serialize_statement(self->rdf_serializer, &triple);
     raptor_free_uri((raptor_uri*)triple.predicate);
@@ -664,8 +767,6 @@ VIRTUAL(RDFSerializer, Object)
      VMETHOD(Con) = RDFSerializer_Con;
      VMETHOD(serialize_urn) = RDFSerializer_serialize_urn;
      VMETHOD(close) = RDFSerializer_close;
-
-     raptor_init();
 END_VIRTUAL
 
 
@@ -706,4 +807,8 @@ XSDInteger new_XSDInteger(void *ctx) {
 
 XSDString new_XSDString(void *ctx) {
   return CONSTRUCT(XSDString, RDFValue, super.Con, ctx);
+};
+
+XSDDatetime new_XSDDateTime(void *ctx) {
+  return CONSTRUCT(XSDDatetime, RDFValue, super.Con, ctx);
 };

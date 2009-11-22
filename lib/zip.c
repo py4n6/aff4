@@ -31,6 +31,11 @@ CLASS(ZipFileStream, FileLikeObject)
      XSDInteger compress_size;
      XSDInteger compression;
 
+     // For now we just decompress the entire segment into memory if
+     // required
+     char *cbuff;
+     char *buff;
+
      // We calculate the SHA256 hash of each archive member
      EVP_MD_CTX digest;
 
@@ -590,15 +595,16 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	strncpy(tmp, (char *)filename->value, BUFF_SIZE);
 	base_name = basename(tmp);
 
-	// We identify streams by their filename ending with "properties"
-	// and parse out their properties:
+	// We identify streams by their filename being information.encoding
+	// for example information.turtle. The basename is then taken
+	// to be the volume name.
 	if(!memcmp(AFF4_INFORMATION, base_name, properties_length)) {
 	  FileLikeObject fd = CALL(self, open_member, escaped_filename, 'r',
 				   ZIP_STORED);
 	  if(fd) {
 	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
 	    
-	    CALL(parser, parse, fd, (char *)filename->value + properties_length, base_name);
+	    CALL(parser, parse, fd, (char *)base_name + properties_length, URNOF(self)->value);
 	    talloc_free(parser);
 	    CALL(oracle, cache_return, (AFFObject)fd);
 	  };
@@ -632,135 +638,6 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
   
   talloc_free(ctx);
   return 0;
-};
-
-/*** NOTE - The buffer callers receive will not be owned by the
-     callers. Callers should never free it nor steal it. The buffer is
-     owned by the cache system and callers merely borrow a reference
-     to it. length will be adjusted to the size of the buffer.
-*/
-static char *ZipFile_read_member(ZipFile self, void *ctx,
-				 char *member_name, 
-				 int *length) {
-  char *buffer;
-  FileLikeObject fd;
-
-  // FIXME - these should be class members so we dont need to
-  // reconstruct them all the time.
-  XSDInteger file_size = new_XSDInteger(self);
-  XSDInteger compression_method = new_XSDInteger(self);
-  XSDInteger compressed_length = new_XSDInteger(self);
-  XSDInteger file_offset = new_XSDInteger(self);
-  XSDInteger file_crc = new_XSDInteger(self);
-  RDFURN volume_urn = new_RDFURN(self);
-  RDFURN fd_urn = new_RDFURN(self);
-  RDFURN filename = URNOF(self)->copy(URNOF(self), self);
-
-  CALL(filename, add, member_name);
-  
-  CALL(compression_method, set, ZIP_STORED);  
-  CALL(oracle, resolve2, filename, AFF4_SIZE, 
-       (RDFValue)file_size);
-
-  CALL(oracle, resolve2, filename, AFF4_VOLATILE_COMPRESSION, 
-       (RDFValue)compression_method);
-
-  CALL(oracle, resolve2, filename, AFF4_VOLATILE_FILE_OFFSET,
-       (RDFValue)file_offset);
-  
-  // This is the volume the filename is stored in
-  CALL(oracle, resolve2, filename, AFF4_STORED,
-       (RDFValue)volume_urn);
-
-  // This is the file that backs this volume
-  CALL(oracle, resolve2, volume_urn, AFF4_STORED,
-       (RDFValue)fd_urn);
-  
-  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
-  if(!fd) goto exit;
-
-  // We know how large we would like the buffer so we make it that big
-  // (bit extra for null termination).
-  buffer = talloc_size(ctx, file_size->value + 2);
-  *length = file_size->value;
-
-  // Go to the start of the file
-  CALL(fd, seek, file_offset->value, SEEK_SET);
-
-  if(compression_method->value == ZIP_DEFLATE) {
-    char *tmp;
-    z_stream strm;
-    
-    CALL(oracle, resolve2, filename, AFF4_VOLATILE_COMPRESSED_SIZE,
-	 (RDFValue)compressed_length);
-    
-    tmp = talloc_size(buffer, compressed_length->value);
-    memset(&strm, 0, sizeof(strm));
-
-    //Now read the data in
-    if(CALL(fd, read, tmp, compressed_length->value) != compressed_length->value)
-      goto error;
-
-    // Decompress it
-    /** Set up our decompressor */
-    strm.next_in = (unsigned char *)tmp;
-    strm.avail_in = compressed_length->value;
-    strm.next_out = (unsigned char *)buffer;
-    strm.avail_out = file_size->value;
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-
-    if(inflateInit2(&strm, -15) != Z_OK) {
-      RaiseError(ERuntimeError, "Failed to initialise zlib");
-      goto error;
-    };
-
-    if(inflate(&strm, Z_FINISH) !=Z_STREAM_END || \
-       strm.total_out != file_size->value) {
-      RaiseError(ERuntimeError, "Failed to fully decompress chunk (%s)", strm.msg);
-      goto error;
-    };
-
-    inflateEnd(&strm);
-
-  } else if(compression_method->value == ZIP_STORED) {
-    if(CALL(fd, read, buffer, *length) != *length) {
-      RaiseError(EIOError, "Unable to read %d bytes from %s@%lld", *length, 
-		 URNOF(fd), fd->readptr);
-      goto error;
-    };
-
-  } else {
-    RaiseError(EInvalidParameter, "Compression type %X unknown", compression_method);
-    goto error;
-  };
-
-  // Here we have a good buffer - now calculate the crc32
-  if(1){
-    uLong crc = crc32(0L, Z_NULL, 0);
-
-    CALL(oracle, resolve2, filename, AFF4_VOLATILE_CRC,
-	 (RDFValue)file_crc);
-
-    crc = crc32(crc, (unsigned char *)buffer,
-		file_size->value);
-
-    if(crc != file_crc->value) {
-      RaiseError(EIOError, 
-		 "CRC not matched on decompressed file %s", filename);
-      goto error;
-    };
-  };
-
-  CALL(oracle, cache_return, (AFFObject)fd);
-  return buffer;
-
- error:
-  CALL(oracle, cache_return, (AFFObject)fd);
-  talloc_free(buffer);
-  
- exit:
-  return NULL;
 };
 
 static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char mode,
@@ -851,17 +728,6 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     break;
   };
   case 'r': {
-    // Check that this volume actually contains the requested member:
-    if(!CALL(oracle, is_set, URNOF(self), AFF4_CONTAINS, (RDFValue)filename)) {
-      RaiseError(ERuntimeError, "Volume does not contain member %s", filename);
-      goto error;
-    };
-
-    if(compression != ZIP_STORED) {
-      RaiseError(ERuntimeError, "Unable to open seekable member for compressed members.");
-      break;
-    };
-
     result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
 				       ZipFileStream, Con, self, 
 				       filename, self->storage_urn,
@@ -1127,8 +993,6 @@ static int ZipFile_writestr(ZipFile self, char *filename,
 };
 
 VIRTUAL(ZipFile, AFFObject)
-//VMETHOD(Con) = ZipFile_Con;
-     VMETHOD(read_member) = ZipFile_read_member;
      VMETHOD(open_member) = ZipFile_open_member;
      VMETHOD(close) = ZipFile_close;
      VMETHOD(writestr) = ZipFile_writestr;
@@ -1189,15 +1053,6 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   EVP_DigestInit(&self->digest, EVP_sha256());
   //EVP_DigestInit(&self->digest, EVP_md5());
 
-  // If we are opened for writing we need to lock the file_urn so
-  // noone else can write on top of us. We do this by retaining a
-  // reference to the volume fd and not returning it to the resolver
-  // until we are closed.
-  if(mode=='w') {
-    self->file_fd = file_fd;
-  };
-
-  self->compression = new_XSDInteger(self);
   self->file_offset = new_XSDInteger(self);
 
   if(!CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_COMPRESSION,
@@ -1221,15 +1076,76 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
     
   DEBUG("ZipFileStream: created %s\n", STRING_URNOF(self));
 
-  if(mode=='w' && self->compression->value == ZIP_DEFLATE) {
-    // Initialise the stream compressor
-    memset(&self->strm, 0, sizeof(self->strm));
-    self->strm.next_in = talloc_size(self, BUFF_SIZE);
-    self->strm.next_out = talloc_size(self, BUFF_SIZE);
+  // If we are opened for writing we need to lock the file_urn so
+  // noone else can write on top of us. We do this by retaining a
+  // reference to the volume fd and not returning it to the resolver
+  // until we are closed.
+  self->file_fd = file_fd;
 
-    if(deflateInit2(&self->strm, 9, Z_DEFLATED, -15,
-		    9, Z_DEFAULT_STRATEGY) != Z_OK) {
+  if(self->compression->value == ZIP_DEFLATE) {
+    switch(mode) {
+    case 'w': {
+      // Initialise the stream compressor
+      memset(&self->strm, 0, sizeof(self->strm));
+      self->strm.next_in = talloc_size(self, BUFF_SIZE);
+      self->strm.next_out = talloc_size(self, BUFF_SIZE);
+      
+      if(deflateInit2(&self->strm, 9, Z_DEFLATED, -15,
+		      9, Z_DEFAULT_STRATEGY) != Z_OK) {
       RaiseError(ERuntimeError, "Unable to initialise zlib (%s)", self->strm.msg);
+      goto error;
+      };
+      break;
+    };
+    case 'r': {
+      // We assume that a compressed segment may fit in memory at once
+      // This is required since it can not be seeked. All AFF4
+      // compressed segments should be able to fit at once.
+      FileLikeObject fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
+      z_stream strm;
+
+      CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
+	   (RDFValue)self->compress_size);
+
+      self->cbuff = talloc_size(self, self->compress_size->value);
+      self->buff = talloc_size(self, self->super.size);
+      if(!self->cbuff || !self->buff) {
+	RaiseError(ERuntimeError, "Compressed segment too large to handle");
+	goto error;
+      };
+
+      // Go to the start of segment
+      CALL(fd, seek, self->file_offset->value, SEEK_SET);
+
+      //Now read the data in
+      if(CALL(fd, read, self->cbuff, self->compress_size->value) != self->compress_size->value)
+	goto error;
+      
+      // Decompress it
+      /** Set up our decompressor */
+      strm.next_in = (unsigned char *)self->cbuff;
+      strm.avail_in = self->compress_size->value;
+      strm.next_out = (unsigned char *)self->buff;
+      strm.avail_out = self->super.size->value;
+      strm.zalloc = Z_NULL;
+      strm.zfree = Z_NULL;
+
+      if(inflateInit2(&strm, -15) != Z_OK) {
+	RaiseError(ERuntimeError, "Failed to initialise zlib");
+	goto error;
+      };
+
+      if(inflate(&strm, Z_FINISH) !=Z_STREAM_END ||	\
+	 strm.total_out != self->super.size->value) {
+	RaiseError(ERuntimeError, "Failed to fully decompress chunk (%s)", strm.msg);
+	goto error;
+      };
+      
+      inflateEnd(&strm);
+      break;
+    };
+    default:
+      RaiseError(ERuntimeError, "Mode %c not supported", mode);
       goto error;
     };
   };
@@ -1303,7 +1219,7 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
 static int ZipFileStream_read(FileLikeObject self, char *buffer,
 			      unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
-  int len=0;
+
   FileLikeObject fd;
 
   // We only read as much data as there is
@@ -1313,30 +1229,23 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
     /** Position our write pointer */
     fd = (FileLikeObject)CALL(oracle, open, this->file_urn, 'r');
     CALL(fd, seek, this->file_offset->value + self->readptr, SEEK_SET);
-    len = CALL(fd, read, buffer, length);
-    self->readptr += len;
+    length = CALL(fd, read, buffer, length);
+    self->readptr += length;
     CALL(oracle, cache_return, (AFFObject)fd);
 
     // We cheat here and decompress the entire member, then copy whats
     // needed out
   } else if(this->compression->value == ZIP_DEFLATE) {
-    int offset;
+    // clip the length to the buffer
+    int available_to_read = self->size->value - self->readptr;
 
-    if(!self->data) {
-      ZipFile container = (ZipFile)CALL(oracle, open, this->container_urn, 'r');
-      int length;
-      if(!container) return -1;
+    length = min(length, available_to_read);
 
-      self->data = CALL(container, read_member, self, STRING_URNOF(self), &length);
-      self->size->value = length;
-      CALL(oracle, cache_return, (AFFObject)container);
-    };
+    memcpy(buffer, this->buff + self->readptr, length);
+    self->readptr += length;
+  };
 
-    offset = min(self->readptr, self->size->value);
-    len = max(self->readptr - offset, self->size->value);
-    memcpy(buffer, self->data + offset, len);
-  }
-  return len;
+  return length;
 };
 
 static void ZipFileStream_close(FileLikeObject self) {

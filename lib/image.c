@@ -7,16 +7,20 @@
 
   Defined attributes:
 
-  aff2:type                "image"
-  aff2:chunk_size          The size of the chunk in bytes (32k)
-  aff2:chunks_in_segment   The number of chunks in each segment (2048)
-  aff2:stored              The URN of the object which stores this
+  aff4:type                "image"
+  aff4:chunk_size          The size of the chunk in bytes (32k)
+  aff4:chunks_in_segment   The number of chunks in each segment (2048)
+  aff4:stored              The URN of the object which stores this
                            stream - This must be a "volume" object
-  aff2:size                The size of this stream in bytes (0)
+  aff4:size                The size of this stream in bytes (0)
 
   Note that bevies are segment objects with an implied URN of:
 
   "%s/%08d" % (Image.urn, bevy_number)
+
+
+This implementation uses threads to compress bevies concurrently. We
+also maintain a chunk cache for faster read access.
 
 **************************************************************/
 
@@ -334,6 +338,14 @@ static void Image_close(FileLikeObject self) {
 
   CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
        rdfvalue_from_string(this, AFF4_IMAGE));
+
+  {
+    XSDDatetime time = new_XSDDateTime(this);
+
+    gettimeofday(&time->value,NULL);
+    CALL(oracle, set_value, URNOF(this), AFF4_TIMESTAMP,
+	 (RDFValue)time);
+  };
 
   // FIXME - implement sha256 RDF dataType
 #if 0

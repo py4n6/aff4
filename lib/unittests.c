@@ -667,14 +667,16 @@ int main() {
 
   AFF4_Init();
 
-  if(1){
-    URLParse p = CONSTRUCT(URLParse, URLParse, Con, NULL,
-			   "hello.txt");
-			   //			   "/foobar/hello.txt");
-    //"http://localhost/foobar.py?a=b#frag");
-    printf("%s\n", CALL(p, string, p));
-    printf("scheme: %s netloc='%s',  query='%s', fragment='%s'\n", 
-	   p->scheme, p->netloc, p->query, p->fragment);
+  {
+    XSDDatetime t = new_XSDDateTime(NULL);
+    struct timeval now;
+    
+    gettimeofday(&now, NULL);
+    CALL(t,set, now);
+    
+    printf("Time now is %s\n", CALL(t,super.serialise));
+
+    talloc_free(t);
   };
 
 #ifdef RESOLVER_TESTS
@@ -684,8 +686,8 @@ int main() {
 
 #ifdef ZIPFILE_TESTS
   //zipfile_test1();
-  zipfile_test2();
-  //zipfile_test_load();
+  //zipfile_test2();
+  zipfile_test_load();
 #endif
 
   /*

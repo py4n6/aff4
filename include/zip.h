@@ -316,12 +316,6 @@ CLASS(ZipFile, AFFObject)
      /** A zip file is opened on a file like object */
      ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
 
-// Fetch a member as a string - this is suitable for small memebrs
-// only as we allocate memory for it. The buffer callers receive will
-// be owned by ctx. 
-     char *METHOD(ZipFile, read_member, void *ctx,
-		  char *filename, int *len);
-
 // This method opens an existing member or creates a new one. We
 // return a file like object which may be used to read and write the
 // member. If we open a member for writing the zip file will be locked

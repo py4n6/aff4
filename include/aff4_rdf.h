@@ -8,6 +8,7 @@
 #include <setjmp.h>
 #include "misc.h"
 #include "aff4_utils.h"
+#include <sys/time.h>
 
 /**** A class used to parse URNs */
 CLASS(URLParse, Object)
@@ -35,6 +36,9 @@ CLASS(RDFValue, Object)
       char *dataType;
       int id;
       raptor_identifier_type raptor_type;
+
+      // This is only required for special handling
+      raptor_uri *raptor_literal_datatype;
 
       RDFValue METHOD(RDFValue, Con);
 
@@ -89,6 +93,14 @@ CLASS(XSDString, RDFValue)
      char *METHOD(XSDString, get);
 END_CLASS
 
+CLASS(XSDDatetime, RDFValue)
+     struct timeval value;
+     struct timezone tz;
+     char *serialised;
+
+     RDFValue METHOD(XSDDatetime, set, struct timeval time);
+END_CLASS
+
 CLASS(RDFURN, RDFValue)
      char *value;
 
@@ -130,6 +142,7 @@ RDFValue rdfvalue_from_string(void *ctx, char *value);
 RDFURN new_RDFURN(void *ctx);
 XSDInteger new_XSDInteger(void *ctx);
 XSDString new_XSDString(void *ctx);
+XSDDatetime new_XSDDateTime(void *ctx);
 
 void rdf_init();
 
