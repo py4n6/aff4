@@ -40,3 +40,5 @@ tools/aff4imager
 tools/affuse
 tools/common.h
 tools/fsbuilder
+*.tdb
+unittests

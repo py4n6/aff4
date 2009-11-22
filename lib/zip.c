@@ -918,13 +918,21 @@ static void dump_volume_properties(ZipFile self) {
   RDFSerializer serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self, 
 				       STRING_URNOF(self), fd);
   RDFURN urn = new_RDFURN(NULL);
+  XSDString type = new_XSDString(urn);
 
   CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS);
   while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
-    CALL(serializer, serialize_urn, urn);
+
+    // Only serialise URNs which are not segments
+    if(CALL(oracle, resolve2, urn, AFF4_TYPE, (RDFValue)type) &&
+       strcmp(type->value, AFF4_SEGMENT)) {
+      CALL(serializer, serialize_urn, urn);
+    };
   };
 
   CALL(serializer, close);
+
+  talloc_free(urn);
 };
 
 

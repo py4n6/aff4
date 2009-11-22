@@ -322,6 +322,19 @@ static void Image_close(FileLikeObject self) {
     };
   };
 
+  // Now store all our parameters in the resolver
+  CALL(oracle, set_value, URNOF(this), AFF4_CHUNK_SIZE,
+       (RDFValue)this->chunk_size);
+
+  CALL(oracle, set_value, URNOF(this), AFF4_COMPRESSION,
+       (RDFValue)this->compression);
+
+  CALL(oracle, set_value, URNOF(this), AFF4_CHUNKS_IN_SEGMENT,
+       (RDFValue)this->chunks_in_segment);
+
+  CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
+       rdfvalue_from_string(this, AFF4_IMAGE));
+
   // FIXME - implement sha256 RDF dataType
 #if 0
   {
