@@ -165,10 +165,6 @@ CLASS(Resolver, AFFObject)
        */
      RDFValue METHOD(Resolver, iter_next_alloc, void *ctx, RESOLVER_ITER *iter);
 
-//Stores the uri and the value in the resolver. The value and uri will
-//be stolen.
-     void METHOD(Resolver, add, RDFURN uri, char *attribute, RDFValue value);
-
      // Exports all the properties to do with uri - user owns the
      // buffer. context is the URN which will ultimately hold the
      // exported file. If uri is the same as context, we write the
@@ -190,9 +186,6 @@ CLASS(Resolver, AFFObject)
 
      // This is the new method that will deprecate the previous method
      void METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
-
-     //This returns 1 if the statement is set
-     int METHOD(Resolver, is_set, RDFURN uri, char *attribute, RDFValue value);
 
      // Parses the properties file
      void METHOD(Resolver, parse, char *context, char *text, int len);

@@ -64,37 +64,6 @@ struct dispatch_t volume_handlers[] = {
 /** This is the global oracle - it knows everything about everyone. */
 Resolver oracle = NULL;
 
-/** We need to call these initialisers explicitely or the class
-    references wont work.
-*/
-/** Our own special add routine */
-static void oracle_add(Resolver self, RDFURN uri, char *attribute, 
-		       RDFValue value) {
-  Resolver i;
-
-  // Call the real add method for the oracle itself
-  __Resolver.add(self, uri, attribute, value);
-
-  // Add these to all the other identities
-  list_for_each_entry(i, &self->identities, identities) {
-    CALL(i, add, uri, attribute, value);
-  };
-};
-
-// If attribute is NULL - it means we remove all attributes for this
-// URN and then the URN itself
-static void oracle_del(Resolver self, RDFURN uri, char *attribute) {
-  Resolver i;
-
-  // Call the real add method for the oracle itself
-  __Resolver.del(self, uri, attribute);
-
-  // Add these to all the other identities
-  list_for_each_entry(i, &self->identities, identities) {
-    CALL(i, del, uri, attribute);
-  };
-};
-
 void register_type_dispatcher(char *type, AFFObject *classref) {
   Cache tmp;
 
@@ -102,6 +71,7 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
   if(!type_dispatcher) {
     type_dispatcher = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
     type_dispatcher->static_objects = 1;
+    talloc_set_name_const(type_dispatcher, "Type Dispatcher");
   };
 
   tmp = CALL(type_dispatcher, get, ZSTRING_NO_NULL(type));
@@ -145,11 +115,8 @@ void AFF4_Init(void) {
     // Create the oracle - it has a special add method which distributes
     // all the adds to the other identities
     oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
-    oracle->del = oracle_del;
-    oracle->add = oracle_add;
   };
 };
-
 
 /** Implementation of Caches */
 
@@ -787,61 +754,6 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
 };
 
 
-#if 0
-static TDB_DATA *make_tdb_value(void *ctx, void *value_str, 
-				char *type) {
-  TDB_DATA *value = talloc_size(ctx, sizeof(TDB_DATA));
-
-  // Now serialise the data according to its type
-  switch(type) {
-  case RESOLVER_DATA_URN:
-  case RESOLVER_DATA_STRING: {
-    value->dptr = (unsigned char *)value_str;
-    value->dsize = strlen(value_str);
-    break;
-  };
-
-  case RESOLVER_DATA_TDB_DATA: {
-    TDB_DATA *data = (TDB_DATA *)value_str;
-
-    value->dptr = data->dptr;
-    value->dsize = data->dsize;
-    break;
-  };
-
-  case RESOLVER_DATA_UINT16: {
-    value->dptr = talloc_size(value, sizeof(uint16_t));
-    *(uint16_t *)(value->dptr) = *(uint16_t *)value_str;
-
-    value->dsize = sizeof(uint16_t);
-    break;
-  };
-
-  case RESOLVER_DATA_UINT32: {
-    value->dptr = talloc_size(value, sizeof(uint32_t));
-    *(uint32_t *)(value->dptr) = *(uint32_t *)value_str;
-
-    value->dsize = sizeof(uint32_t);
-
-    break;
-  };
-
-  case RESOLVER_DATA_UINT64: {
-    value->dptr = talloc_size(value, sizeof(uint64_t));
-    *(uint64_t *)(value->dptr) = *(uint64_t *)value_str;
-
-    value->dsize = sizeof(uint64_t);
-    break;
-  };
-    
-  default:
-    RaiseError(ERuntimeError, "Unable to serialise items of value %d\n", type);
-  };
-
-  return value;
-};
-#endif
-
 /** This sets a single triple into the resolver replacing previous
     values set for this attribute
 */
@@ -1137,21 +1049,23 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   // Empty schemes default to file:// URLs
   if(strlen(scheme)==0) 
     scheme = "file";
-
+  
   classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(scheme));
   if(!classref && CALL(self, resolve2, urn, AFF4_TYPE, (RDFValue)self->type)) {
     classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(self->type->value));
+    if(!classref) {
+      RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
+      goto error;
+    };
   };
 
-  if(!classref) {
-    RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
-    goto error;
-  };
+  if(!classref) goto error;
   
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(classref, Con, NULL, urn, mode);
   
-  // Make sure the object mode is set
+  // Make sure the object mode is set, name the object for talloc
+  // memory reports and lock it.
   if(result) {
     talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
     ((AFFObject)result)->mode = mode;
@@ -1248,9 +1162,6 @@ static void Resolver_add(Resolver self, RDFURN urn_str,
   return;
 };
 
-static int Resolver_is_set(Resolver self, char *uri, char *attribute, char *value) {
-};
-
 /** Format all the attributes of the object specified by urn */
 static char *Resolver_export_urn(Resolver self, char *urn, char *context) {
 };
@@ -1262,7 +1173,7 @@ static char *Resolver_export_all(Resolver self, char *context) {
 static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
   AFFObject result = (AFFObject)CONSTRUCT_FROM_REFERENCE((*class_reference), 
 							 Con, NULL, NULL, 'w');
-  talloc_set_name(result, "%s (created by resolver)", NAMEOF(class_reference));
+  talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), 'w');
 
   return result;
 };
@@ -1367,15 +1278,12 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(get_iter) = Resolver_get_iter;
      VMETHOD(iter_next) = Resolver_iter_next;
      VMETHOD(iter_next_alloc) = Resolver_iter_next_alloc;
-     VMETHOD(add)  = Resolver_add;
      VMETHOD(export_urn) = Resolver_export_urn;
      VMETHOD(export_all) = Resolver_export_all;
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_return;
-			   // VMETHOD(set) = Resolver_set;
      VMETHOD(set_value) = Resolver_set_value;
      VMETHOD(add_value) = Resolver_add_value;
-			//VMETHOD(is_set) = Resolver_is_set;
      VMETHOD(del) = Resolver_del;
      VMETHOD(parse) = Resolver_parse;
      VMETHOD(lock) = Resolver_lock;

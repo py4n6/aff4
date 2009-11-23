@@ -10,7 +10,8 @@
 #define TEST_FILE "test.zip"
 
 //#define RESOLVER_TESTS 1
-#define ZIPFILE_TESTS 1
+//#define ZIPFILE_TESTS 1
+#define MAP_TESTS 1
 
 #ifdef RESOLVER_TESTS
 #define URN "aff4://hello"
@@ -32,7 +33,7 @@ void resolver_test_1() {
   CALL(oracle, add_value, urn, ATTRIBUTE, (RDFValue)xsd_integer);
 
   CALL(xsd_integer, set, 0);
-  
+
   // Retrieve it
   {
     RESOLVER_ITER iter;
@@ -58,7 +59,7 @@ void resolver_test_1() {
 
       talloc_free(result);
     };
-  }; 
+  };
 
   return;
 };
@@ -92,7 +93,7 @@ void resolver_test_locks() {
     printf("Child %lu Got lock on %s\n", time(NULL) - now, URN);
     sleep(5);
     printf("Child %lu Releasing lock on %s\n", time(NULL) - now, URN);
-    CALL(oracle, unlock, URN, 'w');    
+    CALL(oracle, unlock, URN, 'w');
     // Done
     exit(0);
   };
@@ -112,9 +113,9 @@ void zipfile_test1() {
   CALL(zip, writestr, "hello", ZSTRING("hello world"), 0);
 
   // Open the member foobar for writing
-  out_fd = CALL(zip, open_member, "foobar", 'w', 
+  out_fd = CALL(zip, open_member, "foobar", 'w',
 		ZIP_DEFLATE);
-  
+
   // It worked - now copy /bin/ls into it
   if(out_fd) {
     char buffer[BUFF_SIZE];
@@ -145,7 +146,7 @@ void zipfile_test2() {
   CALL(file_urn, set, FILENAME);
 
   CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)file_urn);
-  
+
   zip = (ZipFile)CALL((AFFObject)zip, finish);
 
   CALL(URNOF(outfd), set, STRING_URNOF(zip));
@@ -159,9 +160,9 @@ void zipfile_test2() {
 
   CALL(oracle, set_value, URNOF(outfd), AFF4_CHUNKS_IN_SEGMENT,
        rdfvalue_from_int(file_urn, 10));
-  
+
   outfd = (FileLikeObject)CALL((AFFObject)outfd, finish);
-  
+
   if(outfd) {
     char buffer[BUFF_SIZE];
     int fd=open("/bin/ls",O_RDONLY);
@@ -169,14 +170,14 @@ void zipfile_test2() {
     while(1) {
       length = read(fd, buffer, BUFF_SIZE);
       if(length == 0) break;
-      
+
       CALL(outfd, write, buffer, length);
     };
-    
+
     // Close the member (finalises the member)
     CALL(outfd, close);
   };
-  
+
   // Close the archive
   CALL(zip, close);
 
@@ -219,8 +220,8 @@ void test1_5() {
     char buffer[BUFF_SIZE];
     int fd=open("/bin/ls",O_RDONLY);
     int length;
-    FileLikeObject out_fd = CALL((ZipFile)zipfile, 
-				 open_member, "foobar", 'w', 
+    FileLikeObject out_fd = CALL((ZipFile)zipfile,
+				 open_member, "foobar", 'w',
 				 ZIP_DEFLATE);
 
     if(!out_fd) return;
@@ -228,7 +229,7 @@ void test1_5() {
     while(1) {
       length = read(fd, buffer, BUFF_SIZE);
       if(length == 0) break;
-      
+
       CALL(out_fd, write, buffer, length);
     };
     CALL(out_fd,close);
@@ -245,7 +246,7 @@ void test1_5() {
 
 /** This tests the cache for reading zip members.
 
-There are two steps: 
+There are two steps:
 
 1) We open the zip file directly to populate the oracle.
 
@@ -263,7 +264,7 @@ void test2() {
   FileLikeObject fd;
   ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL, "file://" TEST_FILE, 'r');
 
-  // This is only needed to populate the oracle  
+  // This is only needed to populate the oracle
   if(!zipfile) return;
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
@@ -285,7 +286,7 @@ void test2() {
   printf("Resolving foobar produced **************\n%s\n******************\n", fd->data);
   diff = (new_time.tv_sec * 1000 + new_time.tv_usec/1000) -
     (epoch_time.tv_sec * 1000 + epoch_time.tv_usec/1000);
-  printf("Decompressed foobar %d times in %d mseconds (%f)\n", 
+  printf("Decompressed foobar %d times in %d mseconds (%f)\n",
 	 TIMES,  diff,
 	 ((float)diff)/TIMES);
 };
@@ -319,13 +320,13 @@ void test_image_create() {
   // Is it ok?
   if(!CALL((AFFObject)zipfile, finish))
     goto error;
-  
+
   // Finished with it for the moment
   //  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now we need to create an Image stream
   image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
-  
+
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
   CALL((AFFObject)image, set_property, "aff2:chunks_in_segment", "2");
@@ -338,7 +339,7 @@ void test_image_create() {
   while(in_fd >= 0) {
     length = read(in_fd, buffer, BUFF_SIZE);
     if(length == 0) break;
-    
+
     CALL((FileLikeObject)image, write, buffer, length);
   };
 
@@ -354,14 +355,14 @@ void test_image_create() {
   CALL(oracle, cache_return, (AFFObject)link);
 
   // Close the zipfile - get it back
-  //  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn); 
+  //  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn);
   CALL((ZipFile)zipfile, close);
-  
+
  error:
   // We are done with that now
   CALL(oracle, cache_return, (AFFObject)image);
   CALL(oracle, cache_return, (AFFObject)zipfile);
-  
+
 };
 
 /** Test reading of the Image stream.
@@ -439,7 +440,7 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   while(in_fd >= 0) {
     length = read(in_fd, buffer, BUFF_SIZE);
     if(length == 0) break;
-    
+
     CALL((FileLikeObject)image, write, buffer, length);
   };
 
@@ -453,7 +454,7 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   CALL(link, link, oracle, volume, URNOF(image), friendly_name);
   CALL((AFFObject)link, finish);
   CALL(oracle, cache_return, (AFFObject)link);
-  
+
   return URNOF(image);
 };
 
@@ -468,38 +469,43 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
     seperate streams and build a map. Then we read the map off and
     copy it into the output.
 */
-#define IMAGES "images/"
-#define D0  "d1.dd"
-#define D1  "d2.dd"
-#define D2  "d3.dd"
+#define D1  "d1.dd"
+#define D2  "d2.dd"
+#define D3  "d3.dd"
+#define MAP_NAME "test_map"
 
 void test_map_create() {
   MapDriver map;
   FileLikeObject fd;
-  char *d0;
-  char *d1;
-  char *d2;
-  char *volume;
   ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
-  
-  if(!CALL((AFFObject)zipfile, finish))
-    return;
+  CALL(oracle, set_value, URNOF(zipfile), AFF4_STORED, rdfvalue_from_urn(zipfile, FILENAME));
 
-  volume = URNOF(zipfile);
+  zipfile = CALL((AFFObject)zipfile, finish);
+  if(!zipfile) return;
+
   CALL(oracle, cache_return, (AFFObject)zipfile);
-
-  d0=create_image(volume, IMAGES D0, D0);
-  d1=create_image(volume, IMAGES D1, D1);
-  d2=create_image(volume, IMAGES D2, D2);
 
   // Now create a map stream:
   map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
   if(map) {
-    CALL((AFFObject)map, set_property, AFF4_STORED, volume);
-    CALL((AFFObject)map, set_property, AFF4_TARGET_PERIOD, "3");
-    CALL((AFFObject)map, set_property, AFF4_IMAGE_PERIOD, "6");
-    CALL((AFFObject)map, set_property, AFF4_BLOCKSIZE, "64k");
+    URNOF(map) = CALL(URNOF(zipfile), copy, map);
+    CALL(URNOF(map), add, MAP_NAME);
+
+    CALL((AFFObject)map, set_property, AFF4_STORED,
+	 (RDFValue)URNOF(zipfile));
+
+    CALL((AFFObject)map, set_property, AFF4_TARGET_PERIOD,
+	 (RDFValue)rdfvalue_from_int(zipfile, 3));
+
+    CALL((AFFObject)map, set_property, AFF4_IMAGE_PERIOD,
+	 (RDFValue)rdfvalue_from_int(zipfile, 6));
+
+    CALL((AFFObject)map, set_property, AFF4_SIZE,
+	 (RDFValue)rdfvalue_from_int(zipfile, 5242880 * 2));
+
+    CALL((AFFObject)map, set_property, AFF4_BLOCKSIZE,
+	 (RDFValue)rdfvalue_from_int(zipfile, 64 * 1024));
+
     map = (MapDriver)CALL((AFFObject)map, finish);
   };
 
@@ -509,50 +515,39 @@ void test_map_create() {
   };
 
   // Create the raid reassembly map
-  CALL(map, add, 0, 0, D1);
-  CALL(map, add, 1, 0, D0);
-  CALL(map, add, 2, 1, D2);
-  CALL(map, add, 3, 1, D1);
-  CALL(map, add, 4, 2, D0);
-  CALL(map, add, 5, 2, D2);
+  CALL(map, add, 0, 0, D2);
+  CALL(map, add, 1, 0, D1);
+  CALL(map, add, 2, 1, D3);
+  CALL(map, add, 3, 1, D2);
+  CALL(map, add, 4, 2, D1);
+  CALL(map, add, 5, 2, D3);
 
-  fd = (FileLikeObject)CALL(oracle, open, D1, 'r');
-  CALL((AFFObject)map, set_property, AFF4_SIZE, from_int(fd->size * 2));
-  CALL(oracle, cache_return, (AFFObject)fd);
-
-  CALL(map, save_map);
   CALL((FileLikeObject)map, close);
-  CALL(oracle, cache_return, (AFFObject)map);
-
-  // Make a link to the map:
-  {
-    Link link;
-    
-    link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
-    // The link will be stored in this zipfile
-    CALL(link, link, oracle, volume, URNOF(map), "map");
-    CALL((AFFObject)link, finish);
-    CALL(oracle, cache_return, (AFFObject)link);
-  };
 
  exit:
-  zipfile = (ZipFile)CALL(oracle, open, volume, 'w');
+  zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
   CALL(zipfile, close);
-  CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 
 #define TEST_BUFF_SIZE 63*1024
-void test_map_read(char *filename) {
+void test_map_read() {
   MapDriver map;
   int outfd, length;
   char buff[TEST_BUFF_SIZE];
-  ZipFile zipfile = CONSTRUCT(ZipFile, ZipFile, Con, NULL,filename, 'r');
+  RDFURN volume = new_RDFURN(NULL);
+  RDFURN filename = (RDFURN)rdfvalue_from_urn(volume, FILENAME);
+  RDFURN map_urn;
 
-  CALL(oracle, cache_return, (AFFObject)zipfile);
-  map  = (MapDriver)CALL(oracle, open, "map", 'r');
-  if(!map) return;
+  if(!CALL(oracle, resolve2, filename, AFF4_CONTAINS, (RDFValue)volume))
+    goto error;
 
-  outfd = creat("output.dd", 0644);
+  map_urn = CALL(volume, copy, volume);
+  CALL(map_urn, add, MAP_NAME);
+
+  map = CALL(oracle, open, map_urn, 'r');
+  if(!map) goto error;
+
+  outfd = creat("test_output.dd", 0644);
   if(outfd<0) goto error;
 
   while(1) {
@@ -564,15 +559,17 @@ void test_map_read(char *filename) {
 
   close(outfd);
 
- error:
   CALL(oracle, cache_return, (AFFObject)map);
+
+ error:
+  talloc_free(volume);
   return;
 };
 #endif
 
 #if HTTP_TESTS==1 && HAVE_LIBCURL==1
 void test_http_handle() {
-  FileLikeObject http = (FileLikeObject)CONSTRUCT(HTTPObject, HTTPObject, 
+  FileLikeObject http = (FileLikeObject)CONSTRUCT(HTTPObject, HTTPObject,
 						  Con, NULL, "http://127.0.0.1/test.c");
   char buff[BUFF_SIZE];
 
@@ -623,7 +620,7 @@ void test_encrypted(char *filename) {
 
   // Create a new volume inside the embedded stream
   embedded_volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  CALL((AFFObject)embedded_volume, set_property, AFF4_STORED, 
+  CALL((AFFObject)embedded_volume, set_property, AFF4_STORED,
        URNOF(encrypted_stream));
 
   if(!CALL((AFFObject)embedded_volume, finish)) {
@@ -641,7 +638,7 @@ void test_encrypted(char *filename) {
 
   // Now put the image on it:
   create_image(embedded_volume_uri, "/bin/ls", "encrypted");
-  
+
   embedded_volume = (ZipFile)CALL(oracle, open, embedded_volume_uri, 'w');
   CALL(embedded_volume, close);
   CALL(oracle, cache_return, (AFFObject)embedded_volume);
@@ -671,10 +668,10 @@ int main() {
   {
     XSDDatetime t = new_XSDDateTime(NULL);
     struct timeval now;
-    
+
     gettimeofday(&now, NULL);
     CALL(t,set, now);
-    
+
     printf("Time now is %s\n", CALL(t,super.serialise));
 
     talloc_free(t);
@@ -687,51 +684,14 @@ int main() {
 
 #ifdef ZIPFILE_TESTS
   //zipfile_test1();
-  //zipfile_test2();
+  zipfile_test2();
   zipfile_test_load();
 #endif
 
-  /*
-  AFF2_Init();
-  ClearError();
-  test1_5();
-  PrintError();
-
-  AFF2_Init();
-  ClearError();
-  test2();
-  PrintError();
-
-  AFF2_Init();
-  ClearError();
-  test_image_create();
-  PrintError();
-
-  AFF2_Init();
-  ClearError();
-  test_image_read();
-  PrintError();
- 
-  AFF2_Init();
-  ClearError();
-  printf("\n*******************\ntest 5\n********************\n");
+#ifdef MAP_TESTS
   test_map_create();
-  PrintError();
+  test_map_read();
+#endif
 
-  AFF2_Init();
-  ClearError();
-  test_map_read( "file://" TEST_FILE);
-  PrintError();
-
-  AFF2_Init();
-  ClearError();
-  test_map_read("http://127.0.0.1/" TEST_FILE);
-  PrintError();
-
-  AFF2_Init();
-  ClearError();
-  test_encrypted(TEST_FILE);
-  PrintError();
-  */  
   return 0;
 };

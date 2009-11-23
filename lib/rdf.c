@@ -489,6 +489,7 @@ void register_rdf_value_class(RDFValue classref) {
   if(!RDF_Registry) {
     RDF_Registry = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
     RDF_Registry->static_objects = 1;
+    talloc_set_name_const(RDF_Registry, "RDFValue dispatcher");
   };
 
   tmp = CALL(RDF_Registry, get, ZSTRING_NO_NULL(classref->dataType));

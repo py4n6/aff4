@@ -18,7 +18,8 @@
 static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   FileLikeObject this = (FileLikeObject)self;
 
-  this->size = new_XSDInteger(this);
+  if(!this->size)
+    this->size = new_XSDInteger(this);
 
   return this->__super__->Con(self, urn, mode);
 };
@@ -260,7 +261,8 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
       goto error;
     };
-    
+
+    CALL(oracle, add_value, this->storage_urn, AFF4_CONTAINS, (RDFValue)urn);
     URNOF(self) = CALL(urn, copy, self);
 
     // Try to load this volume
@@ -1005,7 +1007,7 @@ static int ZipFileStream_destroy(void *self) {
     zip member.
 
 */
-static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename, 
+static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 				       RDFURN file_urn, RDFURN container_urn,
 				       char mode, FileLikeObject file_fd) {
   ((AFFObject)self)->mode = mode;
@@ -1016,7 +1018,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   self->compress_size = new_XSDInteger(self);
   self->compression = new_XSDInteger(self);
 
-  self->file_urn = CALL(file_urn, copy, self);  
+  self->file_urn = CALL(file_urn, copy, self);
   self->container_urn = CALL(container_urn, copy, self);
 
   EVP_DigestInit(&self->digest, EVP_sha256());
@@ -1026,7 +1028,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   if(!CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_COMPRESSION,
 	   (RDFValue)self->compression) ||
-     
+
      !CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_FILE_OFFSET,
 	   (RDFValue)self->file_offset)
      ) {
@@ -1251,7 +1253,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   };
 
   // Store important information about this file
-  CALL(oracle, add, this->container_urn, AFF4_CONTAINS, (RDFValue)URNOF(self));
+  CALL(oracle, add_value, this->container_urn, AFF4_CONTAINS, (RDFValue)URNOF(self));
   CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->container_urn);
   {
     uint32_t tmp = time(NULL);
@@ -1314,22 +1316,24 @@ static void ZipFileStream_close(FileLikeObject self) {
   talloc_free(self);
 };
 
+/** We only support opening ZipFileStreams for reading through
+    here. Writing must be done through ZipFile_open_member()
+*/
 static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   ZipFileStream this = (ZipFileStream)self;
 
   if(urn) {
     ZipFile parent;
     AFFObject result;
-    
+
+    if(mode!='r') {
+      RaiseError(ERuntimeError, "This implementation only supports opening ZipFileStreams for writing through ZipFile::open_member");
+      goto error;
+    };
+
     this->container_urn = new_RDFURN(self);
-    this->compression  = new_XSDInteger(self);
 
-    this->compression->value = ZIP_STORED;
-
-    CALL(oracle, resolve2, urn, AFF4_COMPRESSION,
-	 (RDFValue)this->compression);
-
-    if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+    if(!CALL(oracle, resolve2, urn, AFF4_STORED, 
 	     (RDFValue)this->container_urn)) {
       RaiseError(ERuntimeError, "Parent not set?");
       goto error;
@@ -1341,8 +1345,8 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     // Now just return the member from the volume:
     talloc_free(self);
-    result = (AFFObject)CALL(parent, open_member, urn, mode, 
-			     this->compression->value);
+    result = (AFFObject)CALL(parent, open_member, urn->value, mode, 'r');
+
     CALL(oracle, cache_return, (AFFObject)parent);
 
     return result;

@@ -9,10 +9,11 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
   if(uri) {
     FileLikeObject fd;
     char buff[BUFF_SIZE];
-    int blocksize;
     uint32_t tmp;
+    XSDInteger blocksize = rdfvalue_from_int(NULL, 1);
 
     URNOF(self) = CALL(uri, copy, self);
+
     this->stored = new_RDFURN(self);
     this->target_period = new_XSDInteger(self);
     this->image_period = new_XSDInteger(self);
@@ -25,6 +26,10 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     this->image_period->value = -1;
     this->target_period->value = -1;
 
+    // Make a target cache
+    this->targets = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
+    this->targets->static_objects = 1;
+
     // Check that we have a stored property
     if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
 	     (RDFValue)this->stored)) {
@@ -33,11 +38,12 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     };
 
     CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
+    CALL(oracle, set_value, this->stored, AFF4_CONTAINS, uri);
     //    tmp = time(NULL);
     // CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
 
     CALL(oracle, resolve2, URNOF(self), AFF4_BLOCKSIZE,
-	 (RDFValue)this->blocksize);
+	 (RDFValue)blocksize);
 
     // Load some parameters
     CALL(oracle, resolve2, URNOF(self), AFF4_IMAGE_PERIOD,
@@ -46,14 +52,15 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     CALL(oracle, resolve2, URNOF(self), AFF4_TARGET_PERIOD,
 	 (RDFValue)this->target_period);
 
+    this->image_period->value *= blocksize->value;
+    this->target_period->value *= blocksize->value;
+
+    ((FileLikeObject)self)->size = new_XSDInteger(self);
     CALL(oracle, resolve2, URNOF(self), AFF4_SIZE,
 	 (RDFValue)((FileLikeObject)self)->size);
 
     /** Try to load the map from the stream */
-    snprintf(buff, BUFF_SIZE, "%s/map", uri);
-    PrintError();
-    fd = (FileLikeObject)CALL(oracle, open, buff, 'r');
-    ClearError();
+    fd = (FileLikeObject)CALL(oracle, open, (AFFObject)this->map_urn, 'r');
     if(fd) {
       char *map = talloc_strdup(self, CALL(fd,get_data));
       char *x=map, *y;
@@ -64,17 +71,17 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 	// Look for the end of line and null terminate it:
 	y= x + strcspn(x, "\r\n");
 	*y=0;
-	if(sscanf(x,"%lld,%lld,%1000s", &point.image_offset, 
+	if(sscanf(x,"%lld,%lld,%1000s", &point.image_offset,
 		  &point.target_offset, target)==3) {
-	  CALL(this, add, point.target_offset*blocksize, 
-	       point.image_offset*blocksize, target);
+	  CALL(this, add, point.target_offset * blocksize->value,
+	       point.image_offset * blocksize->value, target);
 	};
 	x=y+1;
-      };      
+      };
     };
-  } else {
-    this->__super__->super.Con(self, NULL, mode);
   };
+
+  this->__super__->super.Con(self, uri, mode);
 
   return self;
  error:
@@ -90,13 +97,24 @@ static int compare_points(const void *X, const void *Y) {
 };
 
 static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
-		   char *target_urn) {
+			  char *target) {
   struct map_point new_point;
   MapDriver this=self;
+  // Do we already have this target in the cache?
+  RDFURN target_urn = CALL(self->targets, get_item, ZSTRING_NO_NULL(target));
+
+  if(!target_urn) {
+    target_urn = new_RDFURN(self->targets);
+    CALL(target_urn, set, target);
+
+    // Store it in the cache
+    CALL(self->targets, put, ZSTRING_NO_NULL(target), 
+	 target_urn, sizeof(*target_urn));
+  };
 
   new_point.target_offset = target_offset;
   new_point.image_offset = image_offset;
-  new_point.target_urn = talloc_strdup(this->points, target_urn);
+  new_point.target_urn = target_urn;
 
   // Now append the new point to our struct:
   this->points = talloc_realloc(self, this->points, 
@@ -105,45 +123,53 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
   memcpy(&this->points[this->number_of_points], &new_point, sizeof(new_point));
 
   this->number_of_points ++;
+
+  if(self->super.size->value < new_point.image_offset) {
+    self->super.size->value = new_point.image_offset;
+  };
 };
 
 // This writes out the map to the stream
 static void MapDriver_save_map(MapDriver self) {
   MapDriver this = self;
-  char buff[BUFF_SIZE];
   struct map_point *point;
   int i;
   FileLikeObject fd;
   ZipFile zipfile = (ZipFile)CALL(oracle, open, self->stored, 'w');
 
   if(!zipfile) return;
-  snprintf(buff, BUFF_SIZE, "%s/map", URNOF(self));
 
   // Now sort the array
   qsort(this->points, this->number_of_points, sizeof(*this->points),
 	compare_points);
 
-  fd = CALL(zipfile, open_member, buff, 'w', ZIP_DEFLATE);
+  fd = CALL(zipfile, open_member, self->map_urn->value, 'w', ZIP_DEFLATE);
   for(i=0;i<self->number_of_points;i++) {
+    char buff[BUFF_SIZE];
+
     point = &self->points[i];
     // See if we can reduce adjacent points
+    // Note that due to the cache we can guarantee that if the
+    // target_urn pointers are different, they are in fact different
+    // URNs.
     if(i!=0 && i!=self->number_of_points && 
-       !strcmp(point->target_urn,self->points[i-1].target_urn)) {
+       point->target_urn == self->points[i-1].target_urn) {
       struct map_point *previous = &self->points[i-1];
       uint64_t prediction = point->image_offset - previous->image_offset + 
 	previous->target_offset;
-      
+
       // Dont write this point if its linearly related to previous point.
       if(prediction == point->target_offset) continue;
     };
 
     snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->target_offset, 
-	     point->image_offset, point->target_urn);
+	     point->image_offset, point->target_urn->value);
     CALL(fd, write, ZSTRING_NO_NULL(buff));
   };
 
   CALL(fd, close);
 
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->super.size);
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 
@@ -216,27 +242,25 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
     l = bisect_right(image_period_offset, this->points, this->number_of_points);
     
     // Here this->points[l].image_offset < image_period_offset
-    target_offset = this->points[l].target_offset +			\
-      image_period_offset - this->points[l].image_offset + period_number * this->target_period->value;
+    target_offset = this->points[l].target_offset +        \
+      image_period_offset - this->points[l].image_offset + \
+      period_number * this->target_period->value;
     
     if(l < this->number_of_points-1) {
-      available_to_read = this->points[l+1].image_offset - image_period_offset;
+      available_to_read = this->points[l+1].image_offset -\
+        image_period_offset;
     } else {
-      available_to_read = min(available_to_read, this->image_period - image_period_offset);
+      available_to_read = min(available_to_read, this->image_period->value -
+			      image_period_offset);
     };
-
-    /*
-    printf("%lld %lld %d ", self->readptr, image_period_offset, l);
-    printf(" target %lld available %d\n", target_offset, available_to_read);
-    */
 
     /** Interpolate in reverse */
   } else {
     l = bisect_left(image_period_offset, this->points, this->number_of_points);
-    target_offset = this->points[l].target_offset -	     \
+    target_offset = this->points[l].target_offset - \
       (this->points[l].image_offset - image_period_offset) + \
       period_number * this->target_period->value;
-    
+
     if(l<this->number_of_points) {
       available_to_read = this->points[l].image_offset - image_period_offset;
     };
@@ -265,7 +289,7 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
   int read_length;
 
   // Clip the read to the stream size
-  length = min(length, self->size - self->readptr);
+  length = min(length, self->size->value - self->readptr);
 
   // Just execute as many partial reads as are needed to satisfy the
   // length requested

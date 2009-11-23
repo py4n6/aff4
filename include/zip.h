@@ -154,7 +154,7 @@ struct map_point {
   uint64_t target_offset;
   // This logical offset this represents
   uint64_t image_offset;
-  char *target_urn;
+  RDFURN target_urn;
 };
 
 CLASS(MapDriver, FileLikeObject)
@@ -174,7 +174,9 @@ CLASS(MapDriver, FileLikeObject)
      // This where we get stored
      RDFURN stored;
      RDFURN map_urn;
-     RDFURN target;
+
+  // This is a cache of all the targets
+  Cache targets;
 
      // Deletes the point at the specified file offset
      void METHOD(MapDriver, del, uint64_t target_pos);
