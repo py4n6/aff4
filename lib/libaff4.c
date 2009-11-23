@@ -23,7 +23,7 @@ ZipFile open_volume(char *filename, char mode) {
   };
 
   // Is there a known volume contained in this file?
-  if(CALL(oracle, resolve2, file_urn, AFF4_CONTAINS, (RDFValue)volume_urn)) {
+  if(CALL(oracle, resolve_value, file_urn, AFF4_CONTAINS, (RDFValue)volume_urn)) {
     result = (ZipFile)CALL(oracle, open, volume_urn, mode);
   };
 
@@ -118,6 +118,7 @@ char **aff4_load(char **images) {
   };
 };
 
+#if 0
 /** Opens an AFF4 file for reading */
 AFF4_HANDLE aff4_open(char **images) {
   // The opaque handle we actually return is a FileLikeObject.
@@ -172,7 +173,7 @@ AFF4_HANDLE aff4_open(char **images) {
     int i;
     
     for(i=0; result_set[i]; i++) {
-      char *type = (char *)CALL(oracle, resolve, ctx, result_set[i]->urn, AFF4_TYPE,
+      char *type = (char *)CALL(oracle, resolve_value, result_set[i]->urn, AFF4_TYPE,
 				RESOLVER_DATA_URN);
       if(type && !strcmp(type, AFF4_IMAGE)) {
 	result = (FileLikeObject)CALL(oracle, open, 
@@ -203,6 +204,7 @@ AFF4_HANDLE aff4_open(char **images) {
   talloc_free(ctx);
   return result;
 };
+#endif
 
 void aff4_seek(AFF4_HANDLE self, uint64_t offset, int whence) {
   FileLikeObject result = (FileLikeObject)self;

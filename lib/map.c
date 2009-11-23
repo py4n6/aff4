@@ -8,9 +8,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
   // Try to parse existing map object
   if(uri) {
     FileLikeObject fd;
-    char buff[BUFF_SIZE];
-    uint32_t tmp;
-    XSDInteger blocksize = rdfvalue_from_int(NULL, 1);
+    XSDInteger blocksize = (XSDInteger)rdfvalue_from_int(NULL, 1);
 
     URNOF(self) = CALL(uri, copy, self);
 
@@ -31,36 +29,38 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     this->targets->static_objects = 1;
 
     // Check that we have a stored property
-    if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
 	     (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "Map object does not have a stored attribute?");
       goto error;
     };
 
     CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
-    CALL(oracle, set_value, this->stored, AFF4_CONTAINS, uri);
-    //    tmp = time(NULL);
-    // CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
+    CALL(oracle, set_value, this->stored, AFF4_CONTAINS, (RDFValue)uri);
+    {
+      XSDDatetime time = new_XSDDateTime(this);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_BLOCKSIZE,
+      CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time);
+    };
+    CALL(oracle, resolve_value, URNOF(self), AFF4_BLOCKSIZE,
 	 (RDFValue)blocksize);
 
     // Load some parameters
-    CALL(oracle, resolve2, URNOF(self), AFF4_IMAGE_PERIOD,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_IMAGE_PERIOD,
 	 (RDFValue)this->image_period);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_TARGET_PERIOD,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_TARGET_PERIOD,
 	 (RDFValue)this->target_period);
 
     this->image_period->value *= blocksize->value;
     this->target_period->value *= blocksize->value;
 
     ((FileLikeObject)self)->size = new_XSDInteger(self);
-    CALL(oracle, resolve2, URNOF(self), AFF4_SIZE,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
 	 (RDFValue)((FileLikeObject)self)->size);
 
     /** Try to load the map from the stream */
-    fd = (FileLikeObject)CALL(oracle, open, (AFFObject)this->map_urn, 'r');
+    fd = (FileLikeObject)CALL(oracle, open, (RDFURN)this->map_urn, 'r');
     if(fd) {
       char *map = talloc_strdup(self, CALL(fd,get_data));
       char *x=map, *y;
@@ -177,6 +177,8 @@ static void MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
 
   MapDriver_save_map(this);
+
+  talloc_free(self);
 };
 
 // searches the array of map points and returns the offset in the
@@ -298,9 +300,12 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
     if(read_length==0) break;
     if(read_length < 0) {
       // An error occurred - we need to decide if to pad or not
+      /*
       char *pad = (char *)CALL(oracle, resolve, self, 
 			       CONFIGURATION_NS, CONFIG_PAD,
 			       RESOLVER_DATA_STRING);
+      */
+      int pad = 1;
 
       if(pad) {
 	memset(buffer + i ,0, length -i);
@@ -326,5 +331,5 @@ END_VIRTUAL
 
 void mapdriver_init() {
   MapDriver_init();
-  register_type_dispatcher(AFF4_MAP, (AFFObject)GETCLASS(MapDriver));
+  register_type_dispatcher(AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
 }

@@ -107,7 +107,7 @@ static int dump_bevy(ImageWorker this) {
     char buff[BUFF_SIZE];
     ZipFile parent;
 
-    if(!CALL(oracle, resolve2, URNOF(this), AFF4_STORED, (RDFValue)this->stored)) {
+    if(!CALL(oracle, resolve_value, URNOF(this), AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
       goto error;
     }
@@ -170,16 +170,11 @@ VIRTUAL(ImageWorker, AFFObject) {
 
 static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   Image this=(Image)self;
-  char *value;
 
   // Call our baseclass
   this->__super__->super.Con(self, uri, mode);
 
   if(uri) {
-    uint32_t tmp = time(NULL);
-    char stored[BUFF_SIZE];
-    uint64_t tmp64;
-
     URNOF(self) = CALL(uri, copy, self);
     this->chunk_size = new_XSDInteger(self);
     this->compression = new_XSDInteger(self);
@@ -192,7 +187,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     this->compression->value = ZIP_DEFLATE;
     this->chunks_in_segment->value = 2048;
 
-    if(!CALL(oracle, resolve2, uri, AFF4_STORED, (RDFValue)this->stored)) {
+    if(!CALL(oracle, resolve_value, uri, AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "Image not stored anywhere?");
       goto error;
     };
@@ -204,16 +199,16 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     //CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
 
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_CHUNK_SIZE,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_CHUNK_SIZE,
 	 (RDFValue)this->chunk_size);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_COMPRESSION,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_COMPRESSION,
 	 (RDFValue)this->compression);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_CHUNKS_IN_SEGMENT,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_CHUNKS_IN_SEGMENT,
 	 (RDFValue)this->chunks_in_segment);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_SIZE,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
 	 (RDFValue)((FileLikeObject)this)->size);
 
     this->bevy_size = this->chunks_in_segment->value * this->chunk_size->value;
@@ -294,11 +289,6 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
 static void Image_close(FileLikeObject self) {
   Image this = (Image)self;
-  unsigned char buff[BUFF_SIZE];
-  unsigned int len;
-  unsigned char hash_base64[BUFF_SIZE];
-
-  memset(buff, 0, BUFF_SIZE);
 
   // Write the last chunk
   this->current->segment_count = this->segment_count;
@@ -467,7 +457,7 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   // Done with parent and fd
   CALL(oracle, cache_return, (AFFObject)fd);
 
-  if(this->compression == 8) {
+  if(this->compression->value == 8) {
     // Try to decompress it:
     if(uncompress((unsigned char *)uncompressed_chunk, 
 		  &uncompressed_length, 
@@ -542,6 +532,6 @@ VIRTUAL(Image, FileLikeObject) {
 
 void image_init() {
   Image_init();
-  register_type_dispatcher(AFF4_IMAGE, (AFFObject)GETCLASS(Image));
+  register_type_dispatcher(AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
 
 };

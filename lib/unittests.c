@@ -476,11 +476,10 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
 
 void test_map_create() {
   MapDriver map;
-  FileLikeObject fd;
   ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
   CALL(oracle, set_value, URNOF(zipfile), AFF4_STORED, rdfvalue_from_urn(zipfile, FILENAME));
 
-  zipfile = CALL((AFFObject)zipfile, finish);
+  zipfile = (ZipFile)CALL((AFFObject)zipfile, finish);
   if(!zipfile) return;
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
@@ -538,13 +537,13 @@ void test_map_read() {
   RDFURN filename = (RDFURN)rdfvalue_from_urn(volume, FILENAME);
   RDFURN map_urn;
 
-  if(!CALL(oracle, resolve2, filename, AFF4_CONTAINS, (RDFValue)volume))
+  if(!CALL(oracle, resolve_value, filename, AFF4_CONTAINS, (RDFValue)volume))
     goto error;
 
   map_urn = CALL(volume, copy, volume);
   CALL(map_urn, add, MAP_NAME);
 
-  map = CALL(oracle, open, map_urn, 'r');
+  map = (MapDriver)CALL(oracle, open, map_urn, 'r');
   if(!map) goto error;
 
   outfd = creat("test_output.dd", 0644);
@@ -672,7 +671,7 @@ int main() {
     gettimeofday(&now, NULL);
     CALL(t,set, now);
 
-    printf("Time now is %s\n", CALL(t,super.serialise));
+    printf("Time now is %s\n", (char *)CALL((RDFValue)t, serialise));
 
     talloc_free(t);
   };

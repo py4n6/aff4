@@ -7,6 +7,7 @@
 #include "aff4.h"
 #include "aff4_rdf_serialise.h"
 #include "aff4_rdf.h"
+#include <time.h>
 
 /** Parsing URLs - basically a state machine */
 enum url_state {
@@ -236,7 +237,7 @@ static int XSDString_decode(RDFValue this, int fd, int length) {
 };
 
 /* We serialise the string */
-static char *XSDString_serialise(RDFValue self) {
+static void *XSDString_serialise(RDFValue self) {
   XSDString this = (XSDString)self;
   
   return this->value;
@@ -281,15 +282,13 @@ static RDFValue RDFURN_Con(RDFValue self) {
 };
 
 static RDFValue RDFURN_set(RDFURN self, char *string) {
-  int length;
-
   CALL(self->parser, parse, string);
 
   // Our value is the serialsed version of what the parser got:
   if(self->value) talloc_free(self->value);
   self->value = CALL(self->parser, string, self);
 
-  return self;
+  return (RDFValue)self;
 };
 
 static int RDFURN_decode(RDFValue this, int fd, int length) {
@@ -303,7 +302,7 @@ static int RDFURN_decode(RDFValue this, int fd, int length) {
 };
 
 /* We serialise the string */
-static char *RDFURN_serialise(RDFValue self) {
+static void *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
 
   if(this->serialised) talloc_free(this->serialised);
@@ -321,21 +320,8 @@ static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
 };
 
 static int RDFURN_parse(RDFValue self, char *serialised) {
-  RDFURN_set(self, serialised);
-
+  RDFURN_set((RDFURN)self, serialised);
   return 1;
-};
-
-static char *illegal_url_chars = "|?[]\\+<>:;\'\",*&";
-static char illegal_url_lut[128];
-static void init_rdf_luts() {
-  char *i;
-  
-  memset(illegal_url_lut, 0, 
-	 sizeof(illegal_url_lut));
-
-  for(i=illegal_url_chars;*i;i++) 
-    illegal_url_lut[(int)*i]=1;
 };
 
 // parse filename as a URL and if its relative, append it to
@@ -373,8 +359,8 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
   TDB_DATA result;
 
   if(startswith(self->value, volume->value)) {
-    result.dptr = self->value + strlen(volume->value) + 1;
-    result.dsize = strlen(result.dptr) + 1;
+    result.dptr = (unsigned char *)self->value + strlen(volume->value) + 1;
+    result.dsize = strlen((char *)result.dptr) + 1;
   } else {
     result = tdb_data_from_string(self->value);
   };
@@ -415,16 +401,14 @@ static int XSDDatetime_decode(RDFValue self, int fd, int length) {
 };
 
 static RDFValue XSDDatetime_set(XSDDatetime self, struct timeval time) {
-  XSDDatetime this = (XSDDatetime)self;
+  self->value = time;
 
-  this->value = time;
-
-  return self;
+  return (RDFValue)self;
 };
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
 
-static char *XSDDatetime_serialise(RDFValue self) {
+static void *XSDDatetime_serialise(RDFValue self) {
   XSDDatetime this = (XSDDatetime)self;
   char buff[BUFF_SIZE];
 
@@ -433,9 +417,9 @@ static char *XSDDatetime_serialise(RDFValue self) {
   if(BUFF_SIZE > strftime(buff, BUFF_SIZE, DATETIME_FORMAT_STR,
 			  gmtime(&this->value.tv_sec))) {
     this->serialised = talloc_asprintf(this, "%s.%06u+%02u:%02u", buff,
-				       this->value.tv_usec,
-				       this->tz.tz_minuteswest / 60,
-				       this->tz.tz_minuteswest % 60);
+				       (unsigned int)this->value.tv_usec,
+				       (unsigned int)this->tz.tz_minuteswest / 60,
+				       (unsigned int)this->tz.tz_minuteswest % 60);
     return this->serialised;
   };
 
@@ -445,11 +429,18 @@ static char *XSDDatetime_serialise(RDFValue self) {
 static int XSDDatetime_parse(RDFValue self, char *serialised) {
   XSDDatetime this = (XSDDatetime)self;
   struct tm time;
-  char *next = strptime(serialised, DATETIME_FORMAT_STR, &time);
 
+  strptime(serialised, DATETIME_FORMAT_STR, &time);
   this->value.tv_sec = mktime(&time);
 
   return 1;
+};
+
+static RDFValue XSDDatetime_Con(RDFValue self) {
+  XSDDatetime this = (XSDDatetime)self;
+  gettimeofday(&this->value, NULL);
+
+  return self;
 };
 
 VIRTUAL(XSDDatetime, RDFValue) {
@@ -462,6 +453,7 @@ VIRTUAL(XSDDatetime, RDFValue) {
    VMETHOD(super.decode) = XSDDatetime_decode;
    VMETHOD(super.serialise) = XSDDatetime_serialise;
    VMETHOD(super.parse) = XSDDatetime_parse;
+   VMETHOD(super.Con) = XSDDatetime_Con;
 
    VMETHOD(set) = XSDDatetime_set;
 } END_VIRTUAL
@@ -504,7 +496,6 @@ void register_rdf_value_class(RDFValue classref) {
 /** This function initialises the RDF types registry. */
 void rdf_init() {
   raptor_init();
-  init_rdf_luts();
   RDFValue_init();
   XSDInteger_init();
   XSDString_init();
@@ -519,10 +510,10 @@ void rdf_init() {
 };
 
 /** RDF parsing */
-static void triples_handler(RDFParser self, const raptor_statement* triple) 
+static void triples_handler(void *data, const raptor_statement* triple) 
 {
-  const char *urn_str, *attribute, *value_str, *type_str;
-  enum resolver_data_type type;
+  RDFParser self = (RDFParser)data;
+  char *urn_str, *attribute, *value_str, *type_str;
   RDFValue class_ref = (RDFValue)GETCLASS(XSDString);
   RDFValue result = NULL;
 
@@ -532,10 +523,10 @@ static void triples_handler(RDFParser self, const raptor_statement* triple)
     return;
 
   /* do something with the triple */
-  urn_str = (const char *)raptor_uri_as_string(triple->subject);  
-  attribute = (const char *)raptor_uri_as_string(triple->predicate);
-  value_str = (const char *)raptor_uri_as_string(triple->object);
-  type_str = (const char *)raptor_uri_as_string(triple->object_literal_datatype);
+  urn_str = (char *)raptor_uri_as_string((raptor_uri *)triple->subject);
+  attribute = (char *)raptor_uri_as_string((raptor_uri *)triple->predicate);
+  value_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object);
+  type_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object_literal_datatype);
 
   CALL(self->urn, set, urn_str);
 
@@ -556,14 +547,15 @@ static void triples_handler(RDFParser self, const raptor_statement* triple)
   };
 }
 
-static void message_handler(RDFParser self, raptor_locator* locator, 
+static void message_handler(void *data, raptor_locator* locator, 
 			    const char *message)
 {
   printf("%s\n", message);
 }
 
-static void fatal_error_handler(RDFParser self, raptor_locator *locator,
-			  const char *message) { 
+static void fatal_error_handler(void *data, raptor_locator *locator,
+			  const char *message) {
+  RDFParser self = (RDFParser)data;
   // An error occured - copy the message and to the caller.
   strncpy(self->message, message, BUFF_SIZE);
   self->message[BUFF_SIZE]=0;
@@ -608,7 +600,7 @@ static int RDFParser_parse(RDFParser self, FileLikeObject fd, char *format, char
   while(1) {
     // Read some data from our fd
     unsigned char buff[BUFF_SIZE];
-    int len = CALL(fd, read, buff, BUFF_SIZE);
+    int len = CALL(fd, read, (char *)buff, BUFF_SIZE);
 
     if(len<=0) break;
     // Shove it into the parser.
@@ -684,7 +676,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, FileLikeO
 			   uri, self->iostream);
     raptor_free_uri(uri);
     uri = (void*)raptor_new_uri((const unsigned char*)FQN);
-    raptor_serialize_set_namespace(self->rdf_serializer, uri, "");
+    raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)"");
     raptor_free_uri(uri);
   };
 
@@ -707,11 +699,11 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 
   // Only look at proper attributes
   if(memcmp(key.dptr, "aff4", 4))
-    return 0;
+    goto exit;
 
   // Skip serializing of volatile triples
   if(!memcmp(key.dptr, ZSTRING_NO_NULL(VOLATILE_NS)))
-    return 0;
+    goto exit;
 
   memset(&triple, 0, sizeof(triple));
 
@@ -746,8 +738,8 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     talloc_free(value);
   };
 
- exit:
   talloc_free(attribute);
+ exit:
   return 0;
 };
 
@@ -794,7 +786,7 @@ RDFValue rdfvalue_from_string(void *ctx, char *value) {
 
   result->set(result, value, strlen(value));
 
-  return result;
+  return (RDFValue)result;
 };
 
 RDFURN new_RDFURN(void *ctx) {

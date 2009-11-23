@@ -212,10 +212,6 @@ CLASS(Encrypted, FileLikeObject)
      int block_number;
 END_CLASS
 
-void *resolver_get_with_default(Resolver self, char *urn, 
-				char *attribute, void *default_value,
-				enum resolver_data_type type);
-
   // This is the largest file size which may be represented by a
   // regular zip file without using Zip64 extensions.
 #define ZIP64_LIMIT ((1LL << 31)-1)

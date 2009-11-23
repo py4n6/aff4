@@ -65,7 +65,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       goto error;
     };
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_SIZE, 
+    CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE, 
 	 (RDFValue)self->super.size);
 
     // Check that its what we expected
@@ -257,7 +257,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     // Ok, we need to create ourselves from a URN. We need a
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
-    if(!CALL(oracle, resolve2, urn, AFF4_STORED, (RDFValue)this->storage_urn)) {
+    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->storage_urn)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
       goto error;
     };
@@ -395,7 +395,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
   // valid? We should check the signatures.
 
   // Is there a directory_offset and does it make sense?
-  if(CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
+  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	  (RDFValue)self->directory_offset) &&	\
      self->directory_offset->value < fd->size->value) {
     goto exit;
@@ -621,7 +621,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
   CALL(filename, add, member_name);
 
   // Where are we stored?
-  if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
 	   (RDFValue)self->storage_urn)) {
     RaiseError(ERuntimeError, "No storage for %s?", URNOF(self));
     goto error;
@@ -636,7 +636,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     time_t epoch_time = time(NULL);
     struct tm *now = localtime(&epoch_time);
 
-    CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
     // Open our current volume for writing:
@@ -761,7 +761,7 @@ static void dump_volume_properties(ZipFile self) {
   while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
 
     // Only serialise URNs which are not segments
-    if(CALL(oracle, resolve2, urn, AFF4_TYPE, (RDFValue)type) &&
+    if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) &&
        strcmp(type->value, AFF4_SEGMENT)) {
       CALL(serializer, serialize_urn, urn);
     };
@@ -780,13 +780,13 @@ static void ZipFile_close(ZipFile self) {
 
   // We iterate over all the items which are contained in the
   // volume. We then write them into the CD.
-  if(CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_DIRTY,
+  if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
 	  (RDFValue)self->_didModify)) {
     struct EndCentralDirectory end;
     FileLikeObject fd;
 
     // Get where we are stored
-    if(!CALL(oracle, resolve2, URNOF(self), AFF4_STORED, 
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
 	     (RDFValue)self->storage_urn)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
       return;
@@ -798,7 +798,7 @@ static void ZipFile_close(ZipFile self) {
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
     if(!fd) return;
     
-    CALL(oracle, resolve2, URNOF(self), AFF4_DIRECTORY_OFFSET,
+    CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
@@ -827,14 +827,14 @@ static void ZipFile_close(ZipFile self) {
 	struct tm *now;
 
 	// Only store segments here
-	if(!CALL(oracle, resolve2, urn, AFF4_TYPE, (RDFValue)type) ||
+	if(!CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) ||
 	   strcmp(type->value, AFF4_SEGMENT))
 	  continue;
 
 	// This gets the relative name of the fqn
 	TDB_DATA escaped_filename = urn->relative_name(urn, URNOF(self));
 
-	CALL(oracle, resolve2, urn, AFF4_TIMESTAMP,
+	CALL(oracle, resolve_value, urn, AFF4_TIMESTAMP,
 	     (RDFValue)epoch_time);
 	
 	now = localtime((time_t *)&epoch_time->value);
@@ -849,7 +849,7 @@ static void ZipFile_close(ZipFile self) {
 	cd.version_needed = 0x14;
 	cd.compression_method = ZIP_STORED;
 	
-	if(CALL(oracle, resolve2, urn, AFF4_VOLATILE_COMPRESSION,
+	if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSION,
 		(RDFValue)compression_method)) {
 	  cd.compression_method = compression_method->value;
 	};
@@ -857,7 +857,7 @@ static void ZipFile_close(ZipFile self) {
 	// We always write trailing directory structures
 	cd.flags = 0x8;
 	
-	CALL(oracle, resolve2, urn, AFF4_VOLATILE_CRC,
+	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_CRC,
 	     (RDFValue)crc);
 
 	cd.crc32 = crc->value;
@@ -871,7 +871,7 @@ static void ZipFile_close(ZipFile self) {
 	
 	// The following are optional zip64 fields. They must appear
 	// in this order:
-	CALL(oracle, resolve2, urn, AFF4_SIZE, (RDFValue)size);
+	CALL(oracle, resolve_value, urn, AFF4_SIZE, (RDFValue)size);
 
 	if(size->value > ZIP64_LIMIT) {
 	  cd.file_size = -1;
@@ -882,12 +882,12 @@ static void ZipFile_close(ZipFile self) {
 	
 	// AFF4 does not support very large segments since they are
 	// unseekable.
-	CALL(oracle, resolve2, urn, AFF4_VOLATILE_COMPRESSED_SIZE,
+	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSED_SIZE,
 	     (RDFValue)compressed_size);
 
 	cd.compress_size = compressed_size->value;
 	
-	CALL(oracle, resolve2, urn, AFF4_VOLATILE_HEADER_OFFSET,
+	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
 	     (RDFValue)header_offset);
 
 	if(header_offset->value > ZIP64_LIMIT) {
@@ -947,7 +947,7 @@ static void ZipFile_close(ZipFile self) {
     CALL(fd, close);
   };
   
-  //talloc_free(self);
+  talloc_free(self);
 };
 
 /** This is just a convenience function - real simple now */
@@ -1026,10 +1026,10 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   self->file_offset = new_XSDInteger(self);
 
-  if(!CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_COMPRESSION,
+  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSION,
 	   (RDFValue)self->compression) ||
 
-     !CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_FILE_OFFSET,
+     !CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_FILE_OFFSET,
 	   (RDFValue)self->file_offset)
      ) {
     // We fail here because we dont know the compression or file
@@ -1042,7 +1042,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   self->super.size = new_XSDInteger(self);
 
-  CALL(oracle, resolve2, URNOF(self), AFF4_SIZE,
+  CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->super.size);
     
   DEBUG("ZipFileStream: created %s\n", STRING_URNOF(self));
@@ -1075,11 +1075,11 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       FileLikeObject fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
       z_stream strm;
 
-      CALL(oracle, resolve2, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
+      CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
 	   (RDFValue)self->compress_size);
 
       self->cbuff = talloc_size(self, self->compress_size->value);
-      self->buff = talloc_size(self, self->super.size);
+      self->buff = talloc_size(self, self->super.size->value);
       if(!self->cbuff || !self->buff) {
 	RaiseError(ERuntimeError, "Compressed segment too large to handle");
 	goto error;
@@ -1221,7 +1221,6 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
 
 static void ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
-  FileLikeObject fd;
   int magic = 0x08074b50;
   void *ctx = talloc_size(NULL, 1);
 
@@ -1333,7 +1332,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     this->container_urn = new_RDFURN(self);
 
-    if(!CALL(oracle, resolve2, urn, AFF4_STORED, 
+    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, 
 	     (RDFValue)this->container_urn)) {
       RaiseError(ERuntimeError, "Parent not set?");
       goto error;
@@ -1405,8 +1404,8 @@ void zip_init() {
   ZipFile_init();
   ZipFileStream_init();
   
-  register_type_dispatcher("file", (AFFObject)GETCLASS(FileBackedObject));
-  register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject)GETCLASS(ZipFile));
-  register_type_dispatcher(AFF4_SEGMENT, (AFFObject)GETCLASS(ZipFileStream));
+  register_type_dispatcher("file", (AFFObject *)GETCLASS(FileBackedObject));
+  register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
+  register_type_dispatcher(AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
 
 };

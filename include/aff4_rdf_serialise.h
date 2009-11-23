@@ -34,8 +34,8 @@ CLASS(RDFParser, Object)
 
      RDFURN urn;
 
-     void METHOD(RDFParser, triples_handler, const raptor_statement *triple);
-     void METHOD(RDFParser, message_handler, raptor_locator* locator, const char *message);
+     void METHOD(void *, triples_handler, const raptor_statement *triple);
+     void METHOD(void *, message_handler, raptor_locator* locator, const char *message);
 
 // Parses data stored in fd using the format specified. fd is assumed
 // to contain a base URN specified (or NULL if non specified).

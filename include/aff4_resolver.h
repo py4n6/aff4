@@ -14,26 +14,6 @@
 #include "aff4_io.h"
 
 extern int AFF4_TDB_FLAGS;
-  
-  /** These are the various data types which can be stored in the
-      resolver. The returned (void *) pointer will be the
-      corresponding type as described.
-  */
-  enum resolver_data_type {
-    RESOLVER_DATA_UNKNOWN,   /* void */
-    RESOLVER_DATA_STRING,    /* char * (null terminated) */
-    RESOLVER_DATA_TDB_DATA,  /* TDB_DATA * */
-    RESOLVER_DATA_UINT16,    /* uint16_t * */
-    RESOLVER_DATA_UINT32,    /* uint32_t * */
-    RESOLVER_DATA_UINT64,    /* uint64_t * */
-    RESOLVER_DATA_OBJECT,    /* An RDFValue object */
-    RESOLVER_DATA_URN,        /* char * (null terminated) */
-    RESOLVER_DATA_ANY        /* A value used to indicate a wildcard -
-				in this case no data will be written
-				to the result but the iterator will be
-				advanced. 
-			     */
-  };
 
 // The data store is basically a singly linked list of these records:
 typedef struct TDB_DATA_LIST {
@@ -47,8 +27,7 @@ typedef struct TDB_DATA_LIST {
 typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
-  enum resolver_data_type search_type;
-  int end;
+  uint16_t search_type;
 } RESOLVER_ITER;
 
      /** The resolver is at the heart of the AFF4 specification - its
@@ -107,37 +86,11 @@ CLASS(Resolver, AFFObject)
 /* This create a new object of the specified type. */
       AFFObject METHOD(Resolver, create, AFFObject *class_reference);
 
-/* Returns an attribute about a particular uri if known. This may
-     consult an external data source.
-
-     You should indicate the expected type of the attribute as
-     type. If the actual type is different or not found we return NULL
-     here.
-*/
-  void *METHOD(Resolver, resolve, void *ctx, char *uri, char *attribute, 
-	       enum resolver_data_type type);
-
   /* This function resolves the value in uri and attribute and sets it
      into the RDFValue object which much be of the correct type. 
   */
-  int METHOD(Resolver, resolve_value, char *uri, char *attribute,
+  int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,
 	     RDFValue value);
-
-  /** This version does not allocate any memory it just overwrite the
-      preallocated memory in result (of length specified) with the
-      first element returned and return the number of bytes written to
-      the result.  If there are no elements we dont touch the result
-      and return 0.
-  */
-  int METHOD(Resolver, resolve2, RDFURN uri, char *attribute, 
-	     RDFValue result);
-
-  /** This returns a null terminated list of matches. The matches will
-      all be of the type specified, memory will be allocated with
-      reference to the ctx specified.
-  */
-  void **METHOD(Resolver, resolve_list, void *ctx, char *uri, 
-		char *attribute, enum resolver_data_type type);
 
   /* This is a version of the above which uses an iterator to iterate
      over the list. 
@@ -165,22 +118,9 @@ CLASS(Resolver, AFFObject)
        */
      RDFValue METHOD(Resolver, iter_next_alloc, void *ctx, RESOLVER_ITER *iter);
 
-     // Exports all the properties to do with uri - user owns the
-     // buffer. context is the URN which will ultimately hold the
-     // exported file. If uri is the same as context, we write the
-     // statement as a relative notation.
-     char *METHOD(Resolver, export_urn, char *uri, char *context);
-
-     // Exports all the properties to do with uri - user owns the buffer.
-     char *METHOD(Resolver, export_all, char *context);
-
      // Deletes the attribute from the resolver
      void METHOD(Resolver, del, RDFURN uri, char *attribute);
 
-     // This updates the value or adds it if needed
-     void METHOD(Resolver, set, char *uri, char *attribute, void *value,
-		 char *dataType);
-  
      // This is the new method that will deprecate the previous method
      void METHOD(Resolver, set_value, RDFURN uri, char *attribute, RDFValue value);
 
