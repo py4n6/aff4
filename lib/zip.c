@@ -569,7 +569,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 				   ZIP_STORED);
 	  if(fd) {
 	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
-	    
+
 	    CALL(parser, parse, fd, (char *)base_name + properties_length, URNOF(self)->value);
 	    talloc_free(parser);
 	    CALL(oracle, cache_return, (AFFObject)fd);

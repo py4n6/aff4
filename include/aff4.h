@@ -12,7 +12,7 @@ This file describes the high level interface.
 #define __AFF4_H
 
 #include <stdint.h>
-#include "constants.h"
+#include "aff4_constants.h"
 
 // This file defines the rdf side of the AFF4 specification
 #include "aff4_rdf.h"

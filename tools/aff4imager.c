@@ -65,7 +65,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Make local copy of container_volume URN
   strncpy(container_volume_urn, URNOF(container_volume), BUFF_SIZE);
   CALL(oracle, cache_return, (AFFObject)container_volume);
-  
+
   // Now we need to create an Image stream to store the encrypted volume
   storage_image = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
   // Tell the image that it should be stored in the volume with no
@@ -169,7 +169,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
   RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output_file);
   XSDInteger directory_offset = new_XSDInteger(output_urn);
   RDFURN input_urn = (RDFURN)rdfvalue_from_urn(output_urn, in_urn);
-  FileLikeObject in_fd = CALL(oracle, open, input_urn, 'r');
+  FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, input_urn, 'r');
 
   if(!in_fd) {
     goto error;
@@ -193,6 +193,12 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
   // Now we need to create an Image stream
   image = (Image)CALL(oracle, create, AFF4_IMAGE);
+
+  // We have to give the stream a specific name
+  if(stream_name) {
+    URNOF(image) = CALL(URNOF(zipfile), copy, image);
+    CALL(URNOF(image), add, stream_name);
+  };
 
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set_property, AFF4_STORED, (RDFValue)URNOF(zipfile));
@@ -247,7 +253,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
     length = CALL(in_fd, read, buffer, IMAGE_BUFF_SIZE);
     if(length == 0) break;
-    
+
     CALL((FileLikeObject)image, write, buffer, length);
   };
 

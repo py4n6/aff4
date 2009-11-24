@@ -6,6 +6,10 @@
 
 // This is the URI namespace for the AFF4 scheme
 #define NAMESPACE "aff4://"
+#define PREDICATE_NAMESPACE "http://afflib.org/2009/aff4/#"
+#define RDF_NAMESPACE "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+#define XSD_NAMESPACE "http://www.w3.org/2001/XMLSchema#"
+
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"
 #define FQN NAMESPACE
@@ -19,20 +23,18 @@
 #define CONFIG_AUTOLOAD  CONFIGURATION_NS "autoload"
 #define CONFIG_PAD       CONFIGURATION_NS "pad"
 
-#define FILE_NS "file://"
-
 /** These are standard aff4 attributes */
-#define AFF4_STORED     NAMESPACE "stored"
-#define AFF4_TYPE       NAMESPACE "type"
-#define AFF4_INTERFACE  NAMESPACE "interface"
-#define AFF4_CONTAINS   NAMESPACE "contains"
-#define AFF4_SIZE       NAMESPACE "size"
-#define AFF4_SHA        NAMESPACE "sha256"
-#define AFF4_TIMESTAMP  NAMESPACE "timestamp"
+#define AFF4_STORED     PREDICATE_NAMESPACE "stored"
+#define AFF4_TYPE       RDF_NAMESPACE "type"
+#define AFF4_INTERFACE  PREDICATE_NAMESPACE "interface"
+#define AFF4_CONTAINS   PREDICATE_NAMESPACE "contains"
+#define AFF4_SIZE       PREDICATE_NAMESPACE "size"
+#define AFF4_SHA        PREDICATE_NAMESPACE "sha256"
+#define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "timestamp"
 
 // Supported interfaces
-#define AFF4_STREAM     NAMESPACE "stream"
-#define AFF4_VOLUME     NAMESPACE "volume"
+#define AFF4_STREAM     PREDICATE_NAMESPACE "stream"
+#define AFF4_VOLUME     PREDICATE_NAMESPACE "volume"
 
 /** ZipFile attributes */
 #define AFF4_VOLATILE_HEADER_OFFSET VOLATILE_NS "relative_offset_local_header"
@@ -43,38 +45,38 @@
 #define AFF4_VOLATILE_DIRTY VOLATILE_NS "dirty"
 
 // Volume attributes
-#define AFF4_IDENTITY_STORED NAMESPACE "identity" /* Indicates an identity
+#define AFF4_IDENTITY_STORED PREDICATE_NAMESPACE "identity" /* Indicates an identity
 						      is stored in this
 						      volume */
 
-#define AFF4_AUTOLOAD NAMESPACE "autoload" /* A hint that this stream
+#define AFF4_AUTOLOAD PREDICATE_NAMESPACE "autoload" /* A hint that this stream
 					      should be automatically
 					      loaded as a volume */
 
 /** Image attributes */
-#define AFF4_CHUNK_SIZE NAMESPACE "chunk_size"
-#define AFF4_COMPRESSION NAMESPACE "compression"
-#define AFF4_CHUNKS_IN_SEGMENT NAMESPACE "chunks_in_segment"
+#define AFF4_CHUNK_SIZE PREDICATE_NAMESPACE "chunk_size"
+#define AFF4_COMPRESSION PREDICATE_NAMESPACE "compression"
+#define AFF4_CHUNKS_IN_SEGMENT PREDICATE_NAMESPACE "chunks_in_segment"
 #define AFF4_DIRECTORY_OFFSET VOLATILE_NS "directory_offset"
 
 /** Link, encryption attributes */
-#define AFF4_TARGET NAMESPACE "target"
+#define AFF4_TARGET PREDICATE_NAMESPACE "target"
 
 /** Map attributes */
-#define AFF4_BLOCKSIZE NAMESPACE "blocksize"
-#define AFF4_IMAGE_PERIOD NAMESPACE "image_period"
-#define AFF4_TARGET_PERIOD NAMESPACE "target_period"
+#define AFF4_BLOCKSIZE PREDICATE_NAMESPACE "blocksize"
+#define AFF4_IMAGE_PERIOD PREDICATE_NAMESPACE "image_period"
+#define AFF4_TARGET_PERIOD PREDICATE_NAMESPACE "target_period"
 
 /* Identity attributes */
-#define AFF4_STATEMENT NAMESPACE "statement"
-#define AFF4_CERT      NAMESPACE "x509"
+#define AFF4_STATEMENT PREDICATE_NAMESPACE "statement"
+#define AFF4_CERT      PREDICATE_NAMESPACE "x509"
 #define AFF4_PRIV_KEY  VOLATILE_NS "priv_key"
-#define AFF4_COMMON_NAME NAMESPACE "common_name"
+#define AFF4_COMMON_NAME PREDICATE_NAMESPACE "common_name"
 #define AFF4_IDENTITY_PREFIX  FQN  "identity"
 #define AFF4_HASH_TYPE        FQN  "hash_type"
 
 // A property indicating this object should be highlighted
-#define AFF4_HIGHLIGHT        NAMESPACE   "highlight"  
+#define AFF4_HIGHLIGHT        PREDICATE_NAMESPACE   "highlight"  
 
 // Information segments are named starting with this (and ending with
 // the RDF encoding):

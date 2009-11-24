@@ -257,7 +257,7 @@ static int XSDString_parse(RDFValue self, char *serialise) {
 
 VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = "XSD:String";
+   VATTR(super.dataType) = XSD_NAMESPACE "string";
 
    VMETHOD(super.encode) = XSDString_encode;
    VMETHOD(super.decode) = XSDString_decode;
@@ -449,7 +449,7 @@ static RDFValue XSDDatetime_Con(RDFValue self) {
 
 VIRTUAL(XSDDatetime, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = "XSD:DateTime";
+   VATTR(super.dataType) = XSD_NAMESPACE "datetime";
    VATTR(super.raptor_literal_datatype) = raptor_new_uri(			\
                     (const unsigned char*)VATTR(super.dataType));
 
@@ -673,14 +673,18 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, FileLikeO
     RaiseError(ERuntimeError, "Cant create serializer of type %s", type);
     goto error;
   };
-  
+
   if(base) {
     raptor_uri uri = raptor_new_uri((const unsigned char*)base);
-    raptor_serialize_start(self->rdf_serializer, 
+    raptor_serialize_start(self->rdf_serializer,
 			   uri, self->iostream);
     raptor_free_uri(uri);
-    uri = (void*)raptor_new_uri((const unsigned char*)FQN);
-    raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)"");
+    uri = (void*)raptor_new_uri((const unsigned char*)PREDICATE_NAMESPACE);
+    raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)"aff4");
+    raptor_free_uri(uri);
+
+    uri = (void*)raptor_new_uri((const unsigned char*)XSD_NAMESPACE);
+    raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)"xsd");
     raptor_free_uri(uri);
   };
 
@@ -702,7 +706,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
   raptor_statement triple;
 
   // Only look at proper attributes
-  if(memcmp(key.dptr, "aff4", 4))
+  if(key.dptr[0]=='_')
     goto exit;
 
   // Skip serializing of volatile triples
