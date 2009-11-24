@@ -1,9 +1,12 @@
-#include "zip.h"
 #include "time.h"
 #include <uuid/uuid.h>
 #include <libgen.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdint.h>
+#include <string.h>
+#include "misc.h"
+#include <tdb.h>
 
 uint64_t parse_int(char *string) {
   char *endptr;

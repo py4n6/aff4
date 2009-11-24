@@ -1,5 +1,5 @@
 /** This file implemnts the resolver */
-#include "zip.h"
+#include "aff4.h"
 #include <uuid/uuid.h>
 #include <pthread.h>
 #include <tdb.h>

@@ -27,7 +27,6 @@
 #define AFF4_STORED     PREDICATE_NAMESPACE "stored"
 #define AFF4_TYPE       RDF_NAMESPACE "type"
 #define AFF4_INTERFACE  PREDICATE_NAMESPACE "interface"
-#define AFF4_CONTAINS   VOLATILE_NS "contains"
 #define AFF4_SIZE       PREDICATE_NAMESPACE "size"
 #define AFF4_SHA        PREDICATE_NAMESPACE "sha256"
 #define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "timestamp"
@@ -43,6 +42,7 @@
 #define AFF4_VOLATILE_COMPRESSION VOLATILE_NS "compression"
 #define AFF4_VOLATILE_FILE_OFFSET VOLATILE_NS "file_offset"
 #define AFF4_VOLATILE_DIRTY VOLATILE_NS "dirty"
+#define AFF4_VOLATILE_CONTAINS   VOLATILE_NS "contains"
 
 // Volume attributes
 #define AFF4_IDENTITY_STORED PREDICATE_NAMESPACE "identity" /* Indicates an identity

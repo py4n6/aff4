@@ -1,4 +1,4 @@
-bin_PROGRAMS          = aff4imager
+bin_PROGRAMS          = aff4imager raid_reconstructor
 
 if HAVE_LIBFUSE
  bin_PROGRAMS          += affuse
@@ -21,3 +21,6 @@ endif
 aff4imager_SOURCES    = aff4imager.c common.c
 aff4imager_LDFLAGS    = -lssl
 aff4imager_LDADD      = ../lib/libaff4.la
+
+raid_reconstructor_SOURCES = raid_reconstructor.c common.c
+raid_reconstructor_LDADD = ../lib/libaff4.la

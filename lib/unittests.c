@@ -1,4 +1,4 @@
-#include "zip.h"
+#include "aff4.h"
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -519,7 +519,7 @@ void test_map_read() {
   RDFURN filename = (RDFURN)rdfvalue_from_urn(volume, FILENAME);
   RDFURN map_urn;
 
-  if(!CALL(oracle, resolve_value, filename, AFF4_CONTAINS, (RDFValue)volume))
+  if(!CALL(oracle, resolve_value, filename, AFF4_VOLATILE_CONTAINS, (RDFValue)volume))
     goto error;
 
   map_urn = CALL(volume, copy, volume);

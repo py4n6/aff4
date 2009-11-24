@@ -18,6 +18,7 @@ This file describes the high level interface.
 #include "aff4_rdf.h"
 #include "aff4_utils.h"
 #include "aff4_resolver.h"
+#include "aff4_objects.h"
 
 /** 
     Opens the URIs specified in images and uses them to populate the

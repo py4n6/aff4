@@ -79,7 +79,7 @@ ZipFile AFF1Volume_Con(ZipFile self, char *filename, char mode) {
   // OK - now we fill the resolver with various facts
   CALL(oracle, set, URNOF(self), AFF4_STORED, filename, RESOLVER_DATA_URN);
   CALL(oracle, set, URNOF(self), AFF4_TYPE, AFF4_LIBAFF_VOLUME, RESOLVER_DATA_STRING);
-  CALL(oracle, set, filename, AFF4_CONTAINS, URNOF(self), RESOLVER_DATA_URN);
+  CALL(oracle, set, filename, AFF4_VOLATILE_CONTAINS, URNOF(self), RESOLVER_DATA_URN);
 
   { //This is information about the psuedo stream we represent
     char buffer[BUFF_SIZE];
@@ -94,7 +94,7 @@ ZipFile AFF1Volume_Con(ZipFile self, char *filename, char mode) {
     CALL(oracle, set, buffer, AFF4_STORED, URNOF(self), RESOLVER_DATA_URN);
     CALL(oracle, set, buffer, AFF4_TYPE, AFF4_LIBAFF_STREAM, RESOLVER_DATA_STRING);
     CALL(oracle, set, buffer, AFF4_SIZE, &size, RESOLVER_DATA_UINT64);
-    CALL(oracle, add, URNOF(self), AFF4_CONTAINS, buffer, RESOLVER_DATA_URN, 1);
+    CALL(oracle, add, URNOF(self), AFF4_VOLATILE_CONTAINS, buffer, RESOLVER_DATA_URN, 1);
   };
 
   ((AFFObject)self)->mode = mode;

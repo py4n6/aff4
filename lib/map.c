@@ -1,5 +1,4 @@
 #include "aff4.h"
-#include "zip.h"
 
 /*** This is the implementation of the MapDriver */
 static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){ 
@@ -36,7 +35,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     };
 
     CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
-    CALL(oracle, set_value, this->stored, AFF4_CONTAINS, (RDFValue)uri);
+    CALL(oracle, set_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
     {
       XSDDatetime time = new_XSDDateTime(this);
 

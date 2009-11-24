@@ -1,10 +1,9 @@
-#include "zip.h"
 #include "aff4.h"
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
-#include "common.h"
 #include <libgen.h>
+#include <getopt.h>
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
@@ -131,7 +130,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   while(in_fd >= 0) {
     length = read(in_fd, buffer, BUFF_SIZE);
     if(length == 0) break;
-    
+
     CALL((FileLikeObject)image, write, buffer, length);
   };
 
@@ -214,7 +213,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
     goto error;
 
   while(1) {
-    CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET, 
+    CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET,
          (RDFValue)directory_offset);
 
     if(directory_offset->value > max_size) {
@@ -246,7 +245,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
       CALL(oracle, add_value, URNOF(image), AFF4_STORED,
            (RDFValue)URNOF(zipfile));
 
-      CALL(oracle, add_value, URNOF(zipfile), AFF4_CONTAINS,
+      CALL(oracle, add_value, URNOF(zipfile), AFF4_VOLATILE_CONTAINS,
            (RDFValue)URNOF(image));
 
 	CALL(oracle, cache_return, (AFFObject)zipfile);
@@ -287,9 +286,9 @@ void aff2_extract(char *stream, char *output_file) {
     URNOF(out_fd) = talloc_asprintf(out_fd, "file://%s", output_file);
   } else {
     URNOF(out_fd) = talloc_strdup(out_fd, output_file);
-  }; 
+  };
 
-  if(!CALL((AFFObject)out_fd, finish)) 
+  if(!CALL((AFFObject)out_fd, finish))
     return;
 
   // Now copy the input stream to the output stream
@@ -341,10 +340,10 @@ static int progress_cb(uint64_t progress, char *urn) {
     };
 
     if(type)
-      printf("\r%s (%s): (%s)              \n", current_uri, type, result); 
-    else 
-      printf("\r%s: (%s)              \n", current_uri, result); 
-    
+      printf("\r%s (%s): (%s)              \n", current_uri, type, result);
+    else
+      printf("\r%s: (%s)              \n", current_uri, result);
+
     current_uri = urn;
   };
 

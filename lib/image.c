@@ -1,4 +1,4 @@
-#include "zip.h"
+#include "aff4.h"
 #include "encode.h"
 
 /*************************************************************
@@ -193,7 +193,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     };
 
     // Add ourselves to our volume
-    CALL(oracle, add_value, this->stored, AFF4_CONTAINS, (RDFValue)URNOF(self));
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
 
     // These are the essential properties:
     //CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);

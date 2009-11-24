@@ -12,7 +12,6 @@
 #include <time.h>
 #include <libgen.h>
 #include "aff4.h"
-#include "zip.h"
 #include "aff4_rdf_serialise.h"
 
 static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
@@ -261,7 +260,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       goto error;
     };
 
-    CALL(oracle, add_value, this->storage_urn, AFF4_CONTAINS, (RDFValue)urn);
+    CALL(oracle, add_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)urn);
     URNOF(self) = CALL(urn, copy, self);
 
     CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
@@ -446,7 +445,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
     CALL(oracle, set_value, URNOF(self), AFF4_STORED, 
 	 (RDFValue)URNOF(fd));
 
-    CALL(oracle, add_value, URNOF(fd), AFF4_CONTAINS, 
+    CALL(oracle, add_value, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
 	 (RDFValue)URNOF(self));
     
     // Find the CD
@@ -488,7 +487,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
       CALL(oracle, set_value, filename, AFF4_TYPE, 
 	   rdfvalue_from_string(ctx, AFF4_SEGMENT));
 
-      CALL(oracle, add_value, URNOF(self), AFF4_CONTAINS, 
+      CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS, 
 	   (RDFValue)filename);
 
       // Parse the time from the CD
@@ -681,7 +680,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     CALL(oracle, set_value, filename, AFF4_STORED,
 	 (RDFValue)URNOF(self));
 
-    //    CALL(oracle, add_value, URNOF(self), AFF4_CONTAINS,
+    //    CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS,
     //	 (RDFValue)filename);
 
     {
@@ -763,7 +762,7 @@ static void dump_volume_properties(ZipFile self) {
   // Serialise all statements related to this volume
   CALL(serializer, serialize_urn, URNOF(self));
 
-  CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS);
+  CALL(oracle, get_iter, &iter, URNOF(self), AFF4_VOLATILE_CONTAINS);
   while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
 
     // Only serialise URNs which are not segments
@@ -825,8 +824,8 @@ static void ZipFile_close(ZipFile self) {
 
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
-      // Iterate over all the AFF4_CONTAINS URNs
-      CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS);
+      // Iterate over all the AFF4_VOLATILE_CONTAINS URNs
+      CALL(oracle, get_iter, &iter, URNOF(self), AFF4_VOLATILE_CONTAINS);
       while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
 	// We use type to anchor temporary allocations
@@ -1260,7 +1259,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   };
 
   // Store important information about this file
-  CALL(oracle, add_value, this->container_urn, AFF4_CONTAINS, (RDFValue)URNOF(self));
+  CALL(oracle, add_value, this->container_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
   CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->container_urn);
   {
     uint32_t tmp = time(NULL);

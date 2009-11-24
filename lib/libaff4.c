@@ -1,6 +1,5 @@
 /** Public interface for aff4.
  */
-#include "zip.h"
 #include "aff4.h"
 #include <libgen.h>
 
@@ -23,7 +22,7 @@ ZipFile open_volume(char *filename, char mode) {
   };
 
   // Is there a known volume contained in this file?
-  if(CALL(oracle, resolve_value, file_urn, AFF4_CONTAINS, (RDFValue)volume_urn)) {
+  if(CALL(oracle, resolve_value, file_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)volume_urn)) {
     result = (ZipFile)CALL(oracle, open, volume_urn, mode);
   };
 
