@@ -8,24 +8,6 @@
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
-void list_info() {
-  char *result =  CALL(oracle, export_all, "");
-  printf("%s", result);
-
-  talloc_free(result);
-};
-
-ZipFile create_volume(char *driver) {
-  if(!strcmp(driver, AFF4_ZIP_VOLUME)) {
-    return (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  } else if(!strcmp(driver, AFF4_DIRECTORY_VOLUME)) {
-    return (ZipFile)CALL(oracle, create, (AFFObject *)&__DirVolume);
-  } else {
-    RaiseError(ERuntimeError, "Unknown driver %s", driver);
-    return NULL;
-  };
-};
-
 void aff2_open_volume(char *urn, char mode) {
   // Try the different volume implementations in turn until one works:
   ZipFile volume;
@@ -36,39 +18,6 @@ void aff2_open_volume(char *urn, char mode) {
 };
 
 void aff2_print_info(int verbose) {
-  Cache i,j;
-
-  list_for_each_entry(i, &oracle->urn->cache_list, cache_list) {
-    char *urn = (char *)i->key;
-    Cache attributes = (Cache)i->data;
-
-    printf("\n******** Object %s ***********\n",urn);
-    list_for_each_entry(j, &attributes->cache_list, cache_list) {
-      char *key = (char *)j->key;
-      char *value = (char *)j->data;
-      Resolver i;
-
-      // Ignore volatile data in default verbosity.
-      if(verbose==0 && !memcmp(key, ZSTRING_NO_NULL(VOLATILE_NS)))
-	continue;
-
-      printf("\t%s = %s\n", key, value);
-      /** Now print which identity vouches for this fact */
-      list_for_each_entry(i, &oracle->identities, identities) {
-	char *hash = CALL(i, resolve, NULL, urn, key);
-	
-	if(hash) {
-	  if(!strcmp(hash, value)) {
-	    printf("\t\t---> Signed by %s\n", URNOF(i));
-	  } else {
-	    printf("\t\t---> Incorrect %s says it should be %s\n", URNOF(i), hash);
-	  };
-	  
-	  talloc_free(hash);
-	};
-      };
-    };
-  };
 };
 
 /** When we want to use encryption we must create a container volume,
@@ -88,6 +37,8 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
 			 char *chunks_in_segment,
 			 char *append,
 			 char *source) {
+
+#if 0
   // This is the container volume
   ZipFile container_volume, volume;
   char *output = talloc_strdup(NULL, output_file);
@@ -201,108 +152,100 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     talloc_free(container_volume);
   PrintError();
   return -1;
+#endif
 };
 
+/** This one creates a regular image on the output_file */
 int aff4_image(char *driver, char *output_file, char *stream_name, 
-	       char *chunks_in_segment,
+	       unsigned int chunks_in_segment,
 	       uint64_t max_size,
-	       char *source) {
-  ZipFile zipfile = create_volume(driver);
+	       char *in_urn) {
+  ZipFile zipfile;
   char *output;
   Image image;
   char buffer[IMAGE_BUFF_SIZE];
-  int in_fd;
   int length;
-  Link link;
-  char zipfile_urn[BUFF_SIZE];
-  char *passwd = getenv("AFF4_PASSPHRASE");
   int count = 0;
+  RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output_file);
+  XSDInteger directory_offset = new_XSDInteger(output_urn);
+  RDFURN input_urn = (RDFURN)rdfvalue_from_urn(output_urn, in_urn);
+  FileLikeObject in_fd = CALL(oracle, open, input_urn, 'r');
 
-  if(!zipfile) goto error;
-
-  output = talloc_strdup(zipfile, output_file);
-  in_fd=open(source,O_RDONLY);
-  if(in_fd<0) {
-    RaiseError(ERuntimeError, "Could not open source: %s", strerror(errno));
+  if(!in_fd) {
     goto error;
   };
 
-  CALL((AFFObject)zipfile, set_property, AFF4_STORED, normalise_url(output));
+  zipfile = (ZipFile)CALL(oracle, create, driver);
+  if(!zipfile) {
+    PrintError();
+    print_volume_drivers();
+    goto error;
+  };
+
+  CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
+       (RDFValue)output_urn);
 
   // Is it ok?
   if(!CALL((AFFObject)zipfile, finish)) {
     goto error;
   };
 
-  // Make local copy of zipfile's URN
-  strncpy(zipfile_urn, URNOF(zipfile), BUFF_SIZE);
 
-  // Done with that now
-  CALL(oracle, cache_return, (AFFObject)zipfile);
-  
   // Now we need to create an Image stream
-  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
-  
+  image = (Image)CALL(oracle, create, AFF4_IMAGE);
+
   // Tell the image that it should be stored in the volume
-  CALL((AFFObject)image, set_property, AFF4_STORED, zipfile_urn);
-  if(chunks_in_segment)
-    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
+  CALL((AFFObject)image, set_property, AFF4_STORED, (RDFValue)URNOF(zipfile));
+  if(chunks_in_segment > 0)
+    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, 
+         rdfvalue_from_int(output_urn, chunks_in_segment));
+
+  // Done with the volume now
+  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
     goto error;
 
-  // Do we need to encrypt the image?
-  if(passwd) {
-    Image encrypted = (Image)CALL(oracle, create, (AFFObject *)&__Encrypted);
-
-    // The encrypted object will be stored in this volume and target
-    // the image
-    CALL((AFFObject)encrypted, set_property, AFF4_STORED, zipfile_urn);
-    CALL((AFFObject)encrypted, set_property, AFF4_TARGET, URNOF(image));
-    CALL((AFFObject)encrypted, set_property, "aff2volatile:passphrase", passwd);
-    CALL((AFFObject)encrypted, finish);
-
-    // Dont need the original image any more
-    CALL(oracle, cache_return, (AFFObject)image);
-
-    // Make sure that we write on the encrypted stream now
-    image = encrypted;
-  };
-
-  while(in_fd >= 0) {
+  while(1) {
     // Check if we need to change volumes:
     if(max_size > 0) {
-      uint64_t directory_offset = parse_int(CALL(oracle, resolve, NULL, 
-						 zipfile_urn, 
-						 AFF4_DIRECTORY_OFFSET));
-      if(directory_offset > max_size) {
-	ZipFile zip = (ZipFile)CALL(oracle, open, zipfile_urn, 'w');
+      CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET, 
+           (RDFValue)directory_offset);
+
+      if(directory_offset->value > max_size) {
+	ZipFile zip = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
+
 	char buff[BUFF_SIZE];
 	snprintf(buff, BUFF_SIZE, "%s.%03u", output_file, count++);
 
+        CALL(output_urn, set, buff);
+
 	// Leave a hint in this volume to load the next volume
-	CALL(oracle, add, zipfile_urn, AFF4_AUTOLOAD, basename(buff));
+	CALL(oracle, add_value, URNOF(zipfile), AFF4_AUTOLOAD,
+             (RDFValue)output_urn);
+
 	CALL(zip, close);
 
 	// Create a new volume to hold the image:
-	zip = create_volume(driver);
-	CALL((AFFObject)zip, set_property, AFF4_STORED, normalise_url(buff));
+	zip = (ZipFile)CALL(oracle, create, driver);
+	CALL((AFFObject)zip, set_property, AFF4_STORED, 
+             (RDFValue)output_urn);
+
 	// Is it ok?
 	if(!CALL((AFFObject)zip, finish)) {
 	  goto error;
 	};
 
-	strncpy(zipfile_urn, URNOF(zip), BUFF_SIZE);
-
 	// Tell the resolver that from now on the image will be stored
 	// on the new volume:
-	CALL(oracle, set, URNOF(image), AFF4_STORED, URNOF(zip));
+	CALL(oracle, set_value, URNOF(image), AFF4_STORED, 
+             (RDFValue)URNOF(zip));
 	CALL(oracle, cache_return, (AFFObject)zip);
       };
     };
 
-    length = read(in_fd, buffer, IMAGE_BUFF_SIZE);
+    length = CALL(in_fd, read, buffer, IMAGE_BUFF_SIZE);
     if(length == 0) break;
     
     CALL((FileLikeObject)image, write, buffer, length);
@@ -310,33 +253,10 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
   CALL((FileLikeObject)image, close);
 
-  // We want to make it easy to locate this image so we set up a link
-  // to it:
-  if(stream_name) {
-    PrintError();
-    link = (Link)CALL(oracle, open,
-		      fully_qualified_name(zipfile, stream_name, URNOF(image)),
-		      'r');
-    ClearError();
-  };
-
-  // Sign if needed
-  {
-    Resolver i;
-
-    list_for_each_entry(i, &oracle->identities, identities) {
-      CALL(i->identity, store, zipfile_urn);
-    };
-  };
-
   // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn, 'w');
+  zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
   CALL((ZipFile)zipfile, close);
-  talloc_free(zipfile);
-  
-  // We are done with that now
-  CALL(oracle, cache_return, (AFFObject)image);
-  
+
   return 0;
 
  error:
@@ -344,6 +264,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
   return -1;
 };
 
+#if 0
 void aff2_extract(char *stream, char *output_file) {
   FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, stream, 'r');
   FileLikeObject out_fd;
@@ -458,7 +379,7 @@ void aff2_verify() {
     };
   };
 };
-
+#endif
 
 int main(int argc, char **argv)
 {
@@ -467,7 +388,7 @@ int main(int argc, char **argv)
   char *output_file = NULL;
   char *stream_name = "default";
   char *driver = AFF4_ZIP_VOLUME;
-  char *chunks_per_segment = NULL;
+  int chunks_per_segment = 0;
   char *append = NULL;
   int verbose=0;
   char *extract = NULL;
@@ -477,7 +398,7 @@ int main(int argc, char **argv)
   uint64_t max_size=0;
 
   // Initialise the library
-  AFF2_Init();
+  AFF4_Init();
 
   //talloc_enable_leak_report_full();
 
@@ -535,10 +456,7 @@ int main(int argc, char **argv)
     case 0: {
       char *option = (char *)long_options[option_index].name;
       if(!strcmp(option, "chunks_per_segment")) {
-	chunks_per_segment = optarg;
-	break;
-      } if(!strcmp(option, "no_autoload")) {
-	CALL(oracle, set, GLOBAL, CONFIG_AUTOLOAD, "0");
+	chunks_per_segment = parse_int(optarg);
 	break;
       } if(!strcmp(option, "max_size")) {
 	max_size = parse_int(optarg);
@@ -578,7 +496,7 @@ int main(int argc, char **argv)
 
     case 'p':
       setenv("AFF4_PASSPHRASE", optarg, 1);
-      CALL(oracle, set, GLOBAL, AFF4_VOLATILE_PASSPHRASE, optarg);
+      //CALL(oracle, set_value, GLOBAL, AFF4_VOLATILE_PASSPHRASE, optarg);
       break;
 
     case 'i':
@@ -610,6 +528,7 @@ int main(int argc, char **argv)
     }
   }
 
+#if 0
   if(cert || key_file)
     add_identity(key_file, cert);
 
@@ -617,36 +536,32 @@ int main(int argc, char **argv)
   if(extract) {
     if(!output_file) output_file = "/dev/stdout";
     aff2_extract(extract, output_file);
-  } 
+  }
   // Do we just want to print the content of the resolver?
   else if(mode == 'I') {
     if(verify)
       aff2_verify();
 
     aff2_print_info(verbose);
-  } else if(optind < argc) {
-    // We are imaging now
-    if(mode == 'i') {
-      while (optind < argc) {
-	if(!output_file) {
-	  printf("You must specify an output file with --output\n");
-	  exit(-1);
-	};
-	if(getenv("AFF4_PASSPHRASE")) {
-	  aff2_encrypted_image(driver, output_file, stream_name,
-			       chunks_per_segment,
-			       append,
-			       argv[optind++]);
-	} else {
-	  aff4_image(driver, output_file, stream_name, 
-		     chunks_per_segment,
-		     max_size,
-		     argv[optind++]);
-	};
+  } else
+#endif
+    if(optind < argc) {
+      // We are imaging now
+      if(mode == 'i') {
+        while (optind < argc) {
+          if(!output_file) {
+            printf("You must specify an output file with --output\n");
+            exit(-1);
+          };
+
+          aff4_image(driver, output_file, stream_name,
+                     chunks_per_segment,
+                     max_size,
+                     argv[optind++]);
+        };
       };
+      printf("\n");
     };
-    printf("\n");
-  }
 
   PrintError();
   exit(EXIT_SUCCESS);

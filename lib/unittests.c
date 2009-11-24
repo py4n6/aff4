@@ -138,9 +138,9 @@ void zipfile_test1() {
 };
 
 void zipfile_test2() {
-  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
+  ZipFile zip = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   // Now make an image object
-  FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, (AFFObject *)GETCLASS(Image));
+  FileLikeObject outfd = (FileLikeObject)CALL(oracle, create, AFF4_IMAGE);
   RDFURN file_urn = new_RDFURN(NULL);
 
   CALL(file_urn, set, FILENAME);
@@ -185,7 +185,7 @@ void zipfile_test2() {
 };
 
 void zipfile_test_load() {
-  ZipFile zip = (ZipFile)CALL(oracle, create, (AFFObject *)GETCLASS(ZipFile));
+  ZipFile zip = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   RDFURN location = new_RDFURN(zip);
 
   CALL(location, set, FILENAME);
@@ -213,7 +213,7 @@ void test1_5() {
   ZipFile zipfile;
 
   // Now create a new AFF2 file on top of it
-  zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  zipfile = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   CALL((AFFObject)zipfile, set_property, "aff2:stored", "file://" TEST_FILE);
 
   if(CALL((AFFObject)zipfile, finish)) {
@@ -302,7 +302,7 @@ the ZipFile volume.
 
 */
 void test_image_create() {
-  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  ZipFile zipfile = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   Image image;
   char buffer[BUFF_SIZE];
   int in_fd;
@@ -325,7 +325,7 @@ void test_image_create() {
   //  CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now we need to create an Image stream
-  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
+  image = (Image)CALL(oracle, create, AFF4_IMAGE);
 
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set_property, "aff2:stored", zipfile_urn);
@@ -344,15 +344,6 @@ void test_image_create() {
   };
 
   CALL((FileLikeObject)image, close);
-
-  // We want to make it easy to locate this image so we set up a link
-  // to it:
-  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
-  // The link will be stored in this zipfile
-  CALL((AFFObject)link, set_property, "aff2:stored", zipfile_urn);
-  CALL(link, link, oracle, zipfile_urn, URNOF(image), "default");
-  CALL((AFFObject)link, finish);
-  CALL(oracle, cache_return, (AFFObject)link);
 
   // Close the zipfile - get it back
   //  zipfile = (ZipFile)CALL(oracle, open, zipfile_urn);
@@ -425,7 +416,7 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   Link link;
 
   // Now we need to create an Image stream
-  image = (Image)CALL(oracle, create, (AFFObject *)&__Image);
+  image = (Image)CALL(oracle, create, AFF4_IMAGE);
   if(!image) return NULL;
 
   // Tell the image that it should be stored in the volume
@@ -445,15 +436,6 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
   };
 
   CALL((FileLikeObject)image, close);
-
-  // We want to make it easy to locate this image so we set up a link
-  // to it:
-  link = (Link)CALL(oracle, create, (AFFObject *)&__Link);
-  // The link will be stored in this zipfile
-  CALL((AFFObject)link, set_property, "aff2:stored", volume);
-  CALL(link, link, oracle, volume, URNOF(image), friendly_name);
-  CALL((AFFObject)link, finish);
-  CALL(oracle, cache_return, (AFFObject)link);
 
   return URNOF(image);
 };
@@ -476,7 +458,7 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
 
 void test_map_create() {
   MapDriver map;
-  ZipFile zipfile = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  ZipFile zipfile = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   CALL(oracle, set_value, URNOF(zipfile), AFF4_STORED, rdfvalue_from_urn(zipfile, FILENAME));
 
   zipfile = (ZipFile)CALL((AFFObject)zipfile, finish);
@@ -485,7 +467,7 @@ void test_map_create() {
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now create a map stream:
-  map = (MapDriver)CALL(oracle, create, (AFFObject *)&__MapDriver);
+  map = (MapDriver)CALL(oracle, create, AFF4_MAP);
   if(map) {
     URNOF(map) = CALL(URNOF(zipfile), copy, map);
     CALL(URNOF(map), add, MAP_NAME);
@@ -579,7 +561,7 @@ void test_http_handle() {
 
 #ifdef ENCTYPTED_TESTS
 void test_encrypted(char *filename) {
-  ZipFile container = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  ZipFile container = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
   FileLikeObject encrypted_stream, embedded_stream;
   ZipFile embedded_volume;
   char *container_urn = talloc_strdup(NULL, URNOF(container));

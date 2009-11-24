@@ -20,7 +20,8 @@ enum url_state {
 };
 
 URLParse URLParse_Con(URLParse self, char *url) {
-  CALL(self, parse ,url);
+  if(url)
+    CALL(self, parse ,url);
   self->ctx = talloc_size(self, 1);
   return self;
 };
@@ -39,7 +40,7 @@ int URLParse_parse(URLParse self, char *url) {
   // Initialise with defaults:
   self->scheme = "";
   self->netloc = "";
-  self->query = "";	      
+  self->query = "";
   self->fragment = "";
 
   while(!end) {
@@ -49,7 +50,7 @@ int URLParse_parse(URLParse self, char *url) {
     case STATE_METHOD: {
       // This happens when the url contains no : at all - we interpret
       // it as a file URL with no netloc
-      if(url[i]==0 || url[i]=='/') {
+      if(url[i]==0) {
 	buff[j]=0; j=0;
 	self->query = talloc_strdup(self->ctx,buff);
 	state = STATE_QUERY;
@@ -70,7 +71,7 @@ int URLParse_parse(URLParse self, char *url) {
     };
 
     case STATE_NETLOCK: {
-      if(url[i]==0 || url[i]=='/') {
+      if(url[i]==0 || (url[i]=='/' && i--)) {
 	state = STATE_QUERY;
 	buff[j]=0; j=0;
 	self->netloc = talloc_strdup(self->ctx,buff);
@@ -95,7 +96,7 @@ int URLParse_parse(URLParse self, char *url) {
       } else buff[j++] = url[i];
       break;
     };
-      
+
     default:
     case STATE_END:
       goto exit;
@@ -112,19 +113,22 @@ exit:
 char *URLParse_string(URLParse self, void *ctx) {
   char *fmt;
   char *scheme = self->scheme;
+  char *seperator = "/";
 
   if(strlen(self->fragment)>0)
-    fmt = "%s://%s/%s#%s";
-  else if(strlen(self->query)>0)
-    fmt = "%s://%s/%s";
-  else
+    fmt = "%s://%s%s%s#%s";
+  else if(strlen(self->query)>0) {
+    if(self->query[0] == '/') seperator = "";
+    fmt = "%s://%s%s%s";
+  } else
     fmt = "%s://%s";
 
   if(strlen(scheme)==0)
     scheme = "file";
 
   return talloc_asprintf(ctx, fmt, scheme,
-			 self->netloc, self->query,
+			 self->netloc, seperator, 
+                         self->query,
 			 self->fragment);
 };
 

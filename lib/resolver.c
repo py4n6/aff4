@@ -198,7 +198,7 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
   list_add_tail(&new_cache->hash_list, &self->hash_table[hash]->hash_list);
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
- 
+
   return new_cache;
 };
 
@@ -243,14 +243,14 @@ static void *Cache_get_item(Cache self, char *key, int len) {
   return NULL;
 };
 
-VIRTUAL(Cache, Object)
+VIRTUAL(Cache, Object) {
      VMETHOD(Con) = Cache_Con;
      VMETHOD(put) = Cache_put;
      VMETHOD(cmp) = Cache_cmp;
      VMETHOD(hash) = Cache_hash;
      VMETHOD(get) = Cache_get;
      VMETHOD(get_item) = Cache_get_item;
-END_VIRTUAL
+} END_VIRTUAL
 
 /**********************************************************
    The following are utilities that will be needed later
@@ -619,12 +619,12 @@ static uint64_t is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
     while(data_offset > 0) {
       if(value.dsize == i.length && i.length < 100000) {
 	char buff[value.dsize];
-	
+
 	// Read this much from the file
 	if(read(self->data_store_fd, buff, i.length) < i.length) {
 	  return 0;
 	};
-	
+
 	if(!memcmp(buff, value.dptr, value.dsize)) {
 	  // Found it:
 	  return data_offset - sizeof(i);
@@ -649,11 +649,11 @@ static uint64_t is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
 
     // Do it all again with the inherited URN
   };
-    
+
   return 0;
 };
 
-static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute, 
+static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
 			 TDB_DATA value, int type_id, uint64_t previous_offset) {
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
@@ -689,7 +689,6 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   return 1;
 };
 
-
 /** This sets a single triple into the resolver replacing previous
     values set for this attribute
 */
@@ -698,26 +697,26 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
   TDB_DATA *encoded_value = CALL(value, encode);
 
   if(encoded_value) {
-    TDB_DATA attribute;
-    uint64_t previous_offset;
-
-    attribute.dptr = (unsigned char *)attribute_str;
-    attribute.dsize = strlen(attribute_str);
+    uint64_t data_offset;
+    TDB_DATA_LIST iter;
+    TDB_DATA attribute = tdb_data_from_string(attribute_str);
 
     DEBUG("Setting %s, %s\n", urn->value, attribute_str);
 
     // Grab the lock
     tdb_lockall(self->data_db);
 
-    /** If the value is already in the list, we just ignore this
-	request.
-    */
-    previous_offset = is_value_present(self, 
-	     tdb_data_from_string(urn->value), attribute, *encoded_value, 1);
+    // Try to overwrite a previously set property
+    data_offset = get_data_head(self,
+                                tdb_data_from_string(urn->value),
+                                attribute,
+                                &iter);
 
-    if(previous_offset == 0) {
-      set_new_value(self, tdb_data_from_string(urn->value), 
-		    attribute, *encoded_value, value->id, previous_offset);
+    if(data_offset > 0 && iter.length == encoded_value->dsize) {
+      write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
+    } else {
+      set_new_value(self, tdb_data_from_string(urn->value),
+		    attribute, *encoded_value, value->id, 0);
     };
 
     tdb_unlockall(self->data_db);
@@ -759,8 +758,8 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   };
 };
 
-static int Resolver_get_iter(Resolver self, 
-			     RESOLVER_ITER *iter, 
+static int Resolver_get_iter(Resolver self,
+			     RESOLVER_ITER *iter,
 			     RDFURN urn,
 			     char *attribute_str) {
   TDB_DATA attribute;
@@ -775,7 +774,7 @@ static int Resolver_get_iter(Resolver self,
 };
 
 static int Resolver_iter_next(Resolver self,
-			      RESOLVER_ITER *iter, 
+			      RESOLVER_ITER *iter,
 			      RDFValue result) {
   int res_code;
 
@@ -945,12 +944,27 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 };
 
 // A helper method to construct the class
-static AFFObject Resolver_create(Resolver self, AFFObject *class_reference) {
-  AFFObject result = (AFFObject)CONSTRUCT_FROM_REFERENCE((*class_reference), 
-							 Con, NULL, NULL, 'w');
+static AFFObject Resolver_create(Resolver self, char *name) {
+  AFFObject *class_reference;
+  AFFObject result;
+
+  class_reference = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(name));
+  if(!class_reference) {
+    RaiseError(ERuntimeError, "No handler for object type '%s'", name);
+    goto error;
+  };
+
+  // Newly created objects belong in the write cache
+  result = (AFFObject)CONSTRUCT_FROM_REFERENCE((*class_reference), 
+                                               Con, self->write_cache, NULL, 'w');
+  if(!result) goto error;
+
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), 'w');
 
   return result;
+
+ error:
+  return NULL;
 };
 
 static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
@@ -994,7 +1008,7 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
     };
   };
 };
-  
+
 // Parse a properties file (implicit context is context - if the file
 // does not specify a subject URN we use context instead).
 static void Resolver_parse(Resolver self, char *context_urn, char *text, int len) {
@@ -1047,7 +1061,7 @@ int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
 };
 
 /** Here we implement the resolver */
-VIRTUAL(Resolver, AFFObject)
+VIRTUAL(Resolver, AFFObject) {
      VMETHOD(Con) = Resolver_Con;
      VMETHOD(create) = Resolver_create;
 
@@ -1063,7 +1077,7 @@ VIRTUAL(Resolver, AFFObject)
      VMETHOD(parse) = Resolver_parse;
      VMETHOD(lock) = Resolver_lock;
      VMETHOD(unlock) = Resolver_unlock;
-END_VIRTUAL
+} END_VIRTUAL
 
 /************************************************************
   AFFObject - This is the base class for all other objects
@@ -1071,7 +1085,7 @@ END_VIRTUAL
 static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
   uuid_t uuid;
   char uuid_str[BUFF_SIZE];
-  
+
   if(!uri) {
     // This function creates a new stream from scratch so the stream
     // name will be a new UUID
@@ -1102,9 +1116,25 @@ static AFFObject AFFObject_finish(AFFObject self) {
   return CALL(self, Con, URNOF(self), self->mode);
 };
 
-VIRTUAL(AFFObject, Object)
+VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set_property) = AFFObject_set_property;
 
      VMETHOD(Con) = AFFObject_Con;
-END_VIRTUAL
+} END_VIRTUAL
+
+/* Prints out all available volume drivers */
+void print_volume_drivers() {
+  Cache i;
+  char *ctx = talloc_size(NULL, 1);
+
+  printf("Valid volume drivers: \n");
+
+  list_for_each_entry(i, &type_dispatcher->cache_list, cache_list) {
+    AFFObject class_ref = (AFFObject)i->data;
+
+    if(ISSUBCLASS(class_ref, ZipFile)) {
+      printf(" - %s\n", i->key);
+    };
+  };
+};

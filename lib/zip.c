@@ -40,10 +40,9 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
 
   if(urn) {
     int flags;
-    URLParse parser = CONSTRUCT(URLParse, URLParse, Con, self, urn->value);
 
     // Make sure that the urn passed has a file scheme
-    if(strcmp("file", parser->scheme)) {
+    if(strlen(urn->parser->scheme) > 0 && strcmp("file", urn->parser->scheme)) {
       RaiseError(ERuntimeError, "%s must be called with a file:// scheme", NAMEOF(self));
       goto error;
     };
@@ -55,13 +54,13 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
     } else {
       flags = O_CREAT | O_RDWR | O_BINARY;
       // Try to create leading directories
-      _mkdir(dirname(parser->query));
+      //_mkdir(dirname(urn->parser->query));
     };
     
     // Now try to create the file within the new directory
-    self->fd = open(parser->query, flags, S_IRWXU | S_IRWXG | S_IRWXO);
+    self->fd = open(urn->parser->query, flags, S_IRWXU | S_IRWXG | S_IRWXO);
     if(self->fd<0){
-      RaiseError(EIOError, "Can't open %s (%s)", urn->value, strerror(errno));
+      RaiseError(EIOError, "Can't open %s (%s)", urn->parser->query, strerror(errno));
       goto error;
     };
 

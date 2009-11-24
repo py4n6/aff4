@@ -27,7 +27,6 @@ typedef struct TDB_DATA_LIST {
 typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
-  uint16_t search_type;
 } RESOLVER_ITER;
 
      /** The resolver is at the heart of the AFF4 specification - its
@@ -83,8 +82,12 @@ CLASS(Resolver, AFFObject)
       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
       void METHOD(Resolver, cache_return, AFFObject obj);
 
-/* This create a new object of the specified type. */
-      AFFObject METHOD(Resolver, create, AFFObject *class_reference);
+       /* This create a new object of the specified type.
+          
+          name specifies the type of object as registered in the type
+          handler dispatcher.
+        */
+      AFFObject METHOD(Resolver, create, char *name);
 
   /* This function resolves the value in uri and attribute and sets it
      into the RDFValue object which much be of the correct type. 
@@ -186,4 +189,10 @@ END_CLASS
        /** This is a handler for new types - types get registered here */
 void register_type_dispatcher(char *type, AFFObject *class_ref);
 
+       /** This following are help related function for
+           introspection
+       */
+void print_volume_drivers();
+
 #endif 	    /* !AFF4_RESOLVER_H_ */
+
