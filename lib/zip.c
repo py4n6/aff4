@@ -34,6 +34,7 @@ itself.
 */
 static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char mode) {
   FileBackedObject self = (FileBackedObject)this;
+  uint64_t file_size;
 
   this = self->__super__->super.Con(this, urn, mode);
 
@@ -63,17 +64,19 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       goto error;
     };
 
-    CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE, 
-	 (RDFValue)self->super.size);
+    file_size = lseek(self->fd, 0, SEEK_END);
 
-    // Check that its what we expected
-    if(self->super.size->value != lseek(self->fd, 0, SEEK_END)) {
+    if(CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
+            (RDFValue)self->super.size) &&
+       self->super.size->value != file_size) {
       // The size is not what we expect. Therefore the data stored in
       // the resolver for this file is incorrect - we need to clear it
       // all.
       CALL(oracle, del, URNOF(self), NULL);
+    } else {
+      self->super.size->value = file_size;
     };
-    
+
     CALL(oracle, set_value, URNOF(self), AFF4_SIZE, 
 	 (RDFValue)self->super.size);
   };

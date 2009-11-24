@@ -161,8 +161,8 @@ static void MapDriver_save_map(MapDriver self) {
       if(prediction == point->target_offset) continue;
     };
 
-    snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->target_offset, 
-	     point->image_offset, point->target_urn->value);
+    snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->image_offset,
+	     point->target_offset, point->target_urn->value);
     CALL(fd, write, ZSTRING_NO_NULL(buff));
   };
 

@@ -25,10 +25,14 @@ struct _map_point {
 struct map_description {
   int **description;
   int image_period;
+  int target_period;
+  int blocksize;
+  uint64_t size;
   struct _map_point *map;
 } map_description;
 
 struct map_description *parse_map(char *map, int number_of_disks, int *period,
+                                  int blocksize,
                                   FileLikeObject *disks) {
   struct map_description *result;
   int len = strlen(map);
@@ -52,6 +56,9 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
   result->map = talloc_array(result, struct _map_point,
                              *period * (number_of_disks - 1));
   result->image_period = 0;
+  result->target_period = *period;
+  result->blocksize = blocksize;
+  result->size = disks[0]->size->value * (number_of_disks - 1);
 
   for(i=0; i<*period; i++) {
     result->description[i] = talloc_array(result->description, int, number_of_disks);
@@ -76,7 +83,7 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
 
         result->map[image_block].block = k;
         result->map[image_block].target = disks[j];
-        result->image_period = max(result->image_period, image_block);
+        result->image_period = max(result->image_period, image_block + 1);
       };
       j++;
       if(j>=number_of_disks) {
@@ -94,25 +101,72 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
   return NULL;
 };
 
+void make_map_stream(struct map_description *map, char *output, char *stream) {
+  RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output);
+  ZipFile zip = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
+  MapDriver map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP);
+  XSDInteger i = new_XSDInteger(output_urn);
+
+  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)output_urn);
+  if(!CALL((AFFObject)zip, finish))
+    goto exit;
+
+  URNOF(map_fd) = CALL(URNOF(zip), copy, map_fd);
+  CALL(URNOF(map_fd), add, stream);
+
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, URNOF(zip));
+
+  CALL(oracle, cache_return, (AFFObject)zip);
+
+  if(!CALL((AFFObject)map_fd, finish))
+    goto exit;
+
+  CALL(i, set, map->image_period);
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_IMAGE_PERIOD, (RDFValue)i);
+
+  CALL(i, set, map->target_period);
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_TARGET_PERIOD, (RDFValue)i);
+
+  CALL(i, set, map->blocksize);
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_BLOCKSIZE, (RDFValue)i);
+
+  CALL(map_fd->super.size, set, map->size);
+
+  for(i->value = 0; i->value < map->image_period; i->value++) {
+    CALL(map_fd, add, i->value, map->map[i->value].block,
+         URNOF(map->map[i->value].target)->value);
+  };
+
+  CALL((FileLikeObject)map_fd, close);
+  CALL(zip, close);
+
+ exit:
+  if(output_urn)
+    talloc_free(output_urn);
+
+  return;
+};
+
+
 int print_row(FileLikeObject *disks, int number_of_disks, int columnwidth) {
   int i;
 
   for(i=0;i<number_of_disks;i++) {
     char buff[columnwidth+1];
     int j;
-    
+
     if(CALL(disks[i], read, buff, columnwidth) < columnwidth)
       return 0;
-    
+
     for(j=0;j<columnwidth;j++) {
       if(buff[j] < 32 || buff[j] >= 127)
         buff[j]='.';
     };
     buff[j]=0;
-    
+
     printf("%s%s", buff, seperator);
   };
-  
+
   printf("\n");
   return 1;
 };
@@ -136,6 +190,7 @@ int main(int argc, char **argv)
   uint64_t max_size=0;
   char *map_description = NULL;
   struct map_description *map = NULL;
+  char *output = NULL;
 
   // Initialise the library
   AFF4_Init();
@@ -178,6 +233,10 @@ int main(int argc, char **argv)
       break;
     };
 
+    case 's':
+      stream_name = optarg;
+      break;
+
     case 'v':
       verbose++;
       break;
@@ -199,6 +258,10 @@ int main(int argc, char **argv)
       printf("%s - an AFF4 general purpose imager.\n", argv[0]);
       print_help(long_options);
       exit(0);
+
+    case 'o':
+      output = optarg;
+      break;
 
     default:
       printf("?? getopt returned character code 0%o ??\n", c);
@@ -224,10 +287,15 @@ int main(int argc, char **argv)
     };
 
     if(map_description) {
-      map = parse_map(map_description, number_of_disks, &period, disks);
+      map = parse_map(map_description, number_of_disks, &period,        \
+                      blocksize, disks);
       if(!map->description) goto exit;
     };
 
+    if(output) {
+      make_map_stream(map, output, stream_name);
+      goto exit;
+    };
 
     printf("Blocksize %u\n", blocksize);
     while(1) {
