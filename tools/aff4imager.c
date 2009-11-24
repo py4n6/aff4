@@ -154,6 +154,71 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
 #endif
 };
 
+int aff4_make_map(char *driver, char *output_file, char *stream_name,
+                  char **in_urn, int count) {
+  RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output_file);
+  XSDInteger image_offset = new_XSDInteger(output_urn);
+  XSDInteger target_offset = new_XSDInteger(output_urn);
+  RDFURN input_urn = new_RDFURN(output_urn);
+  int i;
+  MapDriver map_fd;
+  ZipFile zipfile;
+
+  zipfile = (ZipFile)CALL(oracle, create, driver);
+  if(!zipfile) {
+    PrintError();
+    print_volume_drivers();
+    goto error;
+  };
+
+  CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
+       (RDFValue)output_urn);
+
+  // Is it ok?
+  if(!CALL((AFFObject)zipfile, finish)) {
+    goto error;
+  };
+
+  // Now we need to create an Image stream
+  map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP);
+  if(!map_fd) goto error;
+
+  // We have to give the stream a specific name
+  if(stream_name) {
+    URNOF(map_fd) = CALL(URNOF(zipfile), copy, map_fd);
+    CALL(URNOF(map_fd), add, stream_name);
+  };
+
+
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, URNOF(zipfile));
+
+  CALL(oracle, cache_return, (AFFObject)zipfile);
+
+  if(!CALL((AFFObject)map_fd, finish))
+    goto error;
+
+  for(i=0; i<count && in_urn[i]; i++) {
+    FileLikeObject in_fd;
+
+    CALL(input_urn, set, in_urn[i]);
+    in_fd = (FileLikeObject)CALL(oracle, open, input_urn, 'r');
+    if(!in_fd)
+      goto error;
+
+    CALL(map_fd, add, image_offset->value, target_offset->value, in_urn[i]);
+    image_offset->value += in_fd->size->value;
+  };
+
+  map_fd->super.size->value = image_offset->value;
+  CALL((FileLikeObject)map_fd, close);
+  CALL(zipfile, close);
+
+  return 1;
+ error:
+  talloc_free(output_urn);
+  return 0;
+};
+
 /** This one creates a regular image on the output_file */
 int aff4_image(char *driver, char *output_file, char *stream_name,
 	       unsigned int chunks_in_segment,
@@ -192,6 +257,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
   // Now we need to create an Image stream
   image = (Image)CALL(oracle, create, AFF4_IMAGE);
+  if(!image) goto error;
 
   // We have to give the stream a specific name
   if(stream_name) {
@@ -421,6 +487,8 @@ int main(int argc, char **argv)
 
       {"image\0"
        "*Imaging mode (Image each argv as a new stream)", 0, 0, 'i'},
+      {"map\0"
+       "*Map only (create a map object concatenating all the images)", 0, 0, 'm'},
       {"driver\0"
        "Which driver to use - 'directory' or 'volume' (Zip archive, default)", 1, 0, 'd'},
       {"output\0"
@@ -495,6 +563,11 @@ int main(int argc, char **argv)
 
     case 'e':
       extract = optarg;
+      break;
+
+    case 'm':
+      mode = 'm';
+      break;
 
     case 's':
       stream_name = optarg;
@@ -565,6 +638,9 @@ int main(int argc, char **argv)
                      max_size,
                      argv[optind++]);
         };
+      } else if(mode == 'm') {
+        aff4_make_map(driver, output_file, stream_name,
+                      argv+optind, argc- optind);
       };
       printf("\n");
     };
