@@ -1,5 +1,5 @@
 /** This is the public include file for using libaff4.
-    
+
 This defines the API to the AFF4 reference implementation. The API is
 divided into two parts - a low level API and a high level API.
 
@@ -54,7 +54,7 @@ void aff4_close(AFF4_HANDLE self);
 
     returns a null terminated list of tripples. List can be freed with
     aff4_free if desired (or you can free the handle later).
-*/ 
+*/
 struct aff4_tripple {
   char *urn;
   char *attribute;

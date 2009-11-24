@@ -264,6 +264,9 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     CALL(oracle, add_value, this->storage_urn, AFF4_CONTAINS, (RDFValue)urn);
     URNOF(self) = CALL(urn, copy, self);
 
+    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+         (RDFValue)this->directory_offset);
+
     // Try to load this volume
     // ZipFile_load_from(this, stored->value, mode);
     {
@@ -470,7 +473,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 
       // Now read the filename
       escaped_filename = talloc_array(filename, char, cd_header.file_name_length+1);
-						
+
       if(CALL(fd, read, escaped_filename, cd_header.file_name_length) != 
 	 cd_header.file_name_length)
 	goto error_reason;
@@ -631,7 +634,8 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
     struct ZipFileHeader header;
     FileLikeObject fd;
     // We start writing new files at this point
-    TDB_DATA escaped_filename = CALL(filename, relative_name, URNOF(self));
+    TDB_DATA relative_name = CALL(filename, relative_name, URNOF(self));
+    TDB_DATA escaped_filename = escape_filename_data(filename, relative_name);
     time_t epoch_time = time(NULL);
     struct tm *now = localtime(&epoch_time);
 
@@ -756,6 +760,9 @@ static void dump_volume_properties(ZipFile self) {
   RDFURN urn = new_RDFURN(NULL);
   XSDString type = new_XSDString(urn);
 
+  // Serialise all statements related to this volume
+  CALL(serializer, serialize_urn, URNOF(self));
+
   CALL(oracle, get_iter, &iter, URNOF(self), AFF4_CONTAINS);
   while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
 
@@ -796,12 +803,12 @@ static void ZipFile_close(ZipFile self) {
 
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
     if(!fd) return;
-    
+
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
-    
+
     // Dump the central directory for this volume
     {
       // Get all the URNs contained within this volume
@@ -824,6 +831,7 @@ static void ZipFile_close(ZipFile self) {
 	struct CDFileHeader cd;
 	// We use type to anchor temporary allocations
 	struct tm *now;
+        TDB_DATA relative_name, escaped_filename;
 
 	// Only store segments here
 	if(!CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) ||
@@ -831,43 +839,44 @@ static void ZipFile_close(ZipFile self) {
 	  continue;
 
 	// This gets the relative name of the fqn
-	TDB_DATA escaped_filename = urn->relative_name(urn, URNOF(self));
+	relative_name = urn->relative_name(urn, URNOF(self));
+        escaped_filename = escape_filename_data(urn, relative_name);
 
 	CALL(oracle, resolve_value, urn, AFF4_TIMESTAMP,
 	     (RDFValue)epoch_time);
-	
+
 	now = localtime((time_t *)&epoch_time->value);
-		
+
 	// Clear temporary data
 	CALL(zip64_header, truncate, 4);
-	
+
 	// Prepare a central directory record
 	memset(&cd, 0, sizeof(cd));
 	cd.magic = 0x2014b50;
 	cd.version_made_by = 0x317;
 	cd.version_needed = 0x14;
 	cd.compression_method = ZIP_STORED;
-	
+
 	if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSION,
 		(RDFValue)compression_method)) {
 	  cd.compression_method = compression_method->value;
 	};
-	
+
 	// We always write trailing directory structures
 	cd.flags = 0x8;
-	
+
 	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_CRC,
 	     (RDFValue)crc);
 
 	cd.crc32 = crc->value;
-	
+
 	cd.dosdate = (now->tm_year + 1900 - 1980) << 9 | 
 	  (now->tm_mon + 1) << 5 | now->tm_mday;
 	cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
 	  now->tm_sec / 2;
 	cd.external_file_attr = 0644 << 16L;
 	cd.file_name_length = escaped_filename.dsize;
-	
+
 	// The following are optional zip64 fields. They must appear
 	// in this order:
 	CALL(oracle, resolve_value, urn, AFF4_SIZE, (RDFValue)size);
@@ -878,7 +887,7 @@ static void ZipFile_close(ZipFile self) {
 	} else {
 	  cd.file_size = size->value;
 	}
-	
+
 	// AFF4 does not support very large segments since they are
 	// unseekable.
 	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSED_SIZE,

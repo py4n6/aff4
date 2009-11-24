@@ -144,7 +144,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Close the zipfile and dispose of it
   container_volume = (ZipFile)CALL(oracle, open, container_volume_urn, 'w');
   CALL((ZipFile)container_volume, close);
-  
+
   return 0;
 
  error:
@@ -156,7 +156,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
 };
 
 /** This one creates a regular image on the output_file */
-int aff4_image(char *driver, char *output_file, char *stream_name, 
+int aff4_image(char *driver, char *output_file, char *stream_name,
 	       unsigned int chunks_in_segment,
 	       uint64_t max_size,
 	       char *in_urn) {
@@ -214,41 +214,42 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
     goto error;
 
   while(1) {
-    // Check if we need to change volumes:
-    if(max_size > 0) {
-      CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET, 
-           (RDFValue)directory_offset);
+    CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET, 
+         (RDFValue)directory_offset);
 
-      if(directory_offset->value > max_size) {
-	ZipFile zip = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
+    if(directory_offset->value > max_size) {
+      zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
 
-	char buff[BUFF_SIZE];
-	snprintf(buff, BUFF_SIZE, "%s.%03u", output_file, count++);
+      char buff[BUFF_SIZE];
+      snprintf(buff, BUFF_SIZE, "%s.%03u", output_file, count++);
 
-        CALL(output_urn, set, buff);
+      CALL(output_urn, set, buff);
 
-	// Leave a hint in this volume to load the next volume
-	CALL(oracle, add_value, URNOF(zipfile), AFF4_AUTOLOAD,
-             (RDFValue)output_urn);
+      // Leave a hint in this volume to load the next volume
+      CALL(oracle, add_value, URNOF(zipfile), AFF4_AUTOLOAD,
+           (RDFValue)output_urn);
 
-	CALL(zip, close);
+      CALL(zipfile, close);
 
-	// Create a new volume to hold the image:
-	zip = (ZipFile)CALL(oracle, create, driver);
-	CALL((AFFObject)zip, set_property, AFF4_STORED, 
-             (RDFValue)output_urn);
+      // Create a new volume to hold the image:
+      zipfile = (ZipFile)CALL(oracle, create, driver);
+      CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
+           (RDFValue)output_urn);
 
-	// Is it ok?
-	if(!CALL((AFFObject)zip, finish)) {
-	  goto error;
-	};
-
-	// Tell the resolver that from now on the image will be stored
-	// on the new volume:
-	CALL(oracle, set_value, URNOF(image), AFF4_STORED, 
-             (RDFValue)URNOF(zip));
-	CALL(oracle, cache_return, (AFFObject)zip);
+      // Is it ok?
+      if(!CALL((AFFObject)zipfile, finish)) {
+        goto error;
       };
+
+      // Tell the resolver that from now on the image will be stored
+      // on the new volume:
+      CALL(oracle, add_value, URNOF(image), AFF4_STORED,
+           (RDFValue)URNOF(zipfile));
+
+      CALL(oracle, add_value, URNOF(zipfile), AFF4_CONTAINS,
+           (RDFValue)URNOF(image));
+
+	CALL(oracle, cache_return, (AFFObject)zipfile);
     };
 
     length = CALL(in_fd, read, buffer, IMAGE_BUFF_SIZE);

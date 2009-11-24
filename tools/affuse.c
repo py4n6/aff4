@@ -18,22 +18,18 @@
 #include <time.h>
 
 struct stream_info {
-  char *urn;
-  // This is a possibly shortened urn relative to the volume - its
-  // basiclly how the stream shows up in fuse.
-  char *path_name;
-  uint64_t size;
+  RDFURN urn;
+  XSDInteger size;
   time_t mtime;
 } *streams;
 
 static char **volumes=NULL;
 
 static int
-affuse_getattr(const char *path, struct stat *stbuf)
-{
+affuse_getattr(const char *path, struct stat *stbuf) {
     int res = 0;
     struct stream_info *i;
-    char *filename = unescape_filename(NULL, path+1);
+    char *filename = path + 1;
     int is_a_stream=0;
 
     // Truncate the extension
@@ -98,7 +94,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   int i;
   Cache dict = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
   Cache dict_iter;
-  char *filename = talloc_strdup(dict, unescape_filename(dict, path+1));
+  char *filename = talloc_strdup(dict, path+1);
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
@@ -136,15 +132,15 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     };
 
     // Store it in the cache
-    if(name && !CALL(dict, get, name)) {
-      CALL(dict, put, name, talloc_strdup(dict, ""),0);
+    if(name && !CALL(dict, get_item, ZSTRING_NO_NULL(name))) {
+      CALL(dict, put, name, talloc_strdup(dict, ""),0, 0);
     };
   };
        
   // Now go over all the cache and fill it into the directory
   list_for_each_entry(dict_iter, &dict->cache_list, cache_list) {
     char *name = (char *)dict_iter->key;
-    filler(buf, escape_filename(dict, name), NULL, 0);
+    filler(buf, escape_filename(dict, ZSTRING_NO_NULL(name)), NULL, 0);
   };
 
   talloc_free(dict);
@@ -273,14 +269,14 @@ int main(int argc, char **argv)
     fargc++;
 
     // Make sure the library is initialised:
-    AFF2_Init();
-      
+    AFF4_Init();
+
     // Load all the volumes into the resolver
     volumes = aff4_load(volume_names);
     if(!volumes) goto error;
 
     // We pull out all urns with a stream interface:
-   { 
+   {
      struct aff4_tripple **query = aff4_query(NULL,
 					      NULL, // All URNs should match
 					      AFF4_INTERFACE,  // With an interface attribute
@@ -295,7 +291,7 @@ int main(int argc, char **argv)
        info.urn = (*i)->urn;
        info.size = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_SIZE));
        info.mtime = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_TIMESTAMP));
-       
+
        // If a urn is relative to any of our volumes we merge it:
        for(j=volumes; *j; j++) {
 	 if(startswith(info.urn, *j)) {

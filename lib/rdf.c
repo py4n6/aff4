@@ -364,7 +364,7 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
 
   if(startswith(self->value, volume->value)) {
     result.dptr = (unsigned char *)self->value + strlen(volume->value) + 1;
-    result.dsize = strlen((char *)result.dptr) + 1;
+    result.dsize = strlen((char *)result.dptr);
   } else {
     result = tdb_data_from_string(self->value);
   };
@@ -478,7 +478,7 @@ VIRTUAL(XSDDatetime, RDFValue) {
    parse it.
  */
 Cache RDF_Registry = NULL;
-		
+
 void register_rdf_value_class(RDFValue classref) {
   Cache tmp;
 
