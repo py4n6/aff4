@@ -536,6 +536,20 @@ static void triples_handler(void *data, const raptor_statement* triple)
 
   printf("Parsed %s %s\n", urn_str, attribute);
 
+  if(strcmp(self->volume_urn->value, urn_str)) {
+    char *name = CALL(self->member_cache, get_item, ZSTRING_NO_NULL(urn_str));
+
+    if(!name) {
+      // Make sure the volume contains this object
+      printf("!!! %s contains %s\n", self->volume_urn->value, urn_str);
+
+      CALL(oracle, add_value, self->volume_urn, AFF4_VOLATILE_CONTAINS,
+           (RDFValue)self->urn);
+
+      CALL(self->member_cache, put, ZSTRING_NO_NULL(urn_str), ZSTRING_NO_NULL(urn_str));
+    };
+  };
+
   if(triple->object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
     class_ref = (RDFValue)GETCLASS(RDFURN);
   } else if(triple->object_literal_datatype) {
@@ -573,14 +587,17 @@ static int RDFParser_parse(RDFParser self, FileLikeObject fd, char *format, char
 
   // Take a sensible default
   if(!format) format = "turtle";
-  
+
   rdf_parser = raptor_new_parser(format);
   if(!rdf_parser) {
     RaiseError(ERuntimeError, "Unable to create parser for RDF serialization %s", format);
     goto error;
   };
 
-  raptor_set_feature(rdf_parser, RAPTOR_FEATURE_NO_NET, 1);  
+  CALL(self->volume_urn ,set , base);
+
+  // Dont talk to the internet
+  raptor_set_feature(rdf_parser, RAPTOR_FEATURE_NO_NET, 1);
   raptor_set_statement_handler(rdf_parser, self, self->triples_handler);
 
   raptor_set_fatal_error_handler(rdf_parser, self, fatal_error_handler);
@@ -629,7 +646,9 @@ static int RDFParser_parse(RDFParser self, FileLikeObject fd, char *format, char
 
 static RDFParser RDFParser_Con(RDFParser self) {
   self->urn = new_RDFURN(self);
-
+  self->volume_urn = new_RDFURN(self);
+  self->member_cache = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
+  self->member_cache->static_objects = 1;
   return self;
 };
 

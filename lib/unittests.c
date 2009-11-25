@@ -458,7 +458,7 @@ char *create_image(char *volume, char *filename, char *friendly_name) {
 
 void test_map_create() {
   MapDriver map;
-  ZipFile zipfile = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
+  ZipFile zipfile = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'w');
   CALL(oracle, set_value, URNOF(zipfile), AFF4_STORED, rdfvalue_from_urn(zipfile, FILENAME));
 
   zipfile = (ZipFile)CALL((AFFObject)zipfile, finish);
@@ -467,7 +467,7 @@ void test_map_create() {
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
   // Now create a map stream:
-  map = (MapDriver)CALL(oracle, create, AFF4_MAP);
+  map = (MapDriver)CALL(oracle, create, AFF4_MAP, 'w');
   if(map) {
     URNOF(map) = CALL(URNOF(zipfile), copy, map);
     CALL(URNOF(map), add, MAP_NAME);
@@ -561,7 +561,7 @@ void test_http_handle() {
 
 #ifdef ENCTYPTED_TESTS
 void test_encrypted(char *filename) {
-  ZipFile container = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
+  ZipFile container = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'w');
   FileLikeObject encrypted_stream, embedded_stream;
   ZipFile embedded_volume;
   char *container_urn = talloc_strdup(NULL, URNOF(container));

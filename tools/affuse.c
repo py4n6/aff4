@@ -5,7 +5,6 @@
 #include <errno.h>
 #include "misc.h"
 #include "aff4.h"
-#include "zip.h"
 
 #define USE_FUSE 1
 
@@ -20,13 +19,14 @@
 struct stream_info {
   RDFURN urn;
   XSDInteger size;
-  time_t mtime;
+  XSDDatetime time;
 } *streams;
 
 static char **volumes=NULL;
 
 static int
 affuse_getattr(const char *path, struct stat *stbuf) {
+#if 0 
     int res = 0;
     struct stream_info *i;
     char *filename = path + 1;
@@ -85,6 +85,7 @@ affuse_getattr(const char *path, struct stat *stbuf) {
  exit:
     talloc_free(filename);
     return res;
+#endif
 }
 
 static int
@@ -95,6 +96,8 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   Cache dict = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
   Cache dict_iter;
   char *filename = talloc_strdup(dict, path+1);
+
+#if 0 
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
@@ -136,7 +139,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
       CALL(dict, put, name, talloc_strdup(dict, ""),0, 0);
     };
   };
-       
+
   // Now go over all the cache and fill it into the directory
   list_for_each_entry(dict_iter, &dict->cache_list, cache_list) {
     char *name = (char *)dict_iter->key;
@@ -145,14 +148,18 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
   talloc_free(dict);
 
+#endif
+
   return 0;
 }
 
 static int
 affuse_open(const char *path, struct fuse_file_info *fi)
 {
-  char *buffer=unescape_filename(NULL, path+1);
+  //  char *buffer=unescape_filename(NULL, path+1);
   int i;
+
+#if 0 
 
   if(!endswith(buffer, ".dd")) {
     talloc_free(buffer);
@@ -176,8 +183,10 @@ affuse_open(const char *path, struct fuse_file_info *fi)
     };
   };
 
+
   talloc_free(buffer);
   return -ENOENT;
+#endif
 }
 
 static int
@@ -187,6 +196,8 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
     int res = 0;
     char *urn = streams[fi->fh].urn;
     FileLikeObject fh;
+
+#if 0
 
     fh = (FileLikeObject)CALL(oracle, open, urn, 'r');
 
@@ -204,6 +215,8 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
 
     CALL(oracle, cache_return, (AFFObject)fh);
     return res;
+
+#endif
 
  error:
     return -ENOENT;
@@ -226,6 +239,71 @@ usage(void)
     fuse_main(2, cmdline, &affuse_oper, NULL);
     printf("\nUse fusermount -u mount_point, to unmount\n");
 }
+
+// Go over all the volumes as stored in the files specified and
+// extract all streams.
+struct stream_info *populate_streams(char **file_urns, 
+                                     int count, int consider_segments) {
+  // Somewhere to store the streams on
+  StringIO result = CONSTRUCT(StringIO, StringIO, Con, NULL);
+  void *ctx = talloc_size(NULL, 1);
+  struct stream_info stream;
+  RDFURN stream_urn = new_RDFURN(result);
+  XSDString type = new_XSDString(result);
+  XSDInteger size = new_XSDInteger(result);
+  XSDDatetime timestamp = new_XSDDateTime(result);
+  int i;
+  ZipFile volume;
+
+  for(i=0; i<count; i++) {
+    RESOLVER_ITER iter;
+
+    if(file_urns[i] == NULL) goto exit;
+
+    // Try to load it
+    volume = open_volume(file_urns[i]);
+    if(!volume) continue;
+
+    // Iterate over all the streams contained here
+    CALL(oracle, get_iter, &iter, URNOF(volume), AFF4_VOLATILE_CONTAINS);
+    while(CALL(oracle, iter_next, &iter, (RDFValue)stream_urn)) {
+      // What type is it? If we dont consider segments and its a
+      // segment - skip it.
+      if(CALL(oracle, resolve_value, stream_urn, AFF4_TYPE,
+              (RDFValue)type) &&
+         !consider_segments &&
+         !strcmp(type->value, AFF4_SEGMENT))
+        continue;
+
+      // Find out more about the stream
+      stream.size = new_XSDInteger(ctx);
+      CALL(oracle, resolve_value, stream_urn, AFF4_SIZE,
+           (RDFValue)stream.size);
+
+      stream.time = new_XSDDateTime(ctx);
+      CALL(oracle, resolve_value, stream_urn, AFF4_TIMESTAMP,
+           (RDFValue)stream.time);
+
+      // Add the stream
+      stream.urn = CALL(stream_urn, copy, ctx);
+      CALL(result, write, (char *)&stream, sizeof(stream));
+    };
+  };
+
+ exit:
+
+  // NULL terminate the list
+  stream.urn = NULL;
+  CALL(result, write, (char *)&stream, sizeof(stream));
+
+  // Make a fresh copy
+  ctx = talloc_realloc_size(ctx, ctx, result->size);
+  memcpy(ctx, result->data, result->size);
+  //  talloc_free(result);
+
+  return ctx;
+};
+
 
 int main(int argc, char **argv)
 {
@@ -271,45 +349,7 @@ int main(int argc, char **argv)
     // Make sure the library is initialised:
     AFF4_Init();
 
-    // Load all the volumes into the resolver
-    volumes = aff4_load(volume_names);
-    if(!volumes) goto error;
-
-    // We pull out all urns with a stream interface:
-   {
-     struct aff4_tripple **query = aff4_query(NULL,
-					      NULL, // All URNs should match
-					      AFF4_INTERFACE,  // With an interface attribute
-					      AFF4_STREAM);  // Of stream.
-     struct stream_info info;
-     StringIO result = CONSTRUCT(StringIO, StringIO, Con, NULL);
-     char **j;
-     struct aff4_tripple **i;
-
-     // Fix up the stream names if they are relative to any volume
-     for(i=query; *i; i++) {
-       info.urn = (*i)->urn;
-       info.size = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_SIZE));
-       info.mtime = parse_int(CALL(oracle, resolve, result, info.urn, AFF4_TIMESTAMP));
-
-       // If a urn is relative to any of our volumes we merge it:
-       for(j=volumes; *j; j++) {
-	 if(startswith(info.urn, *j)) {
-	   // We store the relative URN in the value member
-	   info.path_name = info.urn + strlen(*j)+1;
-	   break;
-	 } else {
-	   info.path_name = talloc_asprintf(NULL, "__URN__/%s", info.urn);
-	  };
-	}; 
-       // Now we write the info into an array
-       CALL(result, write, (char *)&info, sizeof(info));
-     };
-     memset(&info, 0, sizeof(info));
-     CALL(result, write, (char *)&info, sizeof(info));
-
-     streams = (struct stream_info *)result->data;
-    };
+    streams = populate_streams(volume_names, argc, 0);
 
     return fuse_main(fargc, fargv, &affuse_oper, NULL);
 

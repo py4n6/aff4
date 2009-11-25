@@ -87,7 +87,7 @@ CLASS(Resolver, AFFObject)
           name specifies the type of object as registered in the type
           handler dispatcher.
         */
-      AFFObject METHOD(Resolver, create, char *name);
+       AFFObject METHOD(Resolver, create, char *name, char mode);
 
   /* This function resolves the value in uri and attribute and sets it
      into the RDFValue object which much be of the correct type. 

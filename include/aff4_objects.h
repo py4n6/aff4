@@ -400,7 +400,7 @@ extern struct dispatch_t volume_handlers[];
 void dump_stream_properties(FileLikeObject self);
 
 //Some useful utilities
-ZipFile open_volume(char *urn, char mode);
+ZipFile open_volume(char *urn);
 
   // Members in a volume may have a URN relative to the volume
   // URN. This is still globally unique, but may be stored in a more

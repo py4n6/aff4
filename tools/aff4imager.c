@@ -4,17 +4,10 @@
 #include <openssl/x509.h>
 #include <libgen.h>
 #include <getopt.h>
+#include "common.h"
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
-void aff2_open_volume(char *urn, char mode) {
-  // Try the different volume implementations in turn until one works:
-  ZipFile volume;
-
-  volume = open_volume(urn, mode);
-
-  CALL(oracle, cache_return, (AFFObject)volume);
-};
 
 void aff2_print_info(int verbose) {
 };
@@ -66,7 +59,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   CALL(oracle, cache_return, (AFFObject)container_volume);
 
   // Now we need to create an Image stream to store the encrypted volume
-  storage_image = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
+  storage_image = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image, 'w');
   // Tell the image that it should be stored in the volume with no
   // compression. This is where the encrypted data is actually
   // physically stored
@@ -102,7 +95,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Now we need to create an embedded volume (embedded volumes are
   // always Zip containers). The embedded volume is stored in the
   // encrypted stream:
-  volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
+  volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile, 'w');
   strncpy(volume_urn, URNOF(volume), BUFF_SIZE);
 
   // The embedded volume lives inside the encrypted stream
@@ -164,7 +157,7 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   MapDriver map_fd;
   ZipFile zipfile;
 
-  zipfile = (ZipFile)CALL(oracle, create, driver);
+  zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
   if(!zipfile) {
     PrintError();
     print_volume_drivers();
@@ -180,7 +173,7 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   };
 
   // Now we need to create an Image stream
-  map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP);
+  map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP, 'w');
   if(!map_fd) goto error;
 
   // We have to give the stream a specific name
@@ -190,7 +183,8 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   };
 
 
-  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, URNOF(zipfile));
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, 
+       (RDFValue)URNOF(zipfile));
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
@@ -211,8 +205,13 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
 
   map_fd->super.size->value = image_offset->value;
   CALL((FileLikeObject)map_fd, close);
+
+  // Close the zip file - it is strictly needed to reopen the file in
+  // case it was purged from the cache.
+  zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
   CALL(zipfile, close);
 
+  talloc_free(output_urn);
   return 1;
  error:
   talloc_free(output_urn);
@@ -225,7 +224,6 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 	       uint64_t max_size,
 	       char *in_urn) {
   ZipFile zipfile;
-  char *output;
   Image image;
   char buffer[IMAGE_BUFF_SIZE];
   int length;
@@ -239,7 +237,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
     goto error;
   };
 
-  zipfile = (ZipFile)CALL(oracle, create, driver);
+  zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
   if(!zipfile) {
     PrintError();
     print_volume_drivers();
@@ -256,7 +254,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
 
   // Now we need to create an Image stream
-  image = (Image)CALL(oracle, create, AFF4_IMAGE);
+  image = (Image)CALL(oracle, create, AFF4_IMAGE, 'w');
   if(!image) goto error;
 
   // We have to give the stream a specific name
@@ -297,7 +295,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
       CALL(zipfile, close);
 
       // Create a new volume to hold the image:
-      zipfile = (ZipFile)CALL(oracle, create, driver);
+      zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
       CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
            (RDFValue)output_urn);
 
@@ -461,7 +459,6 @@ int main(int argc, char **argv)
   char *stream_name = "default";
   char *driver = AFF4_ZIP_VOLUME;
   int chunks_per_segment = 0;
-  char *append = NULL;
   int verbose=0;
   char *extract = NULL;
   char *cert = NULL;
@@ -540,10 +537,6 @@ int main(int argc, char **argv)
 	break;
       };
     };
-
-    case 'l':
-      aff2_open_volume(optarg, 'r');
-      break;
 
     case 'c':
       cert = optarg;

@@ -33,6 +33,9 @@ CLASS(RDFParser, Object)
      jmp_buf env;
 
      RDFURN urn;
+     RDFURN volume_urn;
+
+     Cache member_cache;
 
      void METHOD(void *, triples_handler, const raptor_statement *triple);
      void METHOD(void *, message_handler, raptor_locator* locator, const char *message);

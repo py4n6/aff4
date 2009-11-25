@@ -7,13 +7,14 @@ be used to then build an AFF4 map of the raid set in a new volume.
 
 ** Made by (mic)
 ** Login   <scudette@gmail.com>
-** 
+**
 ** Started on  Tue Nov 24 21:04:39 2009 mic
 ** Last update Sun May 12 01:17:25 2002 Speed Blue
 */
 
 #include "aff4.h"
 #include <getopt.h>
+#include "common.h"
 
 static char *seperator = " | ";
 
@@ -101,10 +102,10 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
   return NULL;
 };
 
-void make_map_stream(struct map_description *map, char *output, char *stream) {
+void make_map_stream(char *driver, struct map_description *map, char *output, char *stream) {
   RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output);
-  ZipFile zip = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME);
-  MapDriver map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP);
+  ZipFile zip = (ZipFile)CALL(oracle, create, driver, 'w');
+  MapDriver map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP, 'w');
   XSDInteger i = new_XSDInteger(output_urn);
 
   CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)output_urn);
@@ -114,7 +115,8 @@ void make_map_stream(struct map_description *map, char *output, char *stream) {
   URNOF(map_fd) = CALL(URNOF(zip), copy, map_fd);
   CALL(URNOF(map_fd), add, stream);
 
-  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, URNOF(zip));
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, 
+       (RDFValue)URNOF(zip));
 
   CALL(oracle, cache_return, (AFFObject)zip);
 
@@ -176,18 +178,10 @@ int main(int argc, char **argv)
   int c,blocksize=4*1024;
   int columnwidth=20;
   int rows=2;
-  char mode=0;
-  char *output_file = NULL;
   char *stream_name = "default";
   char *driver = AFF4_ZIP_VOLUME;
-  int chunks_per_segment = 0;
-  char *append = NULL;
   int verbose=0;
-  char *extract = NULL;
-  char *cert = NULL;
-  char *key_file = NULL;
   int verify = 0;
-  uint64_t max_size=0;
   char *map_description = NULL;
   struct map_description *map = NULL;
   char *output = NULL;
@@ -225,14 +219,6 @@ int main(int argc, char **argv)
     if (c == -1)
       break;
     switch (c) {
-      // Long option only:
-    case 0: {
-      char *option = (char *)long_options[option_index].name;
-
-      printf("Unknown long option %s", optarg);
-      break;
-    };
-
     case 's':
       stream_name = optarg;
       break;
@@ -275,10 +261,10 @@ int main(int argc, char **argv)
     RDFURN urn = new_RDFURN(NULL);
     int period = 0;
     int block = 0;
-    char buff[BUFF_SIZE];
 
     for(i=0; i<number_of_disks; i++) {
       CALL(urn, set, argv[i+optind]);
+      printf("Position %u: %s\n", i, urn->value);
 
       disks[i] = (FileLikeObject)CALL(oracle, open, urn, 'r');
       if(!disks[i]) {
@@ -293,7 +279,7 @@ int main(int argc, char **argv)
     };
 
     if(output) {
-      make_map_stream(map, output, stream_name);
+      make_map_stream(driver, map, output, stream_name);
       goto exit;
     };
 

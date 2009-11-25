@@ -745,10 +745,10 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     /** If the value is already in the list, we just ignore this
 	request.
     */
-    previous_offset = get_data_head(self, 
+    previous_offset = get_data_head(self,
 	   tdb_data_from_string(urn->value), attribute, &tmp);
 
-    set_new_value(self, tdb_data_from_string(urn->value), 
+    set_new_value(self, tdb_data_from_string(urn->value),
 		  attribute, *encoded_value, value->id, previous_offset);
 
     tdb_unlockall(self->data_db);
@@ -944,7 +944,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 };
 
 // A helper method to construct the class
-static AFFObject Resolver_create(Resolver self, char *name) {
+static AFFObject Resolver_create(Resolver self, char *name, char mode) {
   AFFObject *class_reference;
   AFFObject result;
 

@@ -270,7 +270,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
          (RDFValue)this->directory_offset);
 
     // Try to load this volume
-    // ZipFile_load_from(this, stored->value, mode);
+    ZipFile_load_from(this, this->storage_urn, mode);
     {
       RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
 
@@ -462,6 +462,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
       TDB_DATA unescaped;
       uint32_t tmp;
       uint64_t tmp64;
+      uint64_t current_offset;
 
       // The length of the struct up to the filename
       // Only read up to the filename member
@@ -540,9 +541,10 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
       // Read the zip file itself
       {
 	// Skip the comments - we dont care about them
-	uint64_t current_offset = CALL(fd, seek, cd_header.file_comment_length, SEEK_CUR);
 	struct ZipFileHeader file_header;
 	uint64_t file_offset;
+
+        current_offset = CALL(fd, seek, cd_header.file_comment_length, SEEK_CUR);
 
 	CALL(fd,seek, self->offset_of_member_header, SEEK_SET);
 	CALL(fd, read, (char *)&file_header, sizeof(file_header));
@@ -553,8 +555,6 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 
 	CALL(oracle, set_value, filename, AFF4_VOLATILE_FILE_OFFSET,
 	     rdfvalue_from_int(ctx, file_offset));
-
-	CALL(fd, seek, current_offset, SEEK_SET);
       };
 
       // Is this file a properties file?
@@ -574,13 +574,17 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 				   ZIP_STORED);
 	  if(fd) {
 	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
+            char *rdf_format = (char *)base_name + properties_length;
 
-	    CALL(parser, parse, fd, (char *)base_name + properties_length, URNOF(self)->value);
+	    CALL(parser, parse, fd, rdf_format, URNOF(self)->value);
 	    talloc_free(parser);
 	    CALL(oracle, cache_return, (AFFObject)fd);
 	  };
 	};
       };
+
+      // Get ready to read the next record
+      CALL(fd, seek, current_offset, SEEK_SET);
 
       // Do we have as many CDFileHeaders as we expect?
       j++;

@@ -3,41 +3,36 @@
 #include "aff4.h"
 #include <libgen.h>
 
-ZipFile open_volume(char *filename, char mode) {
+ZipFile open_volume(char *filename) {
   ZipFile result=NULL;
   RDFURN file_urn = new_RDFURN(NULL);
   RDFURN volume_urn = new_RDFURN(file_urn);
   struct dispatch_t *i=volume_handlers;
-  URLParse parser = CONSTRUCT(URLParse, URLParse, Con, file_urn, filename);
+  char mode = 'r';
 
   // Normalise the URL by parsing it and canonicalising it
-  CALL(file_urn, set, parser->string(parser, file_urn));
+  CALL(file_urn, set, filename);
 
   ClearError();
   // First see if we can even open the file.
   {
-    AFFObject fd = CALL(oracle, open, file_urn, mode);
+    AFFObject fd = CALL(oracle, open, file_urn, 'r');
     if(!fd) return NULL;
     CALL(oracle, cache_return, fd);
   };
 
   // Is there a known volume contained in this file?
-  if(CALL(oracle, resolve_value, file_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)volume_urn)) {
+  if(CALL(oracle, resolve_value, file_urn, AFF4_VOLATILE_CONTAINS,
+          (RDFValue)volume_urn)) {
     result = (ZipFile)CALL(oracle, open, volume_urn, mode);
-  };
-
-  // Go through all the volume handlers trying to create a new
-  // volume, until one works
-  while(!result && i->class_ptr) {
-    result = (ZipFile)CONSTRUCT_FROM_REFERENCE(((AFFObject)i->class_ptr), 
-					       Con, NULL, NULL, mode);
+  } else {
+    // Go through all the volume handlers trying to create a new
+    // volume, until one works
+    result = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'r');
     if(result) {
-      LogWarnings("Loaded %s volume %s", i->type, filename);
-      CALL(oracle, set_value, URNOF(result), AFF4_STORED, (RDFValue)file_urn);
-      result = (ZipFile)CALL((AFFObject)result, finish);
-      break;
+      LogWarnings("Trying to load volume %s", file_urn->value);
+      CALL(result, load_from, file_urn, 'r');
     };
-    i++;
   };
   PrintError();
 
@@ -99,7 +94,7 @@ char **aff4_load(char **images) {
   result = CONSTRUCT(StringIO, StringIO, Con, NULL);
 
   for(i=images; *i; i++) {
-    ZipFile tmp = open_volume(*i, 'r');
+    ZipFile tmp = open_volume(*i);
     if(tmp) {
       // Add the volume URN to the volumes list
       char *urn = talloc_strdup(result->data, URNOF(tmp));
