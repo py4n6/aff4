@@ -26,17 +26,11 @@ static char **volumes=NULL;
 
 static int
 affuse_getattr(const char *path, struct stat *stbuf) {
-#if 0 
     int res = 0;
     struct stream_info *i;
     char *filename = path + 1;
-    int is_a_stream=0;
-
-    // Truncate the extension
-    if(endswith(filename, ".dd")) {
-      filename[strlen(filename)-3]=0;
-      is_a_stream = 1;
-    };
+    char *dirname=NULL;
+    int len = strlen(filename);
 
     memset(stbuf, 0, sizeof(struct stat));
     if(strcmp(path, "/") == 0) {
@@ -45,63 +39,80 @@ affuse_getattr(const char *path, struct stat *stbuf) {
 	goto exit;
     };
 
-    if(is_a_stream) {
-      for(i=streams; i->urn; i++) {
-	if(!strcmp(i->path_name, filename)) {
+    if(filename[len]=='/') {
+      dirname = talloc_strdup(NULL, filename);
+    } else {
+      dirname = talloc_asprintf(NULL, "%s/", filename);
+    };
+
+    //Find the filename in our list of streams
+    for(i=streams; i->urn; i++) {
+      char *stream_urn = i->urn->value + strlen(FQN);
+
+      // Exact match
+      if(!strcmp(filename, stream_urn)) {
 	  stbuf->st_mode = S_IFREG | 0444;
 	  stbuf->st_nlink = 1;
-	  stbuf->st_mtime = i->mtime;
-	  stbuf->st_atime = i->mtime;
-	  stbuf->st_ctime = i->mtime;
-	  
-	  // What it its size?
-	  stbuf->st_size = i->size;
-	  goto exit;
-	};
-      };
-
-      // Its a directory
-    } else {
-      int i;
-
-      // Is this subdirectory of a stream?
-      for(i=0; streams[i].urn; i++) {
-	if(startswith(streams[i].path_name, filename) && streams[i].path_name[strlen(filename)]=='/') {
-	  stbuf->st_mode = S_IFDIR | 0755;
-	  stbuf->st_nlink = 2;
-	  stbuf->st_size = 1;
-	  stbuf->st_mtime = streams[i].mtime;
-	  stbuf->st_atime = streams[i].mtime;
-	  stbuf->st_ctime = streams[i].mtime;
-	  
-	  goto exit;
-	};
+	  stbuf->st_mtime = i->time->value.tv_sec;
+	  stbuf->st_atime = stbuf->st_mtime;
+	  stbuf->st_ctime = stbuf->st_mtime;
+	  stbuf->st_size = i->size->value;
+          goto exit;
+      } else if(startswith(stream_urn, dirname)) {
+        stbuf->st_mode = S_IFDIR | 0755;
+        stbuf->st_nlink = 2;
+        stbuf->st_size = 1;
+        stbuf->st_mtime = i->time->value.tv_sec;
+        stbuf->st_atime = stbuf->st_mtime;
+        stbuf->st_ctime = stbuf->st_mtime;
+        goto exit;
       };
     };
 
-    talloc_free(filename);
+    talloc_free(dirname);
     return -ENOENT;
 
- exit:
-    talloc_free(filename);
+exit:
+    if(dirname) talloc_free(dirname);
     return res;
-#endif
 }
 
 static int
 affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                off_t offset, struct fuse_file_info *fi)
 {
-  int i;
-  Cache dict = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
-  Cache dict_iter;
-  char *filename = talloc_strdup(dict, path+1);
-
-#if 0 
+  struct stream_info *i;
+  char *filename = path + 1;
+  int len = strlen(path);
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
 
+  for(i=streams; i->urn; i++) {
+    char *stream_urn = talloc_strdup(NULL, i->urn->value + strlen(FQN) - 1);
+
+    if(startswith(stream_urn, path)) {
+      char *start,*j = stream_urn + len;
+
+      // Skip any leading /
+      while(*j == '/') j++;
+      start = j;
+
+      for(; *j; j++) {
+        if(*j=='/') {
+          *j=0; j++;
+          break;
+        };
+      };
+
+      printf("%s\n", start);
+      filler(buf, start, NULL, 0);
+
+      talloc_free(stream_urn);
+    };
+  };
+
+#if 0
   for(i=0; streams[i].urn; i++) {
     char buffer[BUFF_SIZE];
     char *name=NULL;
@@ -156,37 +167,26 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int
 affuse_open(const char *path, struct fuse_file_info *fi)
 {
-  //  char *buffer=unescape_filename(NULL, path+1);
-  int i;
+  uint64_t i;
 
-#if 0 
-
-  if(!endswith(buffer, ".dd")) {
-    talloc_free(buffer);
-    return -ENOENT;
-  };
-
-  if((fi->flags & 3) != O_RDONLY) {
-    talloc_free(buffer);
-    return -EACCES;
-  };
-
-  // Now drop the .dd extension
-  buffer[strlen(buffer)-3]=0;
-
-  // Is this a valid stream?
   for(i=0; streams[i].urn; i++) {
-    if(!strcmp(streams[i].path_name, buffer)) {
-      fi->fh = (uint64_t)i;
-      talloc_free(buffer);
+    char *stream_urn = streams[i].urn->value + strlen(FQN) - 1;
+
+    // Found it
+    if(!strcmp(stream_urn, path)) {
+
+      // Only allow readonly access
+      if((fi->flags & 3) != O_RDONLY) {
+        return -EACCES;
+      };
+
+      // return the position in the list
+      fi->fh = i;
       return 0;
     };
   };
 
-
-  talloc_free(buffer);
   return -ENOENT;
-#endif
 }
 
 static int
@@ -194,18 +194,14 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
             struct fuse_file_info *fi)
 {
     int res = 0;
-    char *urn = streams[fi->fh].urn;
-    FileLikeObject fh;
-
-#if 0
-
-    fh = (FileLikeObject)CALL(oracle, open, urn, 'r');
+    FileLikeObject fh = CALL(oracle, open, streams[fi->fh].urn, 'r');
 
     if(!fh) goto error;
 
     CALL(fh, seek, (uint64_t)offset, SEEK_SET);
     errno = 0;
     res = CALL(fh, read, (char *)buf, (int)size);
+
     if (res<0){
 	if (errno==0) 
 	  errno= -EIO;
@@ -216,9 +212,8 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
     CALL(oracle, cache_return, (AFFObject)fh);
     return res;
 
-#endif
-
  error:
+    PrintError();
     return -ENOENT;
 }
 
@@ -350,6 +345,15 @@ int main(int argc, char **argv)
     AFF4_Init();
 
     streams = populate_streams(volume_names, argc, 0);
+
+    printf("Streams accessible\n---------------------\n\n");
+    {
+      struct stream_info *i;
+
+      for(i=streams; i->urn; i++) {
+        printf("%llu\t%s\n", i->size->value, i->urn->value);
+      };
+    };
 
     return fuse_main(fargc, fargv, &affuse_oper, NULL);
 

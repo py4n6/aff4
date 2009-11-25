@@ -251,7 +251,8 @@ static int XSDString_parse(RDFValue self, char *serialise) {
   XSDString this = (XSDString)self;
 
   this->value = talloc_strdup(self, serialise);
-  
+  this->length = strlen(this->value);
+
   return 1;
 };
 
@@ -531,6 +532,10 @@ static void triples_handler(void *data, const raptor_statement* triple)
   attribute = (char *)raptor_uri_as_string((raptor_uri *)triple->predicate);
   value_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object);
   type_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object_literal_datatype);
+
+  if(!strcmp(attribute, AFF4_TYPE)) {
+    printf("Type is %s\n", value_str);
+  };
 
   CALL(self->urn, set, urn_str);
 
