@@ -43,6 +43,10 @@
 #define AFF4_VOLATILE_FILE_OFFSET VOLATILE_NS "file_offset"
 #define AFF4_VOLATILE_DIRTY VOLATILE_NS "dirty"
 #define AFF4_VOLATILE_CONTAINS   VOLATILE_NS "contains"
+//Its useful for debugging to enable this so the RDF file also shows
+//the contains property for a volume. It is not needed normally since
+//its infered from the zip file itself.
+//#define AFF4_VOLATILE_CONTAINS   PREDICATE_NAMESPACE "contains"
 
 // Volume attributes
 #define AFF4_IDENTITY_STORED PREDICATE_NAMESPACE "identity" /* Indicates an identity

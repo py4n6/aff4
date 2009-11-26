@@ -119,8 +119,8 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 
 /** Quick and simple */
 static unsigned int Cache_hash(Cache self, void *key, int len) {
-  char *name = (char *)key;
-  char result = 0;
+  unsigned char *name = (char *)key;
+  unsigned char result = 0;
   int i;
   for(i=0; i<len; i++) 
     result ^= name[i];
@@ -171,6 +171,10 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
     self->hash_table = talloc_array(self, Cache, self->hash_table_width);
 
   hash = CALL(self, hash, key, len);
+  if(hash > self->hash_table_width) {
+    printf("Error in hash function\n");
+    abort();
+  };
   hash_list_head = self->hash_table[hash];
   new_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   // Make sure the new cache member knows where the list head is. We
@@ -435,7 +439,7 @@ static Resolver Resolver_Con(Resolver self) {
   if(self->data_store_fd < 0)
     goto error3;
 
-  if(AFF4_TDB_FLAGS | TDB_CLEAR_IF_FIRST) {
+  if(AFF4_TDB_FLAGS & TDB_CLEAR_IF_FIRST) {
     ftruncate(self->data_store_fd, 0);
   };
 
@@ -584,6 +588,8 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
 
   DEBUG("Getting %s, %s\n", urn_str->value, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
+    char buff[i.length];
+
     // Make sure its the type our caller expects
     if(i.encoding_type != result->id) {
       RaiseError(ERuntimeError, "Request for attribute %s with type %d - but its stored with type %d\n", attribute_str, result->id, i.encoding_type);
@@ -591,12 +597,15 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
     };
 
     // Now get the RDFValue class to read itself
-    if(!CALL(result, decode, self->data_store_fd, i.length)) {
+    if(read(self->data_store_fd, buff, i.length) != i.length)
+      goto not_found;
+
+    if(!CALL(result, decode, buff, i.length)) {
       RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
 		 urn_str, attribute_str);
       goto not_found;
     };
-    
+
     return i.length;
   };
 
@@ -661,6 +670,8 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   uint32_t new_offset;
   TDB_DATA_LIST i;
 
+  if(type_id == 0) abort();
+
   // Update the value in the db and replace with new value
   key.dptr = (unsigned char *)buff;
   key.dsize = calculate_key(self, urn, attribute, buff, BUFF_SIZE, 1);
@@ -713,6 +724,10 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
                                 &iter);
 
     if(data_offset > 0 && iter.length == encoded_value->dsize) {
+      // Ensure that previous values are removed too
+      lseek(self->data_store_fd, data_offset, SEEK_SET);
+      iter.next_offset = 0;
+      write(self->data_store_fd, (char *)&iter, sizeof(iter));
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
       set_new_value(self, tdb_data_from_string(urn->value),
@@ -758,19 +773,24 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   };
 };
 
-static int Resolver_get_iter(Resolver self,
-			     RESOLVER_ITER *iter,
-			     RDFURN urn,
-			     char *attribute_str) {
+static RESOLVER_ITER *Resolver_get_iter(Resolver self,
+                                        void *ctx,
+                                        RDFURN urn,
+                                        char *attribute_str) {
   TDB_DATA attribute;
+  RESOLVER_ITER *iter = talloc(ctx, RESOLVER_ITER);
 
   attribute.dptr = (unsigned char *)attribute_str;
   attribute.dsize = strlen(attribute_str);
 
-  iter->offset = get_data_head(self, tdb_data_from_string(urn->value), 
+  memset(&iter->head, 0, sizeof(iter->head));
+  iter->offset = get_data_head(self, tdb_data_from_string(urn->value),
 			       attribute, &iter->head);
 
-  return iter->offset;
+  iter->cache = CONSTRUCT(Cache, Cache, Con, iter, HASH_TABLE_SIZE, 0);
+  iter->cache->static_objects = 1;
+
+  return iter;
 };
 
 static int Resolver_iter_next(Resolver self,
@@ -781,7 +801,7 @@ static int Resolver_iter_next(Resolver self,
   // We assume the iter is valid and we write the contents of the iter
   // on here.
   // This is our iteration exit condition
-  if(iter->offset == 0) 
+  if(iter->offset == 0)
     return 0;
 
   do {
@@ -790,30 +810,44 @@ static int Resolver_iter_next(Resolver self,
     /* If the value is of the correct type, ask it to read from
        the file. */
     if(result->id == iter->head.encoding_type) {
+      char *data = talloc_size(iter, iter->head.length);
+
       lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
-      res_code = CALL(result, decode, self->data_store_fd, iter->head.length);
+      read(self->data_store_fd, data, iter->head.length);
+
+      // Check if the value was already seen:
+      if(!CALL(iter->cache, get_item, data, iter->head.length)) {
+        // No did not see it before - store it in the Cache
+        CALL(iter->cache, put, data, iter->head.length, data, iter->head.length);
+
+        res_code = CALL(result, decode, data, iter->head.length);
+      } else {
+        // We have seen this before:
+        talloc_free(data);
+      };
     };
 
     // Get the next iterator
     iter->offset = get_data_next(self, &iter->head);
-  } while(res_code == 0 && iter->offset != 0);
-  
+  } while(res_code == 0);
+
   return res_code;
 };
 
-static RDFValue Resolver_iter_next_alloc(Resolver self, void *ctx,
+static RDFValue Resolver_iter_next_alloc(Resolver self,
 					 RESOLVER_ITER *iter) {
-  int res_code;
+  int res_code=0;
   RDFValue rdf_value_class;
   RDFValue result;
   char buff[BUFF_SIZE];
   TDB_DATA attribute, dataType;
+  char *data;
 
   // We assume the iter is valid and we write the contents of the iter
   // on here.
   // This is our iteration exit condition
-  if(iter->offset == 0) 
-    return 0;
+  if(iter->offset == 0)
+    return NULL;
 
   // Retreive the rdf_value_class for this 
   attribute.dptr = (unsigned char *)buff;
@@ -832,15 +866,28 @@ static RDFValue Resolver_iter_next_alloc(Resolver self, void *ctx,
     return NULL;
   };
 
-  result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class, 
-					      Con, ctx);
+  result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
+					      Con, iter);
   free(dataType.dptr);
 
   // Populate the result
   lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
-  res_code = CALL(result, decode, self->data_store_fd, iter->head.length);
+  data = talloc_size(iter, iter->head.length);
 
-  iter->offset = get_data_next(self, &iter->head);
+  if(read(self->data_store_fd, data, iter->head.length) != iter->head.length)
+    return NULL;
+
+  // Check if the value was already seen:
+  if(!CALL(iter->cache, get_item, data, iter->head.length)) {
+    // No did not see it before - store it in the Cache
+    CALL(iter->cache, put, data, iter->head.length, data, iter->head.length);
+
+    res_code = CALL(result, decode, data, iter->head.length);
+    iter->offset = get_data_next(self, &iter->head);
+  } else {
+    // We have seen this before:
+    talloc_free(data);
+  };
 
   if(res_code ==0) {
     talloc_free(result);
@@ -1032,7 +1079,7 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   if(!offset){
     // The attribute is not set - make it now:
     set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, LOCK, 0, 0);
+		  attribute, LOCK, -1, 0);
 
     offset = get_data_head(self, tdb_data_from_string(urn->value),
 			   attribute, &data_list);
@@ -1126,7 +1173,6 @@ VIRTUAL(AFFObject, Object) {
 /* Prints out all available volume drivers */
 void print_volume_drivers() {
   Cache i;
-  char *ctx = talloc_size(NULL, 1);
 
   printf("Valid volume drivers: \n");
 
@@ -1134,7 +1180,7 @@ void print_volume_drivers() {
     AFFObject class_ref = (AFFObject)i->data;
 
     if(ISSUBCLASS(class_ref, ZipFile)) {
-      printf(" - %s\n", i->key);
+      printf(" - %s\n", (char *)i->key);
     };
   };
 };

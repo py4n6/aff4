@@ -266,11 +266,12 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     CALL(oracle, add_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)urn);
     URNOF(self) = CALL(urn, copy, self);
 
-    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-         (RDFValue)this->directory_offset);
-
     // Try to load this volume
     ZipFile_load_from(this, this->storage_urn, mode);
+
+    //    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+    //      (RDFValue)this->directory_offset);
+
     {
       RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
 
@@ -410,6 +411,8 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
   // an archive comment appended to the end
   self->directory_offset->set(self->directory_offset, 
 	      CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END));
+
+  memset(buffer, 0, BUFF_SIZE);
   length = CALL(fd, read, buffer, BUFF_SIZE);
 
   if(length<0) 
@@ -758,7 +761,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 
 // This function dumps all the URNs contained within this volume
 static void dump_volume_properties(ZipFile self) {
-  RESOLVER_ITER iter;
+  RESOLVER_ITER *iter;
   FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
 			   ZIP_DEFLATE);
   RDFSerializer serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self, 
@@ -769,8 +772,8 @@ static void dump_volume_properties(ZipFile self) {
   // Serialise all statements related to this volume
   CALL(serializer, serialize_urn, URNOF(self));
 
-  CALL(oracle, get_iter, &iter, URNOF(self), AFF4_VOLATILE_CONTAINS);
-  while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
+  iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
+  while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
 
     // Only serialise URNs which are not segments
     if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) &&
@@ -818,7 +821,7 @@ static void ZipFile_close(ZipFile self) {
     // Dump the central directory for this volume
     {
       // Get all the URNs contained within this volume
-      RESOLVER_ITER iter;
+      RESOLVER_ITER *iter;
       StringIO zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
       RDFURN urn = new_RDFURN(zip64_header);
       XSDInteger compression_method = new_XSDInteger(urn);
@@ -832,8 +835,8 @@ static void ZipFile_close(ZipFile self) {
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
       // Iterate over all the AFF4_VOLATILE_CONTAINS URNs
-      CALL(oracle, get_iter, &iter, URNOF(self), AFF4_VOLATILE_CONTAINS);
-      while(CALL(oracle, iter_next, &iter, (RDFValue)urn)) {
+      iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
+      while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
 	// We use type to anchor temporary allocations
 	struct tm *now;
@@ -900,7 +903,7 @@ static void ZipFile_close(ZipFile self) {
 	     (RDFValue)compressed_size);
 
 	cd.compress_size = compressed_size->value;
-	
+
 	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
 	     (RDFValue)header_offset);
 
@@ -1390,17 +1393,6 @@ void print_cache(Cache self) {
 
   list_for_each_entry(i, &self->cache_list, cache_list) {
     printf("%s %p %s\n",(char *) i->key,i->data, (char *)i->data);
-  };
-};
-
-char *XXXXfully_qualified_name(void *ctx, char *filename, char *volume_urn) {
-  char fqn_filename[BUFF_SIZE];
-
-  if(!volume_urn || startswith(filename, FQN)) {
-    return talloc_strdup(ctx, filename);
-  } else {
-    snprintf(fqn_filename, BUFF_SIZE, "%s/%s", volume_urn, filename);
-    return talloc_strdup(ctx, fqn_filename);
   };
 };
 

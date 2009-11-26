@@ -280,7 +280,7 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
     CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET,
          (RDFValue)directory_offset);
 
-    if(directory_offset->value > max_size) {
+    if(max_size > 0 && directory_offset->value > max_size) {
       zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
 
       char buff[BUFF_SIZE];
@@ -456,7 +456,7 @@ int main(int argc, char **argv)
   int c;
   char mode=0;
   char *output_file = NULL;
-  char *stream_name = "default";
+  char *stream_name = NULL;
   char *driver = AFF4_ZIP_VOLUME;
   int chunks_per_segment = 0;
   int verbose=0;
@@ -620,16 +620,22 @@ int main(int argc, char **argv)
     if(optind < argc) {
       // We are imaging now
       if(mode == 'i') {
+        if(!output_file) {
+          printf("You must specify an output file with --output\n");
+          exit(-1);
+        };
+
         while (optind < argc) {
-          if(!output_file) {
-            printf("You must specify an output file with --output\n");
-            exit(-1);
+          if(!stream_name) {
+            stream_name = argv[optind];
           };
 
           aff4_image(driver, output_file, stream_name,
                      chunks_per_segment,
                      max_size,
-                     argv[optind++]);
+                     argv[optind]);
+
+          optind++;
         };
       } else if(mode == 'm') {
         aff4_make_map(driver, output_file, stream_name,

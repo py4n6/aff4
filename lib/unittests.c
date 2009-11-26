@@ -36,22 +36,22 @@ void resolver_test_1() {
 
   // Retrieve it
   {
-    RESOLVER_ITER iter;
+    RESOLVER_ITER *iter;
 
-    CALL(oracle, get_iter, &iter, urn, ATTRIBUTE);
-    while(CALL(oracle, iter_next, &iter, (RDFValue)xsd_integer)) {
+    iter = CALL(oracle, get_iter, urn, urn, ATTRIBUTE);
+    while(CALL(oracle, iter_next, iter, (RDFValue)xsd_integer)) {
       printf("Retrieved value: %llu\n", xsd_integer->value);
     };
   };
 
   // Retrieve it using allocation
   {
-    RESOLVER_ITER iter;
+    RESOLVER_ITER *iter;
     RDFValue result;
 
-    CALL(oracle, get_iter, &iter, urn, ATTRIBUTE);
+    iter = CALL(oracle, get_iter, urn, urn, ATTRIBUTE);
     while(1) {
-      result = CALL(oracle, iter_next_alloc, NULL, &iter);
+      result = CALL(oracle, iter_next_alloc, &iter);
       if(!result) break;
 
       printf("Got value of type '%s', value '%s'\n", result->dataType,

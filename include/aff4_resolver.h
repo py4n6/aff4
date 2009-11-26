@@ -27,6 +27,9 @@ typedef struct TDB_DATA_LIST {
 typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
+  // This is used to ensure we do not iterate over multiple values
+  // which are the same
+  Cache cache;
 } RESOLVER_ITER;
 
      /** The resolver is at the heart of the AFF4 specification - its
@@ -107,9 +110,9 @@ CLASS(Resolver, AFFObject)
      the type specified are returned. We return length written for
      each successful iteration, and zero when we have no more items.
   */
-  int METHOD(Resolver, get_iter, RESOLVER_ITER *iter, RDFURN uri,
-	     char *attribute);
-  
+  RESOLVER_ITER *METHOD(Resolver, get_iter, void *ctx, RDFURN uri,
+                        char *attribute);
+
        /* This method reads the next result from the iterator. result
 	  must be an allocated and valid RDFValue object */
   int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, RDFValue result);
@@ -119,7 +122,7 @@ CLASS(Resolver, AFFObject)
 	  advantage of this method is that we dont need to know in
 	  advance what type the value is.
        */
-     RDFValue METHOD(Resolver, iter_next_alloc, void *ctx, RESOLVER_ITER *iter);
+     RDFValue METHOD(Resolver, iter_next_alloc, RESOLVER_ITER *iter);
 
      // Deletes the attribute from the resolver
      void METHOD(Resolver, del, RDFURN uri, char *attribute);

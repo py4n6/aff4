@@ -22,13 +22,11 @@ struct stream_info {
   XSDDatetime time;
 } *streams;
 
-static char **volumes=NULL;
-
 static int
 affuse_getattr(const char *path, struct stat *stbuf) {
     int res = 0;
     struct stream_info *i;
-    char *filename = path + 1;
+    const char *filename = path + 1;
     char *dirname=NULL;
     int len = strlen(filename);
 
@@ -82,7 +80,6 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                off_t offset, struct fuse_file_info *fi)
 {
   struct stream_info *i;
-  char *filename = path + 1;
   int len = strlen(path);
 
   filler(buf, ".", NULL, 0);
@@ -91,7 +88,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   for(i=streams; i->urn; i++) {
     char *stream_urn = talloc_strdup(NULL, i->urn->value + strlen(FQN) - 1);
 
-    if(startswith(stream_urn, path)) {
+    if(startswith(stream_urn, (char *)path)) {
       char *start,*j = stream_urn + len;
 
       // Skip any leading /
@@ -194,7 +191,8 @@ affuse_read(const char *path, char *buf, size_t size, off_t offset,
             struct fuse_file_info *fi)
 {
     int res = 0;
-    FileLikeObject fh = CALL(oracle, open, streams[fi->fh].urn, 'r');
+    FileLikeObject fh = (FileLikeObject)CALL(oracle, open,
+                                             streams[fi->fh].urn, 'r');
 
     if(!fh) goto error;
 
@@ -245,13 +243,11 @@ struct stream_info *populate_streams(char **file_urns,
   struct stream_info stream;
   RDFURN stream_urn = new_RDFURN(result);
   XSDString type = new_XSDString(result);
-  XSDInteger size = new_XSDInteger(result);
-  XSDDatetime timestamp = new_XSDDateTime(result);
   int i;
   ZipFile volume;
 
   for(i=0; i<count; i++) {
-    RESOLVER_ITER iter;
+    RESOLVER_ITER *iter;
 
     if(file_urns[i] == NULL) goto exit;
 
@@ -260,8 +256,10 @@ struct stream_info *populate_streams(char **file_urns,
     if(!volume) continue;
 
     // Iterate over all the streams contained here
-    CALL(oracle, get_iter, &iter, URNOF(volume), AFF4_VOLATILE_CONTAINS);
-    while(CALL(oracle, iter_next, &iter, (RDFValue)stream_urn)) {
+    iter = CALL(oracle, get_iter, result, URNOF(volume),
+                AFF4_VOLATILE_CONTAINS);
+
+    while(CALL(oracle, iter_next, iter, (RDFValue)stream_urn)) {
       // What type is it? If we dont consider segments and its a
       // segment - skip it.
       if(CALL(oracle, resolve_value, stream_urn, AFF4_TYPE,
@@ -356,9 +354,6 @@ int main(int argc, char **argv)
     };
 
     return fuse_main(fargc, fargv, &affuse_oper, NULL);
-
- error:
-    return 0;
 }
 #else
 int main(int argc,char **argv)

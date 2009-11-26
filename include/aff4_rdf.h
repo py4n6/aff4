@@ -57,7 +57,7 @@ CLASS(RDFValue, Object)
 
       // This method is used to decode this object from the
       // data_store. The fd is seeked to the start of this record.
-      int METHOD(RDFValue, decode, int fd, int length);
+      int METHOD(RDFValue, decode, char *data, int length);
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be

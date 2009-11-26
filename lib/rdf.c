@@ -1,8 +1,8 @@
 /** This handles the RDF serialization, and parsing from the
-    resolver. 
+    resolver.
 */
 /** The following are related to raptor - RDF serialization and
-    parsing 
+    parsing
 */
 #include "aff4.h"
 #include "aff4_rdf_serialise.h"
@@ -165,11 +165,12 @@ static RDFValue XSDInteger_set(XSDInteger self, uint64_t value) {
   return (RDFValue)self;
 };
 
-static int XSDInteger_decode(RDFValue this, int fd, int length) {
+static int XSDInteger_decode(RDFValue this, char *data, int length) {
   XSDInteger self = (XSDInteger)this;
 
   self->value = 0;
-  return read(fd, &self->value, length);
+  memcpy(&self->value, data, sizeof(self->value));
+  return length;
 };
 
 static void *XSDInteger_serialise(RDFValue self) {
@@ -229,15 +230,17 @@ static RDFValue XSDString_set(XSDString self, char *string, int length) {
   return (RDFValue)self;
 };
 
-static int XSDString_decode(RDFValue this, int fd, int length) {
+static int XSDString_decode(RDFValue this, char *data, int length) {
   XSDString self = (XSDString)this;
 
   self->value = talloc_realloc_size(self, self->value, length + 1);
   self->length = length;
 
   self->value[length]=0;
+  memcpy(self->value, data, length);
 
-  return read(fd, self->value, length);
+  return length;
+
 };
 
 /* We serialise the string */
@@ -296,11 +299,12 @@ static RDFValue RDFURN_set(RDFURN self, char *string) {
   return (RDFValue)self;
 };
 
-static int RDFURN_decode(RDFValue this, int fd, int length) {
+static int RDFURN_decode(RDFValue this, char *data, int length) {
   RDFURN self = (RDFURN)this;
-  self->value = talloc_realloc_size(self, self->value, length);
+  self->value = talloc_realloc_size(self, self->value, length+1);
+  self->value[length]=0;
 
-  read(fd, self->value, length);
+  memcpy(self->value, data, length);
   CALL(self->parser, parse, self->value);
 
   return length;
@@ -399,10 +403,11 @@ static TDB_DATA *XSDDatetime_encode(RDFValue self) {
   return result;
 };
 
-static int XSDDatetime_decode(RDFValue self, int fd, int length) {
+static int XSDDatetime_decode(RDFValue self, char *data, int length) {
   XSDDatetime this = (XSDDatetime)self;
 
-  return read(fd, &this->value, sizeof(this->value));
+  memcpy(&this->value, data, sizeof(this->value));
+  return length;
 };
 
 static RDFValue XSDDatetime_set(XSDDatetime self, struct timeval time) {
@@ -435,6 +440,7 @@ static int XSDDatetime_parse(RDFValue self, char *serialised) {
   XSDDatetime this = (XSDDatetime)self;
   struct tm time;
 
+  memset(&time, 0, sizeof(time));
   strptime(serialised, DATETIME_FORMAT_STR, &time);
   this->value.tv_sec = mktime(&time);
 
@@ -450,7 +456,7 @@ static RDFValue XSDDatetime_Con(RDFValue self) {
 
 VIRTUAL(XSDDatetime, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = XSD_NAMESPACE "datetime";
+   VATTR(super.dataType) = XSD_NAMESPACE "dateTime";
    VATTR(super.raptor_literal_datatype) = raptor_new_uri(			\
                     (const unsigned char*)VATTR(super.dataType));
 
@@ -533,13 +539,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
   value_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object);
   type_str = (char *)raptor_uri_as_string((raptor_uri *)triple->object_literal_datatype);
 
-  if(!strcmp(attribute, AFF4_TYPE)) {
-    printf("Type is %s\n", value_str);
-  };
-
   CALL(self->urn, set, urn_str);
-
-  printf("Parsed %s %s\n", urn_str, attribute);
 
   if(strcmp(self->volume_urn->value, urn_str)) {
     char *name = CALL(self->member_cache, get_item, ZSTRING_NO_NULL(urn_str));
@@ -725,7 +725,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, FileLikeO
 static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key, 
 				       TDB_DATA value, void *data) {
   RDFSerializer self=(RDFSerializer) data;
-  RESOLVER_ITER iter;
+  RESOLVER_ITER *iter;
   char *attribute;
   raptor_statement triple;
 
@@ -745,16 +745,16 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
   attribute[key.dsize]=0;
 
   // Iterate over all values for this attribute
-  CALL(oracle, get_iter, &iter, self->urn, attribute);
+  iter = CALL(oracle, get_iter, attribute, self->urn, attribute);
   while(1) {
-    RDFValue value = CALL(oracle, iter_next_alloc, NULL, &iter);
+    RDFValue value = CALL(oracle, iter_next_alloc, iter);
 
     if(!value) break;
 
-    // Now iterate over all the values for this 
+    // Now iterate over all the values for this
     triple.subject = self->raptor_uri;
     triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-    
+
     triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute);
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
     triple.object_type = value->raptor_type;
@@ -765,9 +765,8 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     raptor_free_uri((raptor_uri*)triple.predicate);
 
     if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
-      raptor_free_uri((raptor_uri*)triple.object);    
+      raptor_free_uri((raptor_uri*)triple.object);
 
-    talloc_free(value);
   };
 
   talloc_free(attribute);
