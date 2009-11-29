@@ -911,6 +911,8 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   if(!urn) goto error;
 
+  DEBUG("Opening %s for mode %c\n", urn->value, mode);
+
   // Is this object cached?
   if(mode =='r') {
     result = CALL(self->read_cache, get_item, ZSTRING_NO_NULL(urn->value));
@@ -977,6 +979,8 @@ static void Resolver_return(Resolver self, AFFObject obj) {
   // Cache it
   if(!obj) return;
 
+  DEBUG("Returning %s\n", urn);
+
   // Grab the lock
   if(obj->mode == 'r') {
     CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
@@ -1008,6 +1012,8 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
 
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), 'w');
 
+  DEBUG("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
+
   return result;
 
  error:
@@ -1029,10 +1035,12 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
 
     // Remove the key from the database
     tdb_delete(self->data_db, key);
+    DEBUG("Removing attribute %s from %s\n", attribute_str, urn->value);
   } else {
     TDB_DATA max_key;
     int max_id,i;
 
+    DEBUG("Removing all attributes from %s\n", urn->value);
     max_key.dptr = (unsigned char *)MAX_KEY;
     max_key.dsize = strlen(MAX_KEY);
 
@@ -1163,9 +1171,14 @@ static AFFObject AFFObject_finish(AFFObject self) {
   return CALL(self, Con, URNOF(self), self->mode);
 };
 
+static void AFFObject_delete(RDFURN urn) {
+  CALL(oracle, del, urn, NULL);
+};
+
 VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set_property) = AFFObject_set_property;
+     VMETHOD(delete) = AFFObject_delete;
 
      VMETHOD(Con) = AFFObject_Con;
 } END_VIRTUAL

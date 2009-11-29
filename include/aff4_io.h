@@ -22,7 +22,7 @@ CLASS(AFFObject, Object)
 
      // Is this object a reader or a writer?
      char mode;
-     
+
      /** Any object may be asked to be constructed from its URI */
      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
 
@@ -33,6 +33,17 @@ CLASS(AFFObject, Object)
 	 object or NULL if something went wrong.
      */
      AFFObject METHOD(AFFObject, finish);
+
+     /*  This method is used to delete the object from the resolver.
+         It should also call the delete method for all the objects
+         contained within this one or that can be inferred to be
+         incorrect.
+
+         This method is primarily used to ensure that when
+         inconsistant information is found about the world, the
+         resolver information is invalidated.
+     */
+     void CLASS_METHOD(delete, RDFURN urn);
 
 /** This is how an AFFObject can be created. First the oracle is asked
     to create new instance of that object:

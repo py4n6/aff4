@@ -86,7 +86,7 @@ CLASS(Resolver, AFFObject)
       void METHOD(Resolver, cache_return, AFFObject obj);
 
        /* This create a new object of the specified type.
-          
+
           name specifies the type of object as registered in the type
           handler dispatcher.
         */

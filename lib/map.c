@@ -35,7 +35,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     };
 
     CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
-    CALL(oracle, set_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
     {
       XSDDatetime time = new_XSDDateTime(this);
 
@@ -143,6 +143,9 @@ static void MapDriver_save_map(MapDriver self) {
 	compare_points);
 
   fd = CALL(zipfile, open_member, self->map_urn->value, 'w', ZIP_DEFLATE);
+  if(!fd)
+    goto error;
+
   for(i=0;i<self->number_of_points;i++) {
     char buff[BUFF_SIZE];
 
@@ -169,6 +172,7 @@ static void MapDriver_save_map(MapDriver self) {
   CALL(fd, close);
 
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->super.size);
+ error:
   CALL(oracle, cache_return, (AFFObject)zipfile);
 };
 

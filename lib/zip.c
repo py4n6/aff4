@@ -46,9 +46,9 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       RaiseError(ERuntimeError, "%s must be called with a file:// scheme", NAMEOF(self));
       goto error;
     };
-    
+
     URNOF(self) = CALL(urn, copy, self);
-    
+
     if(mode == 'r') {
       flags = O_RDONLY | O_BINARY;
     } else {
@@ -56,10 +56,13 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       // Try to create leading directories
       //_mkdir(dirname(urn->parser->query));
     };
-    
+
     // Now try to create the file within the new directory
     self->fd = open(urn->parser->query, flags, S_IRWXU | S_IRWXG | S_IRWXO);
     if(self->fd<0){
+      // We are unable to open this file for reading - invalidate
+      // everything related to it
+      ((AFFObject)self)->delete(URNOF(self));
       RaiseError(EIOError, "Can't open %s (%s)", urn->parser->query, strerror(errno));
       goto error;
     };
@@ -70,12 +73,14 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
             (RDFValue)self->super.size) &&
        self->super.size->value != file_size) {
       // The size is not what we expect. Therefore the data stored in
-      // the resolver for this file is incorrect - we need to clear it
-      // all.
-      CALL(oracle, del, URNOF(self), NULL);
-    } else {
-      self->super.size->value = file_size;
+      // the resolver for this file and all the objects it contains is
+      // incorrect - we need to clear it all.
+      // Note we call this method as a class method (i.e. we do not
+      // pass self as a first arg since its a class method).
+      ((AFFObject)self)->delete(URNOF(self));
     };
+
+    self->super.size->value = file_size;
 
     CALL(oracle, set_value, URNOF(self), AFF4_SIZE, 
 	 (RDFValue)self->super.size);
@@ -113,7 +118,34 @@ static uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whe
 
   return self->readptr;
 };
-  
+
+static void FileLikeObject_delete(RDFURN del_urn) {
+  // Remove all objects contained in this file
+  RESOLVER_ITER *iter = CALL(oracle, get_iter, NULL, del_urn, AFF4_VOLATILE_CONTAINS);
+  RDFURN urn = new_RDFURN(iter);
+  XSDString type = new_XSDString(iter);
+
+  DEBUG("Invalidating URN %s\n", del_urn->value);
+
+  while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
+    // Check the type of the object
+    if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type)) {
+      AFFObject obj = CALL(oracle, create, type->value, 'r');
+      if(obj) {
+        obj->delete(urn);
+        talloc_free(obj);
+      };
+    };
+
+    // Remove this URN altogether
+    CALL(oracle, del, urn, NULL);
+  };
+
+  // Clear all our attributes
+  CALL(oracle, del, del_urn, NULL);
+  talloc_free(iter);
+};
+
 /** 
     read some data from our file into the buffer (which is assumed to
     be large enough).
@@ -216,6 +248,7 @@ VIRTUAL(FileLikeObject, AFFObject) {
      VMETHOD(close) = FileLikeObject_close;
      VMETHOD(truncate) = FileLikeObject_truncate;
      VMETHOD(get_data) = FileLikeObject_get_data;
+     VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
 
      VATTR(data) = NULL;
 } END_VIRTUAL
@@ -263,14 +296,23 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       goto error;
     };
 
-    CALL(oracle, add_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)urn);
     URNOF(self) = CALL(urn, copy, self);
 
     // Try to load this volume
     ZipFile_load_from(this, this->storage_urn, mode);
 
-    //    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-    //      (RDFValue)this->directory_offset);
+    // If our URN has changed after loading we remove all previous
+    // attributes
+    if(strcmp(URNOF(self)->value, urn->value)) {
+      DEBUG("%s changes URNs from %s to %s\n", NAMEOF(self), urn->value,
+            URNOF(self)->value);
+      CALL(oracle, del, urn, NULL);
+    };
+
+    CALL(oracle, add_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)urn);
+
+    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+         (RDFValue)this->directory_offset);
 
     {
       RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
@@ -803,7 +845,8 @@ static void ZipFile_close(ZipFile self) {
     // Get where we are stored
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
 	     (RDFValue)self->storage_urn)) {
-      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", URNOF(self));
+      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", 
+                 URNOF(self)->value);
       return;
     };
 
@@ -986,6 +1029,7 @@ VIRTUAL(ZipFile, AFFObject) {
      VMETHOD(writestr) = ZipFile_writestr;
      VMETHOD(super.Con) = ZipFile_AFFObject_Con;
      VMETHOD(load_from) = ZipFile_load_from;
+     VMETHOD(super.delete) = FileLikeObject_delete;
 
 // Initialise our private classes
      ZipFileStream_init();
@@ -1337,6 +1381,8 @@ static void ZipFileStream_close(FileLikeObject self) {
 */
 static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   ZipFileStream this = (ZipFileStream)self;
+
+  this->__super__->super.Con(self, urn, mode);
 
   if(urn) {
     ZipFile parent;

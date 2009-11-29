@@ -206,6 +206,12 @@ extern char *_traceback;
 #define METHOD(class,name, ... )		\
   (* name)(class self, ## __VA_ARGS__ )
 
+  // Class methods are attached to the class but are not called with
+  // an instance. This is similar to the python class method or java
+  // static methods.
+#define CLASS_METHOD(name, ... )                \
+  (*name)(__VA_ARGS__)
+
 /***************************************************
    This is a convenience macro which may be used if x if really large
 
