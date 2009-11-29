@@ -493,7 +493,9 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
     CALL(oracle, set_value, URNOF(self), AFF4_STORED, 
 	 (RDFValue)URNOF(fd));
 
-    CALL(oracle, add_value, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
+    // NOTE!! A backing store can only hold one ZipFile volume - thats
+    // why we use set here...
+    CALL(oracle, set_value, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
 	 (RDFValue)URNOF(self));
     
     // Find the CD

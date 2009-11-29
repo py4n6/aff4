@@ -81,6 +81,11 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
   struct stream_info *i;
   int len = strlen(path);
+  // This is used to ensure we do not repeat the same directory
+  // multiple times.
+  Cache cache = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
+
+  cache->static_objects = 1;
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
@@ -103,7 +108,11 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
       };
 
       printf("%s\n", start);
-      filler(buf, start, NULL, 0);
+      // Check to see if we already emitted this directory
+      if(!CALL(cache, get_item, ZSTRING_NO_NULL(start))) {
+        CALL(cache, put, ZSTRING_NO_NULL(start), ZSTRING_NO_NULL(start));
+        filler(buf, start, NULL, 0);
+      };
 
       talloc_free(stream_urn);
     };
@@ -158,6 +167,7 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 #endif
 
+  talloc_free(cache);
   return 0;
 }
 

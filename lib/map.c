@@ -16,7 +16,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     this->image_period = new_XSDInteger(self);
     this->blocksize = new_XSDInteger(self);
     this->map_urn = CALL(uri, copy, self);
-    CALL(this->map_urn, add, "/map");
+    CALL(this->map_urn, add, "map");
 
     // Set defaults
     this->blocksize->value = 1;
@@ -72,8 +72,8 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 	*y=0;
 	if(sscanf(x,"%lld,%lld,%1000s", &point.image_offset,
 		  &point.target_offset, target)==3) {
-	  CALL(this, add, point.target_offset * blocksize->value,
-	       point.image_offset * blocksize->value, target);
+	  CALL(this, add, point.image_offset * blocksize->value,
+	       point.target_offset * blocksize->value, target);
 	};
 	x=y+1;
       };
@@ -223,10 +223,10 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
   MapDriver this = (MapDriver)self;
 
   // How many periods we are from the start
-  uint64_t period_number = self->readptr / this->image_period->value;
+  uint64_t period_number = self->readptr / (uint64_t)this->image_period->value;
 
   // How far into this period we are within the image
-  uint64_t image_period_offset = self->readptr % this->image_period->value;
+  uint64_t image_period_offset = self->readptr % (uint64_t)this->image_period->value;
   char direction = 'f';
   
   // The offset within the target we ultimately need

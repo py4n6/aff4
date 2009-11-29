@@ -25,7 +25,9 @@ ZipFile open_volume(char *filename) {
   if(CALL(oracle, resolve_value, file_urn, AFF4_VOLATILE_CONTAINS,
           (RDFValue)volume_urn)) {
     result = (ZipFile)CALL(oracle, open, volume_urn, mode);
-  } else {
+  };
+
+  if(!result) {
     // Go through all the volume handlers trying to create a new
     // volume, until one works
     result = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'r');
@@ -34,6 +36,7 @@ ZipFile open_volume(char *filename) {
       CALL(result, load_from, file_urn, 'r');
     };
   };
+
   PrintError();
 
   // Check for autoload in this volume
