@@ -547,32 +547,6 @@ static inline uint64_t get_data_next(Resolver self, TDB_DATA_LIST *i){
   return 0;
 };
 
-/** Resolves a single attribute and fills into value. Value needs to
-    be initialised with a valid dptr and dsize will indicate the
-    buffer size
-*/
-static int resolve(Resolver self, TDB_DATA urn, TDB_DATA attribute, TDB_DATA *value) {
-  TDB_DATA_LIST i;
-  
-  if(get_data_head(self, urn, attribute, &i)) {
-    int length = min(value->dsize, i.length);
-    
-    // Read this much from the file
-    if(read(self->data_store_fd, value->dptr, length) < length) {
-      // Oops cant read enough
-      goto error;
-    };
-
-    value->dsize= length;
-    return 1;
-  };
-
- error:
-  value->dsize = 0;
-
-  return 0;
-};
-
 /** Resolves a single attribute and returns the value. Value will be
     talloced with the context of ctx.
 */
@@ -609,56 +583,7 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
     return i.length;
   };
 
- not_found:  
-  return 0;
-};
-
-// check if the value is already set for urn and attribute - honors
-// inheritance. Returns the offset into the TDB_DATA_LIST record.
-static uint64_t is_value_present(Resolver self,TDB_DATA urn, TDB_DATA attribute,
-			    TDB_DATA value, int follow_inheritence) {
-  TDB_DATA_LIST i;
-  char buff[BUFF_SIZE];
-  TDB_DATA tmp;
-
-  while(1) {
-    // Check the current urn,attribute set
-    uint64_t data_offset = get_data_head(self, urn, attribute, &i);
-    // There is something there - check for the presence of the value
-    while(data_offset > 0) {
-      if(value.dsize == i.length && i.length < 100000) {
-	char buff[value.dsize];
-
-	// Read this much from the file
-	if(read(self->data_store_fd, buff, i.length) < i.length) {
-	  return 0;
-	};
-
-	if(!memcmp(buff, value.dptr, value.dsize)) {
-	  // Found it:
-	  return data_offset - sizeof(i);
-	};
-      };
-      data_offset = get_data_next(self, &i);
-    };
-
-    if(!follow_inheritence) break;
-
-    // Follow inheritence - FIXME - limit recursion here!!!
-    tmp.dptr = (unsigned char *)buff;
-    tmp.dsize = BUFF_SIZE;
-    // Substitute our urn with a possible inherited URN
-    if(resolve(self, urn, INHERIT, &tmp)) { // Found - put in urn
-      // Copy the urn
-      urn.dptr = (unsigned char *)buff;
-      urn.dsize = tmp.dsize;
-    } else {
-      break;
-    };
-
-    // Do it all again with the inherited URN
-  };
-
+ not_found:
   return 0;
 };
 
@@ -897,6 +822,26 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
   return result;
 };
 
+static int resolver_cache_destructor(void *this) {
+  AFFObject self = (AFFObject)this;
+  Cache c;
+
+  DEBUG("Unlinking object %s from cache\n", URNOF(self)->value);
+
+  if(self->mode == 'r'){
+    c = CALL(oracle->read_cache, get, ZSTRING_NO_NULL(URNOF(self)->value));
+    if(c)
+      talloc_free(c);
+  } else {
+    if(self->mode == 'w') {
+      c = CALL(oracle->write_cache, get, ZSTRING_NO_NULL(URNOF(self)->value));
+      if(c)
+        talloc_free(c);
+    };
+  };
+
+  return 0;
+};
 
 /** Instantiates a single instance of the class using this
     resolver. The returned object MUST be returned to the cache using
@@ -949,10 +894,10 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
   if(!classref) goto error;
-  
+
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(classref, Con, NULL, urn, mode);
-  
+
   // Make sure the object mode is set, name the object for talloc
   // memory reports and lock it.
   if(result) {
@@ -961,6 +906,10 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
     // Lock it
     CALL(self, lock, URNOF(result), mode);
+
+    // Attach a destructor to ensure it gets removed from the cache
+    // lists if ever its freed rather than returned to us.
+    talloc_set_destructor((void *)result, resolver_cache_destructor);
   };
 
  exit:
@@ -1013,6 +962,9 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), 'w');
 
   DEBUG("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
+
+  // Add a destructor to it
+  talloc_set_destructor((void *)result, resolver_cache_destructor);
 
   return result;
 
@@ -1108,10 +1060,12 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
 };
 
 int Resolver_lock(Resolver self, RDFURN urn, char mode) {
+  DEBUG("locking %s mode %c\n", urn->value, mode);
   return Resolver_lock_gen(self, urn, mode, F_LOCK);
 };
 
 int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
+  DEBUG("releasing %s mode %c\n", urn->value, mode);
   return Resolver_lock_gen(self, urn, mode, F_ULOCK);
 };
 

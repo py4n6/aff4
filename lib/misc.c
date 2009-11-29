@@ -178,3 +178,5 @@ TDB_DATA tdb_data_from_string(char *string) {
 
   return result;
 };
+
+int AFF4_DEBUG_LEVEL = 0;

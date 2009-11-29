@@ -8,6 +8,27 @@
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
+// Searches for an object and returns a correct URN
+FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
+  RDFURN result = new_RDFURN(NULL);
+  FileLikeObject obj;
+
+  CALL(result, set, in_urn);
+  obj = (FileLikeObject)CALL(oracle, open, result, 'r');
+  if(obj) goto exit;
+
+  CALL(result,set, volume_urn->value);
+  CALL(result,add, in_urn);
+  obj = (FileLikeObject)CALL(oracle, open, result, 'r');
+  if(obj) goto exit;
+
+  talloc_free(result);
+  return NULL;
+
+ exit:
+  return obj;
+};
+
 
 void aff2_print_info(int verbose) {
 };
@@ -152,10 +173,14 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output_file);
   XSDInteger image_offset = new_XSDInteger(output_urn);
   XSDInteger target_offset = new_XSDInteger(output_urn);
-  RDFURN input_urn = new_RDFURN(output_urn);
   int i;
   MapDriver map_fd;
   ZipFile zipfile;
+
+  if(!output_urn){
+    printf("Output file not set\n");
+    goto error;
+  };
 
   zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
   if(!zipfile) {
@@ -192,15 +217,14 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
     goto error;
 
   for(i=0; i<count && in_urn[i]; i++) {
-    FileLikeObject in_fd;
+    FileLikeObject in_fd = open_urn(in_urn[i], URNOF(zipfile));
 
-    CALL(input_urn, set, in_urn[i]);
-    in_fd = (FileLikeObject)CALL(oracle, open, input_urn, 'r');
     if(!in_fd)
       goto error;
 
-    CALL(map_fd, add, image_offset->value, target_offset->value, in_urn[i]);
+    CALL(map_fd, add, image_offset->value, target_offset->value, URNOF(in_fd)->value);
     image_offset->value += in_fd->size->value;
+    CALL(oracle, cache_return, (AFFObject)in_fd);
   };
 
   map_fd->super.size->value = image_offset->value;
@@ -219,39 +243,42 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
 };
 
 /** This one creates a regular image on the output_file */
-int aff4_image(char *driver, char *output_file, char *stream_name,
-	       unsigned int chunks_in_segment,
-	       uint64_t max_size,
-	       char *in_urn) {
-  ZipFile zipfile;
+int aff4_image(ZipFile *zipfile, char *driver, 
+               char *output_file,
+               char *stream_name,
+               unsigned int chunks_in_segment,
+               uint64_t max_size,
+               char *in_urn) {
   Image image;
   char buffer[IMAGE_BUFF_SIZE];
   int length;
   int count = 0;
-  RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output_file);
-  XSDInteger directory_offset = new_XSDInteger(output_urn);
-  RDFURN input_urn = (RDFURN)rdfvalue_from_urn(output_urn, in_urn);
+  XSDInteger directory_offset = new_XSDInteger(NULL);
+  RDFURN output_urn = new_RDFURN(directory_offset);
+  RDFURN input_urn = (RDFURN)rdfvalue_from_urn(directory_offset, in_urn);
   FileLikeObject in_fd = (FileLikeObject)CALL(oracle, open, input_urn, 'r');
 
   if(!in_fd) {
     goto error;
   };
 
-  zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
-  if(!zipfile) {
-    PrintError();
-    print_volume_drivers();
-    goto error;
+  // Need to make a new zipfile
+  if(!*zipfile) {
+    *zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
+    if(!*zipfile) {
+      PrintError();
+      print_volume_drivers();
+      goto error;
+    };
+
+    CALL((AFFObject)*zipfile, set_property, AFF4_STORED, 
+         rdfvalue_from_urn(directory_offset, output_file));
+
+    // Is it ok?
+    if(!CALL((AFFObject)*zipfile, finish)) {
+      goto error;
+    };
   };
-
-  CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
-       (RDFValue)output_urn);
-
-  // Is it ok?
-  if(!CALL((AFFObject)zipfile, finish)) {
-    goto error;
-  };
-
 
   // Now we need to create an Image stream
   image = (Image)CALL(oracle, create, AFF4_IMAGE, 'w');
@@ -259,29 +286,29 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
   // We have to give the stream a specific name
   if(stream_name) {
-    URNOF(image) = CALL(URNOF(zipfile), copy, image);
+    URNOF(image) = CALL(URNOF(*zipfile), copy, image);
     CALL(URNOF(image), add, stream_name);
   };
 
   // Tell the image that it should be stored in the volume
-  CALL((AFFObject)image, set_property, AFF4_STORED, (RDFValue)URNOF(zipfile));
+  CALL((AFFObject)image, set_property, AFF4_STORED, (RDFValue)URNOF(*zipfile));
   if(chunks_in_segment > 0)
     CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, 
-         rdfvalue_from_int(output_urn, chunks_in_segment));
+         rdfvalue_from_int(directory_offset, chunks_in_segment));
 
   // Done with the volume now
-  CALL(oracle, cache_return, (AFFObject)zipfile);
+  CALL(oracle, cache_return, (AFFObject)*zipfile);
 
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
     goto error;
 
   while(1) {
-    CALL(oracle, resolve_value, URNOF(zipfile), AFF4_DIRECTORY_OFFSET,
+    CALL(oracle, resolve_value, URNOF(*zipfile), AFF4_DIRECTORY_OFFSET,
          (RDFValue)directory_offset);
 
     if(max_size > 0 && directory_offset->value > max_size) {
-      zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
+      *zipfile = (ZipFile)CALL(oracle, open, URNOF(*zipfile), 'w');
 
       char buff[BUFF_SIZE];
       snprintf(buff, BUFF_SIZE, "%s.%03u", output_file, count++);
@@ -289,30 +316,30 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
       CALL(output_urn, set, buff);
 
       // Leave a hint in this volume to load the next volume
-      CALL(oracle, add_value, URNOF(zipfile), AFF4_AUTOLOAD,
+      CALL(oracle, add_value, URNOF(*zipfile), AFF4_AUTOLOAD,
            (RDFValue)output_urn);
 
-      CALL(zipfile, close);
+      CALL(*zipfile, close);
 
       // Create a new volume to hold the image:
-      zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
-      CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
+      *zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
+      CALL((AFFObject)*zipfile, set_property, AFF4_STORED, 
            (RDFValue)output_urn);
 
       // Is it ok?
-      if(!CALL((AFFObject)zipfile, finish)) {
+      if(!CALL((AFFObject)*zipfile, finish)) {
         goto error;
       };
 
       // Tell the resolver that from now on the image will be stored
       // on the new volume:
       CALL(oracle, add_value, URNOF(image), AFF4_STORED,
-           (RDFValue)URNOF(zipfile));
+           (RDFValue)URNOF(*zipfile));
 
-      CALL(oracle, add_value, URNOF(zipfile), AFF4_VOLATILE_CONTAINS,
+      CALL(oracle, add_value, URNOF(*zipfile), AFF4_VOLATILE_CONTAINS,
            (RDFValue)URNOF(image));
 
-	CALL(oracle, cache_return, (AFFObject)zipfile);
+	CALL(oracle, cache_return, (AFFObject)*zipfile);
     };
 
     length = CALL(in_fd, read, buffer, IMAGE_BUFF_SIZE);
@@ -323,13 +350,10 @@ int aff4_image(char *driver, char *output_file, char *stream_name,
 
   CALL((FileLikeObject)image, close);
 
-  // Close the zipfile and dispose of it
-  zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
-  CALL((ZipFile)zipfile, close);
-
   return 0;
 
  error:
+  talloc_free(directory_offset);
   PrintError();
   return -1;
 };
@@ -459,7 +483,6 @@ int main(int argc, char **argv)
   char *stream_name = NULL;
   char *driver = AFF4_ZIP_VOLUME;
   int chunks_per_segment = 0;
-  int verbose=0;
   char *extract = NULL;
   char *cert = NULL;
   char *key_file = NULL;
@@ -582,7 +605,7 @@ int main(int argc, char **argv)
       break;
 
     case 'v':
-      verbose++;
+      AFF4_DEBUG_LEVEL++;
       break;
 
     case 'V':
@@ -620,23 +643,32 @@ int main(int argc, char **argv)
     if(optind < argc) {
       // We are imaging now
       if(mode == 'i') {
+        ZipFile zipfile=NULL;
+
         if(!output_file) {
           printf("You must specify an output file with --output\n");
           exit(-1);
         };
 
         while (optind < argc) {
-          if(!stream_name) {
-            stream_name = argv[optind];
+          char *in_urn = argv[optind];
+          char *in_stream_name = in_urn;
+
+          if(stream_name) {
+            in_stream_name = stream_name;
           };
 
-          aff4_image(driver, output_file, stream_name,
+          aff4_image(&zipfile, driver, output_file,
+                     in_stream_name,
                      chunks_per_segment,
                      max_size,
-                     argv[optind]);
+                     in_urn);
 
           optind++;
         };
+
+        CALL(zipfile, close);
+
       } else if(mode == 'm') {
         aff4_make_map(driver, output_file, stream_name,
                       argv+optind, argc- optind);

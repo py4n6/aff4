@@ -122,7 +122,7 @@ static int dump_bevy(ImageWorker this) {
     // Push one more offset to the index to cover the last chunk
     this->chunk_indexes[chunk_count + 1] = this->segment_buffer->readptr;
 
-    printf("Dumping segment %s (%lld bytes)\n", buff, this->segment_buffer->readptr);
+    printf("Dumping bevy %s (%lld bytes)\n", buff, this->segment_buffer->readptr);
 
     // Store the entire segment in the zip file
     CALL((ZipFile)parent, writestr,

@@ -42,3 +42,4 @@ tools/common.h
 tools/fsbuilder
 *.tdb
 unittests
+raid_reconstructor

@@ -72,7 +72,7 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
     if(map[i]==',' || i==len) {
       map[i]=0;
 
-      if(map[last]=='p') result->description[j][k]=-1;
+      if(map[last]=='p' || map[last]=='P') result->description[j][k]=-1;
       else {
         int image_block = strtol(map + last, NULL, 0);
         result->description[k][j] = image_block;
@@ -178,13 +178,16 @@ int main(int argc, char **argv)
   int c,blocksize=4*1024;
   int columnwidth=20;
   int rows=2;
-  char *stream_name = "default";
+  char mode = 'r';
+  char *stream_name = NULL;
   char *driver = AFF4_ZIP_VOLUME;
-  int verbose=0;
   int verify = 0;
   char *map_description = NULL;
   struct map_description *map = NULL;
   char *output = NULL;
+  ZipFile volume = NULL;
+
+  AFF4_DEBUG_LEVEL = 0;
 
   // Initialise the library
   AFF4_Init();
@@ -209,8 +212,8 @@ int main(int argc, char **argv)
        "Create the output volume on this file or URL (using webdav)", 1, 0, 'o'},
       {"map\0"
        "map specification to use", 1, 0, 'm'},
-      {"stream\0"
-       "If specified the new stream will be called this", 1, 0, 's'},
+      {"write\0"
+       "Write mode - actually create the map object with the specified name (if not specified just examine the raid)", 1, 0, 'w'},
       {0, 0, 0, 0}
     };
 
@@ -219,12 +222,9 @@ int main(int argc, char **argv)
     if (c == -1)
       break;
     switch (c) {
-    case 's':
-      stream_name = optarg;
-      break;
 
     case 'v':
-      verbose++;
+      AFF4_DEBUG_LEVEL++;
       break;
 
     case 'b':
@@ -247,6 +247,15 @@ int main(int argc, char **argv)
 
     case 'o':
       output = optarg;
+      volume = open_volume(output);
+      if(volume)
+        CALL(oracle, cache_return, (AFFObject)volume);
+
+      break;
+
+    case 'w':
+      mode = 'w';
+      stream_name = optarg;
       break;
 
     default:
@@ -264,12 +273,22 @@ int main(int argc, char **argv)
 
     for(i=0; i<number_of_disks; i++) {
       CALL(urn, set, argv[i+optind]);
-      printf("Position %u: %s\n", i, urn->value);
 
       disks[i] = (FileLikeObject)CALL(oracle, open, urn, 'r');
       if(!disks[i]) {
+        // Maybe its specified relative to the volume
+        if(volume) {
+          CALL(urn, set, URNOF(volume)->value);
+          CALL(urn, add, argv[i+optind]);
+          disks[i] = (FileLikeObject)CALL(oracle, open, urn, 'r');
+        };
+      };
+
+      if(!disks[i]){
         goto exit;
       };
+
+      printf("Position %u: %s\n", i, urn->value);
     };
 
     if(map_description) {
@@ -278,7 +297,7 @@ int main(int argc, char **argv)
       if(!map->description) goto exit;
     };
 
-    if(output) {
+    if(output && mode=='w') {
       make_map_stream(driver, map, output, stream_name);
       goto exit;
     };

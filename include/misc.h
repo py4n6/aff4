@@ -41,10 +41,13 @@ int endswith(const char *haystack, char *needle);
 #define AS_BUFFER(x) &x, sizeof(x)
 
 char *normalise_url(char *url);
+extern int AFF4_DEBUG_LEVEL;
 
 #if 1
-#define DEBUG(x, ...) printf("%s:%d %d: " x, \
-			     __FUNCTION__, __LINE__, (int)pthread_self(), ## __VA_ARGS__);
+#define DEBUG(x, ...) if(AFF4_DEBUG_LEVEL>=1){                              \
+    printf("%s:%d %d: " x,                                              \
+           __FUNCTION__, __LINE__, (int)pthread_self(), ## __VA_ARGS__); \
+  };
 #else
 #define DEBUG(x, ...)
 #endif

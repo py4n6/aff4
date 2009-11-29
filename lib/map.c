@@ -36,7 +36,9 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
     CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
-    {
+
+    // Only update the timestamp if we created a new map
+    if(mode=='w') {
       XSDDatetime time = new_XSDDateTime(this);
 
       CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time);

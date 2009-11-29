@@ -291,6 +291,9 @@ struct stream_info *populate_streams(char **file_urns,
       stream.urn = CALL(stream_urn, copy, ctx);
       CALL(result, write, (char *)&stream, sizeof(stream));
     };
+
+    // Done with the volume now
+    CALL(oracle, cache_return, (AFFObject)volume);
   };
 
  exit:
@@ -331,6 +334,8 @@ int main(int argc, char **argv)
 	usage();
 	talloc_free(volume_names);
 	exit(EXIT_SUCCESS);
+      } else if(!strcmp(argv[i],"-v")) {
+        AFF4_DEBUG_LEVEL = 1;
       } else if(!strcmp(argv[i],"--")) {
 	int j,k;
 

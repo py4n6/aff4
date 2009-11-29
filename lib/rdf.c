@@ -425,9 +425,10 @@ static void *XSDDatetime_serialise(RDFValue self) {
   if(this->serialised) talloc_free(this->serialised);
 
   if(BUFF_SIZE > strftime(buff, BUFF_SIZE, DATETIME_FORMAT_STR,
-			  gmtime(&this->value.tv_sec))) {
+			  localtime(&this->value.tv_sec))) {
     this->serialised = talloc_asprintf(this, "%s.%06u+%02u:%02u", buff,
-				       (unsigned int)this->value.tv_usec,
+                                       0,
+				       //(unsigned int)this->value.tv_usec,
 				       (unsigned int)this->tz.tz_minuteswest / 60,
 				       (unsigned int)this->tz.tz_minuteswest % 60);
     return this->serialised;
@@ -442,6 +443,8 @@ static int XSDDatetime_parse(RDFValue self, char *serialised) {
 
   memset(&time, 0, sizeof(time));
   strptime(serialised, DATETIME_FORMAT_STR, &time);
+
+  time.tm_isdst = -1;
   this->value.tv_sec = mktime(&time);
 
   return 1;
@@ -808,6 +811,7 @@ RDFValue rdfvalue_from_int(void *ctx, uint64_t value) {
 
 RDFValue rdfvalue_from_urn(void *ctx, char *value) {
   RDFURN result = new_RDFURN(ctx);
+  if(!value) return NULL;
 
   return result->set(result, value);  
 };
