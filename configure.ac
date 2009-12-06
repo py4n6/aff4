@@ -1,24 +1,57 @@
-# basics
+dnl basics
 AC_INIT()
 
-# Store the configuration in this header
+dnl Store the configuration in this header
 AC_CONFIG_HEADER([include/config.h])
 AC_CONFIG_AUX_DIR(config)
 AM_INIT_AUTOMAKE(libaff4, 0.01)
 
-# check standard stuff
+AC_CONFIG_MACRO_DIR([m4])
+
+dnl check standard stuff
 AC_PROG_LIBTOOL
 AC_PROG_CC
 
-# check headers
+dnl check headers
 AC_CHECK_HEADER(zlib.h,,AC_MSG_ERROR([You Must install zlib-dev to build libaff4]))
 
-## We really need libuuid:
-AC_CHECK_HEADER(uuid/uuid.h,,AC_MSG_ERROR([You Must install uuid-dev to build libaff4]))
-AC_CHECK_LIB([uuid],[uuid_generate], , AC_MSG_ERROR([You Must install uuid-dev to build libaff4]))
+dnl Gives us access to the host_os environment variable
+AC_CANONICAL_HOST
 
-## Are we running on windows?
-AC_CHECK_HEADER(windows.h,have_windows=yes,have_windows=no)
+dnl Special treatments for different hosts
+case "${host_os}" in
+  *darwin* ) ## Mac OS X configuration
+    CXXFLAGS="-ansi -pedantic $CXXFLAGS"
+    ## OSX has uuid in their libc
+    LIBS="$LIBS"
+    ;;
+
+  *cygwin* ) ## Cygwin configuration
+    # LIBS="-lwinmm -lm";
+    CXXFLAGS="$CXXFLAGS -Wno-uninitialized"
+    LIBS="$LIBS -lm -lpthread -luuid -lrpcrt4"
+    ;;
+
+  *) ## Unix (Linux) configuration
+    AC_CHECK_LIB(pthread, pthread_create,[have_pthread="yes"],
+                AC_MSG_ERROR([libpthread not found!]))
+
+    dnl We really need uuid support:
+    AC_CHECK_HEADER(uuid/uuid.h,,
+                AC_MSG_ERROR([You Must install uuid-dev to build libaff4]))
+
+    AC_CHECK_LIB([uuid],[uuid_generate], , 
+                AC_MSG_ERROR([You Must install uuid-dev to build libaff4]))
+esac
+
+dnl AC_MSG_CHECKING(whether to enable symbol visibility manipulation...)
+dnl AC_ARG_ENABLE([visibility], [AC_HELP_STRING([--disable-visibility],
+dnl               [disable symbol visibility manipulation [default=enabled] ])],
+dnl               [AC_MSG_RESULT(no)]
+dnl              ,
+dnl               [AC_MSG_RESULT(yes)]
+dnl               [CFLAGS="${CFLAGS} -fvisibility=hidden "]
+dnl              )
 
 ## Allow users to disable optional libraries:
 ## Afflib needs some special libraries to link against - is that a bug in afflib?

@@ -336,6 +336,7 @@ int main(int argc, char **argv)
 	exit(EXIT_SUCCESS);
       } else if(!strcmp(argv[i],"-v")) {
         AFF4_DEBUG_LEVEL = 1;
+        continue;
       } else if(!strcmp(argv[i],"--")) {
 	int j,k;
 

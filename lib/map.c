@@ -79,6 +79,8 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 	};
 	x=y+1;
       };
+
+      CALL(oracle, cache_return, (AFFObject)fd);
     };
   };
 
@@ -326,13 +328,13 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 };
 
 
-VIRTUAL(MapDriver, FileLikeObject)
+VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
      VMETHOD(add) = MapDriver_add;
      VMETHOD(save_map) = MapDriver_save_map;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
-END_VIRTUAL
+} END_VIRTUAL
 
 void mapdriver_init() {
   MapDriver_init();

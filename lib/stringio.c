@@ -1,5 +1,6 @@
 #include "stringio.h"
 #include "misc.h"
+#include "aff4.h"
 
 static StringIO StringIO_constructor(StringIO self) {
   //Create a valid buffer to hold the data:

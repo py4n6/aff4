@@ -289,3 +289,7 @@ void add_identity(char *key_file, char *cert_file) {
   };
 };
 #endif
+
+void aff4_free(void *ptr) {
+  talloc_free(ptr);
+};

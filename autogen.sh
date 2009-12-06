@@ -1,16 +1,23 @@
 #! /bin/sh
 
-echo FIFLib autogen.sh
+echo LibAFF4 autogen.sh
 echo
 
-res=`type libtoolize`
+## Try to find the libtoolize tool - in OSX its called glibtoolize
+for LIBTOOL in libtoolize glibtoolize; do
+    res=`type $LIBTOOL`
+    if [ $0 != 0 ] ; then 
+        break
+    fi
+done
+
 if [ $0 = 0 ]; then
 	echo please install libtoolize
 	exit 1
 else
-	echo starting libtoolize
-	libtoolize
-	echo finished libtoolize
+	echo starting $LIBTOOL
+	$LIBTOOL
+	echo finished $LIBTOOL
 fi
 
 echo

@@ -57,7 +57,7 @@ void resolver_test_1() {
       printf("Got value of type '%s', value '%s'\n", result->dataType,
 	     CALL(result, serialise));
 
-      talloc_free(result);
+      aff4_free(result);
     };
   };
 
@@ -83,7 +83,7 @@ void resolver_test_locks() {
     uint32_t now = time(NULL);
 
     // Children have to get their own Resolver
-    talloc_free(oracle);
+    aff4_free(oracle);
     oracle = CONSTRUCT(Resolver, Resolver, Con, NULL);
 
     // Give the parent a chance
@@ -134,7 +134,7 @@ void zipfile_test1() {
 
   // Close the archive
   CALL(zip, close);
-  talloc_free(zip);
+  aff4_free(zip);
 };
 
 void zipfile_test2() {
@@ -181,7 +181,7 @@ void zipfile_test2() {
   // Close the archive
   CALL(zip, close);
 
-  talloc_free(file_urn);
+  aff4_free(file_urn);
 };
 
 void zipfile_test_load() {
@@ -377,7 +377,7 @@ void test_image_read() {
   zipfile =CONSTRUCT(ZipFile, ZipFile, Con, fd, URNOF(fd), 'r');
   if(!zipfile) {
     RaiseError(ERuntimeError, "%s is not a zip file?", TEST_FILE);
-    talloc_free(fd);
+    aff4_free(fd);
     return;
   };
 
@@ -543,7 +543,7 @@ void test_map_read() {
   CALL(oracle, cache_return, (AFFObject)map);
 
  error:
-  talloc_free(volume);
+  aff4_free(volume);
   return;
 };
 #endif
@@ -655,7 +655,7 @@ int main() {
 
     printf("Time now is %s\n", (char *)CALL((RDFValue)t, serialise));
 
-    talloc_free(t);
+    aff4_free(t);
   };
 
 #ifdef RESOLVER_TESTS

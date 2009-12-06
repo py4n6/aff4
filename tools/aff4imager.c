@@ -8,7 +8,7 @@
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
-// Searches for an object and returns a correct URN
+// Searches for an object and tries to open it
 FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
   RDFURN result = new_RDFURN(NULL);
   FileLikeObject obj;
@@ -17,6 +17,7 @@ FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
   obj = (FileLikeObject)CALL(oracle, open, result, 'r');
   if(obj) goto exit;
 
+  ClearError();
   CALL(result,set, volume_urn->value);
   CALL(result,add, in_urn);
   obj = (FileLikeObject)CALL(oracle, open, result, 'r');

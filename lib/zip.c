@@ -13,6 +13,7 @@
 #include <libgen.h>
 #include "aff4.h"
 #include "aff4_rdf_serialise.h"
+#include "exports.h"
 
 static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   FileLikeObject this = (FileLikeObject)self;

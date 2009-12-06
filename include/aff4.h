@@ -66,10 +66,7 @@ struct aff4_tripple **aff4_query(AFF4_HANDLE self, char *urn,
 				char *attributes, char *value);
 
 // Make this available even if clients do not use talloc.
-extern int talloc_free(void *ptr);
-#define aff4_free(x) talloc_free(x)
-
-
+void aff4_free(void *ptr);
 
 /** Loads certificate cert and creates a new identify. All segments
     written from now on will be signed using the identity.
@@ -83,5 +80,7 @@ void add_identity(char *key_file, char *cert);
 // This function must be called to initialise the library - we prepare
 // all the classes and intantiate an oracle.
 void AFF4_Init(void);
+
+#include "exports.h"
 
 #endif

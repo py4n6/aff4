@@ -1,4 +1,5 @@
 #include "aff4.h"
+#include "exports.h"
 #include "encode.h"
 
 /*************************************************************

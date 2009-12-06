@@ -7,6 +7,7 @@
 #include <string.h>
 #include "misc.h"
 #include <tdb.h>
+#include "aff4.h"
 
 uint64_t parse_int(char *string) {
   char *endptr;
