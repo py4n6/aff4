@@ -193,6 +193,19 @@ AC_CHECK_FUNCS([SHA256_Init])           # try to figure out what it's called
 AC_CHECK_FUNCS([EVP_sha256],[evp_sha256=yes],[evp_sha256="no "])
 AC_CHECK_FUNCS([PEM_read_bio_RSA_PUBKEY])
 
+## We must have libraptor installed
+AC_CHECK_HEADERS(raptor.h,,
+                AC_MSG_ERROR([You must have libraptor1-dev installed]))
+
+AC_CHECK_LIB([raptor], [raptor_init], ,
+                AC_MSG_ERROR([You must have libraptor1-dev installed]))
+
+# We must have tdb installed
+AC_CHECK_HEADERS(tdb.h,,
+        AC_MSG_ERROR([You must have tdb-dev installed]))
+
+AC_CHECK_LIB([tdb], [tdb_open],,
+        AC_MSG_ERROR([You must have tdb-dev installed]))         
 
 ## Check for tsk
 AC_CHECK_LIB([tsk3], [tsk_fs_fls], have_sleuthkit=yes, have_sleuthkit=no)
