@@ -176,11 +176,11 @@ static int XSDInteger_decode(RDFValue this, char *data, int length) {
 static void *XSDInteger_serialise(RDFValue self) {
   XSDInteger this = (XSDInteger)self;
 
-  if(this->serialised) 
+  if(this->serialised)
     talloc_free(this->serialised);
 
   this->serialised = talloc_asprintf(self, "%llu", this->value);
-  
+
   return this->serialised;
 };
 
@@ -204,7 +204,7 @@ VIRTUAL(XSDInteger, RDFValue) {
    VMETHOD(super.decode) = XSDInteger_decode;
    VMETHOD(super.serialise) = XSDInteger_serialise;
    VMETHOD(super.parse) = XSDInteger_parse;
-   
+
    VMETHOD(set) = XSDInteger_set;
 } END_VIRTUAL
 
@@ -838,4 +838,17 @@ XSDString new_XSDString(void *ctx) {
 
 XSDDatetime new_XSDDateTime(void *ctx) {
   return CONSTRUCT(XSDDatetime, RDFValue, super.Con, ctx);
+};
+
+// Uses the class registry to construct a type by name
+RDFValue new_rdfvalue(void *ctx, char *type) {
+  RDFValue result = NULL;
+  RDFValue class_ref = CALL(RDF_Registry, get_item,
+                            ZSTRING_NO_NULL(type));
+
+  if(class_ref) {
+    result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, ctx);
+  };
+
+  return result;
 };

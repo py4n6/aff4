@@ -175,7 +175,8 @@ fi
 ################################################################
 ## Crypto (must follow S3)
 ###
-AC_CHECK_LIB([ssl],[ssl3_new], have_openssl=yes, 
+AC_CHECK_LIB([ssl],[ssl3_new], 
+             have_openssl=yes,
 	AC_MSG_ERROR( [ You must have openssl header libraries. This is often packaged as libssl-dev ]))
 
 AC_CHECK_HEADERS([openssl/aes.h openssl/bio.h openssl/evp.h openssl/hmac.h openssl/md5.h openssl/rand.h openssl/rsa.h openssl/sha.h openssl/pem.h])
@@ -241,6 +242,10 @@ if test "${have_libewf}" = "yes"; then
   AC_DEFINE([HAVE_LIBEWF], 1, [Use legacy EWF support ])
 fi
 
+if test "${have_openssl}" = "yes"; then
+  AC_DEFINE([HAVE_OPENSSL], 1, [Use encryption])
+fi
+
 AC_SUBST(AFFUSE_BIN)
 AM_PROG_CC_C_O                  dnl for affuse
 
@@ -276,6 +281,7 @@ AC_MSG_NOTICE([${PACKAGE} ${VERSION} configuration])
 AC_MSG_NOTICE([EWF Support:             $have_libewf ])
 AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
 AC_MSG_NOTICE([CURL Support:            $have_libcurl ])
+AC_MSG_NOTICE([Encryption Support:      $have_openssl ])
 AC_MSG_NOTICE([FUSE:                    $enable_fuse])
 AC_MSG_NOTICE([*****************************************])
 AC_MSG_NOTICE([])

@@ -144,6 +144,9 @@ XSDInteger new_XSDInteger(void *ctx);
 XSDString new_XSDString(void *ctx);
 XSDDatetime new_XSDDateTime(void *ctx);
 
+// Generic constructor for an RDFValue
+RDFValue new_rdfvalue(void *ctx, char *type);
+
 void rdf_init();
 
 #endif

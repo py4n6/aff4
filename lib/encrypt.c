@@ -1,280 +1,278 @@
 #include <openssl/ssl.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
-#include "zip.h"
+#include "aff4.h"
 
-/** Saves the key in the resolver, using all the methods which are
-    available:
+/**
+   Encryption is handled via two components, the encrypted stream and
+   the cipher. An encrypted stream is an FileLikeObject with the
+   following AFF4 attributes:
 
-    Passphrase is a secret password to encrypt the key with.
-    The following steps are taken:
+   AFF4_CHUNK_SIZE = Data will be broken into these chunks and
+                     encrypted independantly.
 
-    1) A random number between 2^16 and 2^24 is used as round number
-       for passphrase fortification. This parameter is saved in the
-       resolver as AFF4_CRYPTO_FORTIFICATION_COUNT.
+   AFF4_STORED     = Data will be stored on this backing stream.
 
-    2) The password is hashed this many times using SHA256. This
-       produces a new 256 bit key.
+   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher
+                     class. More on that below.
 
-    3) The stream key is then encrypted using the above key
-       with AES, and the IV.
+   When opened, the FileLikeObject is created by instantiating a
+   cipher from the AFF4_CIPHER attribute. Data is then divided into
+   chunks and each chunk is encrypted using the cipher, and then
+   written to the backing stream.
 
-    4) We save the IV in the resolver using AFF4_CRYPTO_IV
+   A cipher is a class which extends this baseclass
+
+   CLASS(AFF4Cipher, RDFValue)
+      int blocksize;
+
+      int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, unsigned
+                             char * outbuf, int length, int chunk_number);
+      int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, unsigned
+                             char * outbuf, int length, int chunk_number);
+   END_CLASS
+
+   Of course a valid cipher must also implement valid serialization
+   methods and also some way of key initialization. Chunks must be
+   whole multiples of blocksize.
 */
-static int prepare_passphrase(Encrypted self, OUT unsigned char *key, int key_length) {
-  char *passphrase = (char *)CALL(oracle, resolve, self, CONFIGURATION_NS, 
-				  AFF4_VOLATILE_PASSPHRASE,
-				  RESOLVER_DATA_STRING);
-  
-  if(passphrase) {
-    int passphrase_len = strlen(passphrase);
-    uint64_t fortification_count = *(uint64_t *)CALL(oracle, resolve, self, URNOF(self),
-						     AFF4_CRYPTO_FORTIFICATION_COUNT,
-						     RESOLVER_DATA_UINT64);
-    EVP_MD_CTX digest;
-    unsigned char buffer[BUFF_SIZE];
-    unsigned int buffer_length=BUFF_SIZE;
-    int i;
 
-    EVP_DigestInit(&digest, EVP_sha256());
+VIRTUAL(AFF4Cipher, RDFValue) {
+} END_VIRTUAL
 
-    if(fortification_count == 0) {
-      // Some random data for the fortification_count
-      RAND_pseudo_bytes((unsigned char *)&fortification_count, 
-			sizeof(fortification_count));
-      fortification_count &= 0xFFFF;
-      fortification_count <<= 8;
+static Cache key_cache;
 
-      // Store it
-      CALL(oracle, set, URNOF(self), AFF4_CRYPTO_FORTIFICATION_COUNT, 
-	   &fortification_count, RESOLVER_DATA_UINT64);
-    };
-
-    /* Fortify the passphrase (This is basically done in order to
-       increase the cost of checking the passphrase by a huge factor
-       making dictionary attacks very ineffective). 
-    */
-    for(i=0; i<fortification_count; i++) {
-      EVP_DigestUpdate(&digest, passphrase, passphrase_len);
-    };
-
-    memset(buffer, 0, buffer_length);
-    EVP_DigestFinal(&digest, buffer, &buffer_length); 
-
-    // Return the key material
-    memcpy(key, buffer, key_length);
-
-    return 1;
+  // Create a new cipher
+static RDFValue AES256Password_Con(RDFValue self) {
+  AES256Password this = (AES256Password)self;
+  // Make up some random keys and IVs
+  if(RAND_bytes(this->pub.iv, sizeof(this->pub.iv)) !=1 &&
+     RAND_pseudo_bytes(this->pub.iv, sizeof(this->pub.iv)) != 1) {
+    goto error;
   };
 
-  return 0;
+  return self;
+
+ error:
+  RaiseError(ERuntimeError, "Unable to make random key");
+  talloc_free(self);
+  return NULL;
 };
 
-static int save_AES_key(Encrypted self, unsigned char affkey[32]) {
-  // Is there a passphrase specified?
-  int saved = 0;
-  unsigned char key[32];
-  unsigned char iv[AES_BLOCK_SIZE];
-  unsigned char encrypted_key[32];
-  unsigned char buffer[BUFF_SIZE];
-  AES_KEY aes_key;
-  
-  // This places an encryption key in key derived from the passphrase:
-  if(prepare_passphrase(self, key, sizeof(key))) {
-    TDB_DATA iv_data, encrypted_key_data;
+// We set the password, we basically just copy it here for later
+static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
+  uint32_t round_number;
 
-    // Make a new iv
-    RAND_pseudo_bytes(iv, sizeof(iv));
-    
-    iv_data.dptr = iv;
-    iv_data.dsize = sizeof(iv);
-    
-    // And we store them in the resolver
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_IV, &iv_data, RESOLVER_DATA_TDB_DATA);
-    
-    // The passphrase key is now used to encrypt the stream key
-    AES_set_encrypt_key(key, 256, &aes_key);
-    AES_cbc_encrypt(affkey, encrypted_key, 32, &aes_key, iv, AES_ENCRYPT);
-    
-    encode64((unsigned char *)encrypted_key, 32, buffer, sizeof(buffer));
-    encrypted_key_data.dptr = encrypted_key;
-    encrypted_key_data.dsize = 32;
 
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_PASSPHRASE_KEY, 
-	 &encrypted_key_data, RESOLVER_DATA_TDB_DATA);
+  // Round number is between 2**8 and 2**24
+  round_number = (*(uint32_t *)self->pub.iv & 0xFF) << 8;
 
-    CALL(oracle, set, URNOF(self), AFF4_CRYPTO_ALGORITHM, 
-	 AFF4_CRYPTO_ALGORITHM_AES_SHA254, RESOLVER_DATA_STRING);
-    
-    saved = 1;
-  };
+  // Now make the key
+  PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
+                         self->pub.iv, sizeof(self->pub.iv),
+                         round_number,
+                         sizeof(self->key), self->key);
 
-  return saved;
+  // We now cache the key for that IV (memory will be stolen by the Cache)
+  CALL(key_cache, put,
+       talloc_memdup(NULL, self->pub.iv, sizeof(self->pub.iv)),
+       sizeof(self->pub.iv),
+       talloc_memdup(NULL, self->key, sizeof(self->key)),
+       sizeof(self->key));
+
+  AES_set_encrypt_key(self->key, sizeof(self->key) * 8, &self->ekey);
+  AES_set_decrypt_key(self->key, sizeof(self->key) * 8, &self->dkey);
+
+  return (RDFValue)self;
 };
 
-/*
-  Make a new random key. Note that we use 256 bits (32 bytes)
-  of randomness, but for convenience we base64 encode it so
-  it can be stored in the resolver easily.
-
-  Note that we store the key in the resolver for other instances to
-  use.
+/* When we serialise the keys we need to encrypt them with the
+   passphrase. We do this by creating a new URN and attaching
+   attributes to it.
 */
-static unsigned char *generate_AES_key(Encrypted self) {
-  char buff[BUFF_SIZE];  
-  unsigned char *affkey = talloc_size(self, 32);
-  TDB_DATA affkey_data;
+static void *AES256Password_serialise(RDFValue self) {
+  AES256Password this = (AES256Password)self;
 
-  int r = RAND_bytes(affkey,32); // makes a random key; with REAL random bytes
-  if(r!=1) r = RAND_pseudo_bytes(affkey,32); // true random not supported
-  if(r!=1) {
-    RaiseError(ERuntimeError, "Cant make random data");
-    return NULL;
-  };
-  
-  encode64((unsigned char *)affkey, 32, (unsigned char*)buff, sizeof(buff));
-  // Set the key
-  affkey_data.dptr = affkey;
-  affkey_data.dsize = 32;
+  // Update the nonce
+  CALL((AFF4Cipher)this, encrypt, this->pub.iv,
+       this->pub.nonce, sizeof(this->pub.nonce), 0);
 
-  CALL(oracle, set, URNOF(self), AFF4_VOLATILE_KEY, &affkey_data,
-       RESOLVER_DATA_TDB_DATA);
+  // Encode the key
+  encode64((char *)&this->pub, sizeof(this->pub), this->encoded_key, sizeof(this->encoded_key));
 
-  // Now we have a key - we need to initialise our AES_key:
-  AES_set_encrypt_key(affkey, 256, &self->ekey);
-  AES_set_decrypt_key(affkey, 256, &self->dkey);
-
-  return affkey;
+  return this->encoded_key;
 };
 
-/* Go through the various options for loading the key from various
-   sources. This is basically the mirror image of save_AES_key.
+// We store the most important part of this object
+static TDB_DATA *AES256Password_encode(RDFValue self) {
+  AES256Password this = (AES256Password)self;
+  TDB_DATA *result = talloc(self, TDB_DATA);
+
+  result->dptr = (unsigned char *)&this->pub;
+  result->dsize = sizeof(this->pub);
+
+  return result;
+};
+
+
+/** We do not consider the universal TDB resolver a secure
+    storage. This is because the TDB files just live in the user's
+    home directory unencrypted. Therefore we only store the IV and
+    nonce in the resolver, and re-derive the key from the passphrase
+    each time we decode it.
+
+    Hopefully this wont be too slow as we should not be needed to
+    retrieve the cipher from the resolver that often. Just in case we
+    also cache it locally in the key_cache;
 */
-static int load_AES_key(Encrypted this) {
-  unsigned char affkey[32];
-  // This is an encoded representation of the key (so it in suitable
-  // to go in the resolver).
-  TDB_DATA *key;
+static int AES256Password_decode(RDFValue self, char *data, int length) {
+  AES256Password this = (AES256Password)self;
+  AFF4Cipher pthis = (AFF4Cipher)self;
+  unsigned char *key;
 
-  // Is the key in the resolver already?
-  key = (TDB_DATA *)CALL(oracle, resolve, this, URNOF(this), AFF4_VOLATILE_KEY,
-			 RESOLVER_DATA_TDB_DATA);
+  memcpy((char *)&this->pub, data, length);
 
-  // Maybe its a passphrase
-  if(!key) {
-    unsigned char passphrase_key[32];
-    unsigned char iv[AES_BLOCK_SIZE];
-    unsigned char buffer[BUFF_SIZE];
-    
-    if(prepare_passphrase(this, passphrase_key, sizeof(passphrase_key))) {
-      TDB_DATA *encoded_iv = (TDB_DATA *)CALL(oracle, resolve, 
-					      this, URNOF(this), 
-					      AFF4_CRYPTO_IV,
-					      RESOLVER_DATA_TDB_DATA);
-
-      if(encoded_iv) {
-	TDB_DATA *encoded_key = (TDB_DATA *)CALL(oracle, 
-						 resolve, this,  
-						 URNOF(this), 
-						 AFF4_CRYPTO_PASSPHRASE_KEY,
-						 RESOLVER_DATA_TDB_DATA);
-	AES_KEY aes_key;
-      
-	// The passphrase key is now used to decrypt the stream key
-	AES_set_decrypt_key(passphrase_key, 256, &aes_key);
-
-	// Now this should be the actual key
-	AES_cbc_encrypt(affkey, affkey, 32, &aes_key, iv, AES_DECRYPT);
-
-	// FIXME:
-	// We put it in the volatile namespace:
-	encode64((unsigned char*)affkey, 32, buffer, sizeof(buffer));
-	//CALL(oracle, set, URNOF(this), AFF4_VOLATILE_KEY,  *)buffer);
-
-	key = (char *)buffer;
-      };
-    };
-  };
-
+  // Try to pull the key from the cache
+  key = CALL(key_cache, get_item, (unsigned char *)&this->pub.iv, 
+             sizeof(this->pub.iv));
   if(key) {
-    // Now we have a key - we need to initialise our AES_key:
-    AES_set_encrypt_key(affkey, 256, &this->ekey);
-    AES_set_decrypt_key(affkey, 256, &this->dkey);
-    
-    return 1;
+    memcpy(this->key, key, sizeof(this->key));
+  } else {
+    if(!CALL(this, fetch_password_cb))
+      goto error;
   };
-  
+
+  AES_set_encrypt_key(this->key, sizeof(this->key) * 8, &this->ekey);
+  AES_set_decrypt_key(this->key, sizeof(this->key) * 8, &this->dkey);
+
+  return 1;
+ error:
   return 0;
 };
 
-static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
+static int AES256Password_parse(RDFValue self, char *serialised) {
+  AES256Password this = (AES256Password)self;
+  decode64(ZSTRING_NO_NULL(serialised), (unsigned char *)&this->pub, sizeof(this->pub));
+
+  return 1;
+};
+
+int AES256Password_fetch_password_cb(AES256Password self) {
+  // Try to use the password from the environment to decrypt it
+  char *password = getenv(AFF4_VOLATILE_PASSPHRASE);
+  unsigned char buff[sizeof(self->pub.nonce)];
+
+  if(password) AES256Password_set(self, password);
+  else {
+    RaiseError(ERuntimeError, "No password set?");
+    goto error;
+  };
+
+  // Now check the key by encrypting the IV with the key
+  CALL((AFF4Cipher)self, encrypt, self->pub.iv, buff, sizeof(self->pub.nonce), 0);
+
+  if(memcmp(buff, self->pub.nonce, sizeof(self->pub.nonce))) {
+    RaiseError(ERuntimeError, "Key is invalid");
+    goto error;
+  };
+
+  return 1;
+ error:
+  return 0;
+};
+
+int AES256Password_encrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char *outbuf,
+                           int length, int chunk_number) {
+  AES256Password this = (AES256Password)self;
+  unsigned char iv[sizeof(this->pub.iv)];
+
+  memcpy(iv, this->pub.iv, sizeof(this->pub.iv));
+
+  // The block IV is made by xoring the iv with the chunk number
+  *(uint32_t *)iv ^= chunk_number;
+
+  AES_cbc_encrypt(inbuff, outbuf, length, &this->ekey, iv, AES_ENCRYPT);
+
+  return 1;
+};
+
+int AES256Password_decrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char *outbuf,
+                           int length, int chunk_number) {
+  AES256Password this = (AES256Password)self;
+  unsigned char iv[sizeof(this->pub.iv)];
+
+  memcpy(iv, this->pub.iv, sizeof(this->pub.iv));
+
+  // The block IV is made by xoring the iv with the chunk number
+  *(uint32_t *)iv ^= chunk_number;
+
+  AES_cbc_encrypt(inbuff, outbuf, length, &this->dkey, iv, AES_DECRYPT);
+
+  return 1;
+};
+
+VIRTUAL(AES256Password, AFF4Cipher) {
+     VMETHOD_BASE(RDFValue, dataType) = AFF4_AES256_PASSWORD;
+     VMETHOD_BASE(RDFValue, raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+     VMETHOD_BASE(RDFValue, raptor_literal_datatype) = raptor_new_uri(  \
+                        (const unsigned char*)AFF4_AES256_PASSWORD);
+
+     VMETHOD_BASE(RDFValue, Con) = AES256Password_Con;
+     VMETHOD_BASE(RDFValue, encode) = AES256Password_encode;
+     VMETHOD_BASE(RDFValue, decode) = AES256Password_decode;
+     VMETHOD_BASE(RDFValue, serialise) = AES256Password_serialise;
+     VMETHOD_BASE(RDFValue, parse) = AES256Password_parse;
+
+     VMETHOD_BASE(AFF4Cipher, blocksize) = AES_BLOCK_SIZE;
+     VMETHOD_BASE(AFF4Cipher, encrypt) = AES256Password_encrypt;
+     VMETHOD_BASE(AFF4Cipher, decrypt) = AES256Password_decrypt;
+
+     VMETHOD_BASE(AES256Password, set) = AES256Password_set;
+     VMETHOD_BASE(AES256Password, fetch_password_cb) = AES256Password_fetch_password_cb;
+} END_VIRTUAL
+
+  /** Following is the implementation of the Encrypted stream */
+static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject fd;
-  char *value;
 
-  if(urn) {
-    URNOF(self) = talloc_strdup(self, urn);
-    
-    this->block_size = *(uint64_t *)resolver_get_with_default
-      (oracle, self->urn, AFF4_BLOCKSIZE, "4k",
-       RESOLVER_DATA_UINT64);
+  // Call our baseclass
+  this->__super__->super.Con(self, uri, mode);
 
-    this->target_urn = (char *)CALL(oracle, resolve, self,  URNOF(self), 
-				    AFF4_TARGET, RESOLVER_DATA_URN);
-    if(!this->target_urn) {
-      RaiseError(ERuntimeError, "No target stream specified");
-      goto error;
-    };
+  if(uri) {
+    URNOF(self) = CALL(uri, copy, self);
 
-    fd = (FileLikeObject)CALL(oracle, open, this->target_urn, mode);
-    if(!fd) {
-      RaiseError(ERuntimeError, "Unable to open target %s", this->target_urn);
-      goto error;
-    };
-    CALL(oracle, cache_return, (AFFObject)fd);
-
-    // Set our size 
-    ((FileLikeObject)self)->size = *(uint64_t *)resolver_get_with_default
-      (oracle, self->urn, NAMESPACE "size", "0", RESOLVER_DATA_UINT64);
-
-    this->volume = (char *)CALL(oracle, resolve, self, URNOF(self), AFF4_STORED,
-				RESOLVER_DATA_URN);
-    if(!this->volume) {
-      RaiseError(ERuntimeError, "No idea where im stored?");
-      goto error;
-    };
-
-    CALL(self, set_property, AFF4_TYPE, AFF4_ENCRYTED);
-    CALL(self, set_property, AFF4_INTERFACE, AFF4_STREAM);
+    this->chunk_size = new_XSDInteger(self);
+    this->stored = new_RDFURN(self);
+    this->backing_store = new_RDFURN(self);
     this->block_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
+    this->cipher = new_rdfvalue(self, AFF4_AES256_PASSWORD);
 
-    // If we want to read the stream, we really must be able to grab
-    // the key from somewhere
-    if(mode == 'r') {
-      if(!load_AES_key(this)) {
-	RaiseError(ERuntimeError, "Unable to decrypt encrypted stream %s", URNOF(self));
-	goto error;
-      };
-      // But if we create a new stream we need to create a new key
-    } else if(mode=='w') {
-      // Nope - we dont have a key yet - make a new one:
-      unsigned char *affkey=generate_AES_key(this);
+    // Some defaults
+    this->chunk_size->value = 4*1024;
 
-      /* No point proceeding if we can not save the encryption key (no
-	 one will be able to load this stream later). At least one
-	 supported method needs to be available here.
-      */
-      if(!save_AES_key(this, affkey)) {
-	RaiseError(ERuntimeError, "Unable to save Encryption Key");
-	goto error;
-      };
-      if(!load_AES_key(this)) {
-	RaiseError(ERuntimeError, "Unable to generate new keys for %s", URNOF(self));
-	goto error;	
-      };
+    if(!CALL(oracle, resolve_value, uri, AFF4_TARGET, (RDFValue)this->backing_store)) {
+      RaiseError(ERuntimeError, "Encrypted stream must have a backing store?");
+      goto error;
     };
-  } else {
-    this->__super__->super.Con(self, urn, mode);
+
+    if(!CALL(oracle, resolve_value, uri, AFF4_STORED, (RDFValue)this->stored)) {
+      RaiseError(ERuntimeError, "Encrypted stream must be stored somewhere?");
+      goto error;
+    };
+
+    if(!CALL(oracle, resolve_value, uri, AFF4_CIPHER, (RDFValue)this->cipher)) {
+      RaiseError(ERuntimeError, "Encrypted stream has no cipher?");
+      goto error;
+    };
+
+    // Add ourselves to our volume
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+
+    CALL(oracle, resolve_value, URNOF(self), AFF4_CHUNK_SIZE,
+	 (RDFValue)this->chunk_size);
+
+    CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
+	 (RDFValue)((FileLikeObject)this)->size);
   };
 
   return self;
@@ -284,142 +282,156 @@ static AFFObject Encrypted_AFFObject_Con(AFFObject self, char *urn, char mode) {
   return NULL;
 };
 
-static AFFObject Encrypted_finish(AFFObject self) {
-  return self->Con(self, URNOF(self), 'w');
-};
-
-// Read as much as possible from this block after decrypting it
-static int partial_read(FileLikeObject self, char *buffer, int length, 
-			FileLikeObject target) {
+int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int len) {
   Encrypted this = (Encrypted)self;
-  int block_number = self->readptr / this->block_size;
-  int block_offset = self->readptr % this->block_size;
-  unsigned char data[this->block_size];
-  int datalen = this->block_size;
-  unsigned char iv[AES_BLOCK_SIZE];
-  int available = min(length, this->block_size - block_offset);
-  
-  memset(iv, 0, sizeof(iv));
-  
-  // The IV is derived from the block number
-  snprintf((char *)iv, AES_BLOCK_SIZE, "%u", block_number);
+  int offset = 0;
+  int chunk_size = this->chunk_size->value;
+  int chunk_id = self->readptr / chunk_size;
 
-  CALL(target, seek, block_number * this->block_size, SEEK_SET);
-  length = CALL(target, read, (char *)data, this->block_size);
-  
-  // Now decrypt into the buffer
-  AES_cbc_encrypt(data,data, datalen, &this->dkey, iv, AES_DECRYPT);
-
-  // And copy to the output
-  memcpy(buffer, data + block_offset, available);
-
-  return available;
-};
-
-static int Encrypted_read(FileLikeObject self, char *buffer, unsigned long int length) {
-  Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'r');
-  int result=0;
-  int total_read=0;
-
-  // How much is available to read here?
-  length = min(length, ((int64_t)self->size) - self->readptr);
-
-  while(length > 0) {
-    result = partial_read(self, buffer, length, target);
-    if(result <=0) break;
-    self->readptr += result;
-    buffer += result;
-    length -= result;
-    total_read += result;
-  };
-
-  CALL(oracle, cache_return, (AFFObject)target);
-
-  return total_read;
-};
-
-static int write_encrypted_block(Encrypted this, char *data,
-				 FileLikeObject target) {
-    unsigned char iv[AES_BLOCK_SIZE];
-    unsigned char new_data[this->block_size];
-    int block_number = target->readptr / this->block_size;
-
-    memset(iv, 0, sizeof(iv));
-
-    // The IV is derived from the block number
-    snprintf((char *)iv, AES_BLOCK_SIZE, "%u", block_number);
-    // FIXME - resolver needs to keep track here
-    this->block_number++;
-
-    // Encrypt the block:
-    AES_cbc_encrypt((const unsigned char *)data,
-		    new_data,this->block_size,
-		    &this->ekey, iv, AES_ENCRYPT);
-
-    return CALL(target, write, (char *)new_data, this->block_size);
-};
-
-/** We assume that writing is never random */
-static int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int length) {
-  Encrypted this = (Encrypted)self;
-  FileLikeObject target=NULL;
-  int result;
-  int dumped_offset=0;
-
-  // Write the data to the end of our buffer:
   CALL(this->block_buffer, seek, 0, SEEK_END);
-  result = CALL(this->block_buffer, write, buffer, length);
-  self->readptr += result;
-  self->size = max(self->size, self->readptr);
+  CALL(this->block_buffer, write, buffer, len);
+  self->readptr += len;
 
-  target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'w');
+  if(this->block_buffer->size >= chunk_size) {
+    FileLikeObject backing_store = CALL(oracle, open, this->backing_store, 'w');
+    char buff[chunk_size];
 
-  // If the buffer is too large, we see if we can flush any blocks. We
-  // assume that block_size is a whole multiple of AES_BLOCK_SIZE
-  while(this->block_buffer->size - dumped_offset > this->block_size) {
-    write_encrypted_block(this, this->block_buffer->data + dumped_offset, target);
-    dumped_offset += this->block_size;
+    if(!backing_store) {
+      RaiseError(ERuntimeError, "Unable to open backing store %s", 
+                 this->backing_store->value);
+      goto error;
+    };
+
+    // Now take chunks off the buffer and write them to the backing
+    // stream:
+    for(offset = 0; this->block_buffer->size - offset >= chunk_size;
+        offset += chunk_size) {
+
+      CALL(this->cipher, encrypt, this->block_buffer->data + offset,
+           buff, chunk_size, chunk_id);
+      chunk_id ++;
+
+      CALL(backing_store, write, buff, chunk_size);
+    };
+
+    CALL(oracle, cache_return, (AFFObject)backing_store);
   };
 
-  CALL(this->block_buffer, skip, dumped_offset);
+  // Clear the data we used up
+  CALL(this->block_buffer, skip, offset);
+
+  return len;
+ error:
+  return 0;
+};
+
+static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long int len) {
+  Encrypted this = (Encrypted)self;
+  uint64_t chunk_size = this->chunk_size->value;
+  uint64_t chunk_id = self->readptr / chunk_size;
+  int chunk_offset = self->readptr % chunk_size;
+  int available_to_read = chunk_size - chunk_offset;
+  char cbuff[chunk_size];
+  char dbuff[chunk_size];
+  FileLikeObject target = CALL(oracle, open, this->backing_store, 'r');
+
+  if(!target) {
+    RaiseError(ERuntimeError, "Unable to open the backing stream %s", this->backing_store->value);
+    goto error;
+  };
+
+  CALL(target, seek, chunk_id * chunk_size, SEEK_SET);
+  if(CALL(target, read, cbuff, chunk_size) < chunk_size) 
+    goto error;
+
   CALL(oracle, cache_return, (AFFObject)target);
 
-  return result;
+  // Now decrypt the buffer
+  CALL(this->cipher, decrypt, cbuff, dbuff, chunk_size, chunk_id);
+
+  // Return the available data
+  memcpy(buff, dbuff + chunk_offset, available_to_read);
+
+  self->readptr += available_to_read;
+
+  return available_to_read;
+
+ error:
+  return -1;
+};
+
+static int Encrypted_read(FileLikeObject self, char *buff, unsigned long int length) {
+  int read_length;
+  int len = 0;
+  int offset=0;
+
+  // Clip the read to the stream size
+  if(self->readptr > self->size->value) return 0;
+
+  length = min(length, self->size->value - self->readptr);
+
+  // Just execute as many partial reads as are needed to satisfy the
+  // length requested
+  while(offset < length ) {
+    read_length = Encrypted_partialread(self, buff + offset, length - offset);
+    if(read_length <=0) break;
+    offset += read_length;
+  };
+
+  return length;
 };
 
 static void Encrypted_close(FileLikeObject self) {
   Encrypted this = (Encrypted)self;
-  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->target_urn, 'w');
-  char buffer[this->block_size];
-  int pad = max(this->block_size - this->block_buffer->size, 0);
+  int chunk_size = this->chunk_size->value;
+  char buff[chunk_size];
+  int to_pad = chunk_size - self->readptr % chunk_size;
 
-  memset(buffer, 0, this->block_size);
-  // Pad
-  CALL(this->block_buffer, seek, 0, SEEK_END);
-  CALL(this->block_buffer, write, buffer, pad);
-   
-  // Flush the last block
-  write_encrypted_block(this, this->block_buffer->data, target);
+  // Pad the last chunk but do not adjust the size
+  self->size->value = self->readptr;
 
-  // Now make a new properties file for us:
-  dump_stream_properties(self);
+  memset(buff, 0, chunk_size);
+  if(to_pad > 0) {
+    Encrypted_write(self, buff, to_pad);
+  };
 
-  // Now close the target - we are done here
-  CALL(target, close);
-  talloc_free(self);
+  CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
+       rdfvalue_from_string(this, AFF4_ENCRYTED));
+
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
+       (RDFValue)((FileLikeObject)self)->size);
+
+  {
+    XSDDatetime time = new_XSDDateTime(this);
+
+    gettimeofday(&time->value,NULL);
+    CALL(oracle, set_value, URNOF(this), AFF4_TIMESTAMP,
+	 (RDFValue)time);
+  };
+
+  this->__super__->close(self);
 };
 
-VIRTUAL(Encrypted, FileLikeObject)
-     VMETHOD_BASE(AFFObject, Con) = Encrypted_AFFObject_Con;
-     VMETHOD_BASE(AFFObject, finish) = Encrypted_finish;
- 
-     VMETHOD_BASE(FileLikeObject, read) = Encrypted_read;
-     VMETHOD_BASE(FileLikeObject, write) = Encrypted_write;
-     VMETHOD_BASE(FileLikeObject, close) = Encrypted_close;
 
-// Initialise the SSL library must be done once:
-     SSL_load_error_strings();
-     SSL_library_init();
+VIRTUAL(Encrypted, FileLikeObject) {
+  VMETHOD_BASE(AFFObject, Con) = Encrypted_Con;
 
-END_VIRTUAL
+  VMETHOD_BASE(FileLikeObject, write) = Encrypted_write;
+  VMETHOD_BASE(FileLikeObject, read) = Encrypted_read;
+  VMETHOD_BASE(FileLikeObject, close) = Encrypted_close;
+} END_VIRTUAL;
+
+void encrypt_init() {
+  // Initialise the SSL library must be done once:
+  SSL_load_error_strings();
+  SSL_library_init();
+
+  AES256Password_init();
+  Encrypted_init();
+
+  register_type_dispatcher(AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
+  register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
+
+  // The key cache is a local cache mapping keys to IVs
+  key_cache = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
+};

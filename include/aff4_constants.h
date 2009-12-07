@@ -139,3 +139,7 @@
 #define AFF4_SPECIAL_URN_ZERO FQN "zero" /* This is used to represent long
 					    runs of zero */
 
+
+/** Cryptography related names */
+#define AFF4_CIPHER PREDICATE_NAMESPACE "cipher"
+#define AFF4_AES256_PASSWORD PREDICATE_NAMESPACE "aes256-password"

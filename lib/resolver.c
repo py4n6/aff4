@@ -59,6 +59,10 @@ void AFF4_Init(void) {
   zip_init();
   rdf_init();
 
+#ifdef HAVE_OPENSSL
+  encrypt_init();
+#endif
+
 #ifdef HAVE_LIBCURL
   //  HTTPObject_init();
 #endif

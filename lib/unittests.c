@@ -7,11 +7,12 @@
 #include <time.h>
 #include <assert.h>
 
-#define TEST_FILE "test.zip"
+#define TEST_FILE "/tmp/test.zip"
 
 //#define RESOLVER_TESTS 1
 //#define ZIPFILE_TESTS 1
-#define MAP_TESTS 1
+//#define MAP_TESTS 1
+#define ENCRYPTED_TESTS 1
 
 #ifdef RESOLVER_TESTS
 #define URN "aff4://hello"
@@ -101,7 +102,7 @@ void resolver_test_locks() {
 
 #endif
 
-#define FILENAME "test.zip"
+#define FILENAME "/tmp/test.zip"
 
 #ifdef ZIPFILE_TESTS
 /** First test builds a new zip file from /bin/ls */
@@ -559,85 +560,110 @@ void test_http_handle() {
 };
 #endif
 
-#ifdef ENCTYPTED_TESTS
-void test_encrypted(char *filename) {
-  ZipFile container = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'w');
-  FileLikeObject encrypted_stream, embedded_stream;
-  ZipFile embedded_volume;
-  char *container_urn = talloc_strdup(NULL, URNOF(container));
-  char *encrypted_stream_uri, *embedded_stream_uri, *embedded_volume_uri;
+#ifdef ENCRYPTED_TESTS
+#define PASSPHRASE "Hello"
 
-  CALL((AFFObject)container, set_property, "aff2:stored", "file://" TEST_FILE);
+void test_cipher() {
+  AES256Password cipher;
+  ZipFile zip = (ZipFile)CALL(oracle, create, AFF4_ZIP_VOLUME, 'w');
+  // Now make an image object
+  FileLikeObject image = (FileLikeObject)CALL(oracle, create, AFF4_IMAGE, 'w');
+  RDFURN file_urn = new_RDFURN(NULL);
+  FileLikeObject encrypted;
 
-  if(!CALL((AFFObject)container, finish))
-    return;
+  CALL(file_urn, set, FILENAME);
 
-  // Create an encrypted stream:
-  encrypted_stream = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Encrypted);
-  // The encrypted stream is in the container
-  CALL((AFFObject)encrypted_stream, set_property, "aff2:stored", URNOF(container));
+  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)file_urn);
 
-  // Create an embedded Image stream inside the encrypted stream:
-  embedded_stream = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
-  CALL((AFFObject)embedded_stream, set_property, "aff2:stored", URNOF(container));
-  CALL((AFFObject)embedded_stream, set_property, "aff2:compression", "0");
-  CALL((AFFObject)encrypted_stream, set_property, "aff2:target", URNOF(embedded_stream));
+  zip = (ZipFile)CALL((AFFObject)zip, finish);
 
-  if(!CALL((AFFObject)encrypted_stream, finish)) {
-    CALL(oracle, cache_return, (AFFObject)container);
-    return;
+  // Done with the volume
+  CALL(oracle, cache_return, (AFFObject)zip);
+
+  { // Make the image
+    CALL(URNOF(image), set, STRING_URNOF(zip));
+    CALL(URNOF(image), add, "foobar_image/storage");
+
+    CALL(oracle, set_value, URNOF(image), AFF4_STORED,
+         (RDFValue)URNOF(zip));
+
+    image = (FileLikeObject)CALL((AFFObject)image, finish);
+    CALL(oracle, cache_return, (AFFObject)image);
+  }
+
+  if(image){ // Make the encrypted stream
+    cipher = new_rdfvalue(NULL, AFF4_AES256_PASSWORD);
+    // Set the password
+    CALL(cipher, set, PASSPHRASE);
+
+    encrypted = (FileLikeObject)CALL(oracle, create, AFF4_ENCRYTED, 'w');
+
+    CALL(URNOF(encrypted), set, STRING_URNOF(zip));
+    CALL(URNOF(encrypted), add, "foobar_image");
+
+    CALL((AFFObject)encrypted, set_property, AFF4_STORED, (RDFValue)URNOF(zip));
+    CALL((AFFObject)encrypted, set_property, AFF4_TARGET, (RDFValue)URNOF(image));
+    CALL((AFFObject)encrypted, set_property, AFF4_CIPHER, (RDFValue)cipher);
+    encrypted = CALL((AFFObject)encrypted, finish);
   };
 
-  if(!CALL((AFFObject)embedded_stream, finish)) {
-    CALL(oracle, cache_return, (AFFObject)encrypted_stream);
-    CALL(oracle, cache_return, (AFFObject)container);
-    return;
+  if(encrypted) {
+    char buffer[BUFF_SIZE];
+    int fd=open("/bin/ls",O_RDONLY);
+    int length;
+    while(1) {
+      length = read(fd, buffer, BUFF_SIZE);
+      if(length == 0) break;
+
+      CALL(encrypted, write, buffer, length);
+    };
+
+    // Close the member (finalises the member)
+    CALL(encrypted, close);
   };
 
-  // Finished with those
-  CALL(oracle, cache_return, (AFFObject)container);
-  CALL(oracle, cache_return, (AFFObject)embedded_stream);
-  CALL(oracle, cache_return, (AFFObject)encrypted_stream);
+  // Close the backing stream
+  CALL(image, close);
 
-  // Create a new volume inside the embedded stream
-  embedded_volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile);
-  CALL((AFFObject)embedded_volume, set_property, AFF4_STORED,
-       URNOF(encrypted_stream));
+  // Close the archive
+  CALL(zip, close);
 
-  if(!CALL((AFFObject)embedded_volume, finish)) {
-    CALL(oracle, cache_return, (AFFObject)embedded_stream);
-    CALL(oracle, cache_return, (AFFObject)encrypted_stream);
-    CALL(oracle, cache_return, (AFFObject)container);
-    return;
-  };
+  aff4_free(file_urn);
 
-  encrypted_stream_uri = talloc_strdup(container_urn, URNOF(encrypted_stream));
-  embedded_volume_uri = talloc_strdup(container_urn, URNOF(embedded_volume));
-  embedded_stream_uri = talloc_strdup(container_urn, URNOF(embedded_stream));
-
-  CALL(oracle, cache_return, (AFFObject)embedded_volume);
-
-  // Now put the image on it:
-  create_image(embedded_volume_uri, "/bin/ls", "encrypted");
-
-  embedded_volume = (ZipFile)CALL(oracle, open, embedded_volume_uri, 'w');
-  CALL(embedded_volume, close);
-  CALL(oracle, cache_return, (AFFObject)embedded_volume);
-
-  encrypted_stream = (FileLikeObject)CALL(oracle, open, encrypted_stream_uri, 'w');
-  CALL(encrypted_stream, close);
-  CALL(oracle, cache_return, (AFFObject)encrypted_stream);
-
-  /*
-  embedded_stream = CALL(oracle, open, embedded_stream_uri);
-  CALL(embedded_stream, close);
-  CALL(oracle, cache_return, (AFFObject)embedded_stream);
-  */
-
-  container = (ZipFile)CALL(oracle, open, container_urn, 'w');
-  CALL(container, close);
-  CALL(oracle, cache_return, (AFFObject)container);
 };
+
+void test_cipher_read() {
+  ZipFile zip = open_volume(FILENAME);
+  FileLikeObject encrypted;
+  RDFURN encrypted_urn = new_RDFURN(zip);
+  char buff[BUFF_SIZE];
+  int len;
+  int fd;
+
+  setenv(AFF4_VOLATILE_PASSPHRASE, PASSPHRASE,1);
+
+  if(zip) {
+    CALL(encrypted_urn, set, STRING_URNOF(zip));
+    CALL(encrypted_urn, add, "foobar_image");
+
+    encrypted = CALL(oracle, open, encrypted_urn, 'r');
+    if(!encrypted) return;
+
+    fd = open("/tmp/ls.test", O_CREAT | O_RDWR | O_BINARY, S_IRWXU | S_IRWXG | S_IRWXO);
+
+    while(fd > 0) {
+      len = CALL(encrypted, read, buff, BUFF_SIZE);
+      if(len == 0) break;
+
+      write(fd, buff, len);
+    };
+
+    close(fd);
+
+    CALL(oracle,cache_return, (AFFObject)encrypted);
+  };
+};
+
 #endif
 
 int main() {
@@ -646,6 +672,9 @@ int main() {
 
   AFF4_Init();
 
+  AFF4_DEBUG_LEVEL = 10;
+
+#ifdef RESOLVER_TESTS
   {
     XSDDatetime t = new_XSDDateTime(NULL);
     struct timeval now;
@@ -658,7 +687,6 @@ int main() {
     aff4_free(t);
   };
 
-#ifdef RESOLVER_TESTS
   //resolver_test_1();
   resolver_test_locks();
 #endif
@@ -672,6 +700,11 @@ int main() {
 #ifdef MAP_TESTS
   test_map_create();
   test_map_read();
+#endif
+
+#ifdef ENCRYPTED_TESTS
+  //test_cipher();
+  test_cipher_read();
 #endif
 
   return 0;

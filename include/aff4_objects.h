@@ -198,18 +198,51 @@ END_CLASS
 *************************************************************/
 #include <openssl/aes.h>
 
-CLASS(Encrypted, FileLikeObject)
-     StringIO block_buffer;
-     AES_KEY ekey;
-     AES_KEY dkey;
-     char *salt;
-     char *target_urn;
-     // Our volume urn
-     char *volume;
+/** This is the abstract cipher class - all ciphers must implement
+    these methods */
+CLASS(AFF4Cipher, RDFValue)
+       int blocksize;
 
-     // The block size for CBC mode
-     int block_size;
-     int block_number;
+       int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, unsigned
+                  char * outbuf, int length, int chunk_number);
+       int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, unsigned
+                  char * outbuf, int length, int chunk_number);
+END_CLASS
+
+#define AES256_KEY_SIZE 32
+
+/** The following is information which should be serialised - its
+    public and not secret at all */
+struct aff4_cipher_data_t {
+  unsigned char iv[AES_BLOCK_SIZE];
+
+  // The nonce is the IV encrypted using the key
+  unsigned char nonce[AES_BLOCK_SIZE];
+};
+
+/** The following are some default ciphers */
+CLASS(AES256Password, AFF4Cipher)
+  AES_KEY ekey;
+  AES_KEY dkey;
+  struct aff4_cipher_data_t pub;
+
+  unsigned char key[AES256_KEY_SIZE];
+  unsigned char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
+
+  RDFValue METHOD(AES256Password, set, char *passphrase);
+
+  // This callback can be overridden to fetch password to decode the
+  // IV from. By default, we look in the AFF4_VOLATILE_PASSPHRASE
+  // environment variable.
+  int METHOD(AES256Password, fetch_password_cb);
+END_CLASS
+
+CLASS(Encrypted, FileLikeObject)
+       StringIO block_buffer;
+       AFF4Cipher cipher;
+       RDFURN backing_store;
+       RDFURN stored;
+       XSDInteger chunk_size;
 END_CLASS
 
   // This is the largest file size which may be represented by a

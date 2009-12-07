@@ -679,7 +679,7 @@ static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char 
   // Where are we stored?
   if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
 	   (RDFValue)self->storage_urn)) {
-    RaiseError(ERuntimeError, "No storage for %s?", URNOF(self));
+    RaiseError(ERuntimeError, "No storage for %s?", STRING_URNOF(self));
     goto error;
   };
   
