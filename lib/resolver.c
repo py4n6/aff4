@@ -404,6 +404,15 @@ static Resolver Resolver_Con(Resolver self) {
   // The location of the TDB databases
   char *path = getenv("AFF4_TDB_PATH");
   
+  // Make this object a singleton - the Resolver may be constructed as
+  // many times as needed, but we always return a reference to the
+  // singleton oracle if it exists
+  if(oracle) {
+    talloc_free(self);
+    talloc_increase_ref_count(oracle);
+    return oracle;
+  };
+
   if(!path)  path = ".";
 
   // Open the TDB databases
@@ -934,7 +943,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 
   DEBUG("Returning %s\n", urn);
 
-  // Grab the lock
+  // FIXME: Grab the lock
   if(obj->mode == 'r') {
     CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
   } else if(obj->mode == 'w') {

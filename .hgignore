@@ -43,3 +43,5 @@ tools/fsbuilder
 *.tdb
 unittests
 raid_reconstructor
+pyaff4.c
+*#

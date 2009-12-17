@@ -21,7 +21,7 @@ CLASS(StringIO,Object)
 
   /** Writes data into the string_io at the current offset, growing the
     string_io if needed **/
-  int METHOD(StringIO, write, char *data, unsigned int len);
+  int METHOD(StringIO, write, IN char *data, unsigned int len);
 
   /** Write a format string into the stringio **/
   int METHOD(StringIO, sprintf, char *fmt, ...);
@@ -29,7 +29,7 @@ CLASS(StringIO,Object)
   /** Reads data from the current string location into the buffer (We
       presume it is large enough. We return how much data was actually
       read */
-  int METHOD(StringIO, read, char *data, int len);
+  int METHOD(StringIO, read, OUT char *data, int len);
 
   /** These allow us to read and write to StringIOs rather than direct
     buffers */

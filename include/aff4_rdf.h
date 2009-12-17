@@ -63,16 +63,7 @@ CLASS(RDFValue, Object)
 	  string for export into RDF. The returned string will be
 	  allocated internally and should not be freed by the caller. 
       */
-      void *METHOD(RDFValue, serialise);
-END_CLASS
-
-      /** A literal just stores itself */
-CLASS(XSDLiteral, RDFValue)
-      TDB_DATA literal;
-
-      /* This method is called to set the value of the literal */
-      void METHOD(XSDLiteral, set, char *literal, int length);
-      TDB_DATA METHOD(XSDLiteral, get);
+      BORROWED char *METHOD(RDFValue, serialise);
 END_CLASS
 
       /** An integer */
@@ -98,7 +89,7 @@ CLASS(XSDDatetime, RDFValue)
      struct timezone tz;
      char *serialised;
 
-     RDFValue METHOD(XSDDatetime, set, struct timeval time);
+     BORROWED RDFValue METHOD(XSDDatetime, set, struct timeval time);
 END_CLASS
 
 CLASS(RDFURN, RDFValue)

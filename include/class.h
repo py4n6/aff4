@@ -332,10 +332,10 @@ extern char *_traceback;
 *************************************************************/
 
 #ifdef __DEBUG__
-#define CONSTRUCT(class, virt_class, constructor, context, ... )		\
+#define CONSTRUCT(class, virt_class, constructor, context, ... )        \
   (class)( class ## _init(), virt_class ## _init(),			\
-	   __ ## class.constructor(					\
-				   (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
+           ((virt_class)(&__ ## class))->constructor(                   \
+                       (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
 
 /** This variant is useful when all we have is a class reference
@@ -349,9 +349,9 @@ extern char *_traceback;
 #else
 #define CONSTRUCT(class, virt_class, constructor, context, ... )		\
   (class)( class ## _init(), virt_class ## _init(),			\
-	   __ ## class.constructor(					\
-				   (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class ## _t)), \
-				   ## __VA_ARGS__) )
+           ((virt_class)(&__ ## class))->constructor(                   \
+		 (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class ## _t)), \
+                 ## __VA_ARGS__) )
 
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
   ( class->constructor(							\
@@ -451,9 +451,20 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   (_global_error == error)
 
   // These dont do anything but are useful to indicate when a function
-  // parameter is used purely to return a value
+  // parameter is used purely to return a value. They are now used to
+  // assist the python binding generator in generating the right sort
+  // of code
 #define OUT
 #define IN
+
+  // This modifier before a class means that the class is abstract and
+  // does not have an implementation - we do not generate bindings for
+  // that class then.
+#define ABSTRACT
+
+  // This modifier indicates that the following pointer is pointing to
+  // a borrowed reference - callers must not free the memory after use.
+#define BORROWED
 
 #endif
 #ifdef __cplusplus

@@ -4,9 +4,9 @@ AC_INIT()
 dnl Store the configuration in this header
 AC_CONFIG_HEADER([include/config.h])
 AC_CONFIG_AUX_DIR(config)
-AM_INIT_AUTOMAKE(libaff4, 0.01)
+AC_CONFIG_MACRO_DIR([config])
 
-AC_CONFIG_MACRO_DIR([m4])
+AM_INIT_AUTOMAKE(libaff4, 0.01)
 
 dnl check standard stuff
 AC_PROG_LIBTOOL
@@ -246,6 +246,24 @@ if test "${have_openssl}" = "yes"; then
   AC_DEFINE([HAVE_OPENSSL], 1, [Use encryption])
 fi
 
+# python checks 
+# (requires autoconf 1.5+ and the macros in acinclude.m4)
+AC_ARG_WITH(
+	windows_python,
+	AC_HELP_STRING([--with-windows-python@<:@=WINDOWS_PYTHON@:>@],
+			[Windows Python path (for cross compiling)]
+	),
+	[
+		AM_PATH_PYTHON([2.6])
+		AC_MSG_RESULT(Setting windows python for cross compiling $withval )
+		AC_PYTHON_XCOMPILE_WINDOWS($withval)
+	],
+	[
+		## Not specified - use the system python
+		AM_PATH_PYTHON([2.6])
+		AC_PYTHON_DEVEL()
+	])
+
 AC_SUBST(AFFUSE_BIN)
 AM_PROG_CC_C_O                  dnl for affuse
 
@@ -272,6 +290,7 @@ AC_OUTPUT([
 	Makefile 
 	lib/Makefile
 	tools/Makefile
+        python2.6/Makefile
 	])
 
 ## Tell the use what we found:
@@ -282,6 +301,7 @@ AC_MSG_NOTICE([EWF Support:             $have_libewf ])
 AC_MSG_NOTICE([AFF Support:             $have_libafflib ])
 AC_MSG_NOTICE([CURL Support:            $have_libcurl ])
 AC_MSG_NOTICE([Encryption Support:      $have_openssl ])
+AC_MSG_NOTICE([Python Support:          $PYTHON_VERSION ])
 AC_MSG_NOTICE([FUSE:                    $enable_fuse])
 AC_MSG_NOTICE([*****************************************])
 AC_MSG_NOTICE([])

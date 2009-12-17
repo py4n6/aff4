@@ -173,7 +173,7 @@ static int XSDInteger_decode(RDFValue this, char *data, int length) {
   return length;
 };
 
-static void *XSDInteger_serialise(RDFValue self) {
+static char *XSDInteger_serialise(RDFValue self) {
   XSDInteger this = (XSDInteger)self;
 
   if(this->serialised)
@@ -244,7 +244,7 @@ static int XSDString_decode(RDFValue this, char *data, int length) {
 };
 
 /* We serialise the string */
-static void *XSDString_serialise(RDFValue self) {
+static char *XSDString_serialise(RDFValue self) {
   XSDString this = (XSDString)self;
   
   return this->value;
@@ -311,7 +311,7 @@ static int RDFURN_decode(RDFValue this, char *data, int length) {
 };
 
 /* We serialise the string */
-static void *RDFURN_serialise(RDFValue self) {
+static char *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
 
   if(this->serialised) talloc_free(this->serialised);
@@ -321,7 +321,7 @@ static void *RDFURN_serialise(RDFValue self) {
 };
 
 static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
-  RDFURN result = CONSTRUCT(RDFURN, RDFValue, super.Con, ctx);
+  RDFURN result = CONSTRUCT(RDFURN, RDFValue, Con, ctx);
 
   CALL(result, set, self->value);
 
@@ -817,7 +817,7 @@ RDFValue rdfvalue_from_urn(void *ctx, char *value) {
 };
 
 RDFValue rdfvalue_from_string(void *ctx, char *value) {
-  XSDString result = CONSTRUCT(XSDString, RDFValue, super.Con, ctx);
+  XSDString result = CONSTRUCT(XSDString, RDFValue, Con, ctx);
 
   result->set(result, value, strlen(value));
 
@@ -825,19 +825,19 @@ RDFValue rdfvalue_from_string(void *ctx, char *value) {
 };
 
 RDFURN new_RDFURN(void *ctx) {
-  return CONSTRUCT(RDFURN, RDFValue, super.Con, ctx);
+  return CONSTRUCT(RDFURN, RDFValue, Con, ctx);
 };
 
 XSDInteger new_XSDInteger(void *ctx) {
-  return CONSTRUCT(XSDInteger, RDFValue, super.Con, ctx);
+  return CONSTRUCT(XSDInteger, RDFValue, Con, ctx);
 };
 
 XSDString new_XSDString(void *ctx) {
-  return CONSTRUCT(XSDString, RDFValue, super.Con, ctx);
+  return CONSTRUCT(XSDString, RDFValue, Con, ctx);
 };
 
 XSDDatetime new_XSDDateTime(void *ctx) {
-  return CONSTRUCT(XSDDatetime, RDFValue, super.Con, ctx);
+  return CONSTRUCT(XSDDatetime, RDFValue, Con, ctx);
 };
 
 // Uses the class registry to construct a type by name

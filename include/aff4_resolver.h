@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Thu Nov 12 20:41:24 2009 mic
+** Last update Wed Dec 16 13:52:08 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -37,7 +37,7 @@ typedef struct RESOLVER_ITER {
 	 globally unique identifier (URI).
      */
 
-CLASS(Resolver, AFFObject)
+CLASS(Resolver, Object)
 // This is a global cache of URN and their values - we try to only
 // have small URNs here and keep everything in memory.
        struct tdb_context *urn_db;
@@ -95,7 +95,7 @@ CLASS(Resolver, AFFObject)
   /* This function resolves the value in uri and attribute and sets it
      into the RDFValue object which much be of the correct type. 
   */
-  int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,
+  int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,\
 	     RDFValue value);
 
   /* This is a version of the above which uses an iterator to iterate
@@ -110,7 +110,7 @@ CLASS(Resolver, AFFObject)
      the type specified are returned. We return length written for
      each successful iteration, and zero when we have no more items.
   */
-  RESOLVER_ITER *METHOD(Resolver, get_iter, void *ctx, RDFURN uri,
+  RESOLVER_ITER *METHOD(Resolver, get_iter, void *ctx, RDFURN uri, \
                         char *attribute);
 
        /* This method reads the next result from the iterator. result
@@ -153,41 +153,14 @@ CLASS(Resolver, AFFObject)
      Note that locks have names and so many locks can be set on the
      same URN.
   */
-  int METHOD(Resolver, lock, RDFURN urn, char name);
-  int METHOD(Resolver, unlock, RDFURN urn, char name);
+  int METHOD(Resolver, lock, RDFURN urn, char mode);
+  int METHOD(Resolver, unlock, RDFURN urn, char mode);
 
 END_CLASS
 
 // This is a global instance of the oracle. All AFFObjects must
 // communicate with the oracle rather than instantiate their own.
 extern Resolver oracle;
-
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-#include <openssl/bio.h>
-#include <openssl/pem.h>
-
-/** This object represents an identify - like a person for example. 
-
-An identity is someone who makes statements about other AFFObjects in
-the universe.
-*/
-CLASS(Identity, AFFObject)
-       Resolver info;
-       
-       EVP_PKEY *priv_key;
-       EVP_PKEY *pub_key;
-       X509 *x509;
-
-       Identity METHOD(Identity, Con, char *cert, char *priv_key, char mode);
-       void METHOD(Identity, store, char *volume_urn);
-  /** This method asks the identity to verify its statements. This
-       essentially populates our Resolver with statements which can be
-       verified from our statements. Our Resolver can then be
-       compared to the oracle to see which objects do not match.
-  */
-       void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
-END_CLASS
 
        /** This is a handler for new types - types get registered here */
 void register_type_dispatcher(char *type, AFFObject *class_ref);
