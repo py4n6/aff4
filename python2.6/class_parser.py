@@ -4,14 +4,22 @@ def log(msg):
     sys.stderr.write(msg+"\n")
 
 class Module:
-    initialization = "  talloc_enable_leak_report_full();\n"
-    initialization += "\n  AFF4_Init();\n"
-
     def __init__(self, name):
         self.name = name
         self.constants = []
         self.classes = {}
         self.headers = "#include <Python.h>\n"
+
+    def initialization(self):
+        result = """
+talloc_enable_leak_report_full();
+AFF4_Init();
+
+"""
+        for cls in self.classes.values():
+            result += cls.initialise()
+
+        return result
 
     def add_constant(self, constant, type="numeric"):
         """ This will be called to add #define constant macros """
@@ -24,8 +32,56 @@ class Module:
         ## passing this class from/to python
         type_dispatcher[cls.class_name] = handler
 
+    def private_functions(self):
+        """ Emits hard coded private functions for doing various things """
+        return """
+/* The following is a static array mapping CLASS() pointers to their
+python wrappers. This is used to allow the correct wrapper to be
+chosen depending on the object type found - regardless of the
+prototype.
+
+This is basically a safer way for us to cast the correct python type
+depending on context rather than assuming a type based on the .h
+definition. For example consider the function
+
+AFFObject Resolver.open(uri, mode)
+
+The .h file implies that an AFFObject object is returned, but this is
+not true as most of the time an object of a derived class will be
+returned. In C we cast the returned value to the correct type. In the
+python wrapper we just instantiate the correct python object wrapper
+at runtime depending on the actual returned type. We use this lookup
+table to do so.
+*/
+static int TOTAL_CLASSES=0;
+
+static struct python_wrapper_map_t {
+       Object class_ref;
+       PyTypeObject *python_type;
+} python_wrappers[%s];
+
+/* Create the relevant wrapper from the item based on the lookup
+table.
+*/
+PyObject *new_class_wrapper(Object item) {
+   int i;
+   PyObject *result;
+
+   for(i=0; i<TOTAL_CLASSES; i++) {
+     if(python_wrappers[i].class_ref == item->__class__) {
+       result = _PyObject_New(python_wrappers[i].python_type);
+       return result;
+     };
+   };
+
+   return NULL;
+};
+
+""" % (len(self.classes)+1)
+
     def write(self, out):
         out.write(self.headers)
+        out.write(self.private_functions())
 
         for cls in self.classes.values():
             cls.struct(out)
@@ -36,6 +92,7 @@ class Module:
             cls.code(out)
             cls.PyMethodDef(out)
             cls.PyTypeObject(out)
+
 
         ## Write the module initializer
         out.write("""
@@ -72,7 +129,8 @@ PyMODINIT_FUNC init%(module)s(void) {
  PyDict_SetItemString(d, "%s", tmp);
  Py_DECREF(tmp);\n""" % (constant))
 
-        out.write("%s}\n\n" % self.initialization)
+        out.write(self.initialization())
+        out.write("}\n\n")
 
 class Type:
     interface = None
@@ -84,6 +142,9 @@ class Type:
         self.type = type
         self.attributes = set()
 
+    def python_name(self):
+        return self.name
+
     def definition(self):
         return "%s %s;\n" % (self.type, self.name)
 
@@ -93,10 +154,10 @@ class Type:
     def call_arg(self):
         return self.name
 
-    def pre_call(self):
+    def pre_call(self, method):
         return ''
 
-    def assign(self, call):
+    def assign(self, call, method):
         return "%s = %s;\n" % (self.name, call)
 
 class String(Type):
@@ -150,17 +211,50 @@ class Integer(Type):
     def to_python_object(self):
         return "py_result = PyLong_FromLong(%s);\n" % self.name
 
+class Char(Integer):
+    buidstr = "s"
+
+    def definition(self):
+        return "char %s; char *str_%s;\n" % (self.name, self.name)
+
+    def byref(self):
+        return "&str_%s" % self.name
+
+    def pre_call(self, method):
+        return """
+if(strlen(str_%(name)s)!=1) {
+  PyErr_Format(PyExc_RuntimeError,
+          "You must only provide a single character for arg %(name)r");
+  %(error)s;
+};
+
+%(name)s = str_%(name)s[0];
+""" % dict(name = self.name, error = method.error_condition())
+
 class StringOut(String):
     sense = 'OUT'
 
 class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT'
+    buidstr = 'l'
+
+    def definition(self):
+        return Char_and_Length.definition(self) + "PyObject *tmp_%s;\n" % self.name
+
+    def python_name(self):
+        return self.length
 
     def byref(self):
         return "&%s" % self.length
 
-    def pre_call(self):
-        return "%s = talloc_size(NULL, %s);\n" % (self.name, self.length)
+    def pre_call(self, method):
+        return """tmp_%s = PyString_FromStringAndSize(NULL, %s);
+PyString_AsStringAndSize(tmp_%s, &%s, &%s);
+""" % (self.name, self.length, self.name, self.name, self.length)
+
+    def to_python_object(self):
+        return """ _PyString_Resize(&tmp_%s, func_return); \npy_result = tmp_%s;\n""" % (
+            self.name, self.name)
 
 class TDB_DATA_P(Char_and_Length_OUT):
     def __init__(self, name, type):
@@ -172,7 +266,7 @@ class TDB_DATA_P(Char_and_Length_OUT):
     def byref(self):
         return "%s.dptr, &%s.dsize" % (self.name, self.name)
 
-    def pre_call(self):
+    def pre_call(self, method):
         return ''
 
     def call_arg(self):
@@ -205,7 +299,7 @@ class Void(Type):
     def byref(self):
         return None
 
-    def assign(self, call):
+    def assign(self, call, method):
         ## We dont assign the result to anything
         return "%s;\n" % call
 
@@ -219,22 +313,30 @@ class Wrapper(Type):
     def definition(self):
         return "py%s *%s;\n" % (self.type, self.name)
 
-    def pre_call(self):
-        if self.sense == 'OUT':
-            return """
-
-""" % self.__dict__
-        else: return ''
-
     def call_arg(self):
         return "%s->base" % self.name
 
-    def assign(self, call):
-        return """
-%(name)s = (py%(type)s *)PyObject_New(py%(type)s, &%(type)s_Type);
-%(name)s->base = %(call)s;
-talloc_increase_ref_count(%(name)s->base);
-""" % dict(name = self.name, call = call, type = self.type)
+    def assign(self, call, method):
+        args = dict(name = self.name, call = call, type = self.type,
+                    error = method.error_condition())
+        result = """{
+       Object returned_object = (Object)%(call)s;
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object %(type)s");
+         %(error)s;
+       };
+
+       %(name)s = (py%(type)s *)new_class_wrapper(returned_object);
+       %(name)s->base = (%(type)s)returned_object;
+}
+""" % args
+
+        if "BORROWED" in self.attributes:
+            result += "talloc_increase_ref_count(%(name)s->base);\n" % args
+
+        return result
 
     def to_python_object(self):
         return "py_result = (PyObject *)%(name)s;\n" % self.__dict__
@@ -242,6 +344,17 @@ talloc_increase_ref_count(%(name)s->base);
 
 class StructWrapper(Wrapper):
     """ A wrapper for struct classes """
+    def assign(self, call, method):
+        args = dict(name = self.name, call = call, type = self.type)
+        result = """
+%(name)s = (py%(type)s *)PyObject_New(py%(type)s, &%(type)s_Type);
+%(name)s->base = %(call)s;
+""" % args
+
+        if "BORROWED" in self.attributes:
+            result += "talloc_increase_ref_count(%(name)s->base);\n" % args
+
+        return result
 
     def byref(self):
         return "&%s" % self.name
@@ -262,7 +375,7 @@ class Timeval(Type):
     def byref(self):
         return "&%s_flt" % self.name
 
-    def pre_call(self):
+    def pre_call(self, method):
         return "%(name)s.tv_sec = (int)%(name)s_flt; %(name)s.tv_usec = (%(name)s_flt - %(name)s.tv_sec) * 1e6;\n" % self.__dict__
 
     def to_python_object(self):
@@ -276,7 +389,7 @@ type_dispatcher = {
     "OUT char *": StringOut,
     "unsigned int": Integer,
     'int': Integer,
-    'char': Integer,
+    'char': Char,
     'void': Void,
     'void *': Void,
 
@@ -333,8 +446,9 @@ class Method:
     def write_local_vars(self, out):
         kwlist = """static char *kwlist[] = {"""
         for type in self.args:
-            if type.name:
-                kwlist += '"%s",' % type.name
+            python_name = type.python_name()
+            if python_name:
+                kwlist += '"%s",' % python_name
         kwlist += ' NULL};\n'
 
         for type in self.args:
@@ -369,9 +483,9 @@ class Method:
         self.write_local_vars( out);
 
         ## Precall preparations
-        out.write(self.return_type.pre_call())
+        out.write(self.return_type.pre_call(self))
         for type in self.args:
-            out.write(type.pre_call())
+            out.write(type.pre_call(self))
 
         call = "((%s)self->base)->%s(((%s)self->base)" % (self.definition_class_name, self.name, self.definition_class_name)
         tmp = ''
@@ -381,12 +495,12 @@ class Method:
         call += "%s)" % tmp
 
         ## Now call the wrapped function
-        out.write(self.return_type.assign(call))
+        out.write(self.return_type.assign(call, self))
 
         ## Now assemble the results
         results = [self.return_type.to_python_object()]
         for type in self.args:
-            if "OUT" in type.attributes:
+            if type.sense == 'OUT':
                 results.append(type.to_python_object())
 
         ## Make a tuple of results and pass them back
@@ -469,7 +583,7 @@ class ConstructorMethod(Method):
 
         ## Precall preparations
         for type in self.args:
-            out.write(type.pre_call())
+            out.write(type.pre_call(self))
 
         ## Now call the wrapped function
         out.write("\nself->base = CONSTRUCT(%s, %s, %s, NULL" % (self.class_name,
@@ -546,6 +660,11 @@ class ClassGenerator:
 
         for m in self.methods:
             m.write_definition(out)
+
+    def initialise(self):
+        return "python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__%s;\n" \
+            "python_wrappers[TOTAL_CLASSES++].python_type = &%s_Type;\n" % (
+            self.class_name, self.class_name)
 
     def PyMethodDef(self, out):
         out.write("static PyMethodDef %s_methods[] = {\n" % self.class_name)
@@ -625,6 +744,9 @@ class StructGenerator(ClassGenerator):
   %(class_name)s *base;
 } py%(class_name)s; \n
 """ % dict(class_name=self.class_name))
+
+    def initialise(self):
+        return ''
 
 class parser:
     class_re = re.compile(r"^\s*CLASS\(([A-Z_a-z]+)\s*,\s*([A-Z_a-z]+)\)")

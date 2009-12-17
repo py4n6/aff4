@@ -71,7 +71,7 @@ CLASS(XSDInteger, RDFValue)
      int64_t value;
      char *serialised;
 
-     RDFValue METHOD(XSDInteger, set, uint64_t value);
+     BORROWED RDFValue METHOD(XSDInteger, set, uint64_t value);
      uint64_t METHOD(XSDInteger, get);
 END_CLASS
 
@@ -80,8 +80,8 @@ CLASS(XSDString, RDFValue)
      char *value;
      int length;
 
-     RDFValue METHOD(XSDString, set, char *string, int length);
-     char *METHOD(XSDString, get);
+     BORROWED RDFValue METHOD(XSDString, set, char *string, int length);
+     BORROWED char *METHOD(XSDString, get);
 END_CLASS
 
 CLASS(XSDDatetime, RDFValue)
@@ -100,8 +100,8 @@ CLASS(RDFURN, RDFValue)
      // This parser maintains our internal state
      URLParse parser;
 
-     RDFValue METHOD(RDFURN, set, char *urn);
-     char *METHOD(RDFURN, get);
+     BORROWED RDFValue METHOD(RDFURN, set, char *urn);
+     BORROWED char *METHOD(RDFURN, get);
 
      // Make a new RDFURN as a copy of this one
      RDFURN METHOD(RDFURN, copy, void *ctx);

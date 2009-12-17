@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Thu Nov 12 20:38:45 2009 mic
+** Last update Thu Dec 17 22:33:42 2009 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -71,7 +71,7 @@ CLASS(FileLikeObject, AFFObject)
      char *data;
 
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
-     int METHOD(FileLikeObject, read, char *buffer, unsigned long int length);
+     int METHOD(FileLikeObject, read, OUT char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
   

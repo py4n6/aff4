@@ -1,5 +1,5 @@
 import pyaff4
-import time, struct, sys
+import time, struct, sys, gc
 
 time.sleep(1)
 
@@ -16,6 +16,12 @@ oracle.set_value(url, pyaff4.AFF4_TIMESTAMP, date)
 iter = oracle.get_iter(url, pyaff4.AFF4_TIMESTAMP)
 while oracle.iter_next(iter, date):
     print "%r" % date.serialise()
+
+url.set("file:///etc/passwd")
+fd = oracle.open(url, 'r')
+
+print fd.read(1000)
+
 
 sys.exit(0)
 
