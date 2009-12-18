@@ -216,12 +216,6 @@ static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int w
   return result;
 };
 
-static AFFObject FileBackedObject_finish(AFFObject self) {
-  FileBackedObject this = (FileBackedObject)self;
- 
-  return (AFFObject)this->Con(this, self->urn, 'w');
-};
-
 static char *FileLikeObject_get_data(FileLikeObject self) {
   char *data;
   
@@ -264,7 +258,6 @@ static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
 /** A file backed object extends FileLikeObject */
 VIRTUAL(FileBackedObject, FileLikeObject) {
      VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
-     VMETHOD(super.super.finish) = FileBackedObject_finish;
 
      VMETHOD(super.read) = FileBackedObject_read;
      VMETHOD(super.write) = FileBackedObject_write;
@@ -298,6 +291,14 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     };
 
     URNOF(self) = CALL(urn, copy, self);
+
+    // Check to see that we can open the storage_urn for writing
+    if(mode == 'w'){
+      FileLikeObject fd = CALL(oracle, open, this->storage_urn, mode);
+
+      if(!fd) goto error;
+      CALL(oracle, cache_return, (AFFObject)fd);
+    };
 
     // Try to load this volume
     ZipFile_load_from(this, this->storage_urn, mode);
@@ -1459,7 +1460,7 @@ void zip_init() {
   ZipFile_init();
   ZipFileStream_init();
   
-  register_type_dispatcher("file", (AFFObject *)GETCLASS(FileBackedObject));
+  register_type_dispatcher(AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
   register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
   register_type_dispatcher(AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
 

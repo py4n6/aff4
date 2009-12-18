@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Thu Dec 17 22:33:42 2009 mic
+** Last update Fri Dec 18 17:39:08 2009 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -32,7 +32,7 @@ CLASS(AFFObject, Object)
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.
      */
-     AFFObject METHOD(AFFObject, finish);
+     DESTRUCTOR AFFObject METHOD(AFFObject, finish);
 
      /*  This method is used to delete the object from the resolver.
          It should also call the delete method for all the objects
@@ -86,13 +86,12 @@ CLASS(FileLikeObject, AFFObject)
 
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this (it gets free'd).
-     void METHOD(FileLikeObject, close);
+     DESTRUCTOR void METHOD(FileLikeObject, close);
 END_CLASS
 
 // This file like object is backed by a real disk file:
 CLASS(FileBackedObject, FileLikeObject)
      int fd;
-     FileBackedObject METHOD(FileBackedObject, Con, RDFURN fileurn, char mode);
 END_CLASS
 
 #endif 	    /* !AFF4_IO_H_ */

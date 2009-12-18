@@ -20,7 +20,11 @@ CLASS(URLParse, Object)
       void *ctx;
 
       URLParse METHOD(URLParse, Con, char *url);
+
+      // Parses the url given and sets internal attributes.
       int METHOD(URLParse, parse, char *url);
+
+      // Returns the internal attributes joined together into a valid URL.
       char *METHOD(URLParse, string, void *ctx);
 END_CLASS
 
@@ -66,7 +70,7 @@ CLASS(RDFValue, Object)
       BORROWED char *METHOD(RDFValue, serialise);
 END_CLASS
 
-      /** An integer */
+      /** An integer encoded according the XML RFC. */
 CLASS(XSDInteger, RDFValue)
      int64_t value;
      char *serialised;
@@ -75,7 +79,7 @@ CLASS(XSDInteger, RDFValue)
      uint64_t METHOD(XSDInteger, get);
 END_CLASS
 
-     /** A literal (string) */
+     /** A literal string */
 CLASS(XSDString, RDFValue)
      char *value;
      int length;
@@ -84,6 +88,7 @@ CLASS(XSDString, RDFValue)
      BORROWED char *METHOD(XSDString, get);
 END_CLASS
 
+     /** Dates serialised according the XML standard */
 CLASS(XSDDatetime, RDFValue)
      struct timeval value;
      struct timezone tz;
@@ -92,6 +97,7 @@ CLASS(XSDDatetime, RDFValue)
      BORROWED RDFValue METHOD(XSDDatetime, set, struct timeval time);
 END_CLASS
 
+     /** A URN for use in the rest of the library */
 CLASS(RDFURN, RDFValue)
      char *value;
 
@@ -106,17 +112,17 @@ CLASS(RDFURN, RDFValue)
      // Make a new RDFURN as a copy of this one
      RDFURN METHOD(RDFURN, copy, void *ctx);
 
-     // Add a relative stem to the current value. If uri is a fully
+     // Add a relative stem to the current value. If urn is a fully
      // qualified URN, we replace the current value with it
      void METHOD(RDFURN, add, char *urn);
 
-     // This method returns the relative name 
+     // This method returns the relative name
      TDB_DATA METHOD(RDFURN, relative_name, RDFURN volume);
 END_CLASS
 
      /** This function is used to register a new RDFValue class with
 	 the RDF subsystem. It can then be serialised, and parsed.
-	 
+
 	 Prior to calling this function you need to initialise the
 	 class because we will use its dataType attribute.
      **/

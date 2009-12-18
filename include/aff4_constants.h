@@ -126,6 +126,7 @@
 #define AFF4_ENCRYTED         "encrypted"
 #define AFF4_LIBAFF_STREAM    "aff1_stream"
 #define AFF4_ERROR_STREAM     "error"
+#define AFF4_FILE             "file"
 
 /** Miscellaneous objects */
 #define AFF4_IDENTITY         "identity"

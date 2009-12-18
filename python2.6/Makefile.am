@@ -13,7 +13,8 @@ pyaff4_la_LDFLAGS     	= -module $(PYTHON_LDFLAGS)
 
 ## These are the interface files which are automatically bound in python
 BOUND_FILES = ../include/aff4_constants.h ../include/aff4_rdf.h	\
-              ../include/aff4_io.h ../include/aff4_resolver.h
+              ../include/aff4_io.h ../include/aff4_resolver.h\
+              ../include/aff4_objects.h
 
 ## Automatically generate the bindings
 pyaff4.c: class_parser.py $(BOUND_FILES)

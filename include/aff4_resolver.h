@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Wed Dec 16 13:52:08 2009 mic
+** Last update Fri Dec 18 18:31:32 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -24,7 +24,9 @@ typedef struct TDB_DATA_LIST {
   uint8_t encoding_type;
 }__attribute__((packed)) TDB_DATA_LIST;
 
-typedef struct RESOLVER_ITER {
+/** This object is returned when iterating the a result set from the
+    resolver. Its basically a pointer into the resolver data store.*/
+BOUND typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
   // This is used to ensure we do not iterate over multiple values
@@ -32,11 +34,11 @@ typedef struct RESOLVER_ITER {
   Cache cache;
 } RESOLVER_ITER;
 
-     /** The resolver is at the heart of the AFF4 specification - its
-	 responsible for returning objects keyed by attribute from a
-	 globally unique identifier (URI).
-     */
-
+/** The resolver is at the heart of the AFF4 specification - its
+    responsible for returning objects keyed by attribute from a
+    globally unique identifier (URI) and managing the central
+    information store.
+*/
 CLASS(Resolver, Object)
 // This is a global cache of URN and their values - we try to only
 // have small URNs here and keep everything in memory.
@@ -80,26 +82,34 @@ CLASS(Resolver, Object)
  expire from the cache while callers are holding it. You must return
  the object to the cache as soon as possible by calling
  cache_return. The object will be locked until you return it with
- cache_return.
-*/ 
+ cache_return. */
       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
+
+       // All objected obtained from Resolver.open() need to be
+       // returned to the cache promptly using this method. NOTE - it
+       // is an error to be using an object after being returned to
+       // the cache - it might not be valid and may be gced.
       void METHOD(Resolver, cache_return, AFFObject obj);
 
        /* This create a new object of the specified type.
 
           name specifies the type of object as registered in the type
-          handler dispatcher.
+          handler dispatcher. (e.g. AFF4_ZIP_VOLUME)
         */
        AFFObject METHOD(Resolver, create, char *name, char mode);
 
   /* This function resolves the value in uri and attribute and sets it
-     into the RDFValue object which much be of the correct type. 
+     into the RDFValue object. So you must first create such an object
+     (e.g. XSDDatetime) and then pass the object here to be updated
+     from the data store. Note that only a single value is returned -
+     if you want to iterate over all the values for this attribute you
+     need to call get_iter and iter_next.
   */
   int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,\
 	     RDFValue value);
 
   /* This is a version of the above which uses an iterator to iterate
-     over the list. 
+     over the list.
 
      The iterator is obtained using get_iter first. This function
      returns 1 if an iterator can be found (i.e. at least one result
@@ -124,37 +134,16 @@ CLASS(Resolver, Object)
        */
      RDFValue METHOD(Resolver, iter_next_alloc, RESOLVER_ITER *iter);
 
-     // Deletes the attribute from the resolver
+     // Deletes all values for this attribute from the resolver
      void METHOD(Resolver, del, RDFURN uri, char *attribute);
 
-     // This is the new method that will deprecate the previous method
+     // Sets a new value for an attribute. Note that this function
+     // clears any previously set values, if you want to create a list
+     // of values you need to call add_value.
      void METHOD(Resolver, set_value, RDFURN uri, char *attribute, RDFValue value);
 
-     // This is the new method that will deprecate the previous method
+     // Adds a new value to the value list for this attribute.
      void METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
-
-     // Parses the properties file
-     void METHOD(Resolver, parse, char *context, char *text, int len);
-
-  /* The following APIs are used for synchronization. 
-     A thread begins a transaction - this locks the resolver from
-     access from all other threads.
-
-     One thread
-     creates a lock on an object (Using its URN) by calling:
-     
-     oracle->lock(urn, name)
-
-     Other threads can then attempt to also get a lock on the URN but
-     will be blocked until the original thread calls:
-     
-     oracle->unlock(urn, name) 
-
-     Note that locks have names and so many locks can be set on the
-     same URN.
-  */
-  int METHOD(Resolver, lock, RDFURN urn, char mode);
-  int METHOD(Resolver, unlock, RDFURN urn, char mode);
 
 END_CLASS
 

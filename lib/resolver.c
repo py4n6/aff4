@@ -6,6 +6,10 @@
 #include <raptor.h>
 #include <errno.h>
 
+// Some prototypes
+static int Resolver_lock(Resolver self, RDFURN urn, char mode);
+static int Resolver_unlock(Resolver self, RDFURN urn, char mode);
+
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
 static Cache type_dispatcher = NULL;
@@ -885,7 +889,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     };
 
     // Lock it
-    CALL(self, lock, URNOF(result), mode);
+    Resolver_lock(self, URNOF(result), mode);
     goto exit;
   };
 
@@ -918,7 +922,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     ((AFFObject)result)->mode = mode;
 
     // Lock it
-    CALL(self, lock, URNOF(result), mode);
+    Resolver_lock(self, URNOF(result), mode);
 
     // Attach a destructor to ensure it gets removed from the cache
     // lists if ever its freed rather than returned to us.
@@ -953,7 +957,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
   };
   
   // Unlock the URN
-  CALL(self, unlock, URNOF(obj), obj->mode);
+  Resolver_unlock(self, URNOF(obj), obj->mode);
 };
 
 // A helper method to construct the class
@@ -1029,11 +1033,6 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
   };
 };
 
-// Parse a properties file (implicit context is context - if the file
-// does not specify a subject URN we use context instead).
-static void Resolver_parse(Resolver self, char *context_urn, char *text, int len) {
-};
-
 /** Synchronization methods. */
 int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   TDB_DATA attribute;
@@ -1072,12 +1071,12 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   return 1;
 };
 
-int Resolver_lock(Resolver self, RDFURN urn, char mode) {
+static int Resolver_lock(Resolver self, RDFURN urn, char mode) {
   DEBUG("locking %s mode %c\n", urn->value, mode);
   return Resolver_lock_gen(self, urn, mode, F_LOCK);
 };
 
-int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
+static int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
   DEBUG("releasing %s mode %c\n", urn->value, mode);
   return Resolver_lock_gen(self, urn, mode, F_ULOCK);
 };
@@ -1096,9 +1095,6 @@ VIRTUAL(Resolver, AFFObject) {
      VMETHOD(set_value) = Resolver_set_value;
      VMETHOD(add_value) = Resolver_add_value;
      VMETHOD(del) = Resolver_del;
-     VMETHOD(parse) = Resolver_parse;
-     VMETHOD(lock) = Resolver_lock;
-     VMETHOD(unlock) = Resolver_unlock;
 } END_VIRTUAL
 
 /************************************************************

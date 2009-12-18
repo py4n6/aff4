@@ -1,27 +1,29 @@
 import pyaff4
-import time, struct, sys, gc
+import time, struct, sys, gc, pdb
 
 time.sleep(1)
 
 oracle = pyaff4.Resolver()
-
-date = pyaff4.XSDDatetime()
-date.set(time.time())
-
 url = pyaff4.RDFURN()
-url.set("http://www.google.com")
+url.set("file:///tmp/test.zip")
 
-oracle.set_value(url, pyaff4.AFF4_TIMESTAMP, date)
+zip_fd = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+oracle.set_value(zip_fd.urn, pyaff4.AFF4_STORED, url)
+zip_fd = zip_fd.finish()
 
-iter = oracle.get_iter(url, pyaff4.AFF4_TIMESTAMP)
-while oracle.iter_next(iter, date):
-    print "%r" % date.serialise()
+image_fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
+oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_fd.urn)
+image_fd = image_fd.finish()
 
-url.set("file:///etc/passwd")
-fd = oracle.open(url, 'r')
+fd = open("/bin/ls")
+while 1:
+    data = fd.read(1e6)
+    if not data: break
 
-print fd.read(1000)
+    image_fd.write(data)
 
+image_fd.close()
+zip_fd.close()
 
 sys.exit(0)
 

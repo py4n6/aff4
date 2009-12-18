@@ -184,6 +184,7 @@ extern "C" {
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 
 extern char *_traceback;
+extern char __error_str[];
 
 #ifdef max
 #undef max
@@ -465,6 +466,19 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   // This modifier indicates that the following pointer is pointing to
   // a borrowed reference - callers must not free the memory after use.
 #define BORROWED
+
+  // This tells the autobinder to generated bindings to this struct
+#define BOUND
+
+  // This tells the autobinder to ignore this class as it should be
+  // private to the implementation - external callers should not
+  // access this.
+#define PRIVATE
+
+  // This attribute of a method means that this method is a
+  // desctructor - the object is no longer valid after this method is
+  // run
+#define DESTRUCTOR
 
 #endif
 #ifdef __cplusplus

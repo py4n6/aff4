@@ -37,15 +37,9 @@ CLASS(HTTPObject, FileLikeObject)
 END_CLASS
 #endif
 
-// A link simply returns the URI its pointing to
-CLASS(Link, AFFObject)
-     void METHOD(Link, link, Resolver resolver, char *storage_urn, 
-		 char *target, char *friendly_name);
-END_CLASS
-
 #include "queue.h"
 
-CLASS(ImageWorker, AFFObject)
+PRIVATE CLASS(ImageWorker, AFFObject)
        struct list_head list;
   // The filename where the volume is stored - we fetch that just
   // prior to writing it
@@ -182,7 +176,7 @@ CLASS(MapDriver, FileLikeObject)
      void METHOD(MapDriver, del, uint64_t target_pos);
 
      // Adds a new point ot the file offset table
-     void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,
+     void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,\
 		 char *target);
 
      void METHOD(MapDriver, save_map);
@@ -353,16 +347,16 @@ CLASS(ZipFile, AFFObject)
 // (so another attempt to open a new member for writing will raise,
 // until this member is promptly closed). The ZipFile must have been
 // called with create_new_volume or append_volume before.
-     FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,
+     FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,\
 			   uint16_t compression);
 
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
-     void METHOD(ZipFile, close);
+     DESTRUCTOR void METHOD(ZipFile, close);
 
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).
-     int METHOD(ZipFile, writestr, char *filename, char *data, int len,
+     int METHOD(ZipFile, writestr, char *filename, char *data, int len,\
 		 uint16_t compression);
 
      int METHOD(ZipFile, load_from, RDFURN fd_urn, char mode);
@@ -397,8 +391,8 @@ CLASS(ZipFileStream, FileLikeObject)
 	container_urn. If the stream is opened for writing the file_fd
 	may be passed in. It remains locked until we are closed.
      */
-     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn, 
-			  RDFURN file_urn, RDFURN container_urn,
+     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn, \
+			  RDFURN file_urn, RDFURN container_urn,\
 			  char mode, FileLikeObject file_fd);
 END_CLASS
 
@@ -407,7 +401,7 @@ END_CLASS
 
 // A directory volume implementation - all elements live in a single
 // directory structure
-CLASS(DirVolume, ZipFile)
+PRIVATE CLASS(DirVolume, ZipFile)
 END_CLASS
 
 #ifdef HAVE_LIBAFFLIB

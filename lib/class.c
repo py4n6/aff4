@@ -29,15 +29,23 @@
 
 /** This is used for error reporting.
  */
-char *__error_str;
+#define BUFF_SIZE 1024
+
+char __error_str[BUFF_SIZE];
 enum _error_type _global_error;
 char *_traceback=NULL;
 
 void *raise_errors(enum _error_type t, char *reason, ...) {
   if(reason) {
     va_list ap;
+    int length;
+
     va_start(ap, reason);
-    _traceback = talloc_vasprintf_append(_traceback, reason,ap);
+
+    vsnprintf(__error_str, BUFF_SIZE-1, reason,ap);
+    __error_str[BUFF_SIZE-1]=0;
+
+    _traceback = talloc_asprintf_append(_traceback, "%s", __error_str);
     va_end(ap);
   };
 
