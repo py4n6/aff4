@@ -3,40 +3,6 @@
 #include <openssl/rand.h>
 #include "aff4.h"
 
-/**
-   Encryption is handled via two components, the encrypted stream and
-   the cipher. An encrypted stream is an FileLikeObject with the
-   following AFF4 attributes:
-
-   AFF4_CHUNK_SIZE = Data will be broken into these chunks and
-                     encrypted independantly.
-
-   AFF4_STORED     = Data will be stored on this backing stream.
-
-   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher
-                     class. More on that below.
-
-   When opened, the FileLikeObject is created by instantiating a
-   cipher from the AFF4_CIPHER attribute. Data is then divided into
-   chunks and each chunk is encrypted using the cipher, and then
-   written to the backing stream.
-
-   A cipher is a class which extends this baseclass
-
-   CLASS(AFF4Cipher, RDFValue)
-      int blocksize;
-
-      int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, unsigned
-                             char * outbuf, int length, int chunk_number);
-      int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, unsigned
-                             char * outbuf, int length, int chunk_number);
-   END_CLASS
-
-   Of course a valid cipher must also implement valid serialization
-   methods and also some way of key initialization. Chunks must be
-   whole multiples of blocksize.
-*/
-
 VIRTUAL(AFF4Cipher, RDFValue) {
 } END_VIRTUAL
 
@@ -95,6 +61,7 @@ static void *AES256Password_serialise(RDFValue self) {
 
   // Update the nonce
   CALL((AFF4Cipher)this, encrypt, this->pub.iv,
+       sizeof(this->pub.iv),
        this->pub.nonce, sizeof(this->pub.nonce), 0);
 
   // Encode the key
@@ -169,7 +136,9 @@ int AES256Password_fetch_password_cb(AES256Password self) {
   };
 
   // Now check the key by encrypting the IV with the key
-  CALL((AFF4Cipher)self, encrypt, self->pub.iv, buff, sizeof(self->pub.nonce), 0);
+  CALL((AFF4Cipher)self, encrypt, self->pub.iv,
+       sizeof(self->pub.iv),
+       buff, sizeof(self->pub.nonce), 0);
 
   if(memcmp(buff, self->pub.nonce, sizeof(self->pub.nonce))) {
     RaiseError(ERuntimeError, "Key is invalid");
@@ -181,7 +150,9 @@ int AES256Password_fetch_password_cb(AES256Password self) {
   return 0;
 };
 
-int AES256Password_encrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char *outbuf,
+int AES256Password_encrypt(AFF4Cipher self, unsigned char *inbuff,
+                           int inlen,
+                           unsigned char *outbuf,
                            int length, int chunk_number) {
   AES256Password this = (AES256Password)self;
   unsigned char iv[sizeof(this->pub.iv)];
@@ -193,10 +164,12 @@ int AES256Password_encrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char
 
   AES_cbc_encrypt(inbuff, outbuf, length, &this->ekey, iv, AES_ENCRYPT);
 
-  return 1;
+  return length;
 };
 
-int AES256Password_decrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char *outbuf,
+int AES256Password_decrypt(AFF4Cipher self, unsigned char *inbuff,
+                           int inlen,
+                           unsigned char *outbuf,
                            int length, int chunk_number) {
   AES256Password this = (AES256Password)self;
   unsigned char iv[sizeof(this->pub.iv)];
@@ -208,7 +181,7 @@ int AES256Password_decrypt(AFF4Cipher self, unsigned char *inbuff, unsigned char
 
   AES_cbc_encrypt(inbuff, outbuf, length, &this->dkey, iv, AES_DECRYPT);
 
-  return 1;
+  return length;
 };
 
 VIRTUAL(AES256Password, AFF4Cipher) {
@@ -308,6 +281,7 @@ int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int len) {
         offset += chunk_size) {
 
       CALL(this->cipher, encrypt, this->block_buffer->data + offset,
+           chunk_size,
            buff, chunk_size, chunk_id);
       chunk_id ++;
 
@@ -347,7 +321,8 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
   CALL(oracle, cache_return, (AFFObject)target);
 
   // Now decrypt the buffer
-  CALL(this->cipher, decrypt, cbuff, dbuff, chunk_size, chunk_id);
+  CALL(this->cipher, decrypt, cbuff, chunk_size,
+       dbuff, chunk_size, chunk_id);
 
   // Return the available data
   memcpy(buff, dbuff + chunk_offset, available_to_read);

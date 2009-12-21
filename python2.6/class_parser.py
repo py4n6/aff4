@@ -3,6 +3,13 @@ import sys, os, re, pdb
 def log(msg):
     sys.stderr.write(msg+"\n")
 
+def escape_for_string(string):
+    result = string
+    result = result.encode("string-escape")
+    result = result.replace('"',r'\"')
+
+    return result
+
 class Module:
     def __init__(self, name):
         self.name = name
@@ -17,7 +24,8 @@ AFF4_Init();
 
 """
         for cls in self.classes.values():
-            result += cls.initialise()
+            if cls.is_active():
+                result += cls.initialise()
 
         return result
 
@@ -60,21 +68,30 @@ static struct python_wrapper_map_t {
        PyTypeObject *python_type;
 } python_wrappers[%s];
 
+/** This is a generic wrapper type */
+typedef struct {
+  PyObject_HEAD
+  void *base;
+} Gen_wrapper;
+
 /* Create the relevant wrapper from the item based on the lookup
 table.
 */
-PyObject *new_class_wrapper(Object item) {
+Gen_wrapper *new_class_wrapper(Object item) {
    int i;
-   PyObject *result;
+   Gen_wrapper *result;
 
    for(i=0; i<TOTAL_CLASSES; i++) {
      if(python_wrappers[i].class_ref == item->__class__) {
-       result = _PyObject_New(python_wrappers[i].python_type);
+       result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
+       result->base = (void *)item;
+
        return result;
      };
    };
 
-   return NULL;
+  PyErr_Format(PyExc_RuntimeError, "Unable to find a wrapper for object %%s", NAMEOF(item));
+  return NULL;
 };
 
 """ % (len(self.classes)+1)
@@ -84,15 +101,16 @@ PyObject *new_class_wrapper(Object item) {
         out.write(self.private_functions())
 
         for cls in self.classes.values():
-            cls.struct(out)
-            cls.prototypes(out)
+            if cls.is_active():
+                cls.struct(out)
+                cls.prototypes(out)
 
         out.write("/*****************************************************\n             Implementation\n******************************************************/\n\n")
         for cls in self.classes.values():
-            cls.PyMethodDef(out)
-            cls.code(out)
-            cls.PyTypeObject(out)
-
+            if cls.is_active():
+                cls.PyMethodDef(out)
+                cls.code(out)
+                cls.PyTypeObject(out)
 
         ## Write the module initializer
         out.write("""
@@ -109,7 +127,8 @@ PyMODINIT_FUNC init%(module)s(void) {
 """ % {'module': self.name})
 
         for cls in self.classes.values():
-            out.write("""
+            if cls.is_active():
+                out.write("""
  %(name)s_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&%(name)s_Type) < 0)
      return;
@@ -148,8 +167,11 @@ class Type:
     def python_name(self):
         return self.name
 
-    def definition(self):
-        return "%s %s;\n" % (self.type, self.name)
+    def definition(self, default=None):
+        if default:
+            return "%s %s=%s;\n" % (self.type, self.name, default)
+        else:
+            return "%s %s;\n" % (self.type, self.name)
 
     def byref(self):
         return "&%s" % self.name
@@ -210,15 +232,17 @@ class Char_and_Length(Type):
         return "%s %s, %s %s" % (self.data_type, self.name,
                                  self.length_type, self.length)
 
-    def definition(self):
-        return "%s %s; %s %s;\n" % (self.data_type, self.name,
-                                    self.length_type, self.length)
+    def definition(self, default = '""'):
+        return "char *%s=%s; Py_ssize_t %s=strlen(%s);\n" % (
+            self.name, default,
+            self.length, default)
 
     def byref(self):
         return "&%s, &%s" % (self.name, self.length)
 
     def call_arg(self):
-        return "%s, %s" % (self.name, self.length)
+        return "(%s)%s, (%s)%s" % (self.data_type, self.name, self.length_type,
+                                   self.length)
 
 class Integer(Type):
     interface = 'integer'
@@ -228,13 +252,16 @@ class Integer(Type):
         Type.__init__(self,name,type)
         self.type = 'uint64_t '
 
+    def definition(self, default = 0):
+        return Type.definition(self, default)
+
     def to_python_object(self, name=None):
         name = name or self.name
         return "py_result = PyLong_FromLong(%s);\n" % name
 
 class Char(Integer):
     buidstr = "s"
-    interface = 'string'
+    interface = 'small_integer'
 
     def to_python_object(self, name = None):
         ## We really want to return a string here
@@ -242,8 +269,9 @@ class Char(Integer):
     py_result = PyString_FromStringAndSize(str_%(name)s, 1);
 """ % dict(name = name or self.name)
 
-    def definition(self):
-        return "char %s; char *str_%s;\n" % (self.name, self.name)
+    def definition(self, default = '"\\x0"'):
+        return "char %s=0; char *str_%s = %s;\n" % (
+            self.name,self.name, default)
 
     def byref(self):
         return "&str_%s" % self.name
@@ -267,7 +295,7 @@ class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT_DONE'
     buidstr = 'l'
 
-    def definition(self):
+    def definition(self, default = None):
         return Char_and_Length.definition(self) + "PyObject *tmp_%s;\n" % self.name
 
     def python_name(self):
@@ -278,7 +306,7 @@ class Char_and_Length_OUT(Char_and_Length):
 
     def pre_call(self, method):
         return """tmp_%s = PyString_FromStringAndSize(NULL, %s);
-PyString_AsStringAndSize(tmp_%s,&%s, (Py_ssize_t *)&%s);
+PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
 """ % (self.name, self.length, self.name, self.name, self.length)
 
     def to_python_object(self, name=None):
@@ -291,7 +319,7 @@ class TDB_DATA_P(Char_and_Length_OUT):
     def __init__(self, name, type):
         Type.__init__(self, name, type)
 
-    def definition(self):
+    def definition(self, default=None):
         return Type.definition(self)
 
     def byref(self):
@@ -322,7 +350,7 @@ class Void(Type):
     def __init__(self, *args):
         Type.__init__(self, None, 'void *')
 
-    def definition(self):
+    def definition(self, default = None):
         return ''
 
     def to_python_object(self, name=None):
@@ -345,8 +373,8 @@ class Wrapper(Type):
     def to_python_object(self, name=None):
         return ''
 
-    def definition(self):
-        return "py%s *%s;\n" % (self.type, self.name)
+    def definition(self, default = None):
+        return "Gen_wrapper *%s;\n" % (self.name)
 
     def call_arg(self):
         return "%s->base" % self.name
@@ -365,9 +393,9 @@ class Wrapper(Type):
          goto error;
        };
 
-       %(name)s = (py%(type)s *)new_class_wrapper(returned_object);
-       %(name)s->base = (%(type)s)returned_object;
-}
+       %(name)s = new_class_wrapper(returned_object);
+       if(!%(name)s) goto error;
+    }
 """ % args
 
         if "BORROWED" in self.attributes:
@@ -407,7 +435,7 @@ class Timeval(Type):
     interface = 'numeric'
     buidstr = 'f'
 
-    def definition(self):
+    def definition(self, default = None):
         return "float %(name)s_flt; struct timeval %(name)s;\n" % self.__dict__
 
     def byref(self):
@@ -425,9 +453,11 @@ py_result = PyFloat_FromDouble(%(name)s_flt);
 type_dispatcher = {
     "IN char *": String,
     "IN unsigned char *": String,
+    "unsigned char *": String,
     "char *": String,
 
     "OUT char *": StringOut,
+    "OUT unsigned char *": StringOut,
     "unsigned int": Integer,
     'int': Integer,
     'char': Char,
@@ -460,6 +490,8 @@ def dispatch(name, type):
     return result
 
 class Method:
+    default_re = re.compile("DEFAULT\(([A-Za-z0-9]+)\) = (.+)")
+
     def __init__(self, class_name, base_class_name, method_name, args, return_type,
                  myclass = None):
         self.name = method_name
@@ -468,6 +500,7 @@ class Method:
 
         self.myclass = myclass
         self.docstring = ''
+        self.defaults = {}
         self.error_set = False
         self.class_name = class_name
         self.base_class_name = base_class_name
@@ -495,23 +528,52 @@ class Method:
 
         return result
 
+    def find_optional_vars(self):
+        for line in self.docstring.splitlines():
+            m =self.default_re.search(line)
+            if m:
+                name = m.group(1)
+                value = m.group(2)
+                log("Setting default value for %s of %s" % (m.group(1),
+                                                            m.group(2)))
+                self.defaults[name] = value
+
     def write_local_vars(self, out):
+        self.find_optional_vars()
+
+        ## We do it in two passes - first mandatory then optional
         kwlist = """static char *kwlist[] = {"""
+        ## Mandatory
         for type in self.args:
             python_name = type.python_name()
-            if python_name:
+            if python_name and type.name not in self.defaults:
                 kwlist += '"%s",' % python_name
+
+        for type in self.args:
+            python_name = type.python_name()
+            if python_name and type.name in self.defaults:
+                kwlist += '"%s",' % python_name
+
         kwlist += ' NULL};\n'
 
         for type in self.args:
-            out.write(type.definition());
+            try:
+                out.write(type.definition(default = self.defaults[type.name]))
+            except KeyError:
+                out.write(type.definition())
 
+        ## Make up the format string for the parse args in two pases
         parse_line = ''
         for type in self.args:
-            if type.buidstr:
+            if type.buidstr and type.name not in self.defaults:
                 parse_line += type.buidstr
 
-        if parse_line:
+        parse_line += '|'
+        for type in self.args:
+            if type.buidstr and type.name in self.defaults:
+                parse_line += type.buidstr
+
+        if parse_line != '|':
             ## Now parse the args from python objects
             out.write(kwlist)
             out.write("\nif(!PyArg_ParseTupleAndKeywords(args, kwds, \"%s\", kwlist, " % parse_line)
@@ -609,23 +671,27 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
 
         ## Here we collapse char * + int type interfaces into a
         ## coherent string like interface.
-        if self.args and t.interface == 'integer' and \
-                self.args[-1].interface == 'string':
+        try:
             previous = self.args[-1]
+            if t.interface == 'integer' and \
+                    previous.interface == 'string':
 
-            ## We make a distinction between IN variables and OUT
-            ## variables
-            if previous.sense == 'OUT':
-                cls = Char_and_Length_OUT
-            else:
-                cls = Char_and_Length
+                ## We make a distinction between IN variables and OUT
+                ## variables
+                if previous.sense == 'OUT':
+                    cls = Char_and_Length_OUT
+                else:
+                    cls = Char_and_Length
 
-            self.args[-1] = cls(
-                previous.name,
-                previous.type,
-                name, type)
-        else:
-            self.args.append(t)
+                self.args[-1] = cls(
+                    previous.name,
+                    previous.type,
+                    name, type)
+                return
+        except IndexError:
+            pass
+
+        self.args.append(t)
 
     def comment(self):
         result = ''
@@ -815,6 +881,16 @@ class ClassGenerator:
         self.constructor = None
         self.base_class_name = base_class_name
         self.attributes = GetattrMethod(self.class_name, self.base_class_name)
+        self.modifier = ''
+
+    def is_active(self):
+        """ Returns true if this class is active and should be generated """
+        if self.modifier and ('PRIVATE' in self.modifier \
+                                  or 'ABSTRACT' in self.modifier):
+            log("%s is not active %s" % (self.class_name, self.modifier))
+            return False
+
+        return True
 
     def clone(self, new_class_name):
         """ Creates a clone of this class - usefull when implementing
@@ -885,7 +961,7 @@ class ClassGenerator:
             out.write('     {"%s",(PyCFunction)py%s_%s, METH_VARARGS|METH_KEYWORDS, "%s"},\n' % (
                     method_name,
                     self.class_name,
-                    method_name, docstring.encode("string_escape")))
+                    method_name, escape_for_string(docstring)))
         out.write("     {NULL}  /* Sentinel */\n};\n")
 
     def prototypes(self, out):
@@ -941,7 +1017,7 @@ static PyTypeObject %(class)s_Type = {
 };
 """ % {'class':self.class_name, 'module': self.module.name, 
        'docstring': "%s: %s" % (self.class_name, 
-                                self.docstring.encode("string_escape"))})
+                                escape_for_string(self.docstring))})
 
 class StructGenerator(ClassGenerator):
     """ A wrapper generator for structs """
@@ -965,11 +1041,11 @@ class StructGenerator(ClassGenerator):
         return ''
 
 class parser:
-    class_re = re.compile(r"^\s*CLASS\(([A-Z_a-z]+)\s*,\s*([A-Z_a-z]+)\)")
-    method_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)METHOD\(([A-Z_a-z]+),\s*([A-Z_a-z]+),?")
+    class_re = re.compile(r"^([A-Z]+)?\s*CLASS\(([A-Z_a-z0-9]+)\s*,\s*([A-Z_a-z0-9]+)\)")
+    method_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)METHOD\(([A-Z_a-z0-9]+),\s*([A-Z_a-z0-9]+),?")
     arg_re = re.compile(r"\s*([0-9A-Z a-z_]+\s+\*?)([0-9A-Za-z_]+),?")
     constant_re = re.compile(r"#define\s+([A-Z_0-9]+)\s+[^\s]+")
-    struct_re = re.compile(r"BOUND typedef struct\s+([A-Z_a-z0-9]+)\s+{")
+    struct_re = re.compile(r"([A-Z]+)\s+typedef struct\s+([A-Z_a-z0-9]+)\s+{")
     end_class_re = re.compile("END_CLASS")
     attribute_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z]+)\s*;")
     comment_re = re.compile(r"^\s*//")
@@ -982,7 +1058,7 @@ class parser:
         self.module = module
         self.current_comment = ''
 
-    def add_class(self, class_name, base_class_name, class_type, handler, docstring):
+    def add_class(self, class_name, base_class_name, class_type, handler, docstring, modifier):
         try:
             self.current_class = self.module.classes[base_class_name].clone(class_name)
         except KeyError:
@@ -991,6 +1067,7 @@ class parser:
 
         ## Now add the new class to the module object
         self.current_class.docstring = docstring
+        self.current_class.modifier = modifier
         self.module.add_class(self.current_class, handler)
 
     def parse(self, filename):
@@ -1043,13 +1120,18 @@ class parser:
             ## Wrap structs
             m = self.struct_re.search(line)
             if m:
-                class_name = m.group(1)
+                modifier = m.group(1)
+                class_name = m.group(2)
                 base_class_name = None
                 ## Structs may be refered to as a pointer or absolute
-                ## - its the same thing ultimatley
-                self.add_class(class_name, base_class_name, StructGenerator, StructWrapper,
-                               self.current_comment)
-                type_dispatcher["%s *" % class_name] = PointerStructWrapper
+                ## - its the same thing ultimatley.
+
+                ## We only wrap structures which are explicitely bound
+                if 'BOUND' in modifier:
+                    self.add_class(class_name, base_class_name, StructGenerator, StructWrapper,
+                                   self.current_comment, modifier)
+                    type_dispatcher["%s *" % class_name] = PointerStructWrapper
+
                 continue
 
             m = self.class_re.search(line)
@@ -1058,10 +1140,11 @@ class parser:
                 ## need to build on top of previously declared base
                 ## classes - so we try to find base classes, clone
                 ## them if possible:
-                class_name = m.group(1)
-                base_class_name = m.group(2)
+                modifier = m.group(1)
+                class_name = m.group(2)
+                base_class_name = m.group(3)
                 self.add_class(class_name, base_class_name, ClassGenerator, Wrapper,
-                               self.current_comment)
+                               self.current_comment, modifier)
                 continue
 
             m = self.method_re.search(line)

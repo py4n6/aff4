@@ -28,23 +28,32 @@ static int TOTAL_CLASSES=0;
 static struct python_wrapper_map_t {
        Object class_ref;
        PyTypeObject *python_type;
-} python_wrappers[18];
+} python_wrappers[22];
+
+/** This is a generic wrapper type */
+typedef struct {
+  PyObject_HEAD
+  void *base;
+} Gen_wrapper;
 
 /* Create the relevant wrapper from the item based on the lookup
 table.
 */
-PyObject *new_class_wrapper(Object item) {
+Gen_wrapper *new_class_wrapper(Object item) {
    int i;
-   PyObject *result;
+   Gen_wrapper *result;
 
    for(i=0; i<TOTAL_CLASSES; i++) {
      if(python_wrappers[i].class_ref == item->__class__) {
-       result = _PyObject_New(python_wrappers[i].python_type);
+       result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
+       result->base = (void *)item;
+
        return result;
      };
    };
 
-   return NULL;
+  PyErr_Format(PyExc_RuntimeError, "Unable to find a wrapper for object %s", NAMEOF(item));
+  return NULL;
 };
 
 
@@ -90,6 +99,25 @@ static PyObject *pyMapDriver_close(pyMapDriver *self, PyObject *args, PyObject *
 static PyObject *pyMapDriver_del(pyMapDriver *self, PyObject *args, PyObject *kwds);
 static PyObject *pyMapDriver_add(pyMapDriver *self, PyObject *args, PyObject *kwds);
 static PyObject *pyMapDriver_save_map(pyMapDriver *self, PyObject *args, PyObject *kwds);
+
+typedef struct {
+  PyObject_HEAD
+  AES256Password base;
+} pyAES256Password; 
+
+staticforward PyTypeObject AES256Password_Type;
+
+static int pyAES256Password_init(pyAES256Password *self, PyObject *args, PyObject *kwds);
+
+static PyObject *AES256Password_getattr(pyAES256Password *self, PyObject *name);
+static PyObject *pyAES256Password_parse(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_encode(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_decode(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_serialise(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_encrypt(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_decrypt(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_set(pyAES256Password *self, PyObject *args, PyObject *kwds);
+static PyObject *pyAES256Password_fetch_password_cb(pyAES256Password *self, PyObject *args, PyObject *kwds);
 
 typedef struct {
   PyObject_HEAD
@@ -226,6 +254,27 @@ static PyObject *pyRDFValue_serialise(pyRDFValue *self, PyObject *args, PyObject
 
 typedef struct {
   PyObject_HEAD
+  ZipFileStream base;
+} pyZipFileStream; 
+
+staticforward PyTypeObject ZipFileStream_Type;
+
+static int pyZipFileStream_init(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+
+static PyObject *ZipFileStream_getattr(pyZipFileStream *self, PyObject *name);
+static PyObject *pyZipFileStream_set_property(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_finish(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_seek(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_read(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_write(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_tell(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_get_data(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_truncate(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_close(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+static PyObject *pyZipFileStream_Con(pyZipFileStream *self, PyObject *args, PyObject *kwds);
+
+typedef struct {
+  PyObject_HEAD
   Resolver base;
 } pyResolver; 
 
@@ -315,27 +364,6 @@ static PyObject *pyXSDInteger_get(pyXSDInteger *self, PyObject *args, PyObject *
 
 typedef struct {
   PyObject_HEAD
-  ZipFileStream base;
-} pyZipFileStream; 
-
-staticforward PyTypeObject ZipFileStream_Type;
-
-static int pyZipFileStream_init(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-
-static PyObject *ZipFileStream_getattr(pyZipFileStream *self, PyObject *name);
-static PyObject *pyZipFileStream_set_property(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_finish(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_seek(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_read(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_write(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_tell(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_get_data(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_truncate(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_close(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-static PyObject *pyZipFileStream_Con(pyZipFileStream *self, PyObject *args, PyObject *kwds);
-
-typedef struct {
-  PyObject_HEAD
   RDFURN base;
 } pyRDFURN; 
 
@@ -380,11 +408,11 @@ Encrypted_dealloc(pyEncrypted *self) {
 };
 
 static int pyEncrypted_init(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -429,6 +457,8 @@ if(!strcmp(name, "__members__")) {
     PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("data");
     PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("cipher");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("backing_store");
     PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("stored");
@@ -446,7 +476,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -459,9 +489,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -470,7 +500,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -493,7 +523,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -506,9 +536,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -517,7 +547,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -538,9 +568,33 @@ if(!strcmp(name, "data")) {
 
     return py_result;
 };
+if(!strcmp(name, "cipher")) {
+    PyObject *py_result;
+    Gen_wrapper *cipher;
+
+
+    {
+       Object returned_object = (Object)(((Encrypted)self->base)->cipher);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object AFF4Cipher: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       cipher = new_class_wrapper(returned_object);
+       if(!cipher) goto error;
+    }
+talloc_increase_ref_count(cipher->base);
+
+    py_result = (PyObject *)cipher;
+
+    return py_result;
+};
 if(!strcmp(name, "backing_store")) {
     PyObject *py_result;
-    pyRDFURN *backing_store;
+    Gen_wrapper *backing_store;
 
 
     {
@@ -553,9 +607,9 @@ if(!strcmp(name, "backing_store")) {
          goto error;
        };
 
-       backing_store = (pyRDFURN *)new_class_wrapper(returned_object);
-       backing_store->base = (RDFURN)returned_object;
-}
+       backing_store = new_class_wrapper(returned_object);
+       if(!backing_store) goto error;
+    }
 talloc_increase_ref_count(backing_store->base);
 
     py_result = (PyObject *)backing_store;
@@ -564,7 +618,7 @@ talloc_increase_ref_count(backing_store->base);
 };
 if(!strcmp(name, "stored")) {
     PyObject *py_result;
-    pyRDFURN *stored;
+    Gen_wrapper *stored;
 
 
     {
@@ -577,9 +631,9 @@ if(!strcmp(name, "stored")) {
          goto error;
        };
 
-       stored = (pyRDFURN *)new_class_wrapper(returned_object);
-       stored->base = (RDFURN)returned_object;
-}
+       stored = new_class_wrapper(returned_object);
+       if(!stored) goto error;
+    }
 talloc_increase_ref_count(stored->base);
 
     py_result = (PyObject *)stored;
@@ -588,7 +642,7 @@ talloc_increase_ref_count(stored->base);
 };
 if(!strcmp(name, "chunk_size")) {
     PyObject *py_result;
-    pyXSDInteger *chunk_size;
+    Gen_wrapper *chunk_size;
 
 
     {
@@ -601,9 +655,9 @@ if(!strcmp(name, "chunk_size")) {
          goto error;
        };
 
-       chunk_size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       chunk_size->base = (XSDInteger)returned_object;
-}
+       chunk_size = new_class_wrapper(returned_object);
+       if(!chunk_size) goto error;
+    }
 talloc_increase_ref_count(chunk_size->base);
 
     py_result = (PyObject *)chunk_size;
@@ -626,10 +680,10 @@ void * Encrypted.set_property(char * attribute ,RDFValue value );
 static PyObject *pyEncrypted_set_property(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -660,7 +714,7 @@ AFFObject Encrypted.finish();
 
 static PyObject *pyEncrypted_finish(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
@@ -676,9 +730,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no lon
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -708,7 +762,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -740,21 +794,21 @@ uint64_t  Encrypted.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyEncrypted_read(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -782,10 +836,10 @@ uint64_t  Encrypted.write(char * buffer, unsigned long int length);
 static PyObject *pyEncrypted_write(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -793,7 +847,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no lon
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -871,7 +925,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -942,7 +996,7 @@ static PyTypeObject Encrypted_Type = {
     0,                         /* tp_setattro */
     0,                         /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
-    "Encrypted: ",     /* tp_doc */
+    "Encrypted: \n   Encryption is handled via two components, the encrypted stream and\n   the cipher. An encrypted stream is an FileLikeObject with the\n   following AFF4 attributes:\n\n   AFF4_CHUNK_SIZE = Data will be broken into these chunks and\n                     encrypted independantly.\n\n   AFF4_STORED     = Data will be stored on this backing stream.\n\n   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher\n                     class. More on that below.\n\n   When opened, the FileLikeObject is created by instantiating a\n   cipher from the AFF4_CIPHER attribute. Data is then divided into\n   chunks and each chunk is encrypted using the cipher, and then\n   written to the backing stream.\n\n   A cipher is a class which extends the AFF4Cipher baseclass.\n\n   Of course a valid cipher must also implement valid serialization\n   methods and also some way of key initialization. Chunks must be\n   whole multiples of blocksize.\n",     /* tp_doc */
     0,	                       /* tp_traverse */
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
@@ -987,11 +1041,11 @@ MapDriver_dealloc(pyMapDriver *self) {
 };
 
 static int pyMapDriver_init(pyMapDriver *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -1059,7 +1113,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -1072,9 +1126,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -1083,7 +1137,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -1106,7 +1160,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -1119,9 +1173,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -1130,7 +1184,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -1164,7 +1218,7 @@ if(!strcmp(name, "number_of_points")) {
 };
 if(!strcmp(name, "target_period")) {
     PyObject *py_result;
-    pyXSDInteger *target_period;
+    Gen_wrapper *target_period;
 
 
     {
@@ -1177,9 +1231,9 @@ if(!strcmp(name, "target_period")) {
          goto error;
        };
 
-       target_period = (pyXSDInteger *)new_class_wrapper(returned_object);
-       target_period->base = (XSDInteger)returned_object;
-}
+       target_period = new_class_wrapper(returned_object);
+       if(!target_period) goto error;
+    }
 talloc_increase_ref_count(target_period->base);
 
     py_result = (PyObject *)target_period;
@@ -1188,7 +1242,7 @@ talloc_increase_ref_count(target_period->base);
 };
 if(!strcmp(name, "image_period")) {
     PyObject *py_result;
-    pyXSDInteger *image_period;
+    Gen_wrapper *image_period;
 
 
     {
@@ -1201,9 +1255,9 @@ if(!strcmp(name, "image_period")) {
          goto error;
        };
 
-       image_period = (pyXSDInteger *)new_class_wrapper(returned_object);
-       image_period->base = (XSDInteger)returned_object;
-}
+       image_period = new_class_wrapper(returned_object);
+       if(!image_period) goto error;
+    }
 talloc_increase_ref_count(image_period->base);
 
     py_result = (PyObject *)image_period;
@@ -1212,7 +1266,7 @@ talloc_increase_ref_count(image_period->base);
 };
 if(!strcmp(name, "blocksize")) {
     PyObject *py_result;
-    pyXSDInteger *blocksize;
+    Gen_wrapper *blocksize;
 
 
     {
@@ -1225,9 +1279,9 @@ if(!strcmp(name, "blocksize")) {
          goto error;
        };
 
-       blocksize = (pyXSDInteger *)new_class_wrapper(returned_object);
-       blocksize->base = (XSDInteger)returned_object;
-}
+       blocksize = new_class_wrapper(returned_object);
+       if(!blocksize) goto error;
+    }
 talloc_increase_ref_count(blocksize->base);
 
     py_result = (PyObject *)blocksize;
@@ -1236,7 +1290,7 @@ talloc_increase_ref_count(blocksize->base);
 };
 if(!strcmp(name, "stored")) {
     PyObject *py_result;
-    pyRDFURN *stored;
+    Gen_wrapper *stored;
 
 
     {
@@ -1249,9 +1303,9 @@ if(!strcmp(name, "stored")) {
          goto error;
        };
 
-       stored = (pyRDFURN *)new_class_wrapper(returned_object);
-       stored->base = (RDFURN)returned_object;
-}
+       stored = new_class_wrapper(returned_object);
+       if(!stored) goto error;
+    }
 talloc_increase_ref_count(stored->base);
 
     py_result = (PyObject *)stored;
@@ -1260,7 +1314,7 @@ talloc_increase_ref_count(stored->base);
 };
 if(!strcmp(name, "map_urn")) {
     PyObject *py_result;
-    pyRDFURN *map_urn;
+    Gen_wrapper *map_urn;
 
 
     {
@@ -1273,9 +1327,9 @@ if(!strcmp(name, "map_urn")) {
          goto error;
        };
 
-       map_urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       map_urn->base = (RDFURN)returned_object;
-}
+       map_urn = new_class_wrapper(returned_object);
+       if(!map_urn) goto error;
+    }
 talloc_increase_ref_count(map_urn->base);
 
     py_result = (PyObject *)map_urn;
@@ -1298,10 +1352,10 @@ void * MapDriver.set_property(char * attribute ,RDFValue value );
 static PyObject *pyMapDriver_set_property(pyMapDriver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1332,7 +1386,7 @@ AFFObject MapDriver.finish();
 
 static PyObject *pyMapDriver_finish(pyMapDriver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "MapDriver object no longer valid");
 // Precall preparations
@@ -1348,9 +1402,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "MapDriver object no lon
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -1380,7 +1434,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1412,21 +1466,21 @@ uint64_t  MapDriver.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyMapDriver_read(pyMapDriver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "MapDriver object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -1454,10 +1508,10 @@ uint64_t  MapDriver.write(char * buffer, unsigned long int length);
 static PyObject *pyMapDriver_write(pyMapDriver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1465,7 +1519,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "MapDriver object no lon
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -1543,7 +1597,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1602,7 +1656,7 @@ static PyObject *pyMapDriver_del(pyMapDriver *self, PyObject *args, PyObject *kw
 uint64_t  target_pos;
 static char *kwlist[] = {"target_pos", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &target_pos))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &target_pos))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1638,7 +1692,7 @@ uint64_t  target_offset;
 char * target;
 static char *kwlist[] = {"image_offset","target_offset","target", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KKs", kwlist, &image_offset,&target_offset,&target))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KKs|", kwlist, &image_offset,&target_offset,&target))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1724,6 +1778,428 @@ static PyTypeObject MapDriver_Type = {
     0,                         /* tp_descr_set */
     0,                         /* tp_dictoffset */
     (initproc)pyMapDriver_init,      /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
+static PyMethodDef AES256Password_methods[] = {
+     {"parse",(PyCFunction)pyAES256Password_parse, METH_VARARGS|METH_KEYWORDS, "uint64_t  AES256Password.parse(char * serialised_form );\n\n\n"},
+     {"encode",(PyCFunction)pyAES256Password_encode, METH_VARARGS|METH_KEYWORDS, "TDB_DATA * AES256Password.encode();\n\n\n"},
+     {"decode",(PyCFunction)pyAES256Password_decode, METH_VARARGS|METH_KEYWORDS, "uint64_t  AES256Password.decode(char * data, int length);\n\n\n"},
+     {"serialise",(PyCFunction)pyAES256Password_serialise, METH_VARARGS|METH_KEYWORDS, "char * AES256Password.serialise();\n\n\n"},
+     {"encrypt",(PyCFunction)pyAES256Password_encrypt, METH_VARARGS|METH_KEYWORDS, "uint64_t  AES256Password.encrypt(unsigned char * inbuff, int inlen,OUT unsigned char * outbuf, int outlen,uint64_t  chunk_number );\n\n\n"},
+     {"decrypt",(PyCFunction)pyAES256Password_decrypt, METH_VARARGS|METH_KEYWORDS, "uint64_t  AES256Password.decrypt(unsigned char * inbuff, int inlen,OUT unsigned char * outbuf, int outlen,uint64_t  chunk_number );\n\n\n"},
+     {"set",(PyCFunction)pyAES256Password_set, METH_VARARGS|METH_KEYWORDS, "RDFValue AES256Password.set(char * passphrase );\n\n\n Set the password for this object. Should only be called once\n before using.\n"},
+     {"fetch_password_cb",(PyCFunction)pyAES256Password_fetch_password_cb, METH_VARARGS|METH_KEYWORDS, "uint64_t  AES256Password.fetch_password_cb();\n\n\n This callback can be overridden to fetch password to decode the\n IV from. By default, we look in the AFF4_VOLATILE_PASSPHRASE\n environment variable.\n"},
+     {NULL}  /* Sentinel */
+};
+static void
+AES256Password_dealloc(pyAES256Password *self) {
+
+    if(self->base) {
+        talloc_free(self->base);
+        self->base=NULL;
+    };
+
+};
+
+static int pyAES256Password_init(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+
+self->base = CONSTRUCT(AES256Password, RDFValue, Con, NULL);
+  if(!self->base) {
+    PyErr_Format(PyExc_IOError, "Unable to construct class AES256Password");
+    goto error;
+  };
+  return 0;
+error:
+    return -1;
+};
+
+
+static PyObject *AES256Password_getattr(pyAES256Password *self, PyObject *pyname) {
+  char *name = PyString_AsString(pyname);
+
+  if(!name) return NULL;
+if(!strcmp(name, "__members__")) {
+     PyObject *result = PyList_New(0);
+     PyObject *tmp;
+     PyMethodDef *i;
+
+     if(!result) goto error;
+ tmp = PyString_FromString("dataType");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("id");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("blocksize");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+
+
+    for(i=AES256Password_methods; i->ml_name; i++) {
+     tmp = PyString_FromString(i->ml_name);
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+    }; 
+     return result; 
+   }
+
+if(!strcmp(name, "dataType")) {
+    PyObject *py_result;
+    char * dataType;
+
+
+    dataType = (((RDFValue)self->base)->dataType);
+
+    py_result = PyString_FromStringAndSize((char *)dataType, strlen(dataType));
+
+    return py_result;
+};
+if(!strcmp(name, "id")) {
+    PyObject *py_result;
+    uint64_t  id;
+
+
+    id = (((RDFValue)self->base)->id);
+
+    py_result = PyLong_FromLong(id);
+
+    return py_result;
+};
+if(!strcmp(name, "blocksize")) {
+    PyObject *py_result;
+    uint64_t  blocksize;
+
+
+    blocksize = (((AFF4Cipher)self->base)->blocksize);
+
+    py_result = PyLong_FromLong(blocksize);
+
+    return py_result;
+};
+
+  // Hand it off to the python native handler
+  return PyObject_GenericGetAttr((PyObject *)self, pyname);
+error:
+return NULL;
+}
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  AES256Password.parse(char * serialised_form );
+********************************************************/
+
+static PyObject *pyAES256Password_parse(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char * serialised_form;
+static char *kwlist[] = {"serialised_form", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((RDFValue)self->base)->parse(((RDFValue)self->base), serialised_form);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+TDB_DATA * AES256Password.encode();
+********************************************************/
+
+static PyObject *pyAES256Password_encode(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+TDB_DATA * func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((RDFValue)self->base)->encode(((RDFValue)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyString_FromStringAndSize((char *)func_return->dptr, func_return->dsize);
+talloc_free(func_return);returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  AES256Password.decode(char * data, int length);
+********************************************************/
+
+static PyObject *pyAES256Password_decode(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *data=""; Py_ssize_t length=strlen("");
+static char *kwlist[] = {"data", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+char * AES256Password.serialise();
+********************************************************/
+
+static PyObject *pyAES256Password_serialise(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+char * func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((RDFValue)self->base)->serialise(((RDFValue)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyString_FromStringAndSize((char *)func_return, strlen(func_return));
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  AES256Password.encrypt(unsigned char * inbuff, int inlen,OUT unsigned char * outbuf, int outlen,uint64_t  chunk_number );
+********************************************************/
+
+static PyObject *pyAES256Password_encrypt(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *inbuff=""; Py_ssize_t inlen=strlen("");
+char *outbuf=""; Py_ssize_t outlen=strlen("");
+PyObject *tmp_outbuf;
+uint64_t  chunk_number;
+static char *kwlist[] = {"inbuff","outlen","chunk_number", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#lK|", kwlist, &inbuff, &inlen,&outlen,&chunk_number))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+tmp_outbuf = PyString_FromStringAndSize(NULL, outlen);
+PyString_AsStringAndSize(tmp_outbuf, &outbuf, (Py_ssize_t *)&outlen);
+
+// Make the call
+func_return = ((AFF4Cipher)self->base)->encrypt(((AFF4Cipher)self->base), (unsigned char *)inbuff, (int)inlen, (OUT unsigned char *)outbuf, (int)outlen, chunk_number);
+
+// Postcall preparations
+
+// prepare results
+returned_result = PyList_New(0);
+py_result = PyLong_FromLong(func_return);
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+ _PyString_Resize(&tmp_outbuf, func_return); 
+py_result = tmp_outbuf;
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  AES256Password.decrypt(unsigned char * inbuff, int inlen,OUT unsigned char * outbuf, int outlen,uint64_t  chunk_number );
+********************************************************/
+
+static PyObject *pyAES256Password_decrypt(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *inbuff=""; Py_ssize_t inlen=strlen("");
+char *outbuf=""; Py_ssize_t outlen=strlen("");
+PyObject *tmp_outbuf;
+uint64_t  chunk_number;
+static char *kwlist[] = {"inbuff","outlen","chunk_number", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#lK|", kwlist, &inbuff, &inlen,&outlen,&chunk_number))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+tmp_outbuf = PyString_FromStringAndSize(NULL, outlen);
+PyString_AsStringAndSize(tmp_outbuf, &outbuf, (Py_ssize_t *)&outlen);
+
+// Make the call
+func_return = ((AFF4Cipher)self->base)->decrypt(((AFF4Cipher)self->base), (unsigned char *)inbuff, (int)inlen, (OUT unsigned char *)outbuf, (int)outlen, chunk_number);
+
+// Postcall preparations
+
+// prepare results
+returned_result = PyList_New(0);
+py_result = PyLong_FromLong(func_return);
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+ _PyString_Resize(&tmp_outbuf, func_return); 
+py_result = tmp_outbuf;
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+RDFValue AES256Password.set(char * passphrase );
+********************************************************/
+
+static PyObject *pyAES256Password_set(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+Gen_wrapper *func_return;
+char * passphrase;
+static char *kwlist[] = {"passphrase", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &passphrase))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+{
+       Object returned_object = (Object)((AES256Password)self->base)->set(((AES256Password)self->base), passphrase);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFValue: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
+talloc_increase_ref_count(func_return->base);
+
+// Postcall preparations
+
+// prepare results
+py_result = (PyObject *)func_return;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  AES256Password.fetch_password_cb();
+********************************************************/
+
+static PyObject *pyAES256Password_fetch_password_cb(pyAES256Password *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AES256Password object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((AES256Password)self->base)->fetch_password_cb(((AES256Password)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+static PyTypeObject AES256Password_Type = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /* ob_size */
+    "pyaff4.AES256Password",               /* tp_name */
+    sizeof(pyAES256Password),            /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)AES256Password_dealloc,/* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_compare */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    (getattrofunc)AES256Password_getattr,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
+    "AES256Password:  This cipher uses AES256. The session key is derived from a\n    password using the PBKDF2 algorithm.\n",     /* tp_doc */
+    0,	                       /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    AES256Password_methods,            /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)pyAES256Password_init,      /* tp_init */
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
@@ -1849,7 +2325,7 @@ uint64_t  func_return;
 char * serialised_form;
 static char *kwlist[] = {"serialised_form", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &serialised_form))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1906,10 +2382,10 @@ uint64_t  XSDString.decode(char * data, int length);
 static PyObject *pyXSDString_decode(pyXSDString *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * data; int length;
+char *data=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"data", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &data, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1917,7 +2393,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDString object no lon
 // Precall preparations
 
 // Make the call
-func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), data, length);
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
 
 // Postcall preparations
 
@@ -1965,11 +2441,11 @@ RDFValue XSDString.set(char * string, int length);
 
 static PyObject *pyXSDString_set(pyXSDString *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFValue *func_return;
-char * string; int length;
+Gen_wrapper *func_return;
+char *string=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"string", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &string, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &string, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -1978,7 +2454,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDString object no lon
 
 // Make the call
 {
-       Object returned_object = (Object)((XSDString)self->base)->set(((XSDString)self->base), string, length);
+       Object returned_object = (Object)((XSDString)self->base)->set(((XSDString)self->base), (char *)string, (int)length);
 
        if(!returned_object) {
          PyErr_Format(PyExc_RuntimeError,
@@ -1987,9 +2463,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDString object no lon
          goto error;
        };
 
-       func_return = (pyRDFValue *)new_class_wrapper(returned_object);
-       func_return->base = (RDFValue)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 talloc_increase_ref_count(func_return->base);
 
 // Postcall preparations
@@ -2088,11 +2564,11 @@ AFFObject_dealloc(pyAFFObject *self) {
 };
 
 static int pyAFFObject_init(pyAFFObject *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -2140,7 +2616,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -2153,9 +2629,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -2164,7 +2640,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -2190,10 +2666,10 @@ void * AFFObject.set_property(char * attribute ,RDFValue value );
 static PyObject *pyAFFObject_set_property(pyAFFObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -2224,7 +2700,7 @@ AFFObject AFFObject.finish();
 
 static PyObject *pyAFFObject_finish(pyAFFObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AFFObject object no longer valid");
 // Precall preparations
@@ -2240,9 +2716,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "AFFObject object no lon
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -2324,11 +2800,11 @@ Image_dealloc(pyImage *self) {
 };
 
 static int pyImage_init(pyImage *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -2377,6 +2853,8 @@ if(!strcmp(name, "__members__")) {
     PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("bevy_urn");
     PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("current");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("chunk_size");
     PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("compression");
@@ -2398,7 +2876,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -2411,9 +2889,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -2422,7 +2900,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -2445,7 +2923,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -2458,9 +2936,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -2469,7 +2947,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -2492,7 +2970,7 @@ if(!strcmp(name, "data")) {
 };
 if(!strcmp(name, "stored")) {
     PyObject *py_result;
-    pyRDFURN *stored;
+    Gen_wrapper *stored;
 
 
     {
@@ -2505,9 +2983,9 @@ if(!strcmp(name, "stored")) {
          goto error;
        };
 
-       stored = (pyRDFURN *)new_class_wrapper(returned_object);
-       stored->base = (RDFURN)returned_object;
-}
+       stored = new_class_wrapper(returned_object);
+       if(!stored) goto error;
+    }
 talloc_increase_ref_count(stored->base);
 
     py_result = (PyObject *)stored;
@@ -2516,7 +2994,7 @@ talloc_increase_ref_count(stored->base);
 };
 if(!strcmp(name, "bevy_urn")) {
     PyObject *py_result;
-    pyRDFURN *bevy_urn;
+    Gen_wrapper *bevy_urn;
 
 
     {
@@ -2529,18 +3007,42 @@ if(!strcmp(name, "bevy_urn")) {
          goto error;
        };
 
-       bevy_urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       bevy_urn->base = (RDFURN)returned_object;
-}
+       bevy_urn = new_class_wrapper(returned_object);
+       if(!bevy_urn) goto error;
+    }
 talloc_increase_ref_count(bevy_urn->base);
 
     py_result = (PyObject *)bevy_urn;
 
     return py_result;
 };
+if(!strcmp(name, "current")) {
+    PyObject *py_result;
+    Gen_wrapper *current;
+
+
+    {
+       Object returned_object = (Object)(((Image)self->base)->current);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object ImageWorker: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       current = new_class_wrapper(returned_object);
+       if(!current) goto error;
+    }
+talloc_increase_ref_count(current->base);
+
+    py_result = (PyObject *)current;
+
+    return py_result;
+};
 if(!strcmp(name, "chunk_size")) {
     PyObject *py_result;
-    pyXSDInteger *chunk_size;
+    Gen_wrapper *chunk_size;
 
 
     {
@@ -2553,9 +3055,9 @@ if(!strcmp(name, "chunk_size")) {
          goto error;
        };
 
-       chunk_size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       chunk_size->base = (XSDInteger)returned_object;
-}
+       chunk_size = new_class_wrapper(returned_object);
+       if(!chunk_size) goto error;
+    }
 talloc_increase_ref_count(chunk_size->base);
 
     py_result = (PyObject *)chunk_size;
@@ -2564,7 +3066,7 @@ talloc_increase_ref_count(chunk_size->base);
 };
 if(!strcmp(name, "compression")) {
     PyObject *py_result;
-    pyXSDInteger *compression;
+    Gen_wrapper *compression;
 
 
     {
@@ -2577,9 +3079,9 @@ if(!strcmp(name, "compression")) {
          goto error;
        };
 
-       compression = (pyXSDInteger *)new_class_wrapper(returned_object);
-       compression->base = (XSDInteger)returned_object;
-}
+       compression = new_class_wrapper(returned_object);
+       if(!compression) goto error;
+    }
 talloc_increase_ref_count(compression->base);
 
     py_result = (PyObject *)compression;
@@ -2588,7 +3090,7 @@ talloc_increase_ref_count(compression->base);
 };
 if(!strcmp(name, "chunks_in_segment")) {
     PyObject *py_result;
-    pyXSDInteger *chunks_in_segment;
+    Gen_wrapper *chunks_in_segment;
 
 
     {
@@ -2601,9 +3103,9 @@ if(!strcmp(name, "chunks_in_segment")) {
          goto error;
        };
 
-       chunks_in_segment = (pyXSDInteger *)new_class_wrapper(returned_object);
-       chunks_in_segment->base = (XSDInteger)returned_object;
-}
+       chunks_in_segment = new_class_wrapper(returned_object);
+       if(!chunks_in_segment) goto error;
+    }
 talloc_increase_ref_count(chunks_in_segment->base);
 
     py_result = (PyObject *)chunks_in_segment;
@@ -2648,10 +3150,10 @@ void * Image.set_property(char * attribute ,RDFValue value );
 static PyObject *pyImage_set_property(pyImage *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -2682,7 +3184,7 @@ AFFObject Image.finish();
 
 static PyObject *pyImage_finish(pyImage *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Image object no longer valid");
 // Precall preparations
@@ -2698,9 +3200,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Image object no longer 
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -2730,7 +3232,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -2762,21 +3264,21 @@ uint64_t  Image.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyImage_read(pyImage *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Image object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -2804,10 +3306,10 @@ uint64_t  Image.write(char * buffer, unsigned long int length);
 static PyObject *pyImage_write(pyImage *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -2815,7 +3317,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Image object no longer 
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -2893,7 +3395,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3007,11 +3509,11 @@ HTTPObject_dealloc(pyHTTPObject *self) {
 };
 
 static int pyHTTPObject_init(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -3069,7 +3571,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -3082,9 +3584,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -3093,7 +3595,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -3116,7 +3618,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -3129,9 +3631,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -3140,7 +3642,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -3188,10 +3690,10 @@ void * HTTPObject.set_property(char * attribute ,RDFValue value );
 static PyObject *pyHTTPObject_set_property(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3222,7 +3724,7 @@ AFFObject HTTPObject.finish();
 
 static PyObject *pyHTTPObject_finish(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
 // Precall preparations
@@ -3238,9 +3740,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no lo
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -3270,7 +3772,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3302,21 +3804,21 @@ uint64_t  HTTPObject.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyHTTPObject_read(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -3344,10 +3846,10 @@ uint64_t  HTTPObject.write(char * buffer, unsigned long int length);
 static PyObject *pyHTTPObject_write(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3355,7 +3857,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no lo
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -3433,7 +3935,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3489,11 +3991,11 @@ HTTPObject HTTPObject.Con(char * url );
 
 static PyObject *pyHTTPObject_Con(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyHTTPObject *func_return;
+Gen_wrapper *func_return;
 char * url;
 static char *kwlist[] = {"url", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &url))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &url))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -3511,9 +4013,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no lo
          goto error;
        };
 
-       func_return = (pyHTTPObject *)new_class_wrapper(returned_object);
-       func_return->base = (HTTPObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -3574,10 +4076,10 @@ static PyMethodDef ZipFile_methods[] = {
      {"set_property",(PyCFunction)pyZipFile_set_property, METH_VARARGS|METH_KEYWORDS, "void * ZipFile.set_property(char * attribute ,RDFValue value );\n\n\n"},
      {"finish",(PyCFunction)pyZipFile_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject ZipFile.finish();\n\n\n"},
      {"Con",(PyCFunction)pyZipFile_Con, METH_VARARGS|METH_KEYWORDS, "ZipFile ZipFile.Con(char * file_urn ,uint64_t  mode );\n\n\n A zip file is opened on a file like object "},
-     {"open_member",(PyCFunction)pyZipFile_open_member, METH_VARARGS|METH_KEYWORDS, "FileLikeObject ZipFile.open_member(char * filename ,uint64_t  mode, uint16_t compression);\n\n\n This method opens an existing member or creates a new one. We\n return a file like object which may be used to read and write the\n member. If we open a member for writing the zip file will be locked\n (so another attempt to open a new member for writing will raise,\n until this member is promptly closed). The ZipFile must have been\n called with create_new_volume or append_volume before.\n"},
+     {"open_member",(PyCFunction)pyZipFile_open_member, METH_VARARGS|METH_KEYWORDS, "FileLikeObject ZipFile.open_member(char * filename ,uint64_t  mode ,uint64_t  compression );\n\n\n This method opens an existing member or creates a new one. We\n return a file like object which may be used to read and write the\n member. If we open a member for writing the zip file will be locked\n (so another attempt to open a new member for writing will raise,\n until this member is promptly closed). The ZipFile must have been\n called with create_new_volume or append_volume before.\n\n DEFAULT(mode) = \"r\"\n DEFAULT(compression) = ZIP_DEFLATE\n"},
      {"close",(PyCFunction)pyZipFile_close, METH_VARARGS|METH_KEYWORDS, "void * ZipFile.close();\n\n\n This method flushes the central directory and finalises the\n file. The file may still be accessed for reading after this.\n"},
-     {"writestr",(PyCFunction)pyZipFile_writestr, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFile.writestr(char * filename ,char * data, int len,uint64_t  compression );\n\n\n A convenience function for storing a string as a new file (it\n basically calls open_member, writes the string then closes it).\n"},
-     {"load_from",(PyCFunction)pyZipFile_load_from, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFile.load_from(RDFURN fd_urn ,uint64_t  mode );\n\n\n"},
+     {"writestr",(PyCFunction)pyZipFile_writestr, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFile.writestr(char * filename ,char * data, int len,uint64_t  compression );\n\n\n A convenience function for storing a string as a new file (it\n basically calls open_member, writes the string then closes it).\n\n DEFAULT(compression) = ZIP_DEFLATE\n"},
+     {"load_from",(PyCFunction)pyZipFile_load_from, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFile.load_from(RDFURN fd_urn ,uint64_t  mode );\n\n\n Load an AFF4 volume from the URN specified. We parse all the RDF\n     serializations.\n\n     DEFAULT(mode) = \"r\"\n  "},
      {NULL}  /* Sentinel */
 };
 static void
@@ -3591,11 +4093,11 @@ ZipFile_dealloc(pyZipFile *self) {
 };
 
 static int pyZipFile_init(pyZipFile *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -3671,7 +4173,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -3684,9 +4186,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -3695,7 +4197,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -3751,7 +4253,7 @@ if(!strcmp(name, "offset_of_member_header")) {
 };
 if(!strcmp(name, "directory_offset")) {
     PyObject *py_result;
-    pyXSDInteger *directory_offset;
+    Gen_wrapper *directory_offset;
 
 
     {
@@ -3764,9 +4266,9 @@ if(!strcmp(name, "directory_offset")) {
          goto error;
        };
 
-       directory_offset = (pyXSDInteger *)new_class_wrapper(returned_object);
-       directory_offset->base = (XSDInteger)returned_object;
-}
+       directory_offset = new_class_wrapper(returned_object);
+       if(!directory_offset) goto error;
+    }
 talloc_increase_ref_count(directory_offset->base);
 
     py_result = (PyObject *)directory_offset;
@@ -3775,7 +4277,7 @@ talloc_increase_ref_count(directory_offset->base);
 };
 if(!strcmp(name, "storage_urn")) {
     PyObject *py_result;
-    pyRDFURN *storage_urn;
+    Gen_wrapper *storage_urn;
 
 
     {
@@ -3788,9 +4290,9 @@ if(!strcmp(name, "storage_urn")) {
          goto error;
        };
 
-       storage_urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       storage_urn->base = (RDFURN)returned_object;
-}
+       storage_urn = new_class_wrapper(returned_object);
+       if(!storage_urn) goto error;
+    }
 talloc_increase_ref_count(storage_urn->base);
 
     py_result = (PyObject *)storage_urn;
@@ -3799,7 +4301,7 @@ talloc_increase_ref_count(storage_urn->base);
 };
 if(!strcmp(name, "_didModify")) {
     PyObject *py_result;
-    pyXSDInteger *_didModify;
+    Gen_wrapper *_didModify;
 
 
     {
@@ -3812,9 +4314,9 @@ if(!strcmp(name, "_didModify")) {
          goto error;
        };
 
-       _didModify = (pyXSDInteger *)new_class_wrapper(returned_object);
-       _didModify->base = (XSDInteger)returned_object;
-}
+       _didModify = new_class_wrapper(returned_object);
+       if(!_didModify) goto error;
+    }
 talloc_increase_ref_count(_didModify->base);
 
     py_result = (PyObject *)_didModify;
@@ -3823,7 +4325,7 @@ talloc_increase_ref_count(_didModify->base);
 };
 if(!strcmp(name, "type")) {
     PyObject *py_result;
-    pyXSDInteger *type;
+    Gen_wrapper *type;
 
 
     {
@@ -3836,9 +4338,9 @@ if(!strcmp(name, "type")) {
          goto error;
        };
 
-       type = (pyXSDInteger *)new_class_wrapper(returned_object);
-       type->base = (XSDInteger)returned_object;
-}
+       type = new_class_wrapper(returned_object);
+       if(!type) goto error;
+    }
 talloc_increase_ref_count(type->base);
 
     py_result = (PyObject *)type;
@@ -3847,7 +4349,7 @@ talloc_increase_ref_count(type->base);
 };
 if(!strcmp(name, "epoch_time")) {
     PyObject *py_result;
-    pyXSDInteger *epoch_time;
+    Gen_wrapper *epoch_time;
 
 
     {
@@ -3860,9 +4362,9 @@ if(!strcmp(name, "epoch_time")) {
          goto error;
        };
 
-       epoch_time = (pyXSDInteger *)new_class_wrapper(returned_object);
-       epoch_time->base = (XSDInteger)returned_object;
-}
+       epoch_time = new_class_wrapper(returned_object);
+       if(!epoch_time) goto error;
+    }
 talloc_increase_ref_count(epoch_time->base);
 
     py_result = (PyObject *)epoch_time;
@@ -3871,7 +4373,7 @@ talloc_increase_ref_count(epoch_time->base);
 };
 if(!strcmp(name, "compression_method")) {
     PyObject *py_result;
-    pyXSDInteger *compression_method;
+    Gen_wrapper *compression_method;
 
 
     {
@@ -3884,9 +4386,9 @@ if(!strcmp(name, "compression_method")) {
          goto error;
        };
 
-       compression_method = (pyXSDInteger *)new_class_wrapper(returned_object);
-       compression_method->base = (XSDInteger)returned_object;
-}
+       compression_method = new_class_wrapper(returned_object);
+       if(!compression_method) goto error;
+    }
 talloc_increase_ref_count(compression_method->base);
 
     py_result = (PyObject *)compression_method;
@@ -3895,7 +4397,7 @@ talloc_increase_ref_count(compression_method->base);
 };
 if(!strcmp(name, "crc")) {
     PyObject *py_result;
-    pyXSDInteger *crc;
+    Gen_wrapper *crc;
 
 
     {
@@ -3908,9 +4410,9 @@ if(!strcmp(name, "crc")) {
          goto error;
        };
 
-       crc = (pyXSDInteger *)new_class_wrapper(returned_object);
-       crc->base = (XSDInteger)returned_object;
-}
+       crc = new_class_wrapper(returned_object);
+       if(!crc) goto error;
+    }
 talloc_increase_ref_count(crc->base);
 
     py_result = (PyObject *)crc;
@@ -3919,7 +4421,7 @@ talloc_increase_ref_count(crc->base);
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -3932,9 +4434,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -3943,7 +4445,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "compressed_size")) {
     PyObject *py_result;
-    pyXSDInteger *compressed_size;
+    Gen_wrapper *compressed_size;
 
 
     {
@@ -3956,9 +4458,9 @@ if(!strcmp(name, "compressed_size")) {
          goto error;
        };
 
-       compressed_size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       compressed_size->base = (XSDInteger)returned_object;
-}
+       compressed_size = new_class_wrapper(returned_object);
+       if(!compressed_size) goto error;
+    }
 talloc_increase_ref_count(compressed_size->base);
 
     py_result = (PyObject *)compressed_size;
@@ -3967,7 +4469,7 @@ talloc_increase_ref_count(compressed_size->base);
 };
 if(!strcmp(name, "header_offset")) {
     PyObject *py_result;
-    pyXSDInteger *header_offset;
+    Gen_wrapper *header_offset;
 
 
     {
@@ -3980,9 +4482,9 @@ if(!strcmp(name, "header_offset")) {
          goto error;
        };
 
-       header_offset = (pyXSDInteger *)new_class_wrapper(returned_object);
-       header_offset->base = (XSDInteger)returned_object;
-}
+       header_offset = new_class_wrapper(returned_object);
+       if(!header_offset) goto error;
+    }
 talloc_increase_ref_count(header_offset->base);
 
     py_result = (PyObject *)header_offset;
@@ -4005,10 +4507,10 @@ void * ZipFile.set_property(char * attribute ,RDFValue value );
 static PyObject *pyZipFile_set_property(pyZipFile *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4039,7 +4541,7 @@ AFFObject ZipFile.finish();
 
 static PyObject *pyZipFile_finish(pyZipFile *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFile object no longer valid");
 // Precall preparations
@@ -4055,9 +4557,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFile object no longe
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -4082,12 +4584,12 @@ ZipFile ZipFile.Con(char * file_urn ,uint64_t  mode );
 
 static PyObject *pyZipFile_Con(pyZipFile *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyZipFile *func_return;
+Gen_wrapper *func_return;
 char * file_urn;
-char mode; char *str_mode;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"file_urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss", kwlist, &file_urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss|", kwlist, &file_urn,&str_mode))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4113,9 +4615,9 @@ mode = str_mode[0];
          goto error;
        };
 
-       func_return = (pyZipFile *)new_class_wrapper(returned_object);
-       func_return->base = (ZipFile)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -4133,22 +4635,31 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-FileLikeObject ZipFile.open_member(char * filename ,uint64_t  mode, uint16_t compression);
+FileLikeObject ZipFile.open_member(char * filename ,uint64_t  mode ,uint64_t  compression );
 ********************************************************/
 
 static PyObject *pyZipFile_open_member(pyZipFile *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyFileLikeObject *func_return;
+Gen_wrapper *func_return;
 char * filename;
-uint64_t  mode; uint16_t compression;
-static char *kwlist[] = {"filename","mode", NULL};
+char mode=0; char *str_mode = "r";
+uint64_t  compression=ZIP_DEFLATE;
+static char *kwlist[] = {"filename","mode","compression", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss#", kwlist, &filename,&mode, &compression))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|sK", kwlist, &filename,&str_mode,&compression))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFile object no longer valid");
 // Precall preparations
+
+if(strlen(str_mode)!=1) {
+  PyErr_Format(PyExc_RuntimeError,
+          "You must only provide a single character for arg 'mode'");
+  goto error;
+};
+
+mode = str_mode[0];
 
 // Make the call
 {
@@ -4161,9 +4672,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFile object no longe
          goto error;
        };
 
-       func_return = (pyFileLikeObject *)new_class_wrapper(returned_object);
-       func_return->base = (FileLikeObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -4213,11 +4724,11 @@ static PyObject *pyZipFile_writestr(pyZipFile *self, PyObject *args, PyObject *k
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 char * filename;
-char * data; int len;
-uint64_t  compression;
+char *data=""; Py_ssize_t len=strlen("");
+uint64_t  compression=ZIP_DEFLATE;
 static char *kwlist[] = {"filename","data","compression", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss#K", kwlist, &filename,&data, &len,&compression))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss#|K", kwlist, &filename,&data, &len,&compression))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4225,7 +4736,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFile object no longe
 // Precall preparations
 
 // Make the call
-func_return = ((ZipFile)self->base)->writestr(((ZipFile)self->base), filename, data, len, compression);
+func_return = ((ZipFile)self->base)->writestr(((ZipFile)self->base), filename, (char *)data, (int)len, compression);
 
 // Postcall preparations
 
@@ -4249,11 +4760,11 @@ uint64_t  ZipFile.load_from(RDFURN fd_urn ,uint64_t  mode );
 static PyObject *pyZipFile_load_from(pyZipFile *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-pyRDFURN *fd_urn;
-char mode; char *str_mode;
+Gen_wrapper *fd_urn;
+char mode=0; char *str_mode = "r";
 static char *kwlist[] = {"fd_urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &fd_urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|s", kwlist, &fd_urn,&str_mode))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4448,7 +4959,7 @@ uint64_t  func_return;
 char * serialised_form;
 static char *kwlist[] = {"serialised_form", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &serialised_form))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4505,10 +5016,10 @@ uint64_t  XSDDatetime.decode(char * data, int length);
 static PyObject *pyXSDDatetime_decode(pyXSDDatetime *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * data; int length;
+char *data=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"data", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &data, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4516,7 +5027,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDDatetime object no l
 // Precall preparations
 
 // Make the call
-func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), data, length);
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
 
 // Postcall preparations
 
@@ -4564,11 +5075,11 @@ RDFValue XSDDatetime.set(struct timeval time );
 
 static PyObject *pyXSDDatetime_set(pyXSDDatetime *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFValue *func_return;
+Gen_wrapper *func_return;
 float time_flt; struct timeval time;
 static char *kwlist[] = {"time", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "f", kwlist, &time_flt))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "f|", kwlist, &time_flt))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4587,9 +5098,9 @@ time.tv_sec = (int)time_flt; time.tv_usec = (time_flt - time.tv_sec) * 1e6;
          goto error;
        };
 
-       func_return = (pyRDFValue *)new_class_wrapper(returned_object);
-       func_return->base = (RDFValue)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 talloc_increase_ref_count(func_return->base);
 
 // Postcall preparations
@@ -4666,7 +5177,7 @@ static int pyURLParse_init(pyURLParse *self, PyObject *args, PyObject *kwds) {
 char * url;
 static char *kwlist[] = {"url", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &url))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &url))
  goto error;
 
 
@@ -4771,7 +5282,7 @@ uint64_t  func_return;
 char * url;
 static char *kwlist[] = {"url", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &url))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &url))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -4956,7 +5467,7 @@ uint64_t  func_return;
 char * serialised_form;
 static char *kwlist[] = {"serialised_form", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &serialised_form))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5013,10 +5524,10 @@ uint64_t  RDFValue.decode(char * data, int length);
 static PyObject *pyRDFValue_decode(pyRDFValue *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * data; int length;
+char *data=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"data", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &data, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5024,7 +5535,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "RDFValue object no long
 // Precall preparations
 
 // Make the call
-func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), data, length);
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
 
 // Postcall preparations
 
@@ -5106,10 +5617,778 @@ static PyTypeObject RDFValue_Type = {
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
+static PyMethodDef ZipFileStream_methods[] = {
+     {"set_property",(PyCFunction)pyZipFileStream_set_property, METH_VARARGS|METH_KEYWORDS, "void * ZipFileStream.set_property(char * attribute ,RDFValue value );\n\n\n"},
+     {"finish",(PyCFunction)pyZipFileStream_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject ZipFileStream.finish();\n\n\n"},
+     {"seek",(PyCFunction)pyZipFileStream_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
+     {"read",(PyCFunction)pyZipFileStream_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.read(OUT char * buffer, unsigned long int length);\n\n\n"},
+     {"write",(PyCFunction)pyZipFileStream_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.write(char * buffer, unsigned long int length);\n\n\n"},
+     {"tell",(PyCFunction)pyZipFileStream_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.tell();\n\n\n"},
+     {"get_data",(PyCFunction)pyZipFileStream_get_data, METH_VARARGS|METH_KEYWORDS, "char * ZipFileStream.get_data();\n\n\n"},
+     {"truncate",(PyCFunction)pyZipFileStream_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.truncate(uint64_t  offset );\n\n\n"},
+     {"close",(PyCFunction)pyZipFileStream_close, METH_VARARGS|METH_KEYWORDS, "void * ZipFileStream.close();\n\n\n"},
+     {"Con",(PyCFunction)pyZipFileStream_Con, METH_VARARGS|METH_KEYWORDS, "ZipFileStream ZipFileStream.Con(RDFURN urn ,RDFURN file_urn ,RDFURN container_urn ,uint64_t  mode ,FileLikeObject file_fd );\n\n\n This is the constructor for the file like object. \n\tfile_urn is the storage file for the volume in\n\tcontainer_urn. If the stream is opened for writing the file_fd\n\tmay be passed in. It remains locked until we are closed.\n     "},
+     {NULL}  /* Sentinel */
+};
+static void
+ZipFileStream_dealloc(pyZipFileStream *self) {
+
+    if(self->base) {
+        talloc_free(self->base);
+        self->base=NULL;
+    };
+
+};
+
+static int pyZipFileStream_init(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
+static char *kwlist[] = {"urn","mode", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
+ goto error;
+
+
+if(strlen(str_mode)!=1) {
+  PyErr_Format(PyExc_RuntimeError,
+          "You must only provide a single character for arg 'mode'");
+  goto error;
+};
+
+mode = str_mode[0];
+
+self->base = CONSTRUCT(ZipFileStream, AFFObject, Con, NULL, urn->base, mode);
+  if(!self->base) {
+    PyErr_Format(PyExc_IOError, "Unable to construct class ZipFileStream");
+    goto error;
+  };
+  return 0;
+error:
+    return -1;
+};
+
+
+static PyObject *ZipFileStream_getattr(pyZipFileStream *self, PyObject *pyname) {
+  char *name = PyString_AsString(pyname);
+
+  if(!name) return NULL;
+if(!strcmp(name, "__members__")) {
+     PyObject *result = PyList_New(0);
+     PyObject *tmp;
+     PyMethodDef *i;
+
+     if(!result) goto error;
+ tmp = PyString_FromString("urn");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("mode");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("readptr");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("size");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("mode");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("data");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("file_offset");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("file_urn");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("container_urn");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("file_fd");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("compress_size");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("compression");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("cbuff");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("buff");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+
+
+    for(i=ZipFileStream_methods; i->ml_name; i++) {
+     tmp = PyString_FromString(i->ml_name);
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+    }; 
+     return result; 
+   }
+
+if(!strcmp(name, "urn")) {
+    PyObject *py_result;
+    Gen_wrapper *urn;
+
+
+    {
+       Object returned_object = (Object)(((AFFObject)self->base)->urn);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
+talloc_increase_ref_count(urn->base);
+
+    py_result = (PyObject *)urn;
+
+    return py_result;
+};
+if(!strcmp(name, "mode")) {
+    PyObject *py_result;
+    char mode=0; char *str_mode = "\x0";
+
+
+    mode = (((AFFObject)self->base)->mode);
+
+    str_mode = &mode;
+    py_result = PyString_FromStringAndSize(str_mode, 1);
+
+    return py_result;
+};
+if(!strcmp(name, "readptr")) {
+    PyObject *py_result;
+    uint64_t  readptr;
+
+
+    readptr = (((FileLikeObject)self->base)->readptr);
+
+    py_result = PyLong_FromLong(readptr);
+
+    return py_result;
+};
+if(!strcmp(name, "size")) {
+    PyObject *py_result;
+    Gen_wrapper *size;
+
+
+    {
+       Object returned_object = (Object)(((FileLikeObject)self->base)->size);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
+talloc_increase_ref_count(size->base);
+
+    py_result = (PyObject *)size;
+
+    return py_result;
+};
+if(!strcmp(name, "mode")) {
+    PyObject *py_result;
+    char mode=0; char *str_mode = "\x0";
+
+
+    mode = (((FileLikeObject)self->base)->mode);
+
+    str_mode = &mode;
+    py_result = PyString_FromStringAndSize(str_mode, 1);
+
+    return py_result;
+};
+if(!strcmp(name, "data")) {
+    PyObject *py_result;
+    char * data;
+
+
+    data = (((FileLikeObject)self->base)->data);
+
+    py_result = PyString_FromStringAndSize((char *)data, strlen(data));
+
+    return py_result;
+};
+if(!strcmp(name, "file_offset")) {
+    PyObject *py_result;
+    Gen_wrapper *file_offset;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->file_offset);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       file_offset = new_class_wrapper(returned_object);
+       if(!file_offset) goto error;
+    }
+talloc_increase_ref_count(file_offset->base);
+
+    py_result = (PyObject *)file_offset;
+
+    return py_result;
+};
+if(!strcmp(name, "file_urn")) {
+    PyObject *py_result;
+    Gen_wrapper *file_urn;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->file_urn);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       file_urn = new_class_wrapper(returned_object);
+       if(!file_urn) goto error;
+    }
+talloc_increase_ref_count(file_urn->base);
+
+    py_result = (PyObject *)file_urn;
+
+    return py_result;
+};
+if(!strcmp(name, "container_urn")) {
+    PyObject *py_result;
+    Gen_wrapper *container_urn;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->container_urn);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       container_urn = new_class_wrapper(returned_object);
+       if(!container_urn) goto error;
+    }
+talloc_increase_ref_count(container_urn->base);
+
+    py_result = (PyObject *)container_urn;
+
+    return py_result;
+};
+if(!strcmp(name, "file_fd")) {
+    PyObject *py_result;
+    Gen_wrapper *file_fd;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->file_fd);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object FileLikeObject: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       file_fd = new_class_wrapper(returned_object);
+       if(!file_fd) goto error;
+    }
+talloc_increase_ref_count(file_fd->base);
+
+    py_result = (PyObject *)file_fd;
+
+    return py_result;
+};
+if(!strcmp(name, "compress_size")) {
+    PyObject *py_result;
+    Gen_wrapper *compress_size;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->compress_size);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       compress_size = new_class_wrapper(returned_object);
+       if(!compress_size) goto error;
+    }
+talloc_increase_ref_count(compress_size->base);
+
+    py_result = (PyObject *)compress_size;
+
+    return py_result;
+};
+if(!strcmp(name, "compression")) {
+    PyObject *py_result;
+    Gen_wrapper *compression;
+
+
+    {
+       Object returned_object = (Object)(((ZipFileStream)self->base)->compression);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       compression = new_class_wrapper(returned_object);
+       if(!compression) goto error;
+    }
+talloc_increase_ref_count(compression->base);
+
+    py_result = (PyObject *)compression;
+
+    return py_result;
+};
+if(!strcmp(name, "cbuff")) {
+    PyObject *py_result;
+    char * cbuff;
+
+
+    cbuff = (((ZipFileStream)self->base)->cbuff);
+
+    py_result = PyString_FromStringAndSize((char *)cbuff, strlen(cbuff));
+
+    return py_result;
+};
+if(!strcmp(name, "buff")) {
+    PyObject *py_result;
+    char * buff;
+
+
+    buff = (((ZipFileStream)self->base)->buff);
+
+    py_result = PyString_FromStringAndSize((char *)buff, strlen(buff));
+
+    return py_result;
+};
+
+  // Hand it off to the python native handler
+  return PyObject_GenericGetAttr((PyObject *)self, pyname);
+error:
+return NULL;
+}
+
+
+/********************************************************
+Autogenerated wrapper for function:
+void * ZipFileStream.set_property(char * attribute ,RDFValue value );
+********************************************************/
+
+static PyObject *pyZipFileStream_set_property(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+char * attribute;
+Gen_wrapper *value;
+static char *kwlist[] = {"attribute","value", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+((AFFObject)self->base)->set_property(((AFFObject)self->base), attribute, value->base);
+
+// Postcall preparations
+
+// prepare results
+Py_INCREF(Py_None); py_result = Py_None;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+AFFObject ZipFileStream.finish();
+********************************************************/
+
+static PyObject *pyZipFileStream_finish(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+Gen_wrapper *func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+{
+       Object returned_object = (Object)((AFFObject)self->base)->finish(((AFFObject)self->base));
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object AFFObject: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
+
+// Postcall preparations
+self->base = NULL;
+
+// prepare results
+py_result = (PyObject *)func_return;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    self->base = NULL;
+return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  ZipFileStream.seek(uint64_t  offset ,uint64_t  whence );
+********************************************************/
+
+static PyObject *pyZipFileStream_seek(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+uint64_t  offset;
+uint64_t  whence;
+static char *kwlist[] = {"offset","whence", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->seek(((FileLikeObject)self->base), offset, whence);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  ZipFileStream.read(OUT char * buffer, unsigned long int length);
+********************************************************/
+
+static PyObject *pyZipFileStream_read(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *buffer=""; Py_ssize_t length=strlen("");
+PyObject *tmp_buffer;
+static char *kwlist[] = {"length", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+tmp_buffer = PyString_FromStringAndSize(NULL, length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
+
+// Postcall preparations
+
+// prepare results
+returned_result = PyList_New(0);
+py_result = PyLong_FromLong(func_return);
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+ _PyString_Resize(&tmp_buffer, func_return); 
+py_result = tmp_buffer;
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  ZipFileStream.write(char * buffer, unsigned long int length);
+********************************************************/
+
+static PyObject *pyZipFileStream_write(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *buffer=""; Py_ssize_t length=strlen("");
+static char *kwlist[] = {"buffer", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  ZipFileStream.tell();
+********************************************************/
+
+static PyObject *pyZipFileStream_tell(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->tell(((FileLikeObject)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+char * ZipFileStream.get_data();
+********************************************************/
+
+static PyObject *pyZipFileStream_get_data(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+char * func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->get_data(((FileLikeObject)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyString_FromStringAndSize((char *)func_return, strlen(func_return));
+talloc_free(func_return);
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  ZipFileStream.truncate(uint64_t  offset );
+********************************************************/
+
+static PyObject *pyZipFileStream_truncate(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+uint64_t  offset;
+static char *kwlist[] = {"offset", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->truncate(((FileLikeObject)self->base), offset);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+void * ZipFileStream.close();
+********************************************************/
+
+static PyObject *pyZipFileStream_close(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+// Make the call
+((FileLikeObject)self->base)->close(((FileLikeObject)self->base));
+
+// Postcall preparations
+self->base = NULL;
+
+// prepare results
+Py_INCREF(Py_None); py_result = Py_None;
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+ZipFileStream ZipFileStream.Con(RDFURN urn ,RDFURN file_urn ,RDFURN container_urn ,uint64_t  mode ,FileLikeObject file_fd );
+********************************************************/
+
+static PyObject *pyZipFileStream_Con(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+Gen_wrapper *func_return;
+Gen_wrapper *urn;
+Gen_wrapper *file_urn;
+Gen_wrapper *container_urn;
+char mode=0; char *str_mode = "\x0";
+Gen_wrapper *file_fd;
+static char *kwlist[] = {"urn","file_urn","container_urn","mode","file_fd", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "OOOsO|", kwlist, &urn,&file_urn,&container_urn,&str_mode,&file_fd))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
+// Precall preparations
+
+if(strlen(str_mode)!=1) {
+  PyErr_Format(PyExc_RuntimeError,
+          "You must only provide a single character for arg 'mode'");
+  goto error;
+};
+
+mode = str_mode[0];
+
+// Make the call
+{
+       Object returned_object = (Object)((ZipFileStream)self->base)->Con(((ZipFileStream)self->base), urn->base, file_urn->base, container_urn->base, mode, file_fd->base);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object ZipFileStream: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
+
+// Postcall preparations
+
+// prepare results
+py_result = (PyObject *)func_return;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+static PyTypeObject ZipFileStream_Type = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /* ob_size */
+    "pyaff4.ZipFileStream",               /* tp_name */
+    sizeof(pyZipFileStream),            /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)ZipFileStream_dealloc,/* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_compare */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    (getattrofunc)ZipFileStream_getattr,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
+    "ZipFileStream:  This is a FileLikeObject which is used to provide access to zip\n archive members. Currently only accessible through\n ZipFile.open_member()\n",     /* tp_doc */
+    0,	                       /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    ZipFileStream_methods,            /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)pyZipFileStream_init,      /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
 static PyMethodDef Resolver_methods[] = {
-     {"open",(PyCFunction)pyResolver_open, METH_VARARGS|METH_KEYWORDS, "AFFObject Resolver.open(RDFURN uri ,uint64_t  mode );\n\n\n This method tries to resolve the provided uri and returns an\n instance of whatever the URI refers to (As an AFFObject which is the\n common base class. You should check to see that what you get back is\n actually what you need. For example:\n\n FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);\n if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;\n \n Once the resolver provides the object it is attached to the context\n ctx and removed from the cache. This ensures that the object can not\n expire from the cache while callers are holding it. You must return\n the object to the cache as soon as possible by calling\n cache_return. The object will be locked until you return it with\n cache_return. "},
+     {"open",(PyCFunction)pyResolver_open, METH_VARARGS|METH_KEYWORDS, "AFFObject Resolver.open(RDFURN uri ,uint64_t  mode );\n\n\n This method tries to resolve the provided uri and returns an\n instance of whatever the URI refers to (As an AFFObject which is the\n common base class. You should check to see that what you get back is\n actually what you need. For example:\n\n FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);\n if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;\n \n Once the resolver provides the object it is attached to the context\n ctx and removed from the cache. This ensures that the object can not\n expire from the cache while callers are holding it. You must return\n the object to the cache as soon as possible by calling\n cache_return. The object will be locked until you return it with\n cache_return. \n\n DEFAULT(mode) = \"r\"\n"},
      {"cache_return",(PyCFunction)pyResolver_cache_return, METH_VARARGS|METH_KEYWORDS, "void * Resolver.cache_return(AFFObject obj );\n\n\n All objected obtained from Resolver.open() need to be\n returned to the cache promptly using this method. NOTE - it\n is an error to be using an object after being returned to\n the cache - it might not be valid and may be gced.\n"},
-     {"create",(PyCFunction)pyResolver_create, METH_VARARGS|METH_KEYWORDS, "AFFObject Resolver.create(char * name ,uint64_t  mode );\n\n\n This create a new object of the specified type.\n\n          name specifies the type of object as registered in the type\n          handler dispatcher. (e.g. AFF4_ZIP_VOLUME)\n        "},
+     {"create",(PyCFunction)pyResolver_create, METH_VARARGS|METH_KEYWORDS, "AFFObject Resolver.create(char * name ,uint64_t  mode );\n\n\n This create a new object of the specified type.\n\n          name specifies the type of object as registered in the type\n          handler dispatcher. (e.g. AFF4_ZIP_VOLUME)\n\n          DEFAULT(mode) = \"w\"\n        "},
      {"resolve_value",(PyCFunction)pyResolver_resolve_value, METH_VARARGS|METH_KEYWORDS, "uint64_t  Resolver.resolve_value(RDFURN uri ,char * attribute ,RDFValue value );\n\n\n This function resolves the value in uri and attribute and sets it\n     into the RDFValue object. So you must first create such an object\n     (e.g. XSDDatetime) and then pass the object here to be updated\n     from the data store. Note that only a single value is returned -\n     if you want to iterate over all the values for this attribute you\n     need to call get_iter and iter_next.\n  "},
      {"get_iter",(PyCFunction)pyResolver_get_iter, METH_VARARGS|METH_KEYWORDS, "RESOLVER_ITER Resolver.get_iter(void * None ,RDFURN uri ,char * attribute );\n\n\n This is a version of the above which uses an iterator to iterate\n     over the list.\n\n     The iterator is obtained using get_iter first. This function\n     returns 1 if an iterator can be found (i.e. at least one result\n     exists) or 0 if no results exist.\n\n     Each call to iter_next will write a new value into the buffer set\n     up by result with maximal length length. Only results matching\n     the type specified are returned. We return length written for\n     each successful iteration, and zero when we have no more items.\n  "},
      {"iter_next",(PyCFunction)pyResolver_iter_next, METH_VARARGS|METH_KEYWORDS, "uint64_t  Resolver.iter_next(RESOLVER_ITER iter ,RDFValue result );\n\n\n This method reads the next result from the iterator. result\n\t  must be an allocated and valid RDFValue object "},
@@ -5204,7 +6483,7 @@ if(!strcmp(name, "message")) {
 };
 if(!strcmp(name, "type")) {
     PyObject *py_result;
-    pyXSDString *type;
+    Gen_wrapper *type;
 
 
     {
@@ -5217,9 +6496,9 @@ if(!strcmp(name, "type")) {
          goto error;
        };
 
-       type = (pyXSDString *)new_class_wrapper(returned_object);
-       type->base = (XSDString)returned_object;
-}
+       type = new_class_wrapper(returned_object);
+       if(!type) goto error;
+    }
 talloc_increase_ref_count(type->base);
 
     py_result = (PyObject *)type;
@@ -5241,12 +6520,12 @@ AFFObject Resolver.open(RDFURN uri ,uint64_t  mode );
 
 static PyObject *pyResolver_open(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
-pyRDFURN *uri;
-char mode; char *str_mode;
+Gen_wrapper *func_return;
+Gen_wrapper *uri;
+char mode=0; char *str_mode = "r";
 static char *kwlist[] = {"uri","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &uri,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|s", kwlist, &uri,&str_mode))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5272,9 +6551,9 @@ mode = str_mode[0];
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -5297,10 +6576,10 @@ void * Resolver.cache_return(AFFObject obj );
 
 static PyObject *pyResolver_cache_return(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *obj;
+Gen_wrapper *obj;
 static char *kwlist[] = {"obj", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &obj))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|", kwlist, &obj))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5331,12 +6610,12 @@ AFFObject Resolver.create(char * name ,uint64_t  mode );
 
 static PyObject *pyResolver_create(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 char * name;
-char mode; char *str_mode;
+char mode=0; char *str_mode = "w";
 static char *kwlist[] = {"name","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "ss", kwlist, &name,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|s", kwlist, &name,&str_mode))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5362,9 +6641,9 @@ mode = str_mode[0];
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -5388,12 +6667,12 @@ uint64_t  Resolver.resolve_value(RDFURN uri ,char * attribute ,RDFValue value );
 static PyObject *pyResolver_resolve_value(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-pyRDFURN *uri;
+Gen_wrapper *uri;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"uri","attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist, &uri,&attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO|", kwlist, &uri,&attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5424,12 +6703,12 @@ RESOLVER_ITER Resolver.get_iter(void * None ,RDFURN uri ,char * attribute );
 
 static PyObject *pyResolver_get_iter(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRESOLVER_ITER *func_return;
-pyRDFURN *uri;
+Gen_wrapper *func_return;
+Gen_wrapper *uri;
 char * attribute;
 static char *kwlist[] = {"uri","attribute", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &uri,&attribute))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &uri,&attribute))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5463,11 +6742,11 @@ uint64_t  Resolver.iter_next(RESOLVER_ITER iter ,RDFValue result );
 static PyObject *pyResolver_iter_next(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-pyRESOLVER_ITER *iter;
-pyRDFValue *result;
+Gen_wrapper *iter;
+Gen_wrapper *result;
 static char *kwlist[] = {"iter","result", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "OO", kwlist, &iter,&result))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "OO|", kwlist, &iter,&result))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5498,11 +6777,11 @@ RDFValue Resolver.iter_next_alloc(RESOLVER_ITER iter );
 
 static PyObject *pyResolver_iter_next_alloc(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFValue *func_return;
-pyRESOLVER_ITER *iter;
+Gen_wrapper *func_return;
+Gen_wrapper *iter;
 static char *kwlist[] = {"iter", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &iter))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|", kwlist, &iter))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5520,9 +6799,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Resolver object no long
          goto error;
        };
 
-       func_return = (pyRDFValue *)new_class_wrapper(returned_object);
-       func_return->base = (RDFValue)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -5545,11 +6824,11 @@ void * Resolver.del(RDFURN uri ,char * attribute );
 
 static PyObject *pyResolver_del(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFURN *uri;
+Gen_wrapper *uri;
 char * attribute;
 static char *kwlist[] = {"uri","attribute", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &uri,&attribute))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &uri,&attribute))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5580,12 +6859,12 @@ void * Resolver.set_value(RDFURN uri ,char * attribute ,RDFValue value );
 
 static PyObject *pyResolver_set_value(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFURN *uri;
+Gen_wrapper *uri;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"uri","attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist, &uri,&attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO|", kwlist, &uri,&attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5616,12 +6895,12 @@ void * Resolver.add_value(RDFURN uri ,char * attribute ,RDFValue value );
 
 static PyObject *pyResolver_add_value(pyResolver *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFURN *uri;
+Gen_wrapper *uri;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"uri","attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO", kwlist, &uri,&attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "OsO|", kwlist, &uri,&attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5709,11 +6988,11 @@ FileBackedObject_dealloc(pyFileBackedObject *self) {
 };
 
 static int pyFileBackedObject_init(pyFileBackedObject *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -5771,7 +7050,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -5784,9 +7063,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -5795,7 +7074,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -5818,7 +7097,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -5831,9 +7110,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -5842,7 +7121,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -5890,10 +7169,10 @@ void * FileBackedObject.set_property(char * attribute ,RDFValue value );
 static PyObject *pyFileBackedObject_set_property(pyFileBackedObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -5924,7 +7203,7 @@ AFFObject FileBackedObject.finish();
 
 static PyObject *pyFileBackedObject_finish(pyFileBackedObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileBackedObject object no longer valid");
 // Precall preparations
@@ -5940,9 +7219,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileBackedObject object
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -5972,7 +7251,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6004,21 +7283,21 @@ uint64_t  FileBackedObject.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyFileBackedObject_read(pyFileBackedObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileBackedObject object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -6046,10 +7325,10 @@ uint64_t  FileBackedObject.write(char * buffer, unsigned long int length);
 static PyObject *pyFileBackedObject_write(pyFileBackedObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6057,7 +7336,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileBackedObject object
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -6135,7 +7414,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6248,11 +7527,11 @@ FileLikeObject_dealloc(pyFileLikeObject *self) {
 };
 
 static int pyFileLikeObject_init(pyFileLikeObject *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
  goto error;
 
 
@@ -6308,7 +7587,7 @@ if(!strcmp(name, "__members__")) {
 
 if(!strcmp(name, "urn")) {
     PyObject *py_result;
-    pyRDFURN *urn;
+    Gen_wrapper *urn;
 
 
     {
@@ -6321,9 +7600,9 @@ if(!strcmp(name, "urn")) {
          goto error;
        };
 
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
 talloc_increase_ref_count(urn->base);
 
     py_result = (PyObject *)urn;
@@ -6332,7 +7611,7 @@ talloc_increase_ref_count(urn->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((AFFObject)self->base)->mode);
@@ -6355,7 +7634,7 @@ if(!strcmp(name, "readptr")) {
 };
 if(!strcmp(name, "size")) {
     PyObject *py_result;
-    pyXSDInteger *size;
+    Gen_wrapper *size;
 
 
     {
@@ -6368,9 +7647,9 @@ if(!strcmp(name, "size")) {
          goto error;
        };
 
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
 talloc_increase_ref_count(size->base);
 
     py_result = (PyObject *)size;
@@ -6379,7 +7658,7 @@ talloc_increase_ref_count(size->base);
 };
 if(!strcmp(name, "mode")) {
     PyObject *py_result;
-    char mode; char *str_mode;
+    char mode=0; char *str_mode = "\x0";
 
 
     mode = (((FileLikeObject)self->base)->mode);
@@ -6416,10 +7695,10 @@ void * FileLikeObject.set_property(char * attribute ,RDFValue value );
 static PyObject *pyFileLikeObject_set_property(pyFileLikeObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
-pyRDFValue *value;
+Gen_wrapper *value;
 static char *kwlist[] = {"attribute","value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6450,7 +7729,7 @@ AFFObject FileLikeObject.finish();
 
 static PyObject *pyFileLikeObject_finish(pyFileLikeObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileLikeObject object no longer valid");
 // Precall preparations
@@ -6466,9 +7745,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileLikeObject object n
          goto error;
        };
 
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 self->base = NULL;
@@ -6498,7 +7777,7 @@ uint64_t  offset;
 uint64_t  whence;
 static char *kwlist[] = {"offset","whence", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6530,21 +7809,21 @@ uint64_t  FileLikeObject.read(OUT char * buffer, unsigned long int length);
 static PyObject *pyFileLikeObject_read(pyFileLikeObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 PyObject *tmp_buffer;
 static char *kwlist[] = {"length", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileLikeObject object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -6572,10 +7851,10 @@ uint64_t  FileLikeObject.write(char * buffer, unsigned long int length);
 static PyObject *pyFileLikeObject_write(pyFileLikeObject *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * buffer; unsigned long int length;
+char *buffer=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"buffer", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6583,7 +7862,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "FileLikeObject object n
 // Precall preparations
 
 // Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
 
 // Postcall preparations
 
@@ -6661,7 +7940,7 @@ uint64_t  func_return;
 uint64_t  offset;
 static char *kwlist[] = {"offset", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -6969,7 +8248,7 @@ uint64_t  func_return;
 char * serialised_form;
 static char *kwlist[] = {"serialised_form", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &serialised_form))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -7026,10 +8305,10 @@ uint64_t  XSDInteger.decode(char * data, int length);
 static PyObject *pyXSDInteger_decode(pyXSDInteger *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * data; int length;
+char *data=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"data", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &data, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -7037,7 +8316,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDInteger object no lo
 // Precall preparations
 
 // Make the call
-func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), data, length);
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
 
 // Postcall preparations
 
@@ -7085,11 +8364,11 @@ RDFValue XSDInteger.set(uint64_t  value );
 
 static PyObject *pyXSDInteger_set(pyXSDInteger *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFValue *func_return;
+Gen_wrapper *func_return;
 uint64_t  value;
 static char *kwlist[] = {"value", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &value))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &value))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -7107,9 +8386,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "XSDInteger object no lo
          goto error;
        };
 
-       func_return = (pyRDFValue *)new_class_wrapper(returned_object);
-       func_return->base = (RDFValue)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 talloc_increase_ref_count(func_return->base);
 
 // Postcall preparations
@@ -7189,774 +8468,6 @@ static PyTypeObject XSDInteger_Type = {
     0,                         /* tp_descr_set */
     0,                         /* tp_dictoffset */
     (initproc)pyXSDInteger_init,      /* tp_init */
-    0,                         /* tp_alloc */
-    0,                         /* tp_new */
-};
-static PyMethodDef ZipFileStream_methods[] = {
-     {"set_property",(PyCFunction)pyZipFileStream_set_property, METH_VARARGS|METH_KEYWORDS, "void * ZipFileStream.set_property(char * attribute ,RDFValue value );\n\n\n"},
-     {"finish",(PyCFunction)pyZipFileStream_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject ZipFileStream.finish();\n\n\n"},
-     {"seek",(PyCFunction)pyZipFileStream_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
-     {"read",(PyCFunction)pyZipFileStream_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.read(OUT char * buffer, unsigned long int length);\n\n\n"},
-     {"write",(PyCFunction)pyZipFileStream_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.write(char * buffer, unsigned long int length);\n\n\n"},
-     {"tell",(PyCFunction)pyZipFileStream_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.tell();\n\n\n"},
-     {"get_data",(PyCFunction)pyZipFileStream_get_data, METH_VARARGS|METH_KEYWORDS, "char * ZipFileStream.get_data();\n\n\n"},
-     {"truncate",(PyCFunction)pyZipFileStream_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  ZipFileStream.truncate(uint64_t  offset );\n\n\n"},
-     {"close",(PyCFunction)pyZipFileStream_close, METH_VARARGS|METH_KEYWORDS, "void * ZipFileStream.close();\n\n\n"},
-     {"Con",(PyCFunction)pyZipFileStream_Con, METH_VARARGS|METH_KEYWORDS, "ZipFileStream ZipFileStream.Con(RDFURN urn ,RDFURN file_urn ,RDFURN container_urn ,uint64_t  mode ,FileLikeObject file_fd );\n\n\n This is the constructor for the file like object. \n\tfile_urn is the storage file for the volume in\n\tcontainer_urn. If the stream is opened for writing the file_fd\n\tmay be passed in. It remains locked until we are closed.\n     "},
-     {NULL}  /* Sentinel */
-};
-static void
-ZipFileStream_dealloc(pyZipFileStream *self) {
-
-    if(self->base) {
-        talloc_free(self->base);
-        self->base=NULL;
-    };
-
-};
-
-static int pyZipFileStream_init(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-pyRDFURN *urn;
-char mode; char *str_mode;
-static char *kwlist[] = {"urn","mode", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os", kwlist, &urn,&str_mode))
- goto error;
-
-
-if(strlen(str_mode)!=1) {
-  PyErr_Format(PyExc_RuntimeError,
-          "You must only provide a single character for arg 'mode'");
-  goto error;
-};
-
-mode = str_mode[0];
-
-self->base = CONSTRUCT(ZipFileStream, AFFObject, Con, NULL, urn->base, mode);
-  if(!self->base) {
-    PyErr_Format(PyExc_IOError, "Unable to construct class ZipFileStream");
-    goto error;
-  };
-  return 0;
-error:
-    return -1;
-};
-
-
-static PyObject *ZipFileStream_getattr(pyZipFileStream *self, PyObject *pyname) {
-  char *name = PyString_AsString(pyname);
-
-  if(!name) return NULL;
-if(!strcmp(name, "__members__")) {
-     PyObject *result = PyList_New(0);
-     PyObject *tmp;
-     PyMethodDef *i;
-
-     if(!result) goto error;
- tmp = PyString_FromString("urn");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("mode");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("readptr");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("size");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("mode");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("data");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("file_offset");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("file_urn");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("container_urn");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("file_fd");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("compress_size");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("compression");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("cbuff");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("buff");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-
-
-    for(i=ZipFileStream_methods; i->ml_name; i++) {
-     tmp = PyString_FromString(i->ml_name);
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-    }; 
-     return result; 
-   }
-
-if(!strcmp(name, "urn")) {
-    PyObject *py_result;
-    pyRDFURN *urn;
-
-
-    {
-       Object returned_object = (Object)(((AFFObject)self->base)->urn);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       urn->base = (RDFURN)returned_object;
-}
-talloc_increase_ref_count(urn->base);
-
-    py_result = (PyObject *)urn;
-
-    return py_result;
-};
-if(!strcmp(name, "mode")) {
-    PyObject *py_result;
-    char mode; char *str_mode;
-
-
-    mode = (((AFFObject)self->base)->mode);
-
-    str_mode = &mode;
-    py_result = PyString_FromStringAndSize(str_mode, 1);
-
-    return py_result;
-};
-if(!strcmp(name, "readptr")) {
-    PyObject *py_result;
-    uint64_t  readptr;
-
-
-    readptr = (((FileLikeObject)self->base)->readptr);
-
-    py_result = PyLong_FromLong(readptr);
-
-    return py_result;
-};
-if(!strcmp(name, "size")) {
-    PyObject *py_result;
-    pyXSDInteger *size;
-
-
-    {
-       Object returned_object = (Object)(((FileLikeObject)self->base)->size);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       size->base = (XSDInteger)returned_object;
-}
-talloc_increase_ref_count(size->base);
-
-    py_result = (PyObject *)size;
-
-    return py_result;
-};
-if(!strcmp(name, "mode")) {
-    PyObject *py_result;
-    char mode; char *str_mode;
-
-
-    mode = (((FileLikeObject)self->base)->mode);
-
-    str_mode = &mode;
-    py_result = PyString_FromStringAndSize(str_mode, 1);
-
-    return py_result;
-};
-if(!strcmp(name, "data")) {
-    PyObject *py_result;
-    char * data;
-
-
-    data = (((FileLikeObject)self->base)->data);
-
-    py_result = PyString_FromStringAndSize((char *)data, strlen(data));
-
-    return py_result;
-};
-if(!strcmp(name, "file_offset")) {
-    PyObject *py_result;
-    pyXSDInteger *file_offset;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->file_offset);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       file_offset = (pyXSDInteger *)new_class_wrapper(returned_object);
-       file_offset->base = (XSDInteger)returned_object;
-}
-talloc_increase_ref_count(file_offset->base);
-
-    py_result = (PyObject *)file_offset;
-
-    return py_result;
-};
-if(!strcmp(name, "file_urn")) {
-    PyObject *py_result;
-    pyRDFURN *file_urn;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->file_urn);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       file_urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       file_urn->base = (RDFURN)returned_object;
-}
-talloc_increase_ref_count(file_urn->base);
-
-    py_result = (PyObject *)file_urn;
-
-    return py_result;
-};
-if(!strcmp(name, "container_urn")) {
-    PyObject *py_result;
-    pyRDFURN *container_urn;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->container_urn);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       container_urn = (pyRDFURN *)new_class_wrapper(returned_object);
-       container_urn->base = (RDFURN)returned_object;
-}
-talloc_increase_ref_count(container_urn->base);
-
-    py_result = (PyObject *)container_urn;
-
-    return py_result;
-};
-if(!strcmp(name, "file_fd")) {
-    PyObject *py_result;
-    pyFileLikeObject *file_fd;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->file_fd);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object FileLikeObject: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       file_fd = (pyFileLikeObject *)new_class_wrapper(returned_object);
-       file_fd->base = (FileLikeObject)returned_object;
-}
-talloc_increase_ref_count(file_fd->base);
-
-    py_result = (PyObject *)file_fd;
-
-    return py_result;
-};
-if(!strcmp(name, "compress_size")) {
-    PyObject *py_result;
-    pyXSDInteger *compress_size;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->compress_size);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       compress_size = (pyXSDInteger *)new_class_wrapper(returned_object);
-       compress_size->base = (XSDInteger)returned_object;
-}
-talloc_increase_ref_count(compress_size->base);
-
-    py_result = (PyObject *)compress_size;
-
-    return py_result;
-};
-if(!strcmp(name, "compression")) {
-    PyObject *py_result;
-    pyXSDInteger *compression;
-
-
-    {
-       Object returned_object = (Object)(((ZipFileStream)self->base)->compression);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       compression = (pyXSDInteger *)new_class_wrapper(returned_object);
-       compression->base = (XSDInteger)returned_object;
-}
-talloc_increase_ref_count(compression->base);
-
-    py_result = (PyObject *)compression;
-
-    return py_result;
-};
-if(!strcmp(name, "cbuff")) {
-    PyObject *py_result;
-    char * cbuff;
-
-
-    cbuff = (((ZipFileStream)self->base)->cbuff);
-
-    py_result = PyString_FromStringAndSize((char *)cbuff, strlen(cbuff));
-
-    return py_result;
-};
-if(!strcmp(name, "buff")) {
-    PyObject *py_result;
-    char * buff;
-
-
-    buff = (((ZipFileStream)self->base)->buff);
-
-    py_result = PyString_FromStringAndSize((char *)buff, strlen(buff));
-
-    return py_result;
-};
-
-  // Hand it off to the python native handler
-  return PyObject_GenericGetAttr((PyObject *)self, pyname);
-error:
-return NULL;
-}
-
-
-/********************************************************
-Autogenerated wrapper for function:
-void * ZipFileStream.set_property(char * attribute ,RDFValue value );
-********************************************************/
-
-static PyObject *pyZipFileStream_set_property(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-char * attribute;
-pyRDFValue *value;
-static char *kwlist[] = {"attribute","value", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwlist, &attribute,&value))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-((AFFObject)self->base)->set_property(((AFFObject)self->base), attribute, value->base);
-
-// Postcall preparations
-
-// prepare results
-Py_INCREF(Py_None); py_result = Py_None;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-AFFObject ZipFileStream.finish();
-********************************************************/
-
-static PyObject *pyZipFileStream_finish(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-pyAFFObject *func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-{
-       Object returned_object = (Object)((AFFObject)self->base)->finish(((AFFObject)self->base));
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object AFFObject: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       func_return = (pyAFFObject *)new_class_wrapper(returned_object);
-       func_return->base = (AFFObject)returned_object;
-}
-
-// Postcall preparations
-self->base = NULL;
-
-// prepare results
-py_result = (PyObject *)func_return;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    self->base = NULL;
-return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  ZipFileStream.seek(uint64_t  offset ,uint64_t  whence );
-********************************************************/
-
-static PyObject *pyZipFileStream_seek(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-uint64_t  offset;
-uint64_t  whence;
-static char *kwlist[] = {"offset","whence", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK", kwlist, &offset,&whence))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->seek(((FileLikeObject)self->base), offset, whence);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  ZipFileStream.read(OUT char * buffer, unsigned long int length);
-********************************************************/
-
-static PyObject *pyZipFileStream_read(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-OUT char * buffer; unsigned long int length;
-PyObject *tmp_buffer;
-static char *kwlist[] = {"length", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l", kwlist, &length))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer,&buffer, (Py_ssize_t *)&length);
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), buffer, length);
-
-// Postcall preparations
-
-// prepare results
-returned_result = PyList_New(0);
-py_result = PyLong_FromLong(func_return);
-PyList_Append(returned_result, py_result); Py_DECREF(py_result);
- _PyString_Resize(&tmp_buffer, func_return); 
-py_result = tmp_buffer;
-PyList_Append(returned_result, py_result); Py_DECREF(py_result);
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  ZipFileStream.write(char * buffer, unsigned long int length);
-********************************************************/
-
-static PyObject *pyZipFileStream_write(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-char * buffer; unsigned long int length;
-static char *kwlist[] = {"buffer", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &buffer, &length))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), buffer, length);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  ZipFileStream.tell();
-********************************************************/
-
-static PyObject *pyZipFileStream_tell(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->tell(((FileLikeObject)self->base));
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-char * ZipFileStream.get_data();
-********************************************************/
-
-static PyObject *pyZipFileStream_get_data(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-char * func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->get_data(((FileLikeObject)self->base));
-
-// Postcall preparations
-
-// prepare results
-py_result = PyString_FromStringAndSize((char *)func_return, strlen(func_return));
-talloc_free(func_return);
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  ZipFileStream.truncate(uint64_t  offset );
-********************************************************/
-
-static PyObject *pyZipFileStream_truncate(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-uint64_t  offset;
-static char *kwlist[] = {"offset", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K", kwlist, &offset))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->truncate(((FileLikeObject)self->base), offset);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-void * ZipFileStream.close();
-********************************************************/
-
-static PyObject *pyZipFileStream_close(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-// Make the call
-((FileLikeObject)self->base)->close(((FileLikeObject)self->base));
-
-// Postcall preparations
-self->base = NULL;
-
-// prepare results
-Py_INCREF(Py_None); py_result = Py_None;
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-ZipFileStream ZipFileStream.Con(RDFURN urn ,RDFURN file_urn ,RDFURN container_urn ,uint64_t  mode ,FileLikeObject file_fd );
-********************************************************/
-
-static PyObject *pyZipFileStream_Con(pyZipFileStream *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-pyZipFileStream *func_return;
-pyRDFURN *urn;
-pyRDFURN *file_urn;
-pyRDFURN *container_urn;
-char mode; char *str_mode;
-pyFileLikeObject *file_fd;
-static char *kwlist[] = {"urn","file_urn","container_urn","mode","file_fd", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "OOOsO", kwlist, &urn,&file_urn,&container_urn,&str_mode,&file_fd))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "ZipFileStream object no longer valid");
-// Precall preparations
-
-if(strlen(str_mode)!=1) {
-  PyErr_Format(PyExc_RuntimeError,
-          "You must only provide a single character for arg 'mode'");
-  goto error;
-};
-
-mode = str_mode[0];
-
-// Make the call
-{
-       Object returned_object = (Object)((ZipFileStream)self->base)->Con(((ZipFileStream)self->base), urn->base, file_urn->base, container_urn->base, mode, file_fd->base);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object ZipFileStream: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       func_return = (pyZipFileStream *)new_class_wrapper(returned_object);
-       func_return->base = (ZipFileStream)returned_object;
-}
-
-// Postcall preparations
-
-// prepare results
-py_result = (PyObject *)func_return;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-static PyTypeObject ZipFileStream_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                         /* ob_size */
-    "pyaff4.ZipFileStream",               /* tp_name */
-    sizeof(pyZipFileStream),            /* tp_basicsize */
-    0,                         /* tp_itemsize */
-    (destructor)ZipFileStream_dealloc,/* tp_dealloc */
-    0,                         /* tp_print */
-    0,                         /* tp_getattr */
-    0,                         /* tp_setattr */
-    0,                         /* tp_compare */
-    0,                         /* tp_repr */
-    0,                         /* tp_as_number */
-    0,                         /* tp_as_sequence */
-    0,                         /* tp_as_mapping */
-    0,                         /* tp_hash */
-    0,                         /* tp_call */
-    0,                         /* tp_str */
-    (getattrofunc)ZipFileStream_getattr,                         /* tp_getattro */
-    0,                         /* tp_setattro */
-    0,                         /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
-    "ZipFileStream:  This is a FileLikeObject which is used to provide access to zip\n archive members. Currently only accessible through\n ZipFile.open_member()\n",     /* tp_doc */
-    0,	                       /* tp_traverse */
-    0,                         /* tp_clear */
-    0,                         /* tp_richcompare */
-    0,                         /* tp_weaklistoffset */
-    0,                         /* tp_iter */
-    0,                         /* tp_iternext */
-    ZipFileStream_methods,            /* tp_methods */
-    0,                         /* tp_members */
-    0,                         /* tp_getset */
-    0,                         /* tp_base */
-    0,                         /* tp_dict */
-    0,                         /* tp_descr_get */
-    0,                         /* tp_descr_set */
-    0,                         /* tp_dictoffset */
-    (initproc)pyZipFileStream_init,      /* tp_init */
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
@@ -8057,7 +8568,7 @@ if(!strcmp(name, "value")) {
 };
 if(!strcmp(name, "parser")) {
     PyObject *py_result;
-    pyURLParse *parser;
+    Gen_wrapper *parser;
 
 
     {
@@ -8070,9 +8581,9 @@ if(!strcmp(name, "parser")) {
          goto error;
        };
 
-       parser = (pyURLParse *)new_class_wrapper(returned_object);
-       parser->base = (URLParse)returned_object;
-}
+       parser = new_class_wrapper(returned_object);
+       if(!parser) goto error;
+    }
 talloc_increase_ref_count(parser->base);
 
     py_result = (PyObject *)parser;
@@ -8098,7 +8609,7 @@ uint64_t  func_return;
 char * serialised_form;
 static char *kwlist[] = {"serialised_form", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &serialised_form))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &serialised_form))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -8155,10 +8666,10 @@ uint64_t  RDFURN.decode(char * data, int length);
 static PyObject *pyRDFURN_decode(pyRDFURN *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
-char * data; int length;
+char *data=""; Py_ssize_t length=strlen("");
 static char *kwlist[] = {"data", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#", kwlist, &data, &length))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &data, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -8166,7 +8677,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "RDFURN object no longer
 // Precall preparations
 
 // Make the call
-func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), data, length);
+func_return = ((RDFValue)self->base)->decode(((RDFValue)self->base), (char *)data, (int)length);
 
 // Postcall preparations
 
@@ -8214,11 +8725,11 @@ RDFValue RDFURN.set(char * urn );
 
 static PyObject *pyRDFURN_set(pyRDFURN *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFValue *func_return;
+Gen_wrapper *func_return;
 char * urn;
 static char *kwlist[] = {"urn", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &urn))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &urn))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -8236,9 +8747,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "RDFURN object no longer
          goto error;
        };
 
-       func_return = (pyRDFValue *)new_class_wrapper(returned_object);
-       func_return->base = (RDFValue)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 talloc_increase_ref_count(func_return->base);
 
 // Postcall preparations
@@ -8287,7 +8798,7 @@ RDFURN RDFURN.copy(void * None );
 
 static PyObject *pyRDFURN_copy(pyRDFURN *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
-pyRDFURN *func_return;
+Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
 if(!self->base) return PyErr_Format(PyExc_RuntimeError, "RDFURN object no longer valid");
 // Precall preparations
@@ -8303,9 +8814,9 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "RDFURN object no longer
          goto error;
        };
 
-       func_return = (pyRDFURN *)new_class_wrapper(returned_object);
-       func_return->base = (RDFURN)returned_object;
-}
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
 
 // Postcall preparations
 
@@ -8331,7 +8842,7 @@ static PyObject *pyRDFURN_add(pyRDFURN *self, PyObject *args, PyObject *kwds) {
 char * urn;
 static char *kwlist[] = {"urn", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwlist, &urn))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &urn))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -8363,10 +8874,10 @@ TDB_DATA RDFURN.relative_name(RDFURN volume );
 static PyObject *pyRDFURN_relative_name(pyRDFURN *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 TDB_DATA func_return;
-pyRDFURN *volume;
+Gen_wrapper *volume;
 static char *kwlist[] = {"volume", NULL};
 
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &volume))
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O|", kwlist, &volume))
  goto error;
 
 // Make sure that we have something valid to wrap
@@ -8457,6 +8968,13 @@ PyMODINIT_FUNC initpyaff4(void) {
  Py_INCREF((PyObject *)&MapDriver_Type);
  PyModule_AddObject(m, "MapDriver", (PyObject *)&MapDriver_Type);
 
+ AES256Password_Type.tp_new = PyType_GenericNew;
+ if (PyType_Ready(&AES256Password_Type) < 0)
+     return;
+
+ Py_INCREF((PyObject *)&AES256Password_Type);
+ PyModule_AddObject(m, "AES256Password", (PyObject *)&AES256Password_Type);
+
  XSDString_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&XSDString_Type) < 0)
      return;
@@ -8513,6 +9031,13 @@ PyMODINIT_FUNC initpyaff4(void) {
  Py_INCREF((PyObject *)&RDFValue_Type);
  PyModule_AddObject(m, "RDFValue", (PyObject *)&RDFValue_Type);
 
+ ZipFileStream_Type.tp_new = PyType_GenericNew;
+ if (PyType_Ready(&ZipFileStream_Type) < 0)
+     return;
+
+ Py_INCREF((PyObject *)&ZipFileStream_Type);
+ PyModule_AddObject(m, "ZipFileStream", (PyObject *)&ZipFileStream_Type);
+
  Resolver_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&Resolver_Type) < 0)
      return;
@@ -8547,13 +9072,6 @@ PyMODINIT_FUNC initpyaff4(void) {
 
  Py_INCREF((PyObject *)&XSDInteger_Type);
  PyModule_AddObject(m, "XSDInteger", (PyObject *)&XSDInteger_Type);
-
- ZipFileStream_Type.tp_new = PyType_GenericNew;
- if (PyType_Ready(&ZipFileStream_Type) < 0)
-     return;
-
- Py_INCREF((PyObject *)&ZipFileStream_Type);
- PyModule_AddObject(m, "ZipFileStream", (PyObject *)&ZipFileStream_Type);
 
  RDFURN_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&RDFURN_Type) < 0)
@@ -8869,6 +9387,8 @@ python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Encrypted;
 python_wrappers[TOTAL_CLASSES++].python_type = &Encrypted_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__MapDriver;
 python_wrappers[TOTAL_CLASSES++].python_type = &MapDriver_Type;
+python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__AES256Password;
+python_wrappers[TOTAL_CLASSES++].python_type = &AES256Password_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__XSDString;
 python_wrappers[TOTAL_CLASSES++].python_type = &XSDString_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__AFFObject;
@@ -8885,6 +9405,8 @@ python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__URLParse;
 python_wrappers[TOTAL_CLASSES++].python_type = &URLParse_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__RDFValue;
 python_wrappers[TOTAL_CLASSES++].python_type = &RDFValue_Type;
+python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__ZipFileStream;
+python_wrappers[TOTAL_CLASSES++].python_type = &ZipFileStream_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Resolver;
 python_wrappers[TOTAL_CLASSES++].python_type = &Resolver_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__FileBackedObject;
@@ -8893,8 +9415,6 @@ python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__FileLikeObject;
 python_wrappers[TOTAL_CLASSES++].python_type = &FileLikeObject_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__XSDInteger;
 python_wrappers[TOTAL_CLASSES++].python_type = &XSDInteger_Type;
-python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__ZipFileStream;
-python_wrappers[TOTAL_CLASSES++].python_type = &ZipFileStream_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__RDFURN;
 python_wrappers[TOTAL_CLASSES++].python_type = &RDFURN_Type;
 }

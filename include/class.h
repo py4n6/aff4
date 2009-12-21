@@ -480,6 +480,11 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   // run
 #define DESTRUCTOR
 
+  // including this after an argument definition will cause the
+  // autogenerator to assign default values to that parameter and make
+  // it optional
+#define DEFAULT(x)
+
 #endif
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

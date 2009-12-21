@@ -38,7 +38,9 @@ END_CLASS
 #endif
 
 #include "queue.h"
-
+/** This class is used by the image worker thread to dump the segments
+    out. It is only created by the Image class internally.
+*/
 PRIVATE CLASS(ImageWorker, AFFObject)
        struct list_head list;
   // The filename where the volume is stored - we fetch that just
@@ -193,14 +195,17 @@ END_CLASS
 #include <openssl/aes.h>
 
 /** This is the abstract cipher class - all ciphers must implement
-    these methods */
-CLASS(AFF4Cipher, RDFValue)
+    these methods.
+*/
+ABSTRACT CLASS(AFF4Cipher, RDFValue)
        int blocksize;
 
-       int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, unsigned
-                  char * outbuf, int length, int chunk_number);
-       int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, unsigned
-                  char * outbuf, int length, int chunk_number);
+       int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, \
+                  int inlen,\
+                  OUT unsigned char *outbuf, int outlen, int chunk_number);
+       int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, \
+                  int inlen,\
+                  OUT unsigned char *outbuf, int outlen, int chunk_number);
 END_CLASS
 
 #define AES256_KEY_SIZE 32
@@ -215,6 +220,10 @@ struct aff4_cipher_data_t {
 };
 
 /** The following are some default ciphers */
+
+/** This cipher uses AES256. The session key is derived from a
+    password using the PBKDF2 algorithm.
+*/
 CLASS(AES256Password, AFF4Cipher)
   AES_KEY ekey;
   AES_KEY dkey;
@@ -223,7 +232,9 @@ CLASS(AES256Password, AFF4Cipher)
   unsigned char key[AES256_KEY_SIZE];
   unsigned char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
 
-  RDFValue METHOD(AES256Password, set, char *passphrase);
+  // Set the password for this object. Should only be called once
+  // before using.
+  BORROWED RDFValue METHOD(AES256Password, set, char *passphrase);
 
   // This callback can be overridden to fetch password to decode the
   // IV from. By default, we look in the AFF4_VOLATILE_PASSPHRASE
@@ -231,6 +242,30 @@ CLASS(AES256Password, AFF4Cipher)
   int METHOD(AES256Password, fetch_password_cb);
 END_CLASS
 
+/**
+   Encryption is handled via two components, the encrypted stream and
+   the cipher. An encrypted stream is an FileLikeObject with the
+   following AFF4 attributes:
+
+   AFF4_CHUNK_SIZE = Data will be broken into these chunks and
+                     encrypted independantly.
+
+   AFF4_STORED     = Data will be stored on this backing stream.
+
+   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher
+                     class. More on that below.
+
+   When opened, the FileLikeObject is created by instantiating a
+   cipher from the AFF4_CIPHER attribute. Data is then divided into
+   chunks and each chunk is encrypted using the cipher, and then
+   written to the backing stream.
+
+   A cipher is a class which extends the AFF4Cipher baseclass.
+
+   Of course a valid cipher must also implement valid serialization
+   methods and also some way of key initialization. Chunks must be
+   whole multiples of blocksize.
+*/
 CLASS(Encrypted, FileLikeObject)
        StringIO block_buffer;
        AFF4Cipher cipher;
@@ -347,6 +382,9 @@ CLASS(ZipFile, AFFObject)
 // (so another attempt to open a new member for writing will raise,
 // until this member is promptly closed). The ZipFile must have been
 // called with create_new_volume or append_volume before.
+//
+// DEFAULT(mode) = "r"
+// DEFAULT(compression) = ZIP_DEFLATE
      FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,\
 			   uint16_t compression);
 
@@ -356,9 +394,16 @@ CLASS(ZipFile, AFFObject)
 
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).
+//
+// DEFAULT(compression) = ZIP_DEFLATE
      int METHOD(ZipFile, writestr, char *filename, char *data, int len,\
 		 uint16_t compression);
 
+  /* Load an AFF4 volume from the URN specified. We parse all the RDF
+     serializations.
+
+     DEFAULT(mode) = "r"
+  */
      int METHOD(ZipFile, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 

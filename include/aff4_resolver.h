@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Dec 18 18:31:32 2009 mic
+** Last update Mon Dec 21 17:22:14 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -82,7 +82,10 @@ CLASS(Resolver, Object)
  expire from the cache while callers are holding it. You must return
  the object to the cache as soon as possible by calling
  cache_return. The object will be locked until you return it with
- cache_return. */
+ cache_return. 
+
+ DEFAULT(mode) = "r"
+*/
       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
 
        // All objected obtained from Resolver.open() need to be
@@ -95,6 +98,8 @@ CLASS(Resolver, Object)
 
           name specifies the type of object as registered in the type
           handler dispatcher. (e.g. AFF4_ZIP_VOLUME)
+
+          DEFAULT(mode) = "w"
         */
        AFFObject METHOD(Resolver, create, char *name, char mode);
 

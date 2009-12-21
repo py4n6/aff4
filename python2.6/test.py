@@ -7,11 +7,11 @@ oracle = pyaff4.Resolver()
 url = pyaff4.RDFURN()
 url.set("file:///tmp/test.zip")
 
-zip_fd = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+zip_fd = oracle.create(pyaff4.AFF4_ZIP_VOLUME)
 oracle.set_value(zip_fd.urn, pyaff4.AFF4_STORED, url)
 zip_fd = zip_fd.finish()
 
-image_fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
+image_fd = oracle.create(pyaff4.AFF4_IMAGE)
 oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_fd.urn)
 image_fd = image_fd.finish()
 
