@@ -1,9 +1,10 @@
 #include <Python.h>
-#include "../include/aff4_constants.h"
-#include "../include/aff4_rdf.h"
-#include "../include/aff4_io.h"
-#include "../include/aff4_resolver.h"
-#include "../include/aff4_objects.h"
+#include "/home/mic/projects/aff4/include/aff4_constants.h"
+#include "/home/mic/projects/aff4/include/aff4_rdf.h"
+#include "/home/mic/projects/aff4/include/aff4_io.h"
+#include "/home/mic/projects/aff4/include/aff4_resolver.h"
+#include "/home/mic/projects/aff4/include/aff4_objects.h"
+#include "/home/mic/projects/aff4/include/aff4_http.h"
 
 /* The following is a static array mapping CLASS() pointers to their
 python wrappers. This is used to allow the correct wrapper to be
@@ -56,26 +57,6 @@ Gen_wrapper *new_class_wrapper(Object item) {
   return NULL;
 };
 
-
-typedef struct {
-  PyObject_HEAD
-  Encrypted base;
-} pyEncrypted; 
-
-staticforward PyTypeObject Encrypted_Type;
-
-static int pyEncrypted_init(pyEncrypted *self, PyObject *args, PyObject *kwds);
-
-static PyObject *Encrypted_getattr(pyEncrypted *self, PyObject *name);
-static PyObject *pyEncrypted_set_property(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_finish(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_seek(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_read(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_write(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_tell(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_get_data(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_truncate(pyEncrypted *self, PyObject *args, PyObject *kwds);
-static PyObject *pyEncrypted_close(pyEncrypted *self, PyObject *args, PyObject *kwds);
 
 typedef struct {
   PyObject_HEAD
@@ -171,24 +152,23 @@ static PyObject *pyImage_close(pyImage *self, PyObject *args, PyObject *kwds);
 
 typedef struct {
   PyObject_HEAD
-  HTTPObject base;
-} pyHTTPObject; 
+  Encrypted base;
+} pyEncrypted; 
 
-staticforward PyTypeObject HTTPObject_Type;
+staticforward PyTypeObject Encrypted_Type;
 
-static int pyHTTPObject_init(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static int pyEncrypted_init(pyEncrypted *self, PyObject *args, PyObject *kwds);
 
-static PyObject *HTTPObject_getattr(pyHTTPObject *self, PyObject *name);
-static PyObject *pyHTTPObject_set_property(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_finish(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_seek(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_read(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_write(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_tell(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_get_data(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_truncate(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_close(pyHTTPObject *self, PyObject *args, PyObject *kwds);
-static PyObject *pyHTTPObject_Con(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *Encrypted_getattr(pyEncrypted *self, PyObject *name);
+static PyObject *pyEncrypted_set_property(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_finish(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_seek(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_read(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_write(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_tell(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_get_data(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_truncate(pyEncrypted *self, PyObject *args, PyObject *kwds);
+static PyObject *pyEncrypted_close(pyEncrypted *self, PyObject *args, PyObject *kwds);
 
 typedef struct {
   PyObject_HEAD
@@ -251,6 +231,27 @@ static PyObject *pyRDFValue_parse(pyRDFValue *self, PyObject *args, PyObject *kw
 static PyObject *pyRDFValue_encode(pyRDFValue *self, PyObject *args, PyObject *kwds);
 static PyObject *pyRDFValue_decode(pyRDFValue *self, PyObject *args, PyObject *kwds);
 static PyObject *pyRDFValue_serialise(pyRDFValue *self, PyObject *args, PyObject *kwds);
+
+typedef struct {
+  PyObject_HEAD
+  HTTPObject base;
+} pyHTTPObject; 
+
+staticforward PyTypeObject HTTPObject_Type;
+
+static int pyHTTPObject_init(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+
+static PyObject *HTTPObject_getattr(pyHTTPObject *self, PyObject *name);
+static PyObject *pyHTTPObject_set_property(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_finish(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_seek(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_read(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_write(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_tell(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_get_data(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_truncate(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_close(pyHTTPObject *self, PyObject *args, PyObject *kwds);
+static PyObject *pyHTTPObject_Con(pyHTTPObject *self, PyObject *args, PyObject *kwds);
 
 typedef struct {
   PyObject_HEAD
@@ -385,636 +386,6 @@ static PyObject *pyRDFURN_relative_name(pyRDFURN *self, PyObject *args, PyObject
              Implementation
 ******************************************************/
 
-static PyMethodDef Encrypted_methods[] = {
-     {"set_property",(PyCFunction)pyEncrypted_set_property, METH_VARARGS|METH_KEYWORDS, "void * Encrypted.set_property(char * attribute ,RDFValue value );\n\n\n"},
-     {"finish",(PyCFunction)pyEncrypted_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject Encrypted.finish();\n\n\n"},
-     {"seek",(PyCFunction)pyEncrypted_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
-     {"read",(PyCFunction)pyEncrypted_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.read(OUT char * buffer, unsigned long int length);\n\n\n"},
-     {"write",(PyCFunction)pyEncrypted_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.write(char * buffer, unsigned long int length);\n\n\n"},
-     {"tell",(PyCFunction)pyEncrypted_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.tell();\n\n\n"},
-     {"get_data",(PyCFunction)pyEncrypted_get_data, METH_VARARGS|METH_KEYWORDS, "char * Encrypted.get_data();\n\n\n"},
-     {"truncate",(PyCFunction)pyEncrypted_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.truncate(uint64_t  offset );\n\n\n"},
-     {"close",(PyCFunction)pyEncrypted_close, METH_VARARGS|METH_KEYWORDS, "void * Encrypted.close();\n\n\n"},
-     {NULL}  /* Sentinel */
-};
-static void
-Encrypted_dealloc(pyEncrypted *self) {
-
-    if(self->base) {
-        talloc_free(self->base);
-        self->base=NULL;
-    };
-
-};
-
-static int pyEncrypted_init(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-Gen_wrapper *urn;
-char mode=0; char *str_mode = "\x0";
-static char *kwlist[] = {"urn","mode", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
- goto error;
-
-
-if(strlen(str_mode)!=1) {
-  PyErr_Format(PyExc_RuntimeError,
-          "You must only provide a single character for arg 'mode'");
-  goto error;
-};
-
-mode = str_mode[0];
-
-self->base = CONSTRUCT(Encrypted, AFFObject, Con, NULL, urn->base, mode);
-  if(!self->base) {
-    PyErr_Format(PyExc_IOError, "Unable to construct class Encrypted");
-    goto error;
-  };
-  return 0;
-error:
-    return -1;
-};
-
-
-static PyObject *Encrypted_getattr(pyEncrypted *self, PyObject *pyname) {
-  char *name = PyString_AsString(pyname);
-
-  if(!name) return NULL;
-if(!strcmp(name, "__members__")) {
-     PyObject *result = PyList_New(0);
-     PyObject *tmp;
-     PyMethodDef *i;
-
-     if(!result) goto error;
- tmp = PyString_FromString("urn");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("mode");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("readptr");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("size");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("mode");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("data");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("cipher");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("backing_store");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("stored");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("chunk_size");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-
-
-    for(i=Encrypted_methods; i->ml_name; i++) {
-     tmp = PyString_FromString(i->ml_name);
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-    }; 
-     return result; 
-   }
-
-if(!strcmp(name, "urn")) {
-    PyObject *py_result;
-    Gen_wrapper *urn;
-
-
-    {
-       Object returned_object = (Object)(((AFFObject)self->base)->urn);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       urn = new_class_wrapper(returned_object);
-       if(!urn) goto error;
-    }
-talloc_increase_ref_count(urn->base);
-
-    py_result = (PyObject *)urn;
-
-    return py_result;
-};
-if(!strcmp(name, "mode")) {
-    PyObject *py_result;
-    char mode=0; char *str_mode = "\x0";
-
-
-    mode = (((AFFObject)self->base)->mode);
-
-    str_mode = &mode;
-    py_result = PyString_FromStringAndSize(str_mode, 1);
-
-    return py_result;
-};
-if(!strcmp(name, "readptr")) {
-    PyObject *py_result;
-    uint64_t  readptr;
-
-
-    readptr = (((FileLikeObject)self->base)->readptr);
-
-    py_result = PyLong_FromLong(readptr);
-
-    return py_result;
-};
-if(!strcmp(name, "size")) {
-    PyObject *py_result;
-    Gen_wrapper *size;
-
-
-    {
-       Object returned_object = (Object)(((FileLikeObject)self->base)->size);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       size = new_class_wrapper(returned_object);
-       if(!size) goto error;
-    }
-talloc_increase_ref_count(size->base);
-
-    py_result = (PyObject *)size;
-
-    return py_result;
-};
-if(!strcmp(name, "mode")) {
-    PyObject *py_result;
-    char mode=0; char *str_mode = "\x0";
-
-
-    mode = (((FileLikeObject)self->base)->mode);
-
-    str_mode = &mode;
-    py_result = PyString_FromStringAndSize(str_mode, 1);
-
-    return py_result;
-};
-if(!strcmp(name, "data")) {
-    PyObject *py_result;
-    char * data;
-
-
-    data = (((FileLikeObject)self->base)->data);
-
-    py_result = PyString_FromStringAndSize((char *)data, strlen(data));
-
-    return py_result;
-};
-if(!strcmp(name, "cipher")) {
-    PyObject *py_result;
-    Gen_wrapper *cipher;
-
-
-    {
-       Object returned_object = (Object)(((Encrypted)self->base)->cipher);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object AFF4Cipher: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       cipher = new_class_wrapper(returned_object);
-       if(!cipher) goto error;
-    }
-talloc_increase_ref_count(cipher->base);
-
-    py_result = (PyObject *)cipher;
-
-    return py_result;
-};
-if(!strcmp(name, "backing_store")) {
-    PyObject *py_result;
-    Gen_wrapper *backing_store;
-
-
-    {
-       Object returned_object = (Object)(((Encrypted)self->base)->backing_store);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       backing_store = new_class_wrapper(returned_object);
-       if(!backing_store) goto error;
-    }
-talloc_increase_ref_count(backing_store->base);
-
-    py_result = (PyObject *)backing_store;
-
-    return py_result;
-};
-if(!strcmp(name, "stored")) {
-    PyObject *py_result;
-    Gen_wrapper *stored;
-
-
-    {
-       Object returned_object = (Object)(((Encrypted)self->base)->stored);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object RDFURN: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       stored = new_class_wrapper(returned_object);
-       if(!stored) goto error;
-    }
-talloc_increase_ref_count(stored->base);
-
-    py_result = (PyObject *)stored;
-
-    return py_result;
-};
-if(!strcmp(name, "chunk_size")) {
-    PyObject *py_result;
-    Gen_wrapper *chunk_size;
-
-
-    {
-       Object returned_object = (Object)(((Encrypted)self->base)->chunk_size);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object XSDInteger: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       chunk_size = new_class_wrapper(returned_object);
-       if(!chunk_size) goto error;
-    }
-talloc_increase_ref_count(chunk_size->base);
-
-    py_result = (PyObject *)chunk_size;
-
-    return py_result;
-};
-
-  // Hand it off to the python native handler
-  return PyObject_GenericGetAttr((PyObject *)self, pyname);
-error:
-return NULL;
-}
-
-
-/********************************************************
-Autogenerated wrapper for function:
-void * Encrypted.set_property(char * attribute ,RDFValue value );
-********************************************************/
-
-static PyObject *pyEncrypted_set_property(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-char * attribute;
-Gen_wrapper *value;
-static char *kwlist[] = {"attribute","value", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-((AFFObject)self->base)->set_property(((AFFObject)self->base), attribute, value->base);
-
-// Postcall preparations
-
-// prepare results
-Py_INCREF(Py_None); py_result = Py_None;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-AFFObject Encrypted.finish();
-********************************************************/
-
-static PyObject *pyEncrypted_finish(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-Gen_wrapper *func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-{
-       Object returned_object = (Object)((AFFObject)self->base)->finish(((AFFObject)self->base));
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object AFFObject: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       func_return = new_class_wrapper(returned_object);
-       if(!func_return) goto error;
-    }
-
-// Postcall preparations
-self->base = NULL;
-
-// prepare results
-py_result = (PyObject *)func_return;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    self->base = NULL;
-return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  Encrypted.seek(uint64_t  offset ,uint64_t  whence );
-********************************************************/
-
-static PyObject *pyEncrypted_seek(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-uint64_t  offset;
-uint64_t  whence;
-static char *kwlist[] = {"offset","whence", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->seek(((FileLikeObject)self->base), offset, whence);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  Encrypted.read(OUT char * buffer, unsigned long int length);
-********************************************************/
-
-static PyObject *pyEncrypted_read(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-char *buffer=""; Py_ssize_t length=strlen("");
-PyObject *tmp_buffer;
-static char *kwlist[] = {"length", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-tmp_buffer = PyString_FromStringAndSize(NULL, length);
-PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
-
-// Postcall preparations
-
-// prepare results
-returned_result = PyList_New(0);
-py_result = PyLong_FromLong(func_return);
-PyList_Append(returned_result, py_result); Py_DECREF(py_result);
- _PyString_Resize(&tmp_buffer, func_return); 
-py_result = tmp_buffer;
-PyList_Append(returned_result, py_result); Py_DECREF(py_result);
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  Encrypted.write(char * buffer, unsigned long int length);
-********************************************************/
-
-static PyObject *pyEncrypted_write(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-char *buffer=""; Py_ssize_t length=strlen("");
-static char *kwlist[] = {"buffer", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  Encrypted.tell();
-********************************************************/
-
-static PyObject *pyEncrypted_tell(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->tell(((FileLikeObject)self->base));
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-char * Encrypted.get_data();
-********************************************************/
-
-static PyObject *pyEncrypted_get_data(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-char * func_return;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->get_data(((FileLikeObject)self->base));
-
-// Postcall preparations
-
-// prepare results
-py_result = PyString_FromStringAndSize((char *)func_return, strlen(func_return));
-talloc_free(func_return);
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-uint64_t  Encrypted.truncate(uint64_t  offset );
-********************************************************/
-
-static PyObject *pyEncrypted_truncate(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-uint64_t  func_return;
-uint64_t  offset;
-static char *kwlist[] = {"offset", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-func_return = ((FileLikeObject)self->base)->truncate(((FileLikeObject)self->base), offset);
-
-// Postcall preparations
-
-// prepare results
-py_result = PyLong_FromLong(func_return);
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-/********************************************************
-Autogenerated wrapper for function:
-void * Encrypted.close();
-********************************************************/
-
-static PyObject *pyEncrypted_close(pyEncrypted *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
-// Precall preparations
-
-// Make the call
-((FileLikeObject)self->base)->close(((FileLikeObject)self->base));
-
-// Postcall preparations
-self->base = NULL;
-
-// prepare results
-Py_INCREF(Py_None); py_result = Py_None;
-returned_result = py_result;
-return returned_result;
-
-};
-
-
-static PyTypeObject Encrypted_Type = {
-    PyObject_HEAD_INIT(NULL)
-    0,                         /* ob_size */
-    "pyaff4.Encrypted",               /* tp_name */
-    sizeof(pyEncrypted),            /* tp_basicsize */
-    0,                         /* tp_itemsize */
-    (destructor)Encrypted_dealloc,/* tp_dealloc */
-    0,                         /* tp_print */
-    0,                         /* tp_getattr */
-    0,                         /* tp_setattr */
-    0,                         /* tp_compare */
-    0,                         /* tp_repr */
-    0,                         /* tp_as_number */
-    0,                         /* tp_as_sequence */
-    0,                         /* tp_as_mapping */
-    0,                         /* tp_hash */
-    0,                         /* tp_call */
-    0,                         /* tp_str */
-    (getattrofunc)Encrypted_getattr,                         /* tp_getattro */
-    0,                         /* tp_setattro */
-    0,                         /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
-    "Encrypted: \n   Encryption is handled via two components, the encrypted stream and\n   the cipher. An encrypted stream is an FileLikeObject with the\n   following AFF4 attributes:\n\n   AFF4_CHUNK_SIZE = Data will be broken into these chunks and\n                     encrypted independantly.\n\n   AFF4_STORED     = Data will be stored on this backing stream.\n\n   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher\n                     class. More on that below.\n\n   When opened, the FileLikeObject is created by instantiating a\n   cipher from the AFF4_CIPHER attribute. Data is then divided into\n   chunks and each chunk is encrypted using the cipher, and then\n   written to the backing stream.\n\n   A cipher is a class which extends the AFF4Cipher baseclass.\n\n   Of course a valid cipher must also implement valid serialization\n   methods and also some way of key initialization. Chunks must be\n   whole multiples of blocksize.\n",     /* tp_doc */
-    0,	                       /* tp_traverse */
-    0,                         /* tp_clear */
-    0,                         /* tp_richcompare */
-    0,                         /* tp_weaklistoffset */
-    0,                         /* tp_iter */
-    0,                         /* tp_iternext */
-    Encrypted_methods,            /* tp_methods */
-    0,                         /* tp_members */
-    0,                         /* tp_getset */
-    0,                         /* tp_base */
-    0,                         /* tp_dict */
-    0,                         /* tp_descr_get */
-    0,                         /* tp_descr_set */
-    0,                         /* tp_dictoffset */
-    (initproc)pyEncrypted_init,      /* tp_init */
-    0,                         /* tp_alloc */
-    0,                         /* tp_new */
-};
 static PyMethodDef MapDriver_methods[] = {
      {"set_property",(PyCFunction)pyMapDriver_set_property, METH_VARARGS|METH_KEYWORDS, "void * MapDriver.set_property(char * attribute ,RDFValue value );\n\n\n"},
      {"finish",(PyCFunction)pyMapDriver_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject MapDriver.finish();\n\n\n"},
@@ -3485,21 +2856,20 @@ static PyTypeObject Image_Type = {
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
-static PyMethodDef HTTPObject_methods[] = {
-     {"set_property",(PyCFunction)pyHTTPObject_set_property, METH_VARARGS|METH_KEYWORDS, "void * HTTPObject.set_property(char * attribute ,RDFValue value );\n\n\n"},
-     {"finish",(PyCFunction)pyHTTPObject_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject HTTPObject.finish();\n\n\n"},
-     {"seek",(PyCFunction)pyHTTPObject_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
-     {"read",(PyCFunction)pyHTTPObject_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.read(OUT char * buffer, unsigned long int length);\n\n\n"},
-     {"write",(PyCFunction)pyHTTPObject_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.write(char * buffer, unsigned long int length);\n\n\n"},
-     {"tell",(PyCFunction)pyHTTPObject_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.tell();\n\n\n"},
-     {"get_data",(PyCFunction)pyHTTPObject_get_data, METH_VARARGS|METH_KEYWORDS, "char * HTTPObject.get_data();\n\n\n"},
-     {"truncate",(PyCFunction)pyHTTPObject_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.truncate(uint64_t  offset );\n\n\n"},
-     {"close",(PyCFunction)pyHTTPObject_close, METH_VARARGS|METH_KEYWORDS, "void * HTTPObject.close();\n\n\n"},
-     {"Con",(PyCFunction)pyHTTPObject_Con, METH_VARARGS|METH_KEYWORDS, "HTTPObject HTTPObject.Con(char * url );\n\n\n"},
+static PyMethodDef Encrypted_methods[] = {
+     {"set_property",(PyCFunction)pyEncrypted_set_property, METH_VARARGS|METH_KEYWORDS, "void * Encrypted.set_property(char * attribute ,RDFValue value );\n\n\n"},
+     {"finish",(PyCFunction)pyEncrypted_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject Encrypted.finish();\n\n\n"},
+     {"seek",(PyCFunction)pyEncrypted_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
+     {"read",(PyCFunction)pyEncrypted_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.read(OUT char * buffer, unsigned long int length);\n\n\n"},
+     {"write",(PyCFunction)pyEncrypted_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.write(char * buffer, unsigned long int length);\n\n\n"},
+     {"tell",(PyCFunction)pyEncrypted_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.tell();\n\n\n"},
+     {"get_data",(PyCFunction)pyEncrypted_get_data, METH_VARARGS|METH_KEYWORDS, "char * Encrypted.get_data();\n\n\n"},
+     {"truncate",(PyCFunction)pyEncrypted_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  Encrypted.truncate(uint64_t  offset );\n\n\n"},
+     {"close",(PyCFunction)pyEncrypted_close, METH_VARARGS|METH_KEYWORDS, "void * Encrypted.close();\n\n\n"},
      {NULL}  /* Sentinel */
 };
 static void
-HTTPObject_dealloc(pyHTTPObject *self) {
+Encrypted_dealloc(pyEncrypted *self) {
 
     if(self->base) {
         talloc_free(self->base);
@@ -3508,7 +2878,7 @@ HTTPObject_dealloc(pyHTTPObject *self) {
 
 };
 
-static int pyHTTPObject_init(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static int pyEncrypted_init(pyEncrypted *self, PyObject *args, PyObject *kwds) {
 Gen_wrapper *urn;
 char mode=0; char *str_mode = "\x0";
 static char *kwlist[] = {"urn","mode", NULL};
@@ -3525,9 +2895,9 @@ if(strlen(str_mode)!=1) {
 
 mode = str_mode[0];
 
-self->base = CONSTRUCT(HTTPObject, AFFObject, Con, NULL, urn->base, mode);
+self->base = CONSTRUCT(Encrypted, AFFObject, Con, NULL, urn->base, mode);
   if(!self->base) {
-    PyErr_Format(PyExc_IOError, "Unable to construct class HTTPObject");
+    PyErr_Format(PyExc_IOError, "Unable to construct class Encrypted");
     goto error;
   };
   return 0;
@@ -3536,7 +2906,7 @@ error:
 };
 
 
-static PyObject *HTTPObject_getattr(pyHTTPObject *self, PyObject *pyname) {
+static PyObject *Encrypted_getattr(pyEncrypted *self, PyObject *pyname) {
   char *name = PyString_AsString(pyname);
 
   if(!name) return NULL;
@@ -3558,11 +2928,17 @@ if(!strcmp(name, "__members__")) {
     PyList_Append(result, tmp); Py_DECREF(tmp);
  tmp = PyString_FromString("data");
     PyList_Append(result, tmp); Py_DECREF(tmp);
- tmp = PyString_FromString("send_buffer_offset");
+ tmp = PyString_FromString("cipher");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("backing_store");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("stored");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("chunk_size");
     PyList_Append(result, tmp); Py_DECREF(tmp);
 
 
-    for(i=HTTPObject_methods; i->ml_name; i++) {
+    for(i=Encrypted_methods; i->ml_name; i++) {
      tmp = PyString_FromString(i->ml_name);
     PyList_Append(result, tmp); Py_DECREF(tmp);
     }; 
@@ -3663,14 +3039,99 @@ if(!strcmp(name, "data")) {
 
     return py_result;
 };
-if(!strcmp(name, "send_buffer_offset")) {
+if(!strcmp(name, "cipher")) {
     PyObject *py_result;
-    uint64_t  send_buffer_offset;
+    Gen_wrapper *cipher;
 
 
-    send_buffer_offset = (((HTTPObject)self->base)->send_buffer_offset);
+    {
+       Object returned_object = (Object)(((Encrypted)self->base)->cipher);
 
-    py_result = PyLong_FromLong(send_buffer_offset);
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object AFF4Cipher: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       cipher = new_class_wrapper(returned_object);
+       if(!cipher) goto error;
+    }
+talloc_increase_ref_count(cipher->base);
+
+    py_result = (PyObject *)cipher;
+
+    return py_result;
+};
+if(!strcmp(name, "backing_store")) {
+    PyObject *py_result;
+    Gen_wrapper *backing_store;
+
+
+    {
+       Object returned_object = (Object)(((Encrypted)self->base)->backing_store);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       backing_store = new_class_wrapper(returned_object);
+       if(!backing_store) goto error;
+    }
+talloc_increase_ref_count(backing_store->base);
+
+    py_result = (PyObject *)backing_store;
+
+    return py_result;
+};
+if(!strcmp(name, "stored")) {
+    PyObject *py_result;
+    Gen_wrapper *stored;
+
+
+    {
+       Object returned_object = (Object)(((Encrypted)self->base)->stored);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       stored = new_class_wrapper(returned_object);
+       if(!stored) goto error;
+    }
+talloc_increase_ref_count(stored->base);
+
+    py_result = (PyObject *)stored;
+
+    return py_result;
+};
+if(!strcmp(name, "chunk_size")) {
+    PyObject *py_result;
+    Gen_wrapper *chunk_size;
+
+
+    {
+       Object returned_object = (Object)(((Encrypted)self->base)->chunk_size);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       chunk_size = new_class_wrapper(returned_object);
+       if(!chunk_size) goto error;
+    }
+talloc_increase_ref_count(chunk_size->base);
+
+    py_result = (PyObject *)chunk_size;
 
     return py_result;
 };
@@ -3684,10 +3145,10 @@ return NULL;
 
 /********************************************************
 Autogenerated wrapper for function:
-void * HTTPObject.set_property(char * attribute ,RDFValue value );
+void * Encrypted.set_property(char * attribute ,RDFValue value );
 ********************************************************/
 
-static PyObject *pyHTTPObject_set_property(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_set_property(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * attribute;
 Gen_wrapper *value;
@@ -3697,7 +3158,7 @@ if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
  goto error;
 
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3719,14 +3180,14 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-AFFObject HTTPObject.finish();
+AFFObject Encrypted.finish();
 ********************************************************/
 
-static PyObject *pyHTTPObject_finish(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_finish(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 Gen_wrapper *func_return;
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3762,10 +3223,10 @@ return NULL;
 
 /********************************************************
 Autogenerated wrapper for function:
-uint64_t  HTTPObject.seek(uint64_t  offset ,uint64_t  whence );
+uint64_t  Encrypted.seek(uint64_t  offset ,uint64_t  whence );
 ********************************************************/
 
-static PyObject *pyHTTPObject_seek(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_seek(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 uint64_t  offset;
@@ -3776,7 +3237,7 @@ if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
  goto error;
 
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3798,10 +3259,10 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-uint64_t  HTTPObject.read(OUT char * buffer, unsigned long int length);
+uint64_t  Encrypted.read(OUT char * buffer, unsigned long int length);
 ********************************************************/
 
-static PyObject *pyHTTPObject_read(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_read(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 char *buffer=""; Py_ssize_t length=strlen("");
@@ -3812,7 +3273,7 @@ if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 tmp_buffer = PyString_FromStringAndSize(NULL, length);
 PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
@@ -3840,10 +3301,10 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-uint64_t  HTTPObject.write(char * buffer, unsigned long int length);
+uint64_t  Encrypted.write(char * buffer, unsigned long int length);
 ********************************************************/
 
-static PyObject *pyHTTPObject_write(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_write(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 char *buffer=""; Py_ssize_t length=strlen("");
@@ -3853,7 +3314,7 @@ if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
  goto error;
 
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3875,14 +3336,14 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-uint64_t  HTTPObject.tell();
+uint64_t  Encrypted.tell();
 ********************************************************/
 
-static PyObject *pyHTTPObject_tell(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_tell(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3900,14 +3361,14 @@ return returned_result;
 
 /********************************************************
 Autogenerated wrapper for function:
-char * HTTPObject.get_data();
+char * Encrypted.get_data();
 ********************************************************/
 
-static PyObject *pyHTTPObject_get_data(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_get_data(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 char * func_return;
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3926,10 +3387,10 @@ return returned_result;
 
 /********************************************************
 Autogenerated wrapper for function:
-uint64_t  HTTPObject.truncate(uint64_t  offset );
+uint64_t  Encrypted.truncate(uint64_t  offset );
 ********************************************************/
 
-static PyObject *pyHTTPObject_truncate(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_truncate(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 uint64_t  func_return;
 uint64_t  offset;
@@ -3939,7 +3400,7 @@ if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
  goto error;
 
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3961,13 +3422,13 @@ error:
 
 /********************************************************
 Autogenerated wrapper for function:
-void * HTTPObject.close();
+void * Encrypted.close();
 ********************************************************/
 
-static PyObject *pyHTTPObject_close(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+static PyObject *pyEncrypted_close(pyEncrypted *self, PyObject *args, PyObject *kwds) {
        PyObject *returned_result, *py_result;
 // Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Encrypted object no longer valid");
 // Precall preparations
 
 // Make the call
@@ -3984,60 +3445,13 @@ return returned_result;
 };
 
 
-/********************************************************
-Autogenerated wrapper for function:
-HTTPObject HTTPObject.Con(char * url );
-********************************************************/
-
-static PyObject *pyHTTPObject_Con(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
-       PyObject *returned_result, *py_result;
-Gen_wrapper *func_return;
-char * url;
-static char *kwlist[] = {"url", NULL};
-
-if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &url))
- goto error;
-
-// Make sure that we have something valid to wrap
-if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
-// Precall preparations
-
-// Make the call
-{
-       Object returned_object = (Object)((HTTPObject)self->base)->Con(((HTTPObject)self->base), url);
-
-       if(!returned_object) {
-         PyErr_Format(PyExc_RuntimeError,
-                    "Failed to create object HTTPObject: %s", __error_str);
-         ClearError();
-         goto error;
-       };
-
-       func_return = new_class_wrapper(returned_object);
-       if(!func_return) goto error;
-    }
-
-// Postcall preparations
-
-// prepare results
-py_result = (PyObject *)func_return;
-returned_result = py_result;
-return returned_result;
-
-// error conditions:
-error:
-    return NULL;
-
-};
-
-
-static PyTypeObject HTTPObject_Type = {
+static PyTypeObject Encrypted_Type = {
     PyObject_HEAD_INIT(NULL)
     0,                         /* ob_size */
-    "pyaff4.HTTPObject",               /* tp_name */
-    sizeof(pyHTTPObject),            /* tp_basicsize */
+    "pyaff4.Encrypted",               /* tp_name */
+    sizeof(pyEncrypted),            /* tp_basicsize */
     0,                         /* tp_itemsize */
-    (destructor)HTTPObject_dealloc,/* tp_dealloc */
+    (destructor)Encrypted_dealloc,/* tp_dealloc */
     0,                         /* tp_print */
     0,                         /* tp_getattr */
     0,                         /* tp_setattr */
@@ -4049,18 +3463,18 @@ static PyTypeObject HTTPObject_Type = {
     0,                         /* tp_hash */
     0,                         /* tp_call */
     0,                         /* tp_str */
-    (getattrofunc)HTTPObject_getattr,                         /* tp_getattro */
+    (getattrofunc)Encrypted_getattr,                         /* tp_getattro */
     0,                         /* tp_setattro */
     0,                         /* tp_as_buffer */
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
-    "HTTPObject:  This is implemented in using libcurl\n",     /* tp_doc */
+    "Encrypted: \n   Encryption is handled via two components, the encrypted stream and\n   the cipher. An encrypted stream is an FileLikeObject with the\n   following AFF4 attributes:\n\n   AFF4_CHUNK_SIZE = Data will be broken into these chunks and\n                     encrypted independantly.\n\n   AFF4_STORED     = Data will be stored on this backing stream.\n\n   AFF4_CIPHER     = This is an RDFValue which extends the AFF4Cipher\n                     class. More on that below.\n\n   When opened, the FileLikeObject is created by instantiating a\n   cipher from the AFF4_CIPHER attribute. Data is then divided into\n   chunks and each chunk is encrypted using the cipher, and then\n   written to the backing stream.\n\n   A cipher is a class which extends the AFF4Cipher baseclass.\n\n   Of course a valid cipher must also implement valid serialization\n   methods and also some way of key initialization. Chunks must be\n   whole multiples of blocksize.\n",     /* tp_doc */
     0,	                       /* tp_traverse */
     0,                         /* tp_clear */
     0,                         /* tp_richcompare */
     0,                         /* tp_weaklistoffset */
     0,                         /* tp_iter */
     0,                         /* tp_iternext */
-    HTTPObject_methods,            /* tp_methods */
+    Encrypted_methods,            /* tp_methods */
     0,                         /* tp_members */
     0,                         /* tp_getset */
     0,                         /* tp_base */
@@ -4068,7 +3482,7 @@ static PyTypeObject HTTPObject_Type = {
     0,                         /* tp_descr_get */
     0,                         /* tp_descr_set */
     0,                         /* tp_dictoffset */
-    (initproc)pyHTTPObject_init,      /* tp_init */
+    (initproc)pyEncrypted_init,      /* tp_init */
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
@@ -5614,6 +5028,593 @@ static PyTypeObject RDFValue_Type = {
     0,                         /* tp_descr_set */
     0,                         /* tp_dictoffset */
     (initproc)pyRDFValue_init,      /* tp_init */
+    0,                         /* tp_alloc */
+    0,                         /* tp_new */
+};
+static PyMethodDef HTTPObject_methods[] = {
+     {"set_property",(PyCFunction)pyHTTPObject_set_property, METH_VARARGS|METH_KEYWORDS, "void * HTTPObject.set_property(char * attribute ,RDFValue value );\n\n\n"},
+     {"finish",(PyCFunction)pyHTTPObject_finish, METH_VARARGS|METH_KEYWORDS, "AFFObject HTTPObject.finish();\n\n\n"},
+     {"seek",(PyCFunction)pyHTTPObject_seek, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.seek(uint64_t  offset ,uint64_t  whence );\n\n\n"},
+     {"read",(PyCFunction)pyHTTPObject_read, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.read(OUT char * buffer, unsigned long int length);\n\n\n"},
+     {"write",(PyCFunction)pyHTTPObject_write, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.write(char * buffer, unsigned long int length);\n\n\n"},
+     {"tell",(PyCFunction)pyHTTPObject_tell, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.tell();\n\n\n"},
+     {"get_data",(PyCFunction)pyHTTPObject_get_data, METH_VARARGS|METH_KEYWORDS, "char * HTTPObject.get_data();\n\n\n"},
+     {"truncate",(PyCFunction)pyHTTPObject_truncate, METH_VARARGS|METH_KEYWORDS, "uint64_t  HTTPObject.truncate(uint64_t  offset );\n\n\n"},
+     {"close",(PyCFunction)pyHTTPObject_close, METH_VARARGS|METH_KEYWORDS, "void * HTTPObject.close();\n\n\n"},
+     {"Con",(PyCFunction)pyHTTPObject_Con, METH_VARARGS|METH_KEYWORDS, "HTTPObject HTTPObject.Con(char * url );\n\n\n"},
+     {NULL}  /* Sentinel */
+};
+static void
+HTTPObject_dealloc(pyHTTPObject *self) {
+
+    if(self->base) {
+        talloc_free(self->base);
+        self->base=NULL;
+    };
+
+};
+
+static int pyHTTPObject_init(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+Gen_wrapper *urn;
+char mode=0; char *str_mode = "\x0";
+static char *kwlist[] = {"urn","mode", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "Os|", kwlist, &urn,&str_mode))
+ goto error;
+
+
+if(strlen(str_mode)!=1) {
+  PyErr_Format(PyExc_RuntimeError,
+          "You must only provide a single character for arg 'mode'");
+  goto error;
+};
+
+mode = str_mode[0];
+
+self->base = CONSTRUCT(HTTPObject, AFFObject, Con, NULL, urn->base, mode);
+  if(!self->base) {
+    PyErr_Format(PyExc_IOError, "Unable to construct class HTTPObject");
+    goto error;
+  };
+  return 0;
+error:
+    return -1;
+};
+
+
+static PyObject *HTTPObject_getattr(pyHTTPObject *self, PyObject *pyname) {
+  char *name = PyString_AsString(pyname);
+
+  if(!name) return NULL;
+if(!strcmp(name, "__members__")) {
+     PyObject *result = PyList_New(0);
+     PyObject *tmp;
+     PyMethodDef *i;
+
+     if(!result) goto error;
+ tmp = PyString_FromString("urn");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("mode");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("readptr");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("size");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("mode");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("data");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+ tmp = PyString_FromString("send_buffer_offset");
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+
+
+    for(i=HTTPObject_methods; i->ml_name; i++) {
+     tmp = PyString_FromString(i->ml_name);
+    PyList_Append(result, tmp); Py_DECREF(tmp);
+    }; 
+     return result; 
+   }
+
+if(!strcmp(name, "urn")) {
+    PyObject *py_result;
+    Gen_wrapper *urn;
+
+
+    {
+       Object returned_object = (Object)(((AFFObject)self->base)->urn);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object RDFURN: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       urn = new_class_wrapper(returned_object);
+       if(!urn) goto error;
+    }
+talloc_increase_ref_count(urn->base);
+
+    py_result = (PyObject *)urn;
+
+    return py_result;
+};
+if(!strcmp(name, "mode")) {
+    PyObject *py_result;
+    char mode=0; char *str_mode = "\x0";
+
+
+    mode = (((AFFObject)self->base)->mode);
+
+    str_mode = &mode;
+    py_result = PyString_FromStringAndSize(str_mode, 1);
+
+    return py_result;
+};
+if(!strcmp(name, "readptr")) {
+    PyObject *py_result;
+    uint64_t  readptr;
+
+
+    readptr = (((FileLikeObject)self->base)->readptr);
+
+    py_result = PyLong_FromLong(readptr);
+
+    return py_result;
+};
+if(!strcmp(name, "size")) {
+    PyObject *py_result;
+    Gen_wrapper *size;
+
+
+    {
+       Object returned_object = (Object)(((FileLikeObject)self->base)->size);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object XSDInteger: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       size = new_class_wrapper(returned_object);
+       if(!size) goto error;
+    }
+talloc_increase_ref_count(size->base);
+
+    py_result = (PyObject *)size;
+
+    return py_result;
+};
+if(!strcmp(name, "mode")) {
+    PyObject *py_result;
+    char mode=0; char *str_mode = "\x0";
+
+
+    mode = (((FileLikeObject)self->base)->mode);
+
+    str_mode = &mode;
+    py_result = PyString_FromStringAndSize(str_mode, 1);
+
+    return py_result;
+};
+if(!strcmp(name, "data")) {
+    PyObject *py_result;
+    char * data;
+
+
+    data = (((FileLikeObject)self->base)->data);
+
+    py_result = PyString_FromStringAndSize((char *)data, strlen(data));
+
+    return py_result;
+};
+if(!strcmp(name, "send_buffer_offset")) {
+    PyObject *py_result;
+    uint64_t  send_buffer_offset;
+
+
+    send_buffer_offset = (((HTTPObject)self->base)->send_buffer_offset);
+
+    py_result = PyLong_FromLong(send_buffer_offset);
+
+    return py_result;
+};
+
+  // Hand it off to the python native handler
+  return PyObject_GenericGetAttr((PyObject *)self, pyname);
+error:
+return NULL;
+}
+
+
+/********************************************************
+Autogenerated wrapper for function:
+void * HTTPObject.set_property(char * attribute ,RDFValue value );
+********************************************************/
+
+static PyObject *pyHTTPObject_set_property(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+char * attribute;
+Gen_wrapper *value;
+static char *kwlist[] = {"attribute","value", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "sO|", kwlist, &attribute,&value))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+((AFFObject)self->base)->set_property(((AFFObject)self->base), attribute, value->base);
+
+// Postcall preparations
+
+// prepare results
+Py_INCREF(Py_None); py_result = Py_None;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+AFFObject HTTPObject.finish();
+********************************************************/
+
+static PyObject *pyHTTPObject_finish(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+Gen_wrapper *func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+{
+       Object returned_object = (Object)((AFFObject)self->base)->finish(((AFFObject)self->base));
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object AFFObject: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
+
+// Postcall preparations
+self->base = NULL;
+
+// prepare results
+py_result = (PyObject *)func_return;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    self->base = NULL;
+return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  HTTPObject.seek(uint64_t  offset ,uint64_t  whence );
+********************************************************/
+
+static PyObject *pyHTTPObject_seek(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+uint64_t  offset;
+uint64_t  whence;
+static char *kwlist[] = {"offset","whence", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "KK|", kwlist, &offset,&whence))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->seek(((FileLikeObject)self->base), offset, whence);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  HTTPObject.read(OUT char * buffer, unsigned long int length);
+********************************************************/
+
+static PyObject *pyHTTPObject_read(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *buffer=""; Py_ssize_t length=strlen("");
+PyObject *tmp_buffer;
+static char *kwlist[] = {"length", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "l|", kwlist, &length))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+tmp_buffer = PyString_FromStringAndSize(NULL, length);
+PyString_AsStringAndSize(tmp_buffer, &buffer, (Py_ssize_t *)&length);
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->read(((FileLikeObject)self->base), (OUT char *)buffer, (unsigned long int)length);
+
+// Postcall preparations
+
+// prepare results
+returned_result = PyList_New(0);
+py_result = PyLong_FromLong(func_return);
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+ _PyString_Resize(&tmp_buffer, func_return); 
+py_result = tmp_buffer;
+PyList_Append(returned_result, py_result); Py_DECREF(py_result);
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  HTTPObject.write(char * buffer, unsigned long int length);
+********************************************************/
+
+static PyObject *pyHTTPObject_write(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+char *buffer=""; Py_ssize_t length=strlen("");
+static char *kwlist[] = {"buffer", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s#|", kwlist, &buffer, &length))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->write(((FileLikeObject)self->base), (char *)buffer, (unsigned long int)length);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  HTTPObject.tell();
+********************************************************/
+
+static PyObject *pyHTTPObject_tell(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->tell(((FileLikeObject)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+char * HTTPObject.get_data();
+********************************************************/
+
+static PyObject *pyHTTPObject_get_data(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+char * func_return;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->get_data(((FileLikeObject)self->base));
+
+// Postcall preparations
+
+// prepare results
+py_result = PyString_FromStringAndSize((char *)func_return, strlen(func_return));
+talloc_free(func_return);
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+uint64_t  HTTPObject.truncate(uint64_t  offset );
+********************************************************/
+
+static PyObject *pyHTTPObject_truncate(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+uint64_t  func_return;
+uint64_t  offset;
+static char *kwlist[] = {"offset", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "K|", kwlist, &offset))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+func_return = ((FileLikeObject)self->base)->truncate(((FileLikeObject)self->base), offset);
+
+// Postcall preparations
+
+// prepare results
+py_result = PyLong_FromLong(func_return);
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+void * HTTPObject.close();
+********************************************************/
+
+static PyObject *pyHTTPObject_close(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+((FileLikeObject)self->base)->close(((FileLikeObject)self->base));
+
+// Postcall preparations
+self->base = NULL;
+
+// prepare results
+Py_INCREF(Py_None); py_result = Py_None;
+returned_result = py_result;
+return returned_result;
+
+};
+
+
+/********************************************************
+Autogenerated wrapper for function:
+HTTPObject HTTPObject.Con(char * url );
+********************************************************/
+
+static PyObject *pyHTTPObject_Con(pyHTTPObject *self, PyObject *args, PyObject *kwds) {
+       PyObject *returned_result, *py_result;
+Gen_wrapper *func_return;
+char * url;
+static char *kwlist[] = {"url", NULL};
+
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "s|", kwlist, &url))
+ goto error;
+
+// Make sure that we have something valid to wrap
+if(!self->base) return PyErr_Format(PyExc_RuntimeError, "HTTPObject object no longer valid");
+// Precall preparations
+
+// Make the call
+{
+       Object returned_object = (Object)((HTTPObject)self->base)->Con(((HTTPObject)self->base), url);
+
+       if(!returned_object) {
+         PyErr_Format(PyExc_RuntimeError,
+                    "Failed to create object HTTPObject: %s", __error_str);
+         ClearError();
+         goto error;
+       };
+
+       func_return = new_class_wrapper(returned_object);
+       if(!func_return) goto error;
+    }
+
+// Postcall preparations
+
+// prepare results
+py_result = (PyObject *)func_return;
+returned_result = py_result;
+return returned_result;
+
+// error conditions:
+error:
+    return NULL;
+
+};
+
+
+static PyTypeObject HTTPObject_Type = {
+    PyObject_HEAD_INIT(NULL)
+    0,                         /* ob_size */
+    "pyaff4.HTTPObject",               /* tp_name */
+    sizeof(pyHTTPObject),            /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)HTTPObject_dealloc,/* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_compare */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    (getattrofunc)HTTPObject_getattr,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,        /* tp_flags */
+    "HTTPObject:  This is implemented in using libcurl\n",     /* tp_doc */
+    0,	                       /* tp_traverse */
+    0,                         /* tp_clear */
+    0,                         /* tp_richcompare */
+    0,                         /* tp_weaklistoffset */
+    0,                         /* tp_iter */
+    0,                         /* tp_iternext */
+    HTTPObject_methods,            /* tp_methods */
+    0,                         /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)pyHTTPObject_init,      /* tp_init */
     0,                         /* tp_alloc */
     0,                         /* tp_new */
 };
@@ -8954,13 +8955,6 @@ PyMODINIT_FUNC initpyaff4(void) {
    PyObject *d = PyModule_GetDict(m);
    PyObject *tmp;
 
- Encrypted_Type.tp_new = PyType_GenericNew;
- if (PyType_Ready(&Encrypted_Type) < 0)
-     return;
-
- Py_INCREF((PyObject *)&Encrypted_Type);
- PyModule_AddObject(m, "Encrypted", (PyObject *)&Encrypted_Type);
-
  MapDriver_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&MapDriver_Type) < 0)
      return;
@@ -8996,12 +8990,12 @@ PyMODINIT_FUNC initpyaff4(void) {
  Py_INCREF((PyObject *)&Image_Type);
  PyModule_AddObject(m, "Image", (PyObject *)&Image_Type);
 
- HTTPObject_Type.tp_new = PyType_GenericNew;
- if (PyType_Ready(&HTTPObject_Type) < 0)
+ Encrypted_Type.tp_new = PyType_GenericNew;
+ if (PyType_Ready(&Encrypted_Type) < 0)
      return;
 
- Py_INCREF((PyObject *)&HTTPObject_Type);
- PyModule_AddObject(m, "HTTPObject", (PyObject *)&HTTPObject_Type);
+ Py_INCREF((PyObject *)&Encrypted_Type);
+ PyModule_AddObject(m, "Encrypted", (PyObject *)&Encrypted_Type);
 
  ZipFile_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&ZipFile_Type) < 0)
@@ -9030,6 +9024,13 @@ PyMODINIT_FUNC initpyaff4(void) {
 
  Py_INCREF((PyObject *)&RDFValue_Type);
  PyModule_AddObject(m, "RDFValue", (PyObject *)&RDFValue_Type);
+
+ HTTPObject_Type.tp_new = PyType_GenericNew;
+ if (PyType_Ready(&HTTPObject_Type) < 0)
+     return;
+
+ Py_INCREF((PyObject *)&HTTPObject_Type);
+ PyModule_AddObject(m, "HTTPObject", (PyObject *)&HTTPObject_Type);
 
  ZipFileStream_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&ZipFileStream_Type) < 0)
@@ -9380,11 +9381,9 @@ PyMODINIT_FUNC initpyaff4(void) {
  PyDict_SetItemString(d, "ZIP_DEFLATE", tmp);
  Py_DECREF(tmp);
 
-talloc_enable_leak_report_full();
+//talloc_enable_leak_report_full();
 AFF4_Init();
 
-python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Encrypted;
-python_wrappers[TOTAL_CLASSES++].python_type = &Encrypted_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__MapDriver;
 python_wrappers[TOTAL_CLASSES++].python_type = &MapDriver_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__AES256Password;
@@ -9395,8 +9394,8 @@ python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__AFFObject;
 python_wrappers[TOTAL_CLASSES++].python_type = &AFFObject_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Image;
 python_wrappers[TOTAL_CLASSES++].python_type = &Image_Type;
-python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__HTTPObject;
-python_wrappers[TOTAL_CLASSES++].python_type = &HTTPObject_Type;
+python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Encrypted;
+python_wrappers[TOTAL_CLASSES++].python_type = &Encrypted_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__ZipFile;
 python_wrappers[TOTAL_CLASSES++].python_type = &ZipFile_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__XSDDatetime;
@@ -9405,6 +9404,8 @@ python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__URLParse;
 python_wrappers[TOTAL_CLASSES++].python_type = &URLParse_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__RDFValue;
 python_wrappers[TOTAL_CLASSES++].python_type = &RDFValue_Type;
+python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__HTTPObject;
+python_wrappers[TOTAL_CLASSES++].python_type = &HTTPObject_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__ZipFileStream;
 python_wrappers[TOTAL_CLASSES++].python_type = &ZipFileStream_Type;
 python_wrappers[TOTAL_CLASSES].class_ref = (Object)&__Resolver;

@@ -1,0 +1,29 @@
+import os, os.path, pdb
+import SconsUtils.utils as utils
+
+Import('env', 'pythonenv')
+
+BOUND_FILES = Split("""#include/aff4_constants.h #include/aff4_rdf.h
+              #include/aff4_io.h #include/aff4_resolver.h
+              #include/aff4_objects.h """)
+
+import class_parser
+
+def build_python_bindings(target, source, env):
+    """ A command to generate python bindings """
+    module_name = os.path.splitext(os.path.basename(target[0].name))[0]
+    utils.warn("Generating automatic python bindings for module %s" % module_name)
+
+    p = class_parser.parser(class_parser.Module(module_name), verbosity=pythonenv['V'])
+    for s in source:
+        p.parse(s.get_abspath())
+
+    fd = open(target[0].get_abspath(), 'w')
+    p.write(fd)
+    fd.close()
+
+if not env.get("disable_curl"):
+    BOUND_FILES.append("#include/aff4_http.h")
+
+pythonenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
+pythonenv.SharedLibrary("pyaff4", "pyaff4.c")

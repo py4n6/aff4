@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Fri Dec 18 17:39:08 2009 mic
+** Last update Wed Dec 23 23:24:33 2009 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -74,7 +74,7 @@ CLASS(FileLikeObject, AFFObject)
      int METHOD(FileLikeObject, read, OUT char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
-  
+ 
   // This can be used to get the content of the FileLikeObject in a
   // big buffer of data. The data will be cached with the
   // FileLikeObject. Its only really suitable for smallish amounts of

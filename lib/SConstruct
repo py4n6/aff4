@@ -1,0 +1,11 @@
+Import("env")
+
+source_files = """
+class.c talloc.c
+misc.c zip.c stringio.c resolver.c rdf.c  libaff4.c image.c map.c  encode.c queue.c
+"""
+env.Append(CPPFLAGS = ['-DHAVE_VA_COPY'])
+
+library = env.SharedLibrary("libaff4.so", Split(source_files))
+#env.Install("/usr/lib", library)
+

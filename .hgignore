@@ -5,6 +5,7 @@ syntax: glob
 *.pyc
 *~
 *.o
+*.os
 *.Plo
 *.lo
 *.Po
@@ -44,4 +45,8 @@ tools/fsbuilder
 unittests
 raid_reconstructor
 pyaff4.c
-*#
+*\#
+.\#*
+.sconf_temp
+.sconsign*
+paper/

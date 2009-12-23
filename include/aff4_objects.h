@@ -18,25 +18,6 @@ extern "C" {
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#ifdef HAVE_LIBCURL
-#include <curl/curl.h>
-
-// This is implemented in using libcurl
-CLASS(HTTPObject, FileLikeObject)
-// The socket
-     CURL *curl;
-     StringIO buffer;
-
-     CURL *send_handle;
-     StringIO send_buffer;
-     int send_buffer_offset;
-
-     CURLM *multi_handle;
-
-     HTTPObject METHOD(HTTPObject, Con, char *url);
-END_CLASS
-#endif
-
 #include "queue.h"
 /** This class is used by the image worker thread to dump the segments
     out. It is only created by the Image class internally.

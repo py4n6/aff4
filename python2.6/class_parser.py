@@ -1,7 +1,10 @@
 import sys, os, re, pdb
 
+DEBUG = 0
+
 def log(msg):
-    sys.stderr.write(msg+"\n")
+    if DEBUG>0:
+        sys.stderr.write(msg+"\n")
 
 def escape_for_string(string):
     result = string
@@ -19,7 +22,7 @@ class Module:
 
     def initialization(self):
         result = """
-talloc_enable_leak_report_full();
+//talloc_enable_leak_report_full();
 AFF4_Init();
 
 """
@@ -1054,9 +1057,13 @@ class parser:
     blank_line_re = re.compile("\s+")
     current_class = None
 
-    def __init__(self, module):
+    def __init__(self, module, verbosity=0):
         self.module = module
         self.current_comment = ''
+        self.verbosity = verbosity
+        global DEBUG
+
+        DEBUG = verbosity
 
     def add_class(self, class_name, base_class_name, class_type, handler, docstring, modifier):
         try:
@@ -1198,8 +1205,9 @@ class parser:
     def write(self, out):
         self.module.write(out)
 
-p = parser(Module("pyaff4"))
-for arg in sys.argv[1:]:
-    p.parse(arg)
+if __name__ == '__main__':
+    p = parser(Module("pyaff4"))
+    for arg in sys.argv[1:]:
+        p.parse(arg)
 
-p.write(sys.stdout)
+    p.write(sys.stdout)
