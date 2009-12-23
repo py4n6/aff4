@@ -25,6 +25,7 @@ images/changelog.html
 conf.py
 .libs/
 *.so
+*.so.*
 pyflag
 pyflag_launch
 pyflash

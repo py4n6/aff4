@@ -1,4 +1,8 @@
 Import("env")
+import pdb
+import SCons.Util, SCons.Subst
+
+env = env.Clone()
 
 source_files = """
 class.c talloc.c
@@ -6,6 +10,7 @@ misc.c zip.c stringio.c resolver.c rdf.c  libaff4.c image.c map.c  encode.c queu
 """
 env.Append(CPPFLAGS = ['-DHAVE_VA_COPY'])
 
-library = env.SharedLibrary("libaff4.so", Split(source_files))
-#env.Install("/usr/lib", library)
+library = env.VersionedSharedLibrary("libaff4", '0', Split(source_files))
+env.InstallVersionedSharedLibrary("${prefix}/lib/", library)
+env.Alias('install', '${prefix}')
 

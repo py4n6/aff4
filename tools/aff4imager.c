@@ -47,12 +47,13 @@ void aff2_print_info(int verbose) {
 
     The source is copied onto Encrypted Image
 */
+#if 0
+
 int aff2_encrypted_image(char *driver, char *output_file, char *stream_name, 
 			 char *chunks_in_segment,
 			 char *append,
 			 char *source) {
 
-#if 0
   // This is the container volume
   ZipFile container_volume, volume;
   char *output = talloc_strdup(NULL, output_file);
@@ -166,8 +167,8 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     talloc_free(container_volume);
   PrintError();
   return -1;
-#endif
 };
+#endif
 
 int aff4_make_map(char *driver, char *output_file, char *stream_name,
                   char **in_urn, int count) {

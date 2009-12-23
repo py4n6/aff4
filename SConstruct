@@ -39,6 +39,7 @@ add_option(args, 'prefix',
            nargs=1,
            action='store',
            metavar='DIR',
+           default='/usr/local/',
            help='installation prefix')
 
 add_option(args, 'disable_ewf', action='store_true', default=False,
@@ -47,7 +48,7 @@ add_option(args, 'disable_ewf', action='store_true', default=False,
 add_option(args, 'disable_curl', action='store_true', default=False,
               help = 'Disable http support')
 
-env = Environment(**args)
+env = utils.ExtendedEnvironment(**args)
 
 Progress(['-\r', '\\\r', '|\r', '/\r'], interval=5)
 
@@ -107,6 +108,10 @@ if not env.GetOption('clean'):
    if not conf.CheckLib('pthread') or \
           not conf.CheckFunc('pthread_create'):
       error('You must install pthread-dev to build libaff4!')
+
+   if not conf.CheckLib('tdb') or \
+          not conf.CheckFunc('tdb_open'):
+      error('You must install libtdb-dev to build libaff4!')
 
    ## Make sure the openssl installation is ok
    if not conf.CheckLib('ssl'):

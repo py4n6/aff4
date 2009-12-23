@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, re, pdb
 import platform
 
 # taken from scons wiki
@@ -182,3 +182,70 @@ def config_h_build(target, source, env):
         config_h.write(config_h_in.read() % config_h_defines)
         config_h_in.close()
         config_h.close()
+
+
+import SCons.Environment
+
+class ExtendedEnvironment(SCons.Environment.Environment):
+    def VersionedSharedLibrary(self, libname, libversion, lib_objs=[]):
+        platform = self.subst('$PLATFORM')
+        shlib_pre_action = None
+        shlib_suffix = self.subst('$SHLIBSUFFIX')
+        shlib_post_action = None
+        shlink_flags = SCons.Util.CLVar(self.subst('$SHLINKFLAGS'))
+
+        if platform == 'posix':
+            shlib_post_action = [ 'rm -f $TARGET', 'ln -s ${SOURCE.file} $TARGET' ]
+            shlib_post_action_output_re = [ '%s\\.[0-9\\.]*$' % re.escape(shlib_suffix), shlib_suffix ]
+            shlib_suffix += '.' + libversion
+            shlink_flags += [ '-Wl,-Bsymbolic', '-Wl,-soname=${TARGET}' ]
+        elif platform == 'aix':
+            shlib_pre_action = [ "nm -Pg $SOURCES > ${TARGET}.tmp1", "grep ' [BDT] ' < ${TARGET}.tmp1 > ${TARGET}.tmp2", "cut -f1 -d' ' < ${TARGET}.tmp2 > ${TARGET}", "rm -f ${TARGET}.tmp[12]" ]
+            shlib_pre_action_output_re = [ '$', '.exp' ]
+            shlib_post_action = [ 'rm -f $TARGET', 'ln -s $SOURCE $TARGET' ]
+            shlib_post_action_output_re = [ '%s\\.[0-9\\.]*' % re.escape(shlib_suffix), shlib_suffix ]
+            shlib_suffix += '.' + libversion
+            shlink_flags += ['-G', '-bE:${TARGET}.exp', '-bM:SRE']
+        elif platform == 'cygwin':
+            shlink_flags += [ '-Wl,-Bsymbolic', '-Wl,--out-implib,${TARGET.base}.a' ]
+        elif platform == 'darwin':
+            shlib_suffix = '.' + libversion + shlib_suffix
+            shlink_flags += [ '-dynamiclib', '-current-version %s' % libversion ]
+
+        lib = self.SharedLibrary(libname,lib_objs,
+                                 SHLIBSUFFIX=shlib_suffix,
+                                 SHLINKFLAGS=shlink_flags)
+
+        if shlib_pre_action:
+            shlib_pre_action_output = re.sub(shlib_pre_action_output_re[0], shlib_pre_action_output_re[1], str(lib[0]))
+            self.Command(shlib_pre_action_output, [ lib_objs ], shlib_pre_action)
+            self.Depends(lib, shlib_pre_action_output)
+
+        if shlib_post_action:
+            shlib_post_action_output = re.sub(shlib_post_action_output_re[0], shlib_post_action_output_re[1], str(lib[0]))
+            self.Command(shlib_post_action_output, lib, shlib_post_action)
+
+        return lib
+
+    def InstallVersionedSharedLibrary(self, destination, lib):
+        platform = self.subst('$PLATFORM')
+        shlib_suffix = self.subst('$SHLIBSUFFIX')
+        shlib_install_pre_action = None
+        shlib_install_post_action = None
+
+        if platform == 'posix':
+            shlib_post_action = [ 'rm -f $TARGET', 'ln -s ${SOURCE.file} $TARGET' ]
+            shlib_post_action_output_re = [ '%s\\.[0-9\\.]*$' % re.escape(shlib_suffix), shlib_suffix ]
+            shlib_install_post_action = shlib_post_action
+            shlib_install_post_action_output_re = shlib_post_action_output_re
+
+        ilib = self.Install(destination,lib)
+
+        if shlib_install_pre_action:
+            shlib_install_pre_action_output = re.sub(shlib_install_pre_action_output_re[0], shlib_install_pre_action_output_re[1], str(ilib[0]))
+            self.Command(shlib_install_pre_action_output, ilib, shlib_install_pre_action)
+            self.Depends(shlib_install_pre_action_output, ilib)
+
+        if shlib_install_post_action:
+            shlib_install_post_action_output = re.sub(shlib_install_post_action_output_re[0], shlib_install_post_action_output_re[1], str(ilib[0]))
+            self.Command(shlib_install_post_action_output, ilib, shlib_install_post_action) 

@@ -9,7 +9,7 @@ be used to then build an AFF4 map of the raid set in a new volume.
 ** Login   <scudette@gmail.com>
 **
 ** Started on  Tue Nov 24 21:04:39 2009 mic
-** Last update Sun May 12 01:17:25 2002 Speed Blue
+** Last update Wed Dec 23 23:45:56 2009 mic
 */
 
 #include "aff4.h"
@@ -183,7 +183,6 @@ int main(int argc, char **argv)
   int c,blocksize=4*1024;
   int columnwidth=20;
   int rows=2;
-  int disks=0;
   char mode = 'r';
   char *stream_name = NULL;
   char *driver = AFF4_ZIP_VOLUME;
