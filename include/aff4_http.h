@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Wed Dec 23 22:31:11 2009 mic
-** Last update Wed Dec 23 22:32:03 2009 mic
+** Last update Thu Dec 24 14:16:01 2009 mic
 */
 
 #ifndef   	AFF4_HTTP_H_
@@ -15,7 +15,7 @@
 #include <curl/curl.h>
 
 // This is implemented in using libcurl
-CLASS(HTTPObject, FileLikeObject)
+PRIVATE CLASS(HTTPObject, FileLikeObject)
 // The socket
      CURL *curl;
      StringIO buffer;

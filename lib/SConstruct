@@ -7,6 +7,7 @@ env = env.Clone()
 source_files = """
 class.c talloc.c
 misc.c zip.c stringio.c resolver.c rdf.c  libaff4.c image.c map.c  encode.c queue.c
+encrypt.c
 """
 
 uuid_files = """
@@ -28,10 +29,11 @@ tdb_files = """
 
 env.Append(CPPFLAGS = ['-DHAVE_VA_COPY', '-Ilibreplace/'])
 
-library = env.VersionedSharedLibrary("libaff4", '0', Split(source_files +
-                                                           uuid_files +
-                                                           tdb_files))
+env.libaff4_sources = Split(source_files +
+                            uuid_files +
+                            tdb_files)
+
+library = env.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
 
 env.InstallVersionedSharedLibrary("${prefix}/lib/", library)
 env.Alias('install', '${prefix}')
-

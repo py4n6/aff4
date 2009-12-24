@@ -1,4 +1,6 @@
 import os, sys, re, pdb
+import distutils.sysconfig as sysconfig
+import distutils.util
 import platform
 
 # taken from scons wiki
@@ -216,7 +218,53 @@ import SCons.Environment
 class ExtendedEnvironment(SCons.Environment.Environment):
     """ Implementation from Richard Levitte email to
     org.tigris.scons.dev dated Jan 26, 2006 7:05:10 am."""
+    def PythonModule(self, libname, lib_objs=[], **kwargs):
+        """ This builds a python module which is almost a library but
+        is sometimes named differently.
+
+        We have two modes - a cross compile mode where we do our best
+        to guess the flags. In the native mode we can get the required
+        flags directly from distutils.
+        """
+        platform = self.subst('$PLATFORM')
+        shlib_pre_action = None
+        shlib_suffix = distutils.util.split_quoted(
+            sysconfig.get_config_var('SO'))
+        shlib_post_action = None
+        cppflags = distutils.util.split_quoted(
+            "-I"+sysconfig.get_python_inc())
+        shlink_flags = ['-laff4']
+        install_dest = distutils.util.split_quoted(
+            sysconfig.get_config_var('BINLIBDEST'))
+
+        flags = distutils.util.split_quoted(
+            sysconfig.get_config_var('LDSHARED'))
+
+        ## For some stupid reason they include the compiler in LDSHARED
+        shlink_flags.extend([x for x in flags if 'gcc' not in x])
+
+        shlink_flags.append(sysconfig.get_config_var('LOCALMODLIBS'))
+
+        ## TODO cross compile mode
+
+        lib = self.SharedLibrary(libname,lib_objs,
+                                 LIBPREFIX='',
+                                 CPPFLAGS = cppflags,
+                                 SHLIBSUFFIX=shlib_suffix,
+                                 SHLINKFLAGS=shlink_flags,
+                                 **kwargs)
+
+        ## Install it to the right spot
+        self.Install(install_dest, lib)
+        self.Alias('install', install_dest)
+
+        return lib
+
     def VersionedSharedLibrary(self, libname, libversion, lib_objs=[]):
+        """ This creates a version library similar to libtool.
+
+        We name the library with the appropriate soname.
+        """
         platform = self.subst('$PLATFORM')
         shlib_pre_action = None
         shlib_suffix = self.subst('$SHLIBSUFFIX')
@@ -227,7 +275,8 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             shlib_post_action = [ 'rm -f $TARGET', 'ln -s ${SOURCE.file} $TARGET' ]
             shlib_post_action_output_re = [ '%s\\.[0-9\\.]*$' % re.escape(shlib_suffix), shlib_suffix ]
             shlib_suffix += '.' + libversion
-            shlink_flags += [ '-Wl,-Bsymbolic', '-Wl,-soname=${TARGET}' ]
+            shlink_flags += [ '-Wl,-Bsymbolic', '-Wl,-soname=${LIBPREFIX}%s%s' % (
+                    libname, shlib_suffix) ]
         elif platform == 'aix':
             shlib_pre_action = [ "nm -Pg $SOURCES > ${TARGET}.tmp1", "grep ' [BDT] ' < ${TARGET}.tmp1 > ${TARGET}.tmp2", "cut -f1 -d' ' < ${TARGET}.tmp2 > ${TARGET}", "rm -f ${TARGET}.tmp[12]" ]
             shlib_pre_action_output_re = [ '$', '.exp' ]
@@ -277,4 +326,4 @@ class ExtendedEnvironment(SCons.Environment.Environment):
 
         if shlib_install_post_action:
             shlib_install_post_action_output = re.sub(shlib_install_post_action_output_re[0], shlib_install_post_action_output_re[1], str(ilib[0]))
-            self.Command(shlib_install_post_action_output, ilib, shlib_install_post_action) 
+            self.Command(shlib_install_post_action_output, ilib, shlib_install_post_action)

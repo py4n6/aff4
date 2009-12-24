@@ -162,14 +162,6 @@ generate_help(vars, env)
 
 Export("env")
 
-## This environment is for compiling python extension modules
-pythonenv = env.Clone()
-pythonenv.Append(CPPFLAGS= ['-I%s' % distutils.sysconfig.get_python_inc()],
-                 LDFLAGS = ['-L%s' % distutils.sysconfig.get_python_lib(),
-                            distutils.sysconfig.get_config_var('LOCALMODLIBS')],
-                 )
-Export('pythonenv')
-
 env.AlwaysBuild(env.Command('include/config.h', 'include/sc_config.h.in', config_h_build))
 
 SConscript('lib/SConstruct')
