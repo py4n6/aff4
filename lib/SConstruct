@@ -8,9 +8,30 @@ source_files = """
 class.c talloc.c
 misc.c zip.c stringio.c resolver.c rdf.c  libaff4.c image.c map.c  encode.c queue.c
 """
-env.Append(CPPFLAGS = ['-DHAVE_VA_COPY'])
 
-library = env.VersionedSharedLibrary("libaff4", '0', Split(source_files))
+uuid_files = """
+#uuid/clear.c    #uuid/copy.c      #uuid/gen_uuid_nt.c  #uuid/pack.c
+#uuid/unparse.c
+#uuid/compare.c  #uuid/gen_uuid.c  #uuid/isnull.c       #uuid/parse.c
+#uuid/unpack.c   #uuid/uuid_time.c
+"""
+
+## We compile these statically into our library to ensure users dont
+## need tdb as a dependency and also to ensure we can port tdb for
+## windows.
+tdb_files = """
+#libtdb/dump.c   #libtdb/freelist.c       #libtdb/io.c    #libtdb/open.c
+#libtdb/transaction.c
+#libtdb/error.c  #libtdb/freelistcheck.c  #libtdb/lock.c  #libtdb/tdb.c
+#libtdb/traverse.c
+"""
+
+env.Append(CPPFLAGS = ['-DHAVE_VA_COPY', '-Ilibreplace/'])
+
+library = env.VersionedSharedLibrary("libaff4", '0', Split(source_files +
+                                                           uuid_files +
+                                                           tdb_files))
+
 env.InstallVersionedSharedLibrary("${prefix}/lib/", library)
 env.Alias('install', '${prefix}')
 

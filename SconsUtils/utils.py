@@ -109,7 +109,7 @@ if not sys.stdout.isatty():
 
 def error(msg):
    print "%s%s%s" % (colors['red'], msg, colors['end'])
-   Exit(1)
+   sys.exit(1)
 
 def warn(msg):
    print "%s%s%s" % (colors['yellow'], msg, colors['end'])
@@ -171,6 +171,26 @@ def generate_help(vars, env):
     Script.Help("\nThe following variables can be used on the command line:\n")
     Script.Help(vars.GenerateHelpText(env))
 
+HEADERS = {}
+
+def check(type, conf, headers):
+    for header in headers:
+        if ":" in header:
+            define, header = header.split(':')
+        else:
+            if "/" in header:
+                tmp = header.split("/")[-1]
+            else:
+                tmp = header
+
+            define = "HAVE_" + tmp.upper().replace(".","_")
+
+        global HEADERS
+        if type == 'header':
+            HEADERS[define] = conf.CheckCHeader(header)
+        elif type == 'func':
+            HEADERS[define] = conf.CheckFunc(header)
+
 ## Build the config.h file
 def config_h_build(target, source, env):
     config_h_defines = env.Dictionary()
@@ -181,12 +201,21 @@ def config_h_build(target, source, env):
         config_h_in = file(str(a_source), "r")
         config_h.write(config_h_in.read() % config_h_defines)
         config_h_in.close()
-        config_h.close()
 
+
+    for k,v in HEADERS.items():
+        if v:
+            config_h.write("#define %s 1\n" % k)
+        else:
+            config_h.write("/** %s unset */\n" % k)
+
+    config_h.close()
 
 import SCons.Environment
 
 class ExtendedEnvironment(SCons.Environment.Environment):
+    """ Implementation from Richard Levitte email to
+    org.tigris.scons.dev dated Jan 26, 2006 7:05:10 am."""
     def VersionedSharedLibrary(self, libname, libversion, lib_objs=[]):
         platform = self.subst('$PLATFORM')
         shlib_pre_action = None

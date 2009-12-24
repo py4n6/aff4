@@ -4,9 +4,10 @@ import SconsUtils.utils as utils
 import distutils.sysconfig
 
 from SconsUtils.utils import error, warn, add_option, generate_help, config_h_build
+import SconsUtils.utils
 
 ## Options
-SetOption('implicit_cache', 1)
+#SetOption('implicit_cache', 1)
 
 args = dict(CPPPATH='#include/', tools=['default', 'packaging'],
             package_version = '0.1',
@@ -47,6 +48,9 @@ add_option(args, 'disable_ewf', action='store_true', default=False,
 
 add_option(args, 'disable_curl', action='store_true', default=False,
               help = 'Disable http support')
+
+add_option(args, 'mingw', action='store_true', default=False,
+           help = 'Use mingw to cross compile windows binaries')
 
 env = utils.ExtendedEnvironment(**args)
 
@@ -90,28 +94,28 @@ compileFlags += [ ('-W' + warning) for warning in warnings ]
 env['CCFLAGS'] = compileFlags
 env['CPPDEFINES'] = cppDefines
 
+if env['mingw']:
+   import SconsUtils.crossmingw as crossmingw
+
+   crossmingw.generate(env)
+
 conf = Configure(env)
 
 ## Check for different things
 if not env.GetOption('clean'):
+   ## Headers
+   SconsUtils.utils.check("header", conf, Split("""
+standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
+crypt.h dlfcn.h
+"""))
+
    ## Mandatory dependencies
    if not conf.CheckLibWithHeader('z', 'zlib.h','c'):
       error( 'You must install zlib-dev to build libaff4!')
 
-   if conf.CheckLibWithHeader('', 'uuid/uuid.h', 'c', call='uuid_generate();'):
-      ## uuid is built in as in osX
-      pass
-   elif not conf.CheckLibWithHeader('uuid', 'uuid/uuid.h','c') or \
-          not conf.CheckFunc('uuid_generate'):
-      error('You must install uuid-dev to build libaff4!')
-
    if not conf.CheckLib('pthread') or \
           not conf.CheckFunc('pthread_create'):
       error('You must install pthread-dev to build libaff4!')
-
-   if not conf.CheckLib('tdb') or \
-          not conf.CheckFunc('tdb_open'):
-      error('You must install libtdb-dev to build libaff4!')
 
    ## Make sure the openssl installation is ok
    if not conf.CheckLib('ssl'):
@@ -139,6 +143,17 @@ if not env.GetOption('clean'):
       warn("HTTP Support disabled as requested by user")
    elif not conf.CheckLib('curl'):
       env['disable_curl'] = True
+
+
+   ## Functions
+   SconsUtils.utils.check("func", conf, Split("""
+strerror strdup memmove mktime timegm utime utimes strlcpy strlcat setenv
+unsetenv seteuid setegid setresuid setresgid chown chroot link readlink symlink
+realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgroups
+bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
+asprintf vsyslog va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
+inet_aton connect gethostbyname getifaddrs freeifaddrs crypt
+"""))
 
 
 env = conf.Finish()
