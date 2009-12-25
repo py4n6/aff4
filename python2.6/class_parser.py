@@ -110,6 +110,34 @@ static int type_check(PyObject *obj, PyTypeObject *type) {
 
 """ % (len(self.classes)+1)
 
+    def initialise_class(self, class_name, out, done = None):
+        if done and class_name in done: return
+
+        done.add(class_name)
+
+        cls = self.classes[class_name]
+        """ Write out class initialisation code into the main init function. """
+        if cls.is_active():
+            base_class = self.classes.get(cls.base_class_name)
+
+            if base_class and base_class.is_active():
+                ## We have a base class - ensure it gets written out
+                ## first:
+                self.initialise_class(cls.base_class_name, out, done)
+
+                ## Now assign ourselves as derived from them
+                out.write(" %s_Type.tp_base = &%s_Type;" % (
+                        cls.class_name, cls.base_class_name))
+
+            out.write("""
+ %(name)s_Type.tp_new = PyType_GenericNew;
+ if (PyType_Ready(&%(name)s_Type) < 0)
+     return;
+
+ Py_INCREF((PyObject *)&%(name)s_Type);
+ PyModule_AddObject(m, "%(name)s", (PyObject *)&%(name)s_Type);
+""" % {'name': cls.class_name})
+
     def write(self, out):
         out.write(self.headers)
         out.write(self.private_functions())
@@ -140,21 +168,12 @@ PyMODINIT_FUNC init%(module)s(void) {
    PyObject *tmp;
 """ % {'module': self.name})
 
-        for cls in self.classes.values():
-            if cls.is_active():
-                base_class = self.classes.get(cls.base_class_name)
-
-                if base_class and base_class.is_active():
-                    out.write(" %s_Type.tp_base = &%s_Type;" % (
-                            cls.class_name, cls.base_class_name))
-                out.write("""
- %(name)s_Type.tp_new = PyType_GenericNew;
- if (PyType_Ready(&%(name)s_Type) < 0)
-     return;
-
- Py_INCREF((PyObject *)&%(name)s_Type);
- PyModule_AddObject(m, "%(name)s", (PyObject *)&%(name)s_Type);
-""" % {'name': cls.class_name})
+        ## The trick is to initialise the classes in order of their
+        ## inheritance. The following code will order initializations
+        ## according to their inheritance tree
+        done = set()
+        for class_name in self.classes.keys():
+            self.initialise_class(class_name, out, done)
 
         ## Add the constants in here
         for constant, type in self.constants:
@@ -221,7 +240,7 @@ class String(Type):
     def byref(self):
         return "&%s" % self.name
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
 
         result = "py_result = PyString_FromStringAndSize((char *)%s, %s);\n" % (name, self.length)
@@ -231,7 +250,7 @@ class String(Type):
         return result
 
 class BorrowedString(String):
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
         return "py_result = PyString_FromStringAndSize((char *)%(name)s, %(length)s);\n" % dict(name=name, length=self.length)
 
@@ -274,7 +293,7 @@ class Integer(Type):
     def definition(self, default = 0):
         return Type.definition(self, default)
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, *kw):
         name = name or self.name
         return "py_result = PyLong_FromLong(%s);\n" % name
 
@@ -282,7 +301,7 @@ class Char(Integer):
     buidstr = "s"
     interface = 'small_integer'
 
-    def to_python_object(self, name = None):
+    def to_python_object(self, name = None, **kw):
         ## We really want to return a string here
         return """str_%(name)s = &%(name)s;
     py_result = PyString_FromStringAndSize(str_%(name)s, 1);
@@ -328,8 +347,11 @@ class Char_and_Length_OUT(Char_and_Length):
 PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
 """ % (self.name, self.length, self.name, self.name, self.length)
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
+
+        if 'results' in kw:
+            kw['results'].pop(0)
 
         return """ _PyString_Resize(&tmp_%s, func_return); \npy_result = tmp_%s;\n""" % (
             name, name)
@@ -350,14 +372,14 @@ class TDB_DATA_P(Char_and_Length_OUT):
     def call_arg(self):
         return Type.call_arg(self)
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
         return "py_result = PyString_FromStringAndSize((char *)%s->dptr, %s->dsize);"\
             "\ntalloc_free(%s);" % (
             name, name, name)
 
 class TDB_DATA(TDB_DATA_P):
-    def to_python_object(self, name = None):
+    def to_python_object(self, name = None, **kw):
         name = name or self.name
 
         return "py_result = PyString_FromStringAndSize((char *)%s.dptr, %s.dsize);\n" % (
@@ -372,7 +394,7 @@ class Void(Type):
     def definition(self, default = None):
         return ''
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         return "Py_INCREF(Py_None); py_result = Py_None;\n"
 
     def call_arg(self):
@@ -389,7 +411,7 @@ class Wrapper(Type):
     """ This class represents a wrapped C type """
     sense = 'IN'
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, **kw):
         return ''
 
     def definition(self, default = None):
@@ -402,10 +424,10 @@ class Wrapper(Type):
         if 'OUT' in self.attributes or self.sense == 'OUT':
             return ''
 
-        return """ if(!type_check((PyObject *)%s,&%s_Type)) {
-     PyErr_Format(PyExc_RuntimeError, "%s must be of type %s");
+        return """if(!type_check((PyObject *)%s,&%s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%s must be derived from type %s");
      goto error;
-};""" % (self.name, self.type, self.name, self.type)
+};\n""" % (self.name, self.type, self.name, self.type)
 
     def assign(self, call, method, target=None):
         method.error_set = True;
@@ -431,7 +453,7 @@ class Wrapper(Type):
 
         return result
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
         return "py_result = (PyObject *)%(name)s;\n" % dict(name = name)
 
@@ -472,7 +494,7 @@ class Timeval(Type):
     def pre_call(self, method):
         return "%(name)s.tv_sec = (int)%(name)s_flt; %(name)s.tv_usec = (%(name)s_flt - %(name)s.tv_sec) * 1e6;\n" % self.__dict__
 
-    def to_python_object(self, name=None):
+    def to_python_object(self, name=None, **kw):
         name = name or self.name
         return """%(name)s_flt = (double)(%(name)s.tv_sec) + %(name)s.tv_usec;
 py_result = PyFloat_FromDouble(%(name)s_flt);
@@ -691,7 +713,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         results = [self.return_type.to_python_object()]
         for type in self.args:
             if type.sense == 'OUT_DONE':
-                results.append(type.to_python_object())
+                results.append(type.to_python_object(results = results))
 
         out.write("\n// prepare results\n")
         ## Make a tuple of results and pass them back
@@ -841,7 +863,7 @@ static PyObject *%(class_name)s_getattr(py%(class_name)s *self, PyObject *name);
 
     def built_ins(self, out):
         """ check for some built in attributes we need to support """
-        out.write("""if(!strcmp(name, "__members__")) {
+        out.write("""  if(!strcmp(name, "__members__")) {
      PyObject *result = PyList_New(0);
      PyObject *tmp;
      PyMethodDef *i;

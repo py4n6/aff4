@@ -58,10 +58,7 @@ def image(output_URI, options, fds):
         image_fd = image_fd.finish()
 
         while 1:
-            try:
-                len, data = fd.read(100000)
-            except IndexError:
-                data = fd.read(100000)
+            data = fd.read(100000)
 
             if not data: break
 
