@@ -113,10 +113,6 @@ crypt.h dlfcn.h
    if not conf.CheckLibWithHeader('z', 'zlib.h','c'):
       error( 'You must install zlib-dev to build libaff4!')
 
-   if not conf.CheckLib('pthread') or \
-          not conf.CheckFunc('pthread_create'):
-      error('You must install pthread-dev to build libaff4!')
-
    ## Make sure the openssl installation is ok
    if not conf.CheckLib('ssl'):
       error('You must have openssl header libraries. This is often packaged as libssl-dev')
@@ -133,18 +129,7 @@ crypt.h dlfcn.h
           not conf.CheckFunc('raptor_init'):
       error("You must have libraptor-dev installed")
 
-   ## Optional dependencies
-   if env["disable_ewf"]:
-      warn("EWF Support disabled as requested by user")
-   elif not conf.CheckLib('ewf'):
-      env['disable_ewf'] = True
-
-   if env["disable_curl"]:
-      warn("HTTP Support disabled as requested by user")
-   elif not conf.CheckLib('curl'):
-      env['disable_curl'] = True
-
-
+   ## Optional stuff:
    ## Functions
    SconsUtils.utils.check("func", conf, Split("""
 strerror strdup memmove mktime timegm utime utimes strlcpy strlcat setenv
@@ -153,6 +138,11 @@ realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgrou
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
 asprintf vsyslog va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
 inet_aton connect gethostbyname getifaddrs freeifaddrs crypt
+"""))
+
+   ## Libraries
+   SconsUtils.utils.check("lib", conf, Split("""
+ewf curl afflib pthread
 """))
 
 
@@ -164,9 +154,7 @@ Export("env")
 
 env.AlwaysBuild(env.Command('include/config.h', 'include/sc_config.h.in', config_h_build))
 
-SConscript('lib/SConstruct')
-SConscript('tools/SConstruct')
-SConscript('python2.6/SConstruct')
+SConscript(['lib/SConstruct', 'tools/SConstruct', 'python2.6/SConstruct'])
 
 # env.Package( NAME           = 'libaff4',
 #              VERSION        = '0.1.rc1',

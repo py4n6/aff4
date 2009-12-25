@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Thu Dec 24 13:58:47 2009 mic
+** Last update Fri Dec 25 23:19:48 2009 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -33,6 +33,14 @@ CLASS(AFFObject, Object)
 	 object or NULL if something went wrong.
      */
      DESTRUCTOR AFFObject METHOD(AFFObject, finish);
+
+     /** This method is used to return this object to the primary
+     resolver cache. The object should not be used after calling this
+     as the caller no longer owns it. As far as the caller is
+     concerned this is a desctructor and if you need the object again,
+     you need to call Resolver.open() to reobtain this.
+     */
+     DESTRUCTOR void METHOD(AFFObject, cache_return);
 
      /*  This method is used to delete the object from the resolver.
          It should also call the delete method for all the objects

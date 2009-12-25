@@ -27,7 +27,6 @@ def CheckFramework(context, name):
 
     return ret
 
-
 def CheckFink(context):
     context.Message( 'Looking for fink... ')
     prog = context.env.WhereIs('fink')
@@ -80,7 +79,7 @@ def ConfigPKG(context, name):
     if ret:
         context.env.ParseConfig('pkg-config --cflags --libs \'%s\'' % name)
     return int(ret)
-    
+
 def CheckPKG(context, name):
     context.Message( 'Checking for %s... ' % name )
     if platform.system().lower() == 'windows':
@@ -122,6 +121,9 @@ compile_source_message = '%sCompiling %s==> %s$SOURCE%s' % \
 compile_shared_source_message = '%sCompiling shared %s==> %s$SOURCE%s' % \
    (colors['blue'], colors['purple'], colors['yellow'], colors['end'])
 
+compile_python_source_message = '%sCompiling python module %s==> %s$SOURCE%s' % \
+   (colors['blue'], colors['purple'], colors['yellow'], colors['end'])
+
 link_program_message = '%sLinking Program %s==> %s$TARGET%s' % \
    (colors['red'], colors['purple'], colors['yellow'], colors['end'])
 
@@ -132,6 +134,9 @@ ranlib_library_message = '%sRanlib Library %s==> %s$TARGET%s' % \
    (colors['red'], colors['purple'], colors['yellow'], colors['end'])
 
 link_shared_library_message = '%sLinking Shared Library %s==> %s$TARGET%s' % \
+   (colors['red'], colors['purple'], colors['yellow'], colors['end'])
+
+link_python_module_message = '%sLinking Native Python module %s==> %s${TARGET}%s' % \
    (colors['red'], colors['purple'], colors['yellow'], colors['end'])
 
 java_library_message = '%sCreating Java Archive %s==> %s$TARGET%s' % \
@@ -192,6 +197,8 @@ def check(type, conf, headers):
             HEADERS[define] = conf.CheckCHeader(header)
         elif type == 'func':
             HEADERS[define] = conf.CheckFunc(header)
+        elif type == 'lib':
+            HEADERS[define] = conf.CheckLib(header)
 
 ## Build the config.h file
 def config_h_build(target, source, env):
@@ -205,8 +212,11 @@ def config_h_build(target, source, env):
         config_h_in.close()
 
 
-    for k,v in HEADERS.items():
-        if v:
+    keys = HEADERS.keys()
+    keys.sort()
+
+    for k in keys:
+        if HEADERS[k]:
             config_h.write("#define %s 1\n" % k)
         else:
             config_h.write("/** %s unset */\n" % k)
@@ -246,12 +256,16 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         shlink_flags.append(sysconfig.get_config_var('LOCALMODLIBS'))
 
         ## TODO cross compile mode
+        kwargs['LIBPREFIX'] = ''
+        kwargs['CPPFLAGS'] = cppflags
+        kwargs['SHLIBSUFFIX'] = shlib_suffix
+        kwargs['SHLINKFLAGS'] = shlink_flags
+
+        if not self.get('V'):
+            kwargs['SHCCCOMSTR'] = compile_python_source_message
+            kwargs['SHLINKCOMSTR'] = link_python_module_message
 
         lib = self.SharedLibrary(libname,lib_objs,
-                                 LIBPREFIX='',
-                                 CPPFLAGS = cppflags,
-                                 SHLIBSUFFIX=shlib_suffix,
-                                 SHLINKFLAGS=shlink_flags,
                                  **kwargs)
 
         ## Install it to the right spot

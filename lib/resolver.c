@@ -1138,10 +1138,15 @@ static void AFFObject_delete(RDFURN urn) {
   CALL(oracle, del, urn, NULL);
 };
 
+static void AFFObject_cache_return(AFFObject self) {
+  CALL(oracle, cache_return, self);
+};
+
 VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set_property) = AFFObject_set_property;
      VMETHOD(delete) = AFFObject_delete;
+     VMETHOD(cache_return) = AFFObject_cache_return;
 
      VMETHOD(Con) = AFFObject_Con;
 } END_VIRTUAL

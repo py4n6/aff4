@@ -39,7 +39,7 @@ glob:*.log
 glob:*.dd
 glob:*.zip
 tools/aff4imager
-tools/affuse
+tools/aff4fuse
 tools/common.h
 tools/fsbuilder
 *.tdb

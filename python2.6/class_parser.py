@@ -97,6 +97,17 @@ Gen_wrapper *new_class_wrapper(Object item) {
   return NULL;
 };
 
+static int type_check(PyObject *obj, PyTypeObject *type) {
+   PyTypeObject *tmp;
+
+   // Recurse through the inheritance tree and check if the types are expected
+   for(tmp = obj->ob_type; tmp != &PyBaseObject_Type; tmp = tmp->tp_base) {
+     if(tmp == type) return 1;
+   };
+
+  return 0;
+};
+
 """ % (len(self.classes)+1)
 
     def write(self, out):
@@ -131,6 +142,11 @@ PyMODINIT_FUNC init%(module)s(void) {
 
         for cls in self.classes.values():
             if cls.is_active():
+                base_class = self.classes.get(cls.base_class_name)
+
+                if base_class and base_class.is_active():
+                    out.write(" %s_Type.tp_base = &%s_Type;" % (
+                            cls.class_name, cls.base_class_name))
                 out.write("""
  %(name)s_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&%(name)s_Type) < 0)
@@ -382,6 +398,15 @@ class Wrapper(Type):
     def call_arg(self):
         return "%s->base" % self.name
 
+    def pre_call(self, method):
+        if 'OUT' in self.attributes or self.sense == 'OUT':
+            return ''
+
+        return """ if(!type_check((PyObject *)%s,&%s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%s must be of type %s");
+     goto error;
+};""" % (self.name, self.type, self.name, self.type)
+
     def assign(self, call, method, target=None):
         method.error_set = True;
         args = dict(name = target or self.name, call = call, type = self.type)
@@ -492,8 +517,24 @@ def dispatch(name, type):
 
     return result
 
+
+class ResultException:
+    value = 0
+    exception = "PyExc_IOError"
+
+    def __init__(self, check, exception, message):
+        self.check = check
+        self.exception = exception
+        self.message = message
+
+    def write(self, out):
+        out.write("\n//Handle exceptions\n")
+        out.write("if(%s) {\n    PyErr_Format(PyExc_%s, %s);\n  goto error; \n};\n\n" % (
+                self.check, self.exception, self.message))
+
 class Method:
-    default_re = re.compile("DEFAULT\(([A-Za-z0-9]+)\) = (.+)")
+    default_re = re.compile("DEFAULT\(([A-Za-z0-9]+)\) =(.+)")
+    exception_re = re.compile("RAISES\(([^,]+),([^\)]+)\) =(.+)")
 
     def __init__(self, class_name, base_class_name, method_name, args, return_type,
                  myclass = None):
@@ -504,6 +545,7 @@ class Method:
         self.myclass = myclass
         self.docstring = ''
         self.defaults = {}
+        self.exception = None
         self.error_set = False
         self.class_name = class_name
         self.base_class_name = base_class_name
@@ -540,6 +582,10 @@ class Method:
                 log("Setting default value for %s of %s" % (m.group(1),
                                                             m.group(2)))
                 self.defaults[name] = value
+
+            m =self.exception_re.search(line)
+            if m:
+                self.exception = ResultException(m.group(1), m.group(2), m.group(3))
 
     def write_local_vars(self, out):
         self.find_optional_vars()
@@ -632,6 +678,8 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
 
         ## Now call the wrapped function
         out.write(self.return_type.assign(call, self))
+        if self.exception:
+            self.exception.write(out)
 
         out.write("\n// Postcall preparations\n")
         ## Postcall preparations
@@ -823,6 +871,7 @@ static PyObject *%(class_name)s_getattr(py%(class_name)s *self, PyObject *name);
 static PyObject *%(class_name)s_getattr(py%(class_name)s *self, PyObject *pyname) {
   char *name = PyString_AsString(pyname);
 
+  if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Wrapped object no longer valid");
   if(!name) return NULL;
 """ % self.__dict__)
 

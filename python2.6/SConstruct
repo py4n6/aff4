@@ -26,4 +26,6 @@ if not env.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
 env.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
+env.Depends('pyaff4.c', 'class_parser.py')
+
 env.PythonModule("pyaff4", ["pyaff4.c"],LIBS="aff4")

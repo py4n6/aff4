@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Mon Dec 21 17:22:14 2009 mic
+** Last update Fri Dec 25 23:23:37 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -88,10 +88,15 @@ CLASS(Resolver, Object)
 */
       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
 
-       // All objected obtained from Resolver.open() need to be
-       // returned to the cache promptly using this method. NOTE - it
-       // is an error to be using an object after being returned to
-       // the cache - it might not be valid and may be gced.
+       /* All objects obtained from Resolver.open() need to be
+          returned to the cache promptly using this method. NOTE - it
+          is an error to be using an object after being returned to
+          the cache - it might not be valid and may be gced.
+
+          NOTE for Python bindings - do not use this function, instead
+          use AFFObject.cache_return() method which ensures the
+          wrapped python object is properly destroyed after this call.
+       */
       void METHOD(Resolver, cache_return, AFFObject obj);
 
        /* This create a new object of the specified type.

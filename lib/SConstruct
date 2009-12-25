@@ -1,13 +1,16 @@
 Import("env")
 import pdb
 import SCons.Util, SCons.Subst
+import SconsUtils.utils as utils
 
 env = env.Clone()
 
 source_files = """
-class.c talloc.c
-misc.c zip.c stringio.c resolver.c rdf.c  libaff4.c image.c map.c  encode.c queue.c
-encrypt.c
+#lib/class.c #lib/talloc.c
+#lib/misc.c #lib/zip.c #lib/stringio.c #lib/resolver.c
+#lib/rdf.c  #lib/libaff4.c #lib/image.c #lib/map.c
+#lib/encode.c #lib/queue.c
+#lib/encrypt.c
 """
 
 uuid_files = """
@@ -37,3 +40,5 @@ library = env.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
 
 env.InstallVersionedSharedLibrary("${prefix}/lib/", library)
 env.Alias('install', '${prefix}')
+
+utils.libaff4_static_lib = env.StaticLibrary('aff4', env.libaff4_sources)
