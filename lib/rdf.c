@@ -515,7 +515,7 @@ void rdf_init() {
   XSDString_init();
   RDFURN_init();
   XSDDatetime_init();
-  
+
   // Register all the known basic types
   register_rdf_value_class((RDFValue)GETCLASS(XSDInteger));
   register_rdf_value_class((RDFValue)GETCLASS(XSDString));

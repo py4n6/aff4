@@ -1097,6 +1097,9 @@ static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
 void Resolver_register_rdf_value_class(Resolver self, RDFValue class_ref) {
   register_rdf_value_class(class_ref);
   talloc_increase_ref_count(class_ref);
+
+  // Sync up the rdf registry with the attribute tdb
+  store_rdf_registry(self);
 };
 
 RDFValue Resolver_new_rdfvalue(Resolver self, void *ctx, char *type) {
