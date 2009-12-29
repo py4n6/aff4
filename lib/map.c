@@ -132,6 +132,14 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
   };
 };
 
+static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_offset, uint64_t target_length) {
+  FileLikeObject this = (FileLikeObject)self;
+
+  CALL(self, add, this->readptr, target_offset, target->value);
+  this->readptr += target_length;
+  this->size = max(this->size, this->readptr);
+};
+
 // This writes out the map to the stream
 static void MapDriver_save_map(MapDriver self) {
   MapDriver this = self;
@@ -331,6 +339,7 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
      VMETHOD(add) = MapDriver_add;
+     VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD(save_map) = MapDriver_save_map;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;

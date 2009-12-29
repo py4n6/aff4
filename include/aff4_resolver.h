@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Dec 25 23:23:37 2009 mic
+** Last update Tue Dec 29 11:47:45 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -155,6 +155,45 @@ CLASS(Resolver, Object)
      // Adds a new value to the value list for this attribute.
      void METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
 
+
+       /** This returns a unique ID for the given URN. The ID is only
+           unique within this resolver.
+       */
+       int METHOD(Resolver, get_id_by_urn, RDFURN uri);
+
+       /** This fills the URI specified by id into the uri container
+       passed. Returns 1 if the ID is found, or 0 if the ID is not
+       found.
+
+       RAISES(func_return == 0, KeyError) = "URI not found for id %llu", id
+       **/
+       int METHOD(Resolver, get_urn_by_id, int id, RDFURN uri);
+
+       /** This function is used to register a new RDFValue class with
+           the RDF subsystem. It can then be serialised, and parsed.
+
+           Note - the RDFValue instance must implement all the
+           required methods and attributes of an RDFValue. Namely:
+
+               dataType - the name this serialiser is known as.
+               parse(serialised_form) - parse itself from a serialised
+                                        form
+               serialise()            - Return a serialised version.
+
+               encode()  - Returns a string encoding for storage in
+                           the DB
+               decode()  - Decode itself from the db.
+
+           Note 2- this function steals a reference to the RDFValue
+           object provided - this means that it must not be a
+           statically allocated class template, and must be allocated
+           with talloc. Use register_rdf_value_class() for static
+           classes (e.g. GETCLASS(RDFURN)). Its ok to use a class
+           instance in here - we will call its constructor to make new
+           objects.
+       **/
+       void METHOD(Resolver, register_rdf_value_class, RDFValue class_ref);
+       RDFValue METHOD(Resolver, new_rdfvalue, void *ctx, char *type);
 END_CLASS
 
 // This is a global instance of the oracle. All AFFObjects must

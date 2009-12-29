@@ -162,6 +162,14 @@ CLASS(MapDriver, FileLikeObject)
      void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,\
 		 char *target);
 
+  /* This interface is a more natural way to build the map, by
+     simulating copying from different offsets in different targets
+     sequentially. This function will add a new map point, and advance
+     the readptr by the specified length.
+  */
+     void METHOD(MapDriver, write_from, RDFURN target, uint64_t target_offset,\
+                 uint64_t length);
+
      void METHOD(MapDriver, save_map);
 END_CLASS
 

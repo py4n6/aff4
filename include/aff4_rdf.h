@@ -41,7 +41,8 @@ CLASS(RDFValue, Object)
       int id;
       raptor_identifier_type raptor_type;
 
-      // This is only required for special handling
+      // This is only required for special handling - Leave as NULL to
+      // be the same as dataType above
       raptor_uri *raptor_literal_datatype;
 
       RDFValue METHOD(RDFValue, Con);
@@ -67,8 +68,15 @@ CLASS(RDFValue, Object)
 	  string for export into RDF. The returned string will be
 	  allocated internally and should not be freed by the caller. 
       */
-      BORROWED char *METHOD(RDFValue, serialise);
+      char *METHOD(RDFValue, serialise);
 END_CLASS
+
+      /** The following is a direction for the autogenerator to create
+          a proxied class for providing a python class as an
+          implementation of RDFValue.
+      */
+PROXY_CLASS(RDFValue)
+
 
       /** An integer encoded according the XML RFC. */
 CLASS(XSDInteger, RDFValue)
@@ -100,8 +108,6 @@ END_CLASS
      /** A URN for use in the rest of the library */
 CLASS(RDFURN, RDFValue)
      char *value;
-
-     void *serialised;
 
      // This parser maintains our internal state
      URLParse parser;

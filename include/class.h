@@ -303,6 +303,9 @@ extern char __error_str[];
 #define NAMEOF(obj)				\
   ((Object)obj)->__name__
 
+#define SIZEOF(obj)                             \
+  ((Object)obj)->__size
+
 #define DOCSTRING(obj)				\
   ((Object)obj)->__doc__
 
@@ -484,6 +487,25 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   // autogenerator to assign default values to that parameter and make
   // it optional
 #define DEFAULT(x)
+
+  // This explicitely denote that the type is a null terminated char
+  // ptr as opposed to a pointer to char and length.
+#define ZString char *
+
+  /* The following is a direction for the autogenerator to proxy the
+     given class. This is done in the following way:
+
+1) a new python type is created called Proxy_class_name() with a
+constructor which takes a surrogate object.
+
+2) The proxy class contains a member "base" of the type of the proxied
+C class.
+
+3) The returned python object may be passed to any C functions which
+expect the proxied class, and internal C calls will be converted to
+python method calls on the proxied object.
+  */
+#define PROXY_CLASS(name)
 
 #endif
 #ifdef __cplusplus

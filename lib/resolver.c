@@ -336,8 +336,7 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
   } else if(create_new) {
     TDB_DATA max_key;
 
-    max_key.dptr = (unsigned char *)MAX_KEY;
-    max_key.dsize = strlen(MAX_KEY);
+    max_key = tdb_data_from_string(MAX_KEY);
 
     urn_id = tdb_fetch(tdb, max_key);
     if(urn_id.dptr) {
@@ -395,8 +394,7 @@ static void store_rdf_registry(Resolver self) {
     int attribute_id;
     RDFValue value_class = i->data;
 
-    tmp.dptr = (unsigned char *)value_class->dataType;
-    tmp.dsize = strlen(value_class->dataType);
+    tmp = tdb_data_from_string(value_class->dataType);
 
     attribute_id = get_id(self->attribute_db, tmp, 1);
     value_class->id = attribute_id;
@@ -572,10 +570,8 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
   TDB_DATA_LIST i;
   TDB_DATA urn, attribute;
 
-  urn.dptr = (unsigned char *)urn_str->value;
-  urn.dsize = strlen(urn_str->value);
-  attribute.dptr = (unsigned char *)attribute_str;
-  attribute.dsize = strlen(attribute_str);
+  urn = tdb_data_from_string(urn_str->value);
+  attribute = tdb_data_from_string(attribute_str);
 
   DEBUG("Getting %s, %s\n", urn_str->value, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
@@ -693,8 +689,7 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     TDB_DATA_LIST tmp;
 
     DEBUG("Adding %s, %s\n", urn->value, attribute_str);
-    attribute.dptr = (unsigned char *)attribute_str;
-    attribute.dsize = strlen(attribute_str);
+    attribute = tdb_data_from_string(attribute_str);
 
     // Grab the lock
     tdb_lockall(self->data_db);
@@ -722,8 +717,7 @@ static RESOLVER_ITER *Resolver_get_iter(Resolver self,
   TDB_DATA attribute;
   RESOLVER_ITER *iter = talloc(ctx, RESOLVER_ITER);
 
-  attribute.dptr = (unsigned char *)attribute_str;
-  attribute.dsize = strlen(attribute_str);
+  attribute = tdb_data_from_string(attribute_str);
 
   memset(&iter->head, 0, sizeof(iter->head));
   iter->offset = get_data_head(self, tdb_data_from_string(urn->value),
@@ -995,8 +989,7 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
   char buff[BUFF_SIZE];
 
   if(attribute_str) {
-    attribute.dptr = (unsigned char *)attribute_str;
-    attribute.dsize = strlen(attribute_str);
+    attribute = tdb_data_from_string(attribute_str);
 
     key.dptr = (unsigned char *)buff;
     key.dsize = calculate_key(self, tdb_data_from_string(urn->value),
@@ -1010,8 +1003,7 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
     int max_id,i;
 
     DEBUG("Removing all attributes from %s\n", urn->value);
-    max_key.dptr = (unsigned char *)MAX_KEY;
-    max_key.dsize = strlen(MAX_KEY);
+    max_key = tdb_data_from_string(MAX_KEY);
 
     max_key = tdb_fetch(self->attribute_db, max_key);
     if(max_key.dptr) {
@@ -1081,6 +1073,37 @@ static int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
   return Resolver_lock_gen(self, urn, mode, F_ULOCK);
 };
 
+static int Resolver_get_id_by_urn(Resolver self, RDFURN uri) {
+  return get_id(self->urn_db, tdb_data_from_string(uri->value), 1);
+};
+
+static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
+  TDB_DATA urn_id, result;
+  char buff[BUFF_SIZE];
+
+  urn_id.dptr = (unsigned char *)buff;
+  urn_id.dsize = tdb_serialise_int(id, buff, BUFF_SIZE);
+
+  result = tdb_fetch(self->urn_db, urn_id);
+  if(result.dptr) {
+    CALL(uri, set, result.dptr);
+    free(result.dptr);
+    return 1;
+  };
+
+  return 0;
+};
+
+void Resolver_register_rdf_value_class(Resolver self, RDFValue class_ref) {
+  register_rdf_value_class(class_ref);
+  talloc_increase_ref_count(class_ref);
+};
+
+RDFValue Resolver_new_rdfvalue(Resolver self, void *ctx, char *type) {
+
+  return new_rdfvalue(ctx, type);
+};
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, AFFObject) {
      VMETHOD(Con) = Resolver_Con;
@@ -1095,6 +1118,11 @@ VIRTUAL(Resolver, AFFObject) {
      VMETHOD(set_value) = Resolver_set_value;
      VMETHOD(add_value) = Resolver_add_value;
      VMETHOD(del) = Resolver_del;
+
+     VMETHOD(get_id_by_urn) = Resolver_get_id_by_urn;
+     VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;
+     VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
+     VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
 } END_VIRTUAL
 
 /************************************************************

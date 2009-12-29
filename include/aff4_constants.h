@@ -12,7 +12,7 @@
 
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"
-#define FQN NAMESPACE
+#define FQN NAMESPACE ""
 
 // This object holds parameters pertinent to the running instance
 #define GLOBAL VOLATILE_NS "global"
@@ -144,3 +144,13 @@
 /** Cryptography related names */
 #define AFF4_CIPHER PREDICATE_NAMESPACE "cipher"
 #define AFF4_AES256_PASSWORD PREDICATE_NAMESPACE "aes256-password"
+
+
+/** The following are endoresed vocabulary for storing common forensic
+    properties.
+*/
+#define AFF4_UNIX_PERMS PREDICATE_NAMESPACE "unix_perms"
+#define AFF4_MTIME      PREDICATE_NAMESPACE "mtime"
+#define AFF4_ATIME      PREDICATE_NAMESPACE "atime"
+#define AFF4_CTIME      PREDICATE_NAMESPACE "ctime"
+#define AFF4_FILE_TYPE  PREDICATE_NAMESPACE "type:magic"

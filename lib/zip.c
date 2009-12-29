@@ -286,7 +286,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
     if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->storage_urn)) {
-      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn);
+      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn->value);
       goto error;
     };
 

@@ -181,6 +181,7 @@ static char *XSDInteger_serialise(RDFValue self) {
 
   this->serialised = talloc_asprintf(self, "%llu", this->value);
 
+  talloc_increase_ref_count(this->serialised);
   return this->serialised;
 };
 
@@ -197,8 +198,6 @@ VIRTUAL(XSDInteger, RDFValue) {
 
    // This is our official data type - or at least what raptor gives us
    VATTR(super.dataType) = "http://www.w3.org/2001/XMLSchema#integer";
-   VATTR(super.raptor_literal_datatype) = raptor_new_uri(		\
-		   (const unsigned char*)VATTR(super.dataType));
 
    VMETHOD(super.encode) = XSDInteger_encode;
    VMETHOD(super.decode) = XSDInteger_decode;
@@ -246,7 +245,8 @@ static int XSDString_decode(RDFValue this, char *data, int length) {
 /* We serialise the string */
 static char *XSDString_serialise(RDFValue self) {
   XSDString this = (XSDString)self;
-  
+
+  talloc_increase_ref_count(this->value);
   return this->value;
 };
 
@@ -277,7 +277,7 @@ static TDB_DATA *RDFURN_encode(RDFValue self) {
   TDB_DATA *result = talloc(self, TDB_DATA);
 
   result->dptr = (unsigned char *)this->value;
-  result->dsize = strlen(this->value)+1;
+  result->dsize = strlen(this->value) + 1;
 
   return result;
 };
@@ -285,6 +285,7 @@ static TDB_DATA *RDFURN_encode(RDFValue self) {
 static RDFValue RDFURN_Con(RDFValue self) {
   RDFURN this = (RDFURN)self;
   this->parser = CONSTRUCT(URLParse, URLParse, Con, this, NULL);
+  this->value = talloc_strdup(self,"(unset)");
 
   return self;
 };
@@ -302,9 +303,10 @@ static RDFValue RDFURN_set(RDFURN self, char *string) {
 static int RDFURN_decode(RDFValue this, char *data, int length) {
   RDFURN self = (RDFURN)this;
   self->value = talloc_realloc_size(self, self->value, length+1);
-  self->value[length]=0;
 
   memcpy(self->value, data, length);
+  self->value[length]=0;
+
   CALL(self->parser, parse, self->value);
 
   return length;
@@ -314,10 +316,8 @@ static int RDFURN_decode(RDFValue this, char *data, int length) {
 static char *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
 
-  if(this->serialised) talloc_free(this->serialised);
-  this->serialised = raptor_new_uri((const unsigned char*)this->value);
-
-  return this->serialised;
+  // This is incompatible with talloc - it has a special freer
+  return raptor_new_uri((const unsigned char*)this->value);
 };
 
 static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
@@ -369,7 +369,7 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
 
   if(startswith(self->value, volume->value)) {
     result.dptr = (unsigned char *)self->value + strlen(volume->value) + 1;
-    result.dsize = strlen((char *)result.dptr);
+    result.dsize = strlen((char *)result.dptr) +1;
   } else {
     result = tdb_data_from_string(self->value);
   };
@@ -431,6 +431,8 @@ static void *XSDDatetime_serialise(RDFValue self) {
 				       //(unsigned int)this->value.tv_usec,
 				       (unsigned int)this->tz.tz_minuteswest / 60,
 				       (unsigned int)this->tz.tz_minuteswest % 60);
+
+    talloc_increase_ref_count(this->serialised);
     return this->serialised;
   };
 
@@ -460,8 +462,6 @@ static RDFValue XSDDatetime_Con(RDFValue self) {
 VIRTUAL(XSDDatetime, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = XSD_NAMESPACE "dateTime";
-   VATTR(super.raptor_literal_datatype) = raptor_new_uri(			\
-                    (const unsigned char*)VATTR(super.dataType));
 
    VMETHOD(super.encode) = XSDDatetime_encode;
    VMETHOD(super.decode) = XSDDatetime_decode;
@@ -761,14 +761,25 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute);
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
     triple.object_type = value->raptor_type;
+
+    // New reference here:
     triple.object = CALL(value, serialise);
+
+    // Ensure we have a valid raptor datatype
+    if(!value->raptor_literal_datatype)
+      value->raptor_literal_datatype = raptor_new_uri(                  \
+		   (const unsigned char*)value->dataType);
+
     triple.object_literal_datatype = value->raptor_literal_datatype;
 
     raptor_serialize_statement(self->rdf_serializer, &triple);
     raptor_free_uri((raptor_uri*)triple.predicate);
 
+    // Special free function for URIs
     if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
       raptor_free_uri((raptor_uri*)triple.object);
+    else
+      talloc_free(triple.object);
 
   };
 

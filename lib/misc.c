@@ -175,7 +175,7 @@ TDB_DATA tdb_data_from_string(char *string) {
   TDB_DATA result;
 
   result.dptr = (unsigned char *)string;
-  result.dsize = strlen(string);
+  result.dsize = strlen(string)+1;
 
   return result;
 };

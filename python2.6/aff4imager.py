@@ -156,16 +156,16 @@ if options.image:
 
     fds = []
     urn = pyaff4.RDFURN()
-    for arg in args:
-        urn.set(arg)
-        fd = oracle.open(urn, 'r')
-        ## Check to see if this object is valid
-        try:
-            fd.read
-        except AttributeError:
-            error("%s is not a file like object" % arg)
+    try:
+        for arg in args:
+            urn.set(arg)
+            fd = oracle.open(urn, 'r')
+            fds.append(fd)
+            if not isinstance(fd, pyaff4.FileLikeObject):
+                error("%s is not a file like object" % arg)
 
-        fds.append(fd)
-
-    urn.set(output)
-    image(urn, options, fds)
+        urn.set(output)
+        image(urn, options, fds)
+    finally:
+        for fd in fds:
+            fd.cache_return()
