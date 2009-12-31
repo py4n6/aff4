@@ -336,7 +336,7 @@ struct Zip64CDLocator {
 }__attribute__((packed));
 
 /** This represents a Zip file */
-CLASS(ZipFile, AFFObject)
+CLASS(ZipFile, AFF4Volume)
      // This keeps the end of central directory struct so we can
      // recopy it when we update the CD.
      struct EndCentralDirectory *end;
@@ -361,39 +361,6 @@ CLASS(ZipFile, AFFObject)
   XSDInteger size;
   XSDInteger compressed_size;
   XSDInteger header_offset;
-
-     /** A zip file is opened on a file like object */
-     ZipFile METHOD(ZipFile, Con, char *file_urn, char mode);
-
-// This method opens an existing member or creates a new one. We
-// return a file like object which may be used to read and write the
-// member. If we open a member for writing the zip file will be locked
-// (so another attempt to open a new member for writing will raise,
-// until this member is promptly closed). The ZipFile must have been
-// called with create_new_volume or append_volume before.
-//
-// DEFAULT(mode) = "r"
-// DEFAULT(compression) = ZIP_DEFLATE
-     FileLikeObject METHOD(ZipFile, open_member, char *filename, char mode,\
-			   uint16_t compression);
-
-// This method flushes the central directory and finalises the
-// file. The file may still be accessed for reading after this.
-     DESTRUCTOR void METHOD(ZipFile, close);
-
-// A convenience function for storing a string as a new file (it
-// basically calls open_member, writes the string then closes it).
-//
-// DEFAULT(compression) = ZIP_DEFLATE
-     int METHOD(ZipFile, writestr, char *filename, char *data, int len,\
-		 uint16_t compression);
-
-  /* Load an AFF4 volume from the URN specified. We parse all the RDF
-     serializations.
-
-     DEFAULT(mode) = "r"
-  */
-     int METHOD(ZipFile, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 
 // This is a FileLikeObject which is used to provide access to zip

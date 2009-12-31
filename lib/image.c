@@ -96,7 +96,7 @@ static int dump_bevy(ImageWorker this) {
     // Update the index to point at the current segment stream buffer
     // offset
     this->chunk_indexes[chunk_count] = this->segment_buffer->readptr;
-    
+
     // Now write the buffer to the stream buffer
     CALL(this->segment_buffer, write, cbuffer, clength);
     chunk_count ++;
@@ -106,14 +106,14 @@ static int dump_bevy(ImageWorker this) {
   // Dump the bevy to the zip volume
   {
     char buff[BUFF_SIZE];
-    ZipFile parent;
+    AFF4Volume parent;
 
     if(!CALL(oracle, resolve_value, URNOF(this), AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "No storage for Image stream?");
       goto error;
     }
 
-    parent  = (ZipFile)CALL(oracle, open, this->stored, 'w');
+    parent  = (AFF4Volume)CALL(oracle, open, this->stored, 'w');
 
     // Format the segment name
     snprintf(buff, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, 
@@ -126,7 +126,7 @@ static int dump_bevy(ImageWorker this) {
     printf("Dumping bevy %s (%lld bytes)\n", buff, this->segment_buffer->readptr);
 
     // Store the entire segment in the zip file
-    CALL((ZipFile)parent, writestr,
+    CALL((AFF4Volume)parent, writestr,
 	 buff, this->segment_buffer->data, 
 	 this->segment_buffer->readptr, 
 	 // No compression for these segments
@@ -138,7 +138,7 @@ static int dump_bevy(ImageWorker this) {
 	     ((AFFObject)this)->urn->value, 
 	     segment_number);
 
-    CALL((ZipFile)parent, writestr,
+    CALL((AFF4Volume)parent, writestr,
 	 buff, (char *)this->chunk_indexes,
 	 (chunk_count + 1) * sizeof(uint32_t),
 	 ZIP_STORED
@@ -166,7 +166,7 @@ static int dump_bevy(ImageWorker this) {
 };
 
 VIRTUAL(ImageWorker, AFFObject) {
-     VMETHOD_BASE(ImageWorker, Con) = ImageWorker_Con;
+  VMETHOD_BASE(ImageWorker, Con) = ImageWorker_Con;
 } END_VIRTUAL
 
 static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
@@ -525,6 +525,7 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
 
 VIRTUAL(Image, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = Image_Con;
+     VMETHOD_BASE(AFFObject, dataType) = AFF4_IMAGE;
 
      VMETHOD_BASE(FileLikeObject, read) = Image_read;
      VMETHOD_BASE(FileLikeObject, write) = Image_write;

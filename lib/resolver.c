@@ -40,6 +40,10 @@ Resolver oracle = NULL;
 void register_type_dispatcher(char *type, AFFObject *classref) {
   Cache tmp;
 
+  if(!(*classref)->dataType) {
+    printf("%s has no dataType\n", NAMEOF(*classref));
+  };
+
   // Make the various dispatchers
   if(!type_dispatcher) {
     type_dispatcher = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
@@ -1107,8 +1111,34 @@ RDFValue Resolver_new_rdfvalue(Resolver self, void *ctx, char *type) {
   return new_rdfvalue(ctx, type);
 };
 
+int Resolver_load(Resolver self, RDFURN uri) {
+  /** We iterate over all the type handlers which are derived from the
+      AFF4Volume abstract class, and try to instantiate them in their
+      preferred order.
+  */
+  Cache i;
+
+  list_for_each_entry(i, &type_dispatcher->cache_list, cache_list) {
+    if(ISSUBCLASS(i->data, AFF4Volume)) {
+      AFF4Volume class_ref = *(AFF4Volume *)i->data;
+      AFF4Volume volume = (AFF4Volume)CALL(oracle, create,
+                                           ((AFFObject)class_ref)->dataType, 'r');
+
+      if(CALL(volume, load_from, uri, 'r')) {
+        CALL(uri, set, STRING_URNOF(volume));
+        CALL(oracle, cache_return, (AFFObject)volume);
+        return 1;
+      };
+
+      talloc_free(volume);
+    };
+  };
+
+  return 0;
+};
+
 /** Here we implement the resolver */
-VIRTUAL(Resolver, AFFObject) {
+VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
      VMETHOD(create) = Resolver_create;
 
@@ -1126,6 +1156,8 @@ VIRTUAL(Resolver, AFFObject) {
      VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;
      VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
+
+     VMETHOD(load) = Resolver_load;
 } END_VIRTUAL
 
 /************************************************************
@@ -1175,7 +1207,7 @@ static void AFFObject_cache_return(AFFObject self) {
 
 VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
-     VMETHOD(set_property) = AFFObject_set_property;
+     VMETHOD(set_attribute) = AFFObject_set_property;
      VMETHOD(delete) = AFFObject_delete;
      VMETHOD(cache_return) = AFFObject_cache_return;
 

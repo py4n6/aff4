@@ -1,11 +1,9 @@
 /** This file implements support for ewf volumes */
-#include "zip.h"
-#include <fcntl.h>
-#include <uuid/uuid.h>
+#include "aff4.h"
+#include "ewfvolume.h"
 
-
-VIRTUAL(EWFVolume, ZipFile)
-END_VIRTUAL
+VIRTUAL(EWFVolume, AFF4Volume) {
+} END_VIRTUAL
 
 VIRTUAL(EWFStream, FileLikeObject)
 END_VIRTUAL

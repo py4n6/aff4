@@ -86,3 +86,8 @@ int issubclass(Object obj, Object class, void (init)()) {
       return 0;
   };
 };
+
+void unimplemented(Object self) {
+  printf("%s contains unimplemented functions.. is it an abstract class?\n", NAMEOF(self));
+  abort();
+};

@@ -55,7 +55,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
 			 char *source) {
 
   // This is the container volume
-  ZipFile container_volume, volume;
+  AFF4Volume container_volume, volume;
   char *output = talloc_strdup(NULL, output_file);
   FileLikeObject storage_image, image, encrypted;
   char buffer[BUFF_SIZE];
@@ -73,7 +73,7 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   container_volume = create_volume(driver);
   if(!container_volume) goto error;
 
-  CALL((AFFObject)container_volume, set_property, AFF4_STORED, normalise_url(output));
+  CALL((AFFObject)container_volume, set_attribute, AFF4_STORED, normalise_url(output));
   if(!CALL((AFFObject)container_volume, finish))
     goto error;
 
@@ -86,25 +86,25 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Tell the image that it should be stored in the volume with no
   // compression. This is where the encrypted data is actually
   // physically stored
-  CALL((AFFObject)storage_image, set_property, AFF4_STORED, container_volume_urn);
+  CALL((AFFObject)storage_image, set_attribute, AFF4_STORED, container_volume_urn);
   CALL(oracle, add, container_volume_urn, AFF4_CONTAINS, URNOF(storage_image));
-  CALL((AFFObject)storage_image, set_property, AFF4_COMPRESSION, from_int(ZIP_STORED));
+  CALL((AFFObject)storage_image, set_attribute, AFF4_COMPRESSION, from_int(ZIP_STORED));
   if(chunks_in_segment)
-    CALL((AFFObject)storage_image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
+    CALL((AFFObject)storage_image, set_attribute, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
   if(!CALL((AFFObject)storage_image, finish))
     goto error;
 
   // The encrypted object will be stored in this volume and target (be
   // backed by) the image:
   encrypted = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Encrypted);
-  CALL((AFFObject)encrypted, set_property, AFF4_STORED, container_volume_urn);
+  CALL((AFFObject)encrypted, set_attribute, AFF4_STORED, container_volume_urn);
   CALL(oracle, add, container_volume_urn, AFF4_CONTAINS, URNOF(encrypted));
-  CALL((AFFObject)encrypted, set_property, AFF4_TARGET, URNOF(storage_image));
+  CALL((AFFObject)encrypted, set_attribute, AFF4_TARGET, URNOF(storage_image));
   // Dont need the original image any more
   CALL(oracle, cache_return, (AFFObject)storage_image);
 
   // Initialise the crypto
-  CALL((AFFObject)encrypted, set_property, AFF4_VOLATILE_PASSPHRASE, passwd);
+  CALL((AFFObject)encrypted, set_attribute, AFF4_VOLATILE_PASSPHRASE, passwd);
   if(!CALL((AFFObject)encrypted, finish))
     goto error;
 
@@ -118,11 +118,11 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Now we need to create an embedded volume (embedded volumes are
   // always Zip containers). The embedded volume is stored in the
   // encrypted stream:
-  volume = (ZipFile)CALL(oracle, create, (AFFObject *)&__ZipFile, 'w');
+  volume = (AFF4Volume)CALL(oracle, create, (AFFObject *)&__AFF4Volume, 'w');
   strncpy(volume_urn, URNOF(volume), BUFF_SIZE);
 
   // The embedded volume lives inside the encrypted stream
-  CALL((AFFObject)volume, set_property, AFF4_STORED, encrypted_urn);
+  CALL((AFFObject)volume, set_attribute, AFF4_STORED, encrypted_urn);
   // Is it ok?
   if(!CALL((AFFObject)volume, finish))
     goto error;
@@ -132,12 +132,12 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   // Now we create a new image stream inside the encrypted
   // volume. Thats where we stored the disk image:
   image = (FileLikeObject)CALL(oracle, create, (AFFObject *)&__Image);
-  CALL((AFFObject)image, set_property, AFF4_STORED, volume_urn);
+  CALL((AFFObject)image, set_attribute, AFF4_STORED, volume_urn);
   CALL(oracle, add, volume_urn, AFF4_CONTAINS, URNOF(image));
-  CALL((AFFObject)image, set_property, AFF4_COMPRESSION, from_int(ZIP_DEFLATE));
-  //CALL((AFFObject)image, set_property, AFF4_COMPRESSION, from_int(ZIP_STORED));
+  CALL((AFFObject)image, set_attribute, AFF4_COMPRESSION, from_int(ZIP_DEFLATE));
+  //CALL((AFFObject)image, set_attribute, AFF4_COMPRESSION, from_int(ZIP_STORED));
   if(chunks_in_segment)
-    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
+    CALL((AFFObject)image, set_attribute, AFF4_CHUNKS_IN_SEGMENT, chunks_in_segment);
   // Is it ok?
   if(!CALL((AFFObject)image, finish))
     goto error;
@@ -153,12 +153,12 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
   CALL((FileLikeObject)image, close);
 
   // Close the zipfile and dispose of it
-  volume = (ZipFile)CALL(oracle, open, volume_urn, 'w');
-  CALL((ZipFile)volume, close);
+  volume = (AFF4Volume)CALL(oracle, open, volume_urn, 'w');
+  CALL((AFF4Volume)volume, close);
 
   // Close the zipfile and dispose of it
-  container_volume = (ZipFile)CALL(oracle, open, container_volume_urn, 'w');
-  CALL((ZipFile)container_volume, close);
+  container_volume = (AFF4Volume)CALL(oracle, open, container_volume_urn, 'w');
+  CALL((AFF4Volume)container_volume, close);
 
   return 0;
 
@@ -177,21 +177,21 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   XSDInteger target_offset = new_XSDInteger(output_urn);
   int i;
   MapDriver map_fd;
-  ZipFile zipfile;
+  AFF4Volume zipfile;
 
   if(!output_urn){
     printf("Output file not set\n");
     goto error;
   };
 
-  zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
+  zipfile = (AFF4Volume)CALL(oracle, create, driver, 'w');
   if(!zipfile) {
     PrintError();
     print_volume_drivers();
     goto error;
   };
 
-  CALL((AFFObject)zipfile, set_property, AFF4_STORED, 
+  CALL((AFFObject)zipfile, set_attribute, AFF4_STORED, 
        (RDFValue)output_urn);
 
   // Is it ok?
@@ -234,7 +234,7 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
 
   // Close the zip file - it is strictly needed to reopen the file in
   // case it was purged from the cache.
-  zipfile = (ZipFile)CALL(oracle, open, URNOF(zipfile), 'w');
+  zipfile = (AFF4Volume)CALL(oracle, open, URNOF(zipfile), 'w');
   CALL(zipfile, close);
 
   talloc_free(output_urn);
@@ -245,7 +245,7 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
 };
 
 /** This one creates a regular image on the output_file */
-int aff4_image(ZipFile *zipfile, char *driver, 
+int aff4_image(AFF4Volume *zipfile, char *driver, 
                char *output_file,
                char *stream_name,
                unsigned int chunks_in_segment,
@@ -266,14 +266,14 @@ int aff4_image(ZipFile *zipfile, char *driver,
 
   // Need to make a new zipfile
   if(!*zipfile) {
-    *zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
+    *zipfile = (AFF4Volume)CALL(oracle, create, driver, 'w');
     if(!*zipfile) {
       PrintError();
       print_volume_drivers();
       goto error;
     };
 
-    CALL((AFFObject)*zipfile, set_property, AFF4_STORED, 
+    CALL((AFFObject)*zipfile, set_attribute, AFF4_STORED, 
          rdfvalue_from_urn(directory_offset, output_file));
 
     // Is it ok?
@@ -293,9 +293,9 @@ int aff4_image(ZipFile *zipfile, char *driver,
   };
 
   // Tell the image that it should be stored in the volume
-  CALL((AFFObject)image, set_property, AFF4_STORED, (RDFValue)URNOF(*zipfile));
+  CALL((AFFObject)image, set_attribute, AFF4_STORED, (RDFValue)URNOF(*zipfile));
   if(chunks_in_segment > 0)
-    CALL((AFFObject)image, set_property, AFF4_CHUNKS_IN_SEGMENT, 
+    CALL((AFFObject)image, set_attribute, AFF4_CHUNKS_IN_SEGMENT, 
          rdfvalue_from_int(directory_offset, chunks_in_segment));
 
   // Done with the volume now
@@ -310,7 +310,7 @@ int aff4_image(ZipFile *zipfile, char *driver,
          (RDFValue)directory_offset);
 
     if(max_size > 0 && directory_offset->value > max_size) {
-      *zipfile = (ZipFile)CALL(oracle, open, URNOF(*zipfile), 'w');
+      *zipfile = (AFF4Volume)CALL(oracle, open, URNOF(*zipfile), 'w');
 
       char buff[BUFF_SIZE];
       snprintf(buff, BUFF_SIZE, "%s.%03u", output_file, count++);
@@ -324,8 +324,8 @@ int aff4_image(ZipFile *zipfile, char *driver,
       CALL(*zipfile, close);
 
       // Create a new volume to hold the image:
-      *zipfile = (ZipFile)CALL(oracle, create, driver, 'w');
-      CALL((AFFObject)*zipfile, set_property, AFF4_STORED, 
+      *zipfile = (AFF4Volume)CALL(oracle, create, driver, 'w');
+      CALL((AFFObject)*zipfile, set_attribute, AFF4_STORED, 
            (RDFValue)output_urn);
 
       // Is it ok?
@@ -645,7 +645,7 @@ int main(int argc, char **argv)
     if(optind < argc) {
       // We are imaging now
       if(mode == 'i') {
-        ZipFile zipfile=NULL;
+        AFF4Volume zipfile=NULL;
 
         if(!output_file) {
           printf("You must specify an output file with --output\n");

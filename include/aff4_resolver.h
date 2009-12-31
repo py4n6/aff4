@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Tue Dec 29 11:47:45 2009 mic
+** Last update Thu Dec 31 23:21:10 2009 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -194,6 +194,16 @@ CLASS(Resolver, Object)
        **/
        void METHOD(Resolver, register_rdf_value_class, RDFValue class_ref);
        RDFValue METHOD(Resolver, new_rdfvalue, void *ctx, char *type);
+
+       /* This function attempts to load the volume stored within the
+          FileLikeObject URI provided. If there is a volume, the
+          volume URI is set in uri, and we return true.
+
+          We attempt to instantiate all volume drivers in turn until
+          one works and then load them from the URI.
+       */
+       int METHOD(Resolver, load, RDFURN uri);
+
 END_CLASS
 
 // This is a global instance of the oracle. All AFFObjects must

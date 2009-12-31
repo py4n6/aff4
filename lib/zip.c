@@ -257,13 +257,14 @@ static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
 
 /** A file backed object extends FileLikeObject */
 VIRTUAL(FileBackedObject, FileLikeObject) {
-     VMETHOD(super.super.Con) = FileBackedObject_AFFObject_Con;
+  VMETHOD_BASE(AFFObject, Con) = FileBackedObject_AFFObject_Con;
+  VMETHOD_BASE(AFFObject, dataType) = AFF4_FILE;
 
-     VMETHOD(super.read) = FileBackedObject_read;
-     VMETHOD(super.write) = FileBackedObject_write;
-     VMETHOD(super.close) = FileBackedObject_close;
-     VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
-     VMETHOD(super.truncate) = FileBackedObject_truncate;
+  VMETHOD_BASE(FileLikeObject, read) = FileBackedObject_read;
+  VMETHOD_BASE(FileLikeObject, write) = FileBackedObject_write;
+  VMETHOD_BASE(FileLikeObject, close) = FileBackedObject_close;
+  VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
+  VMETHOD_BASE(FileLikeObject, truncate) = FileBackedObject_truncate;
 } END_VIRTUAL;
 
 // Some prototypes
@@ -294,7 +295,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
     // Check to see that we can open the storage_urn for writing
     if(mode == 'w'){
-      FileLikeObject fd = CALL(oracle, open, this->storage_urn, mode);
+      FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->storage_urn, mode);
 
       if(!fd) goto error;
       CALL(oracle, cache_return, (AFFObject)fd);
@@ -325,7 +326,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
   } else {
     // Call ZipFile's AFFObject constructor.
-    this->__super__->Con(self, urn, mode);
+    ((AFFObject)this->__super__)->Con((AFFObject)self, urn, mode);
   };
 
   return self;
@@ -619,7 +620,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	// for example information.turtle. The basename is then taken
 	// to be the volume name.
 	if(!memcmp(AFF4_INFORMATION, base_name, properties_length)) {
-	  FileLikeObject fd = CALL(self, open_member, escaped_filename, 'r',
+	  FileLikeObject fd = CALL((AFF4Volume)self, open_member, escaped_filename, 'r',
 				   ZIP_STORED);
 	  if(fd) {
 	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
@@ -668,17 +669,18 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
   return 0;
 };
 
-static FileLikeObject ZipFile_open_member(ZipFile self, char *member_name, char mode,
+static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, char mode,
 				   uint16_t compression) {
   FileLikeObject result=NULL;
   char *ctx=talloc_size(NULL, 1);
-  RDFURN filename = URNOF(self)->copy(URNOF(self), ctx);
-  
+  RDFURN filename = URNOF(this)->copy(URNOF(this), ctx);
+  ZipFile self = (ZipFile)this;
+
   // Make the filename URN relative to us.
   CALL(filename, add, member_name);
 
   // Where are we stored?
-  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
+  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
 	   (RDFValue)self->storage_urn)) {
     RaiseError(ERuntimeError, "No storage for %s?", STRING_URNOF(self));
     goto error;
@@ -806,8 +808,9 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 };
 
 // This function dumps all the URNs contained within this volume
-static void dump_volume_properties(ZipFile self) {
+static void dump_volume_properties(ZipFile this) {
   RESOLVER_ITER *iter;
+  AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
 			   ZIP_DEFLATE);
   RDFSerializer serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self, 
@@ -834,7 +837,8 @@ static void dump_volume_properties(ZipFile self) {
 };
 
 
-static void ZipFile_close(ZipFile self) {
+static void ZipFile_close(AFF4Volume this) {
+  ZipFile self = (ZipFile)this;
   // Dump the current CD. We expect our fd is seeked to the right
   // place:
   int k=0;
@@ -1015,7 +1019,7 @@ static void ZipFile_close(ZipFile self) {
 };
 
 /** This is just a convenience function - real simple now */
-static int ZipFile_writestr(ZipFile self, char *filename, 
+static int ZipFile_writestr(AFF4Volume self, char *filename, 
 		      char *data, int len, uint16_t compression) {
   FileLikeObject fd = CALL(self, open_member, filename, 'w',
 			   compression);
@@ -1027,16 +1031,29 @@ static int ZipFile_writestr(ZipFile self, char *filename,
   } else return -1;
 };
 
-VIRTUAL(ZipFile, AFFObject) {
-     VMETHOD(open_member) = ZipFile_open_member;
-     VMETHOD(close) = ZipFile_close;
-     VMETHOD(writestr) = ZipFile_writestr;
-     VMETHOD(super.Con) = ZipFile_AFFObject_Con;
-     VMETHOD(load_from) = ZipFile_load_from;
-     VMETHOD(super.delete) = FileLikeObject_delete;
+/** The following is an abstract class and therefore does not have any
+    implemented methods.
+*/
+VIRTUAL(AFF4Volume, AFFObject) {
+  UNIMPLEMENTED(open_member);
+  UNIMPLEMENTED(close);
+  UNIMPLEMENTED(writestr);
+  UNIMPLEMENTED(load_from);
+} END_VIRTUAL;
+
+
+VIRTUAL(ZipFile, AFF4Volume) {
+  VMETHOD_BASE(AFFObject, dataType) = AFF4_ZIP_VOLUME;
+
+  VMETHOD_BASE(AFF4Volume, open_member) = ZipFile_open_member;
+  VMETHOD_BASE(AFF4Volume, close) = ZipFile_close;
+  VMETHOD_BASE(AFF4Volume, writestr) = ZipFile_writestr;
+  VMETHOD_BASE(AFFObject, Con) = ZipFile_AFFObject_Con;
+  VMETHOD_BASE(AFF4Volume, load_from) = ZipFile_load_from;
+  VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
 
 // Initialise our private classes
-     ZipFileStream_init();
+  ZipFileStream_init();
 } END_VIRTUAL
 
 /** 
@@ -1389,7 +1406,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
   this->__super__->super.Con(self, urn, mode);
 
   if(urn) {
-    ZipFile parent;
+    AFF4Volume parent;
     AFFObject result;
 
     if(mode!='r') {
@@ -1406,7 +1423,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
     };
 
     // Open the volume:
-    parent = (ZipFile)CALL(oracle, open, this->container_urn, mode);
+    parent = (AFF4Volume)CALL(oracle, open, this->container_urn, mode);
     if(!parent) goto error;
 
     // Now just return the member from the volume:
@@ -1426,16 +1443,17 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
 };
 
-
 VIRTUAL(ZipFileStream, FileLikeObject) {
-     VMETHOD(super.super.Con) = ZipFileStream_AFFObject_Con;
-     VMETHOD(Con) = ZipFileStream_Con;
-     VMETHOD(super.write) = ZipFileStream_write;
-     VMETHOD(super.read) = ZipFileStream_read;
-     VMETHOD(super.close) = ZipFileStream_close;
+  VMETHOD_BASE(AFFObject, Con) = ZipFileStream_AFFObject_Con;
+  VMETHOD_BASE(AFFObject, dataType) = AFF4_SEGMENT;
+  VMETHOD(Con) = ZipFileStream_Con;
+
+  VMETHOD_BASE(FileLikeObject, write) = ZipFileStream_write;
+  VMETHOD_BASE(FileLikeObject, read) = ZipFileStream_read;
+  VMETHOD_BASE(FileLikeObject, close) = ZipFileStream_close;
 
 // Initialise the encoding luts
-     encode_init();
+  encode_init();
 } END_VIRTUAL
 
 void print_cache(Cache self) {

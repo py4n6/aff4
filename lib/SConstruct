@@ -8,10 +8,14 @@ env = env.Clone()
 source_files = """
 #lib/class.c #lib/talloc.c
 #lib/misc.c #lib/zip.c #lib/stringio.c #lib/resolver.c
-#lib/rdf.c  #lib/libaff4.c #lib/image.c #lib/map.c
+#lib/rdf.c  #lib/image.c #lib/map.c
 #lib/encode.c #lib/queue.c
 #lib/encrypt.c
 """
+
+## Optional support for EWF and AFF1 volumes
+if utils.HEADERS.get("HAVE_EWF"):
+    source_files += "  #lib/ewfvolume.c "
 
 uuid_files = """
 #uuid/clear.c    #uuid/copy.c      #uuid/gen_uuid_nt.c  #uuid/pack.c

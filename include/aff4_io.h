@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Sat Dec 26 23:34:15 2009 mic
+** Last update Fri Jan  1 01:24:18 2010 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -23,11 +23,14 @@ CLASS(AFFObject, Object)
      // Is this object a reader or a writer?
      char mode;
 
+     // This is the rdf:type property of this object
+     char *dataType;
+
      /** Any object may be asked to be constructed from its URI */
      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
 
      /** This is called to set properties on the object */
-     void METHOD(AFFObject, set_property, char *attribute, RDFValue value);
+     void METHOD(AFFObject, set_attribute, char *attribute, RDFValue value);
 
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.
@@ -104,6 +107,39 @@ END_CLASS
 // This file like object is backed by a real disk file:
 CLASS(FileBackedObject, FileLikeObject)
      int fd;
+END_CLASS
+
+     /** This is an abstract class that implements AFF4 volumes */
+CLASS(AFF4Volume, AFFObject)
+// This method opens an existing member or creates a new one. We
+// return a file like object which may be used to read and write the
+// member. If we open a member for writing the zip file will be locked
+// (so another attempt to open a new member for writing will raise,
+// until this member is promptly closed). The ZipFile must have been
+// called with create_new_volume or append_volume before.
+//
+// DEFAULT(mode) = "r"
+// DEFAULT(compression) = ZIP_DEFLATE
+     FileLikeObject METHOD(AFF4Volume, open_member, char *filename, char mode,\
+			   uint16_t compression);
+
+// This method flushes the central directory and finalises the
+// file. The file may still be accessed for reading after this.
+     DESTRUCTOR void METHOD(AFF4Volume, close);
+
+// A convenience function for storing a string as a new file (it
+// basically calls open_member, writes the string then closes it).
+//
+// DEFAULT(compression) = ZIP_DEFLATE
+     int METHOD(AFF4Volume, writestr, char *filename, char *data, int len,\
+		 uint16_t compression);
+
+  /* Load an AFF4 volume from the URN specified. We parse all the RDF
+     serializations.
+
+     DEFAULT(mode) = "r"
+  */
+     int METHOD(AFF4Volume, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 
 #endif 	    /* !AFF4_IO_H_ */

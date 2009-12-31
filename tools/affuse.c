@@ -251,6 +251,7 @@ struct stream_info *populate_streams(char **file_urns,
   StringIO result = CONSTRUCT(StringIO, StringIO, Con, NULL);
   void *ctx = talloc_size(NULL, 1);
   struct stream_info stream;
+  RDFURN volume_urn = new_RDFURN(result);
   RDFURN stream_urn = new_RDFURN(result);
   XSDString type = new_XSDString(result);
   int i;
@@ -262,11 +263,11 @@ struct stream_info *populate_streams(char **file_urns,
     if(file_urns[i] == NULL) goto exit;
 
     // Try to load it
-    volume = open_volume(file_urns[i]);
-    if(!volume) continue;
+    CALL(volume_urn, set, file_urns[i]);
+    if(!CALL(oracle, load, volume_urn)) continue;
 
     // Iterate over all the streams contained here
-    iter = CALL(oracle, get_iter, result, URNOF(volume),
+    iter = CALL(oracle, get_iter, result, volume_urn,
                 AFF4_VOLATILE_CONTAINS);
 
     while(CALL(oracle, iter_next, iter, (RDFValue)stream_urn)) {

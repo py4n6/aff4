@@ -146,7 +146,7 @@ static void MapDriver_save_map(MapDriver self) {
   struct map_point *point;
   int i;
   FileLikeObject fd;
-  ZipFile zipfile = (ZipFile)CALL(oracle, open, self->stored, 'w');
+  AFF4Volume zipfile = (AFF4Volume)CALL(oracle, open, self->stored, 'w');
 
   if(!zipfile) return;
 
@@ -338,10 +338,12 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 
 VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
+     VMETHOD_BASE(AFFObject, dataType) = AFF4_MAP;
+
      VMETHOD(add) = MapDriver_add;
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD(save_map) = MapDriver_save_map;
-     VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;  
+     VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
 } END_VIRTUAL
 

@@ -426,6 +426,11 @@ extern enum _error_type _global_error;
 
 void *raise_errors(enum _error_type t, char *string,  ...);
 
+extern void unimplemented(Object self);
+
+#define UNIMPLEMENTED(method)                   \
+  self->method = (void *)unimplemented;
+
 // Some helpful little things
 #define ERROR_BUFFER_SIZE 1024
 

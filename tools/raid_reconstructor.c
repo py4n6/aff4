@@ -9,7 +9,7 @@ be used to then build an AFF4 map of the raid set in a new volume.
 ** Login   <scudette@gmail.com>
 **
 ** Started on  Tue Nov 24 21:04:39 2009 mic
-** Last update Wed Dec 23 23:45:56 2009 mic
+** Last update Fri Jan  1 01:07:09 2010 mic
 */
 
 #include "aff4.h"
@@ -104,7 +104,7 @@ struct map_description *parse_map(char *map, int number_of_disks, int *period,
 
 void make_map_stream(char *driver, struct map_description *map, char *output, char *stream) {
   RDFURN output_urn = (RDFURN)rdfvalue_from_urn(NULL, output);
-  ZipFile zip = (ZipFile)CALL(oracle, create, driver, 'w');
+  AFF4Volume zip = (AFF4Volume)CALL(oracle, create, driver, 'w');
   MapDriver map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP, 'w');
   XSDInteger i = new_XSDInteger(output_urn);
 
@@ -189,8 +189,8 @@ int main(int argc, char **argv)
   int verify = 0;
   char *map_description = NULL;
   struct map_description *map = NULL;
-  char *output = NULL;
-  ZipFile volume = NULL;
+  RDFURN output = new_RDFURN(NULL);
+  AFF4Volume volume = NULL;
   uint64_t start_block = 0;
   uint64_t disk_offset = 0;
 
@@ -270,14 +270,11 @@ int main(int argc, char **argv)
       rows = parse_int(optarg);
       break;
 
-    case 'o':
-      output = optarg;
-      volume = open_volume(output);
-      if(volume)
-        CALL(oracle, cache_return, (AFFObject)volume);
-
+    case 'o':{
+      CALL(output, set, optarg);
+      CALL(oracle, load, output);
       break;
-
+    };
     case 'w':
       mode = 'w';
       stream_name = optarg;
