@@ -26,6 +26,7 @@
 */
 
 #include "tdb_private.h"
+#include <sys/time.h>
 
 #define TDB_MARK_LOCK 0x80000000
 

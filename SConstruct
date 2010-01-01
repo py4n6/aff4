@@ -76,6 +76,7 @@ compileFlags = [
     '-fno-exceptions',
     '-fno-strict-aliasing',
     '-msse2',
+    '-D_XOPEN_SOURCE=600',
 #    '-fomit-frame-pointer',
 #    '-flto',
     ]

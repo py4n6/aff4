@@ -7,6 +7,14 @@ time.sleep(1)
 oracle = pyaff4.Resolver()
 
 urn = pyaff4.RDFURN()
+try:
+    urn.set("ewf:///var/tmp/uploads/stdcapture_0.4.pcap/stream")
+    fd = oracle.open(urn, 'r')
+    print fd
+    fd.cache_return()
+except RuntimeError:
+    pass
+
 urn.set("/var/tmp/uploads/stdcapture_0.4.pcap.e01")
 
 if oracle.load(urn):

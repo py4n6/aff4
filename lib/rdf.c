@@ -317,7 +317,7 @@ static char *RDFURN_serialise(RDFValue self) {
   RDFURN this = (RDFURN)self;
 
   // This is incompatible with talloc - it has a special freer
-  return raptor_new_uri((const unsigned char*)this->value);
+  return (char *)raptor_new_uri((const unsigned char*)this->value);
 };
 
 static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
@@ -418,7 +418,7 @@ static RDFValue XSDDatetime_set(XSDDatetime self, struct timeval time) {
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
 
-static void *XSDDatetime_serialise(RDFValue self) {
+static char *XSDDatetime_serialise(RDFValue self) {
   XSDDatetime this = (XSDDatetime)self;
   char buff[BUFF_SIZE];
 
@@ -429,8 +429,8 @@ static void *XSDDatetime_serialise(RDFValue self) {
     this->serialised = talloc_asprintf(this, "%s.%06u+%02u:%02u", buff,
                                        0,
 				       //(unsigned int)this->value.tv_usec,
-				       (unsigned int)this->tz.tz_minuteswest / 60,
-				       (unsigned int)this->tz.tz_minuteswest % 60);
+				       (unsigned int)this->gm_offset / 3600,
+				       (unsigned int)this->gm_offset % 3600);
 
     talloc_increase_ref_count(this->serialised);
     return this->serialised;
@@ -460,14 +460,14 @@ static RDFValue XSDDatetime_Con(RDFValue self) {
 };
 
 VIRTUAL(XSDDatetime, RDFValue) {
-   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = XSD_NAMESPACE "dateTime";
+  VMETHOD_BASE(RDFValue, raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+  VMETHOD_BASE(RDFValue, dataType) = XSD_NAMESPACE "dateTime";
 
-   VMETHOD(super.encode) = XSDDatetime_encode;
-   VMETHOD(super.decode) = XSDDatetime_decode;
-   VMETHOD(super.serialise) = XSDDatetime_serialise;
-   VMETHOD(super.parse) = XSDDatetime_parse;
-   VMETHOD(super.Con) = XSDDatetime_Con;
+  VMETHOD_BASE(RDFValue, encode) = XSDDatetime_encode;
+  VMETHOD_BASE(RDFValue, decode) = XSDDatetime_decode;
+  VMETHOD_BASE(RDFValue, serialise) = XSDDatetime_serialise;
+  VMETHOD_BASE(RDFValue, parse) = XSDDatetime_parse;
+  VMETHOD_BASE(RDFValue, Con) = XSDDatetime_Con;
 
    VMETHOD(set) = XSDDatetime_set;
 } END_VIRTUAL
@@ -779,7 +779,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
       raptor_free_uri((raptor_uri*)triple.object);
     else
-      talloc_free(triple.object);
+      talloc_free((void *)triple.object);
 
   };
 

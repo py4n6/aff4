@@ -56,7 +56,7 @@ static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
    passphrase. We do this by creating a new URN and attaching
    attributes to it.
 */
-static void *AES256Password_serialise(RDFValue self) {
+static char *AES256Password_serialise(RDFValue self) {
   AES256Password this = (AES256Password)self;
 
   // Update the nonce
@@ -65,7 +65,7 @@ static void *AES256Password_serialise(RDFValue self) {
        this->pub.nonce, sizeof(this->pub.nonce), 0);
 
   // Encode the key
-  encode64((char *)&this->pub, sizeof(this->pub), this->encoded_key, sizeof(this->encoded_key));
+  encode64((unsigned char *)&this->pub, sizeof(this->pub), (unsigned char *)this->encoded_key, sizeof(this->encoded_key));
 
   return this->encoded_key;
 };
@@ -94,13 +94,12 @@ static TDB_DATA *AES256Password_encode(RDFValue self) {
 */
 static int AES256Password_decode(RDFValue self, char *data, int length) {
   AES256Password this = (AES256Password)self;
-  AFF4Cipher pthis = (AFF4Cipher)self;
   unsigned char *key;
 
   memcpy((char *)&this->pub, data, length);
 
   // Try to pull the key from the cache
-  key = CALL(key_cache, get_item, (unsigned char *)&this->pub.iv, 
+  key = CALL(key_cache, get_item, (void *)&this->pub.iv, 
              sizeof(this->pub.iv));
   if(key) {
     memcpy(this->key, key, sizeof(this->key));
@@ -119,7 +118,7 @@ static int AES256Password_decode(RDFValue self, char *data, int length) {
 
 static int AES256Password_parse(RDFValue self, char *serialised) {
   AES256Password this = (AES256Password)self;
-  decode64(ZSTRING_NO_NULL(serialised), (unsigned char *)&this->pub, sizeof(this->pub));
+  decode64((unsigned char *)ZSTRING_NO_NULL(serialised), (unsigned char *)&this->pub, sizeof(this->pub));
 
   return 1;
 };
@@ -218,7 +217,7 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
     this->stored = new_RDFURN(self);
     this->backing_store = new_RDFURN(self);
     this->block_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
-    this->cipher = new_rdfvalue(self, AFF4_AES256_PASSWORD);
+    this->cipher = (AFF4Cipher)new_rdfvalue(self, AFF4_AES256_PASSWORD);
 
     // Some defaults
     this->chunk_size->value = 4*1024;
@@ -266,11 +265,12 @@ int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int len) {
   self->readptr += len;
 
   if(this->block_buffer->size >= chunk_size) {
-    FileLikeObject backing_store = CALL(oracle, open, this->backing_store, 'w');
+    FileLikeObject backing_store = (FileLikeObject)CALL(oracle,
+                                 open, this->backing_store, 'w');
     char buff[chunk_size];
 
     if(!backing_store) {
-      RaiseError(ERuntimeError, "Unable to open backing store %s", 
+      RaiseError(ERuntimeError, "Unable to open backing store %s",
                  this->backing_store->value);
       goto error;
     };
@@ -279,10 +279,10 @@ int Encrypted_write(FileLikeObject self, char *buffer, unsigned long int len) {
     // stream:
     for(offset = 0; this->block_buffer->size - offset >= chunk_size;
         offset += chunk_size) {
-
-      CALL(this->cipher, encrypt, this->block_buffer->data + offset,
+      
+      CALL(this->cipher, encrypt, (unsigned char *)this->block_buffer->data + offset,
            chunk_size,
-           buff, chunk_size, chunk_id);
+           (unsigned char *)buff, chunk_size, chunk_id);
       chunk_id ++;
 
       CALL(backing_store, write, buff, chunk_size);
@@ -305,9 +305,9 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
   uint64_t chunk_id = self->readptr / chunk_size;
   int chunk_offset = self->readptr % chunk_size;
   int available_to_read = chunk_size - chunk_offset;
-  char cbuff[chunk_size];
-  char dbuff[chunk_size];
-  FileLikeObject target = CALL(oracle, open, this->backing_store, 'r');
+  unsigned char cbuff[chunk_size];
+  unsigned char dbuff[chunk_size];
+  FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->backing_store, 'r');
 
   if(!target) {
     RaiseError(ERuntimeError, "Unable to open the backing stream %s", this->backing_store->value);
@@ -315,7 +315,7 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
   };
 
   CALL(target, seek, chunk_id * chunk_size, SEEK_SET);
-  if(CALL(target, read, cbuff, chunk_size) < chunk_size) 
+  if(CALL(target, read, (char *)cbuff, chunk_size) < chunk_size) 
     goto error;
 
   CALL(oracle, cache_return, (AFFObject)target);

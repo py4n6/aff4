@@ -268,7 +268,7 @@ VIRTUAL(FileBackedObject, FileLikeObject) {
 } END_VIRTUAL;
 
 // Some prototypes
-static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode);
+static int ZipFile_load_from(AFF4Volume self, RDFURN fd_urn, char mode);
 
 /** This is the constructor which will be used when we get
     instantiated as an AFFObject.
@@ -302,7 +302,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     };
 
     // Try to load this volume
-    ZipFile_load_from(this, this->storage_urn, mode);
+    ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
 
     // If our URN has changed after loading we remove all previous
     // attributes
@@ -426,8 +426,9 @@ static int parse_extra_field(ZipFile self, FileLikeObject fd,unsigned int length
 /** tries to open fd_urn as a zip file and populate the resolver with
     what it found 
 */
-static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
+static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   char buffer[BUFF_SIZE+1];
+  ZipFile self= (ZipFile)this;
   int length,i;
   FileLikeObject fd=NULL;
   void *ctx = talloc_size(NULL, 1);
@@ -553,7 +554,7 @@ static int ZipFile_load_from(ZipFile self, RDFURN fd_urn, char mode) {
 	  .tm_hour = cd_header.dostime >> 11,
 	  .tm_min = (cd_header.dostime>>5) & 0x3F, 
 	  .tm_sec = (cd_header.dostime&0x1F) * 2,
-	  .tm_zone = "GMT"
+          //	  .tm_zone = "GMT"
 	};
 	int64_t now = mktime(&x);
 

@@ -99,7 +99,7 @@ END_CLASS
      /** Dates serialised according the XML standard */
 CLASS(XSDDatetime, RDFValue)
      struct timeval value;
-     struct timezone tz;
+     int gm_offset;
      char *serialised;
 
      BORROWED RDFValue METHOD(XSDDatetime, set, struct timeval time);

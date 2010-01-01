@@ -131,7 +131,7 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 
 /** Quick and simple */
 static unsigned int Cache_hash(Cache self, void *key, int len) {
-  unsigned char *name = (char *)key;
+  unsigned char *name = (unsigned char *)key;
   unsigned char result = 0;
   int i;
   for(i=0; i<len; i++) 
@@ -1093,7 +1093,7 @@ static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
 
   result = tdb_fetch(self->urn_db, urn_id);
   if(result.dptr) {
-    CALL(uri, set, result.dptr);
+    CALL(uri, set, (char *)result.dptr);
     free(result.dptr);
     return 1;
   };

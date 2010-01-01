@@ -1,7 +1,7 @@
 /** This file implements support for ewf volumes */
 #include "aff4.h"
 
-static EWFVolume_destructor(void *this) {
+static int EWFVolume_destructor(void *this) {
   EWFVolume self = (EWFVolume)this;
 
   if(self->handle)
@@ -55,7 +55,10 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
                                     &filenames);
 
   this->handle = libewf_open(filenames, amount_of_filenames, LIBEWF_OPEN_READ);
-  if(!this->handle) RaiseError(ERuntimeError, "Unable to open EWF volume %s", urn->value);
+  if(!this->handle) {
+    RaiseError(ERuntimeError, "Unable to open EWF volume %s", urn->value);
+    goto error;
+  };
 
   if(-1==libewf_get_media_size(this->handle, &media_size)) {
     goto error;
@@ -108,6 +111,10 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   talloc_free(size);
   return 1;
  error:
+  // We were unable to load this volume - invalidate anything we know
+  // about it (remove streams etc).
+  ((AFFObject)self)->delete(URNOF(self));
+
   talloc_free(size);
   return 0;
 };
@@ -118,8 +125,12 @@ static void EWFVolume_close(AFF4Volume self) {
 
 VIRTUAL(EWFVolume, AFF4Volume) {
   VMETHOD_BASE(AFFObject, dataType) = AFF4_EWF_VOLUME;
+  VMETHOD_BASE(AFFObject, Con) = EWFVolume_AFFObject_Con;
   VMETHOD_BASE(AFF4Volume, load_from) = EWFVolume_load_from;
   VMETHOD_BASE(AFF4Volume, close) = EWFVolume_close;
+
+  FileLikeObject_init();
+  VMETHOD_BASE(AFFObject, delete) = ((AFFObject)GETCLASS(FileLikeObject))->delete;
 
   UNIMPLEMENTED(AFF4Volume, writestr);
 } END_VIRTUAL
@@ -138,7 +149,7 @@ static AFFObject EWFStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) 
     this->stored = new_RDFURN(self);
     CALL(URNOF(self), set, urn->value);
 
-    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, this->stored)) {
+    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "EWF Stream %s has not AFF4_STORED attribute?", urn);
       goto error;
     };
@@ -176,12 +187,16 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   return -1;
 };
 
+static void EWFStream_close(FileLikeObject self) {
+  talloc_free(self);
+};
 
 VIRTUAL(EWFStream, FileLikeObject) {
   VMETHOD_BASE(AFFObject, dataType) = AFF4_EWF_STREAM;
 
   VMETHOD_BASE(AFFObject, Con) = EWFStream_AFFObject_Con;
   VMETHOD_BASE(FileLikeObject, read) = EWFStream_read;
+  VMETHOD_BASE(FileLikeObject, close) = EWFStream_close;
 } END_VIRTUAL
 
 void EWF_init() {

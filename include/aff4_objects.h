@@ -219,7 +219,7 @@ CLASS(AES256Password, AFF4Cipher)
   struct aff4_cipher_data_t pub;
 
   unsigned char key[AES256_KEY_SIZE];
-  unsigned char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
+  char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
 
   // Set the password for this object. Should only be called once
   // before using.

@@ -38,7 +38,6 @@ char *_traceback=NULL;
 void *raise_errors(enum _error_type t, char *reason, ...) {
   if(reason) {
     va_list ap;
-    int length;
 
     va_start(ap, reason);
 
