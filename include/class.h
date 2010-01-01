@@ -428,8 +428,8 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 
 extern void unimplemented(Object self);
 
-#define UNIMPLEMENTED(method)                   \
-  self->method = (void *)unimplemented;
+#define UNIMPLEMENTED(class, method)             \
+  ((class)self)->method = (void *)unimplemented;
 
 // Some helpful little things
 #define ERROR_BUFFER_SIZE 1024

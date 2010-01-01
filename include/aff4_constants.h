@@ -43,6 +43,8 @@
 #define AFF4_VOLATILE_FILE_OFFSET VOLATILE_NS "file_offset"
 #define AFF4_VOLATILE_DIRTY VOLATILE_NS "dirty"
 #define AFF4_VOLATILE_CONTAINS   VOLATILE_NS "contains"
+#define AFF4_CONTAINS   VOLATILE_NS "contains"
+
 //Its useful for debugging to enable this so the RDF file also shows
 //the contains property for a volume. It is not needed normally since
 //its infered from the zip file itself.
@@ -116,7 +118,7 @@
 #define AFF4_ZIP_VOLUME       "zip_volume"
 #define AFF4_DIRECTORY_VOLUME "directory"
 #define AFF4_LIBAFF_VOLUME    "aff1_volume"
-#define AFF4_LIBEWF_VOLUME    "ewf_volume"
+#define AFF4_EWF_VOLUME    "ewf_volume"
 
 /** Streams */
 #define AFF4_SEGMENT          "segment"
@@ -127,6 +129,7 @@
 #define AFF4_LIBAFF_STREAM    "aff1_stream"
 #define AFF4_ERROR_STREAM     "error"
 #define AFF4_FILE             "file"
+#define AFF4_EWF_STREAM       "ewf_stream"
 
 /** Miscellaneous objects */
 #define AFF4_IDENTITY         "identity"

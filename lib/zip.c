@@ -1035,10 +1035,10 @@ static int ZipFile_writestr(AFF4Volume self, char *filename,
     implemented methods.
 */
 VIRTUAL(AFF4Volume, AFFObject) {
-  UNIMPLEMENTED(open_member);
-  UNIMPLEMENTED(close);
-  UNIMPLEMENTED(writestr);
-  UNIMPLEMENTED(load_from);
+  UNIMPLEMENTED(AFF4Volume, open_member);
+  UNIMPLEMENTED(AFF4Volume, close);
+  UNIMPLEMENTED(AFF4Volume, writestr);
+  UNIMPLEMENTED(AFF4Volume, load_from);
 } END_VIRTUAL;
 
 

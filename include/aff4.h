@@ -12,6 +12,7 @@ This file describes the high level interface.
 #define __AFF4_H
 
 #include <stdint.h>
+#include "config.h"
 #include "aff4_constants.h"
 
 // This file defines the rdf side of the AFF4 specification
@@ -20,6 +21,7 @@ This file describes the high level interface.
 #include "aff4_resolver.h"
 #include "aff4_crypto.h"
 #include "aff4_objects.h"
+#include "ewfvolume.h"
 
 /** 
     Opens the URIs specified in images and uses them to populate the

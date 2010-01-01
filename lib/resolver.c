@@ -80,8 +80,8 @@ void AFF4_Init(void) {
   // AFF1Stream_init();
 #endif
 
-#ifdef HAVE_LIBEWF
-  //  EWFVolume_init();
+#ifdef HAVE_EWF
+  EWF_init();
   // EWFStream_init();
 #endif
 
@@ -896,19 +896,22 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   scheme = urn->parser->scheme;
 
   // Empty schemes default to file:// URLs
-  if(strlen(scheme)==0) 
+  if(strlen(scheme)==0)
     scheme = "file";
-  
+
   classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(scheme));
-  if(!classref && CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type)) {
+  if(!classref) {
+    if(!CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type)) {
+      RaiseError(ERuntimeError, "No type found for %s", urn->value);
+      goto error;
+    };
+
     classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(self->type->value));
     if(!classref) {
       RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
       goto error;
     };
   };
-
-  if(!classref) goto error;
 
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(classref, Con, NULL, urn, mode);
@@ -971,10 +974,10 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
 
   // Newly created objects belong in the write cache
   result = (AFFObject)CONSTRUCT_FROM_REFERENCE((*class_reference), 
-                                               Con, self->write_cache, NULL, 'w');
+                                               Con, self->write_cache, NULL, mode);
   if(!result) goto error;
 
-  talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), 'w');
+  talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
 
   DEBUG("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
 
