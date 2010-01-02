@@ -153,6 +153,9 @@ static AFFObject EWFStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) 
       RaiseError(ERuntimeError, "EWF Stream %s has not AFF4_STORED attribute?", urn);
       goto error;
     };
+
+    CALL(oracle, resolve_value, urn, AFF4_SIZE,
+         (RDFValue)((FileLikeObject)self)->size);
   };
 
   return self;

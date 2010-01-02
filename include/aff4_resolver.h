@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Thu Dec 31 23:21:10 2009 mic
+** Last update Sat Jan  2 15:13:27 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -138,9 +138,9 @@ CLASS(Resolver, Object)
   int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, RDFValue result);
 
        /* This method is similar to iter_next except the result is
-	  allocated. Callers need to talloc_free the result. This
-	  advantage of this method is that we dont need to know in
-	  advance what type the value is.
+	  allocated to the NULL context. Callers need to talloc_free
+	  the result. This advantage of this method is that we dont
+	  need to know in advance what type the value is.
        */
      RDFValue METHOD(Resolver, iter_next_alloc, RESOLVER_ITER *iter);
 

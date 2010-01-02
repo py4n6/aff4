@@ -115,10 +115,12 @@ char *URLParse_string(URLParse self, void *ctx) {
   char *scheme = self->scheme;
   char *seperator = "/";
 
+  if(strlen(self->query)>0 && self->query[0] == '/')
+    seperator = "";
+
   if(strlen(self->fragment)>0)
     fmt = "%s://%s%s%s#%s";
   else if(strlen(self->query)>0) {
-    if(self->query[0] == '/') seperator = "";
     fmt = "%s://%s%s%s";
   } else
     fmt = "%s://%s";
@@ -338,7 +340,7 @@ static int RDFURN_parse(RDFValue self, char *serialised) {
 // it.
 static void RDFURN_add(RDFURN self,  char *filename) {
   URLParse parser = CONSTRUCT(URLParse, URLParse, Con, self, filename);
-  
+
   // Absolute URL
   if(strlen(parser->scheme)>0) {
     talloc_free(self->parser);
@@ -689,10 +691,25 @@ raptor_iostream_handler2 raptor_special_handler = {
   .write_bytes = iostream_write_bytes,
 };
 
-static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, FileLikeObject fd) {
+static int RDFSerializer_destructor(void *self) {
+  RDFSerializer this = (RDFSerializer)self;
+
+  talloc_free(this->fd);
+
+  return 0;
+};
+
+static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, 
+                                       FileLikeObject fd) {
   char *type = "turtle";
 
+  // We keep a reference to the FileLikeObject (although we dont
+  // technically own it) - which means we need to explicitly free it
+  // when we get destroyed.
   self->fd = fd;
+  talloc_increase_ref_count(fd);
+  talloc_set_destructor((void *)self, RDFSerializer_destructor);
+
   self->iostream = raptor_new_iostream_from_handler2((void *)self, &raptor_special_handler);
   // Try to make a new serialiser
   self->rdf_serializer = raptor_new_serializer(type);
@@ -762,6 +779,10 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
     triple.object_type = value->raptor_type;
 
+    // Default to something sensible
+    if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type) 
+      triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+
     // New reference here:
     triple.object = CALL(value, serialise);
 
@@ -803,7 +824,6 @@ static void RDFSerializer_close(RDFSerializer self) {
   raptor_serialize_end(self->rdf_serializer);
 
   raptor_free_serializer(self->rdf_serializer);
-  CALL(self->fd, close);
 };
 
 VIRTUAL(RDFSerializer, Object) {

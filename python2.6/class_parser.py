@@ -525,17 +525,26 @@ class Wrapper(Type):
         args = dict(name = target or self.name, call = call, type = self.type)
 
         result = """{
-       Object returned_object = (Object)%(call)s;
+       Object returned_object;
 
-       if(!returned_object) {
+       ClearError();
+
+       returned_object = (Object)%(call)s;
+
+       if(_global_error != EZero) {
          PyErr_Format(PyExc_RuntimeError,
                     "Failed to create object %(type)s: %%s", __error_str);
          ClearError();
          goto error;
-       };
 
-       %(name)s = new_class_wrapper(returned_object);
-       if(!%(name)s) goto error;
+       // A NULL return without errors means we return None
+       } else if(!returned_object) {
+         %(name)s = (Gen_wrapper *)Py_None;
+         Py_INCREF(Py_None);
+       } else {
+         %(name)s = new_class_wrapper(returned_object);
+         if(!%(name)s) goto error;
+       };
     }
 """ % args
 

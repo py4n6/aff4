@@ -669,6 +669,7 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
       // Ensure that previous values are removed too
       lseek(self->data_store_fd, data_offset, SEEK_SET);
       iter.next_offset = 0;
+      iter.encoding_type = value->id;
       write(self->data_store_fd, (char *)&iter, sizeof(iter));
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
@@ -750,15 +751,24 @@ static int Resolver_iter_next(Resolver self,
     /* If the value is of the correct type, ask it to read from
        the file. */
     if(result->id == iter->head.encoding_type) {
-      char *data = talloc_size(iter, iter->head.length);
+      /** We need to cache the triple "data", RDFValue_id because two
+      different RDFValue implementations may use the same encoding,
+      but they should be treated as different.
+      */
+      uint32_t id = iter->head.encoding_type;
+      char *data = talloc_size(iter, iter->head.length + sizeof(id));
 
       lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
       read(self->data_store_fd, data, iter->head.length);
 
+      memcpy(data + iter->head.length, &id, sizeof(id));
+
       // Check if the value was already seen:
-      if(!CALL(iter->cache, get_item, data, iter->head.length)) {
+      if(!CALL(iter->cache, get_item, data, iter->head.length + \
+               sizeof(id))) {
         // No did not see it before - store it in the Cache
-        CALL(iter->cache, put, data, iter->head.length, data, iter->head.length);
+        CALL(iter->cache, put, data, iter->head.length, data, iter->head.length +\
+             sizeof(id));
 
         res_code = CALL(result, decode, data, iter->head.length);
       } else {
@@ -782,6 +792,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
   char buff[BUFF_SIZE];
   TDB_DATA attribute, dataType;
   char *data;
+  uint32_t id = iter->head.encoding_type;
 
   // We assume the iter is valid and we write the contents of the iter
   // on here.
@@ -789,7 +800,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
   if(iter->offset == 0)
     return NULL;
 
-  // Retreive the rdf_value_class for this 
+  // Retrieve the rdf_value_class for this 
   attribute.dptr = (unsigned char *)buff;
   attribute.dsize = tdb_serialise_int(iter->head.encoding_type, buff, BUFF_SIZE);
 
@@ -807,20 +818,23 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
   };
 
   result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
-					      Con, iter);
+					      Con, NULL);
   free(dataType.dptr);
 
   // Populate the result
   lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
-  data = talloc_size(iter, iter->head.length);
+  data = talloc_size(iter, iter->head.length + sizeof(id));
 
   if(read(self->data_store_fd, data, iter->head.length) != iter->head.length)
     return NULL;
 
+  memcpy(data + iter->head.length, &id, sizeof(id));
+
   // Check if the value was already seen:
-  if(!CALL(iter->cache, get_item, data, iter->head.length)) {
+  if(!CALL(iter->cache, get_item, data, iter->head.length + sizeof(id))) {
     // No did not see it before - store it in the Cache
-    CALL(iter->cache, put, data, iter->head.length, data, iter->head.length);
+    CALL(iter->cache, put, data, iter->head.length, data,
+         iter->head.length + sizeof(id));
 
     res_code = CALL(result, decode, data, iter->head.length);
     iter->offset = get_data_next(self, &iter->head);
