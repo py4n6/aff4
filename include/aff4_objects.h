@@ -151,6 +151,7 @@ CLASS(MapDriver, FileLikeObject)
      // This where we get stored
      RDFURN stored;
      RDFURN map_urn;
+     RDFURN target_urn;
 
   // This is a cache of all the targets
   Cache targets;
@@ -171,6 +172,15 @@ CLASS(MapDriver, FileLikeObject)
                  uint64_t length);
 
      void METHOD(MapDriver, save_map);
+
+  /* This function returns information about the current file pointer
+     and its view of the target slice.
+  */
+  void METHOD(MapDriver, get_range, OUT uint64_t *image_offset_at_point, \
+              OUT uint64_t *target_offset_at_point,                     \
+              OUT uint64_t *available_to_read,                          \
+              RDFURN urn);
+
 END_CLASS
 
 /************************************************************

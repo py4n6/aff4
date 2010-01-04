@@ -230,7 +230,7 @@ class Type:
     def python_name(self):
         return self.name
 
-    def definition(self, default=None):
+    def definition(self, default=None, **kw):
         if default:
             return "%s %s=%s;\n" % (self.type, self.name, default)
         else:
@@ -322,7 +322,7 @@ class Char_and_Length(Type):
         return "%s %s, %s %s" % (self.data_type, self.name,
                                  self.length_type, self.length)
 
-    def definition(self, default = '""'):
+    def definition(self, default = '""', **kw):
         return "char *%s=%s; Py_ssize_t %s=strlen(%s);\n" % (
             self.name, default,
             self.length, default)
@@ -347,10 +347,10 @@ class Integer(Type):
         Type.__init__(self,name,type)
         self.type = 'uint64_t '
 
-    def definition(self, default = 0):
+    def definition(self, default = 0, **kw):
         return Type.definition(self, default)
 
-    def to_python_object(self, name=None, result='py_result', *kw):
+    def to_python_object(self, name=None, result='py_result', **kw):
         name = name or self.name
         return "PyErr_Clear();\n%s = PyLong_FromLong(%s);\n" % (result, name)
 
@@ -370,7 +370,7 @@ class Char(Integer):
     %(result)s = PyString_FromStringAndSize(str_%(name)s, 1);
 """ % dict(result=result, name = name or self.name)
 
-    def definition(self, default = '"\\x0"'):
+    def definition(self, default = '"\\x0"', **kw):
         return "char %s=0; char *str_%s = %s;\n" % (
             self.name,self.name, default)
 
@@ -392,11 +392,24 @@ if(strlen(str_%(name)s)!=1) {
 class StringOut(String):
     sense = 'OUT'
 
+class IntegerOut(Integer):
+    sense = 'OUT_DONE'
+    buidstr = ''
+
+    def python_name(self):
+        return None
+
+    def byref(self):
+        return ''
+
+    def call_arg(self):
+        return "&%s" % self.name
+
 class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT_DONE'
     buidstr = 'l'
 
-    def definition(self, default = None):
+    def definition(self, default = None, **kw):
         return Char_and_Length.definition(self) + "PyObject *tmp_%s;\n" % self.name
 
     def python_name(self):
@@ -426,7 +439,7 @@ class TDB_DATA_P(Char_and_Length_OUT):
     def __init__(self, name, type):
         Type.__init__(self, name, type)
 
-    def definition(self, default=None):
+    def definition(self, default=None, **kw):
         return Type.definition(self)
 
     def byref(self):
@@ -481,7 +494,7 @@ class Void(Type):
     def __init__(self, *args):
         Type.__init__(self, None, 'void *')
 
-    def definition(self, default = None):
+    def definition(self, default = None, **kw):
         return ''
 
     def to_python_object(self, name=None, result = 'py_result', **kw):
@@ -505,20 +518,29 @@ class Wrapper(Type):
     def to_python_object(self, **kw):
         return ''
 
-    def definition(self, default = None):
-        return "Gen_wrapper *%s;\n" % (self.name)
+    def definition(self, default = None, sense='in', **kw):
+        result = "Gen_wrapper *%s;" % (self.name)
+        if sense == 'in' and not 'OUT' in self.attributes:
+            result += " %s call_%s;\n" % (self.type, self.name)
+
+        return result
 
     def call_arg(self):
-        return "%s->base" % self.name
+        return "call_%s" % self.name
 
     def pre_call(self, method):
         if 'OUT' in self.attributes or self.sense == 'OUT':
             return ''
 
-        return """if(!type_check((PyObject *)%s,&%s_Type)) {
-     PyErr_Format(PyExc_RuntimeError, "%s must be derived from type %s");
+        return """
+if((PyObject *)%(name)s==Py_None) {
+   call_%(name)s = NULL;
+} else if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
      goto error;
-};\n""" % (self.name, self.type, self.name, self.type)
+} else {
+   call_%(name)s = %(name)s->base;
+};\n""" % self.__dict__
 
     def assign(self, call, method, target=None):
         method.error_set = True;
@@ -578,6 +600,22 @@ PyErr_Clear();
     def byref(self):
         return "&%s" % self.name
 
+    def pre_call(self, method):
+        if 'OUT' in self.attributes or self.sense == 'OUT':
+            return ''
+
+        return """
+if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
+     goto error;
+};\n""" % self.__dict__
+
+    def call_arg(self):
+        return "%s->base" % self.name
+
+    def definition(self, default = None, sense='in', **kw):
+        return "Gen_wrapper *%s;" % (self.name)
+
 class PointerStructWrapper(StructWrapper):
     def __init__(self, name, type):
         type = type.split()[0]
@@ -588,7 +626,7 @@ class Timeval(Type):
     interface = 'numeric'
     buidstr = 'f'
 
-    def definition(self, default = None):
+    def definition(self, default = None, **kw):
         return "float %(name)s_flt; struct timeval %(name)s;\n" % self.__dict__
 
     def byref(self):
@@ -607,7 +645,7 @@ class PyObject(Type):
     """ Accept an opaque python object """
     interface = 'opaque'
     buidstr = 'O'
-    def definition(self, default = None):
+    def definition(self, default = None, **kw):
         return 'PyObject *%(name)s;\n' % self.__dict__
 
     def byref(self):
@@ -624,6 +662,7 @@ type_dispatcher = {
     "OUT unsigned char *": StringOut,
     "unsigned int": Integer,
     'int': Integer,
+    'OUT uint64_t *': IntegerOut,
     'char': Char,
     'void': Void,
     'void *': Void,
@@ -845,6 +884,11 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
             if type.sense == 'OUT_DONE':
                 results.append(type.to_python_object(results = results))
 
+        ## If all the results are returned by reference we dont need
+        ## to prepend the void return value at all.
+        if isinstance(self.return_type, Void) and len(results)>1:
+            results.pop(0)
+
         out.write("\n// prepare results\n")
         ## Make a tuple of results and pass them back
         if len(results)>1:
@@ -1049,7 +1093,7 @@ if(!strcmp(name, "%(name)s")) {
     return py_result;
 };""" % dict(name = attr.name, python_obj = attr.to_python_object(),
              python_assign = attr.assign(call, self),
-             python_def = attr.definition()))
+             python_def = attr.definition(sense='out')))
 
         out.write("""
 

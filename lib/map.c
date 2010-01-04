@@ -12,6 +12,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     URNOF(self) = CALL(uri, copy, self);
 
     this->stored = new_RDFURN(self);
+    this->target_urn = new_RDFURN(self);
     this->target_period = new_XSDInteger(self);
     this->image_period = new_XSDInteger(self);
     this->blocksize = new_XSDInteger(self);
@@ -232,24 +233,19 @@ static int bisect_right(uint64_t offset, struct map_point *array, int hi) {
   return lo-1;
 };
 
-// Read as much as possible and return how much was read
-static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
-				  unsigned long int length) {
-  MapDriver this = (MapDriver)self;
-
+static void MapDriver_get_range(MapDriver this, uint64_t *image_offset_at_point,
+                     uint64_t *target_offset_at_point,
+                     uint64_t *available_to_read,
+                     RDFURN urn) {
+  FileLikeObject self = (FileLikeObject)this;
   // How many periods we are from the start
   uint64_t period_number = self->readptr / (uint64_t)this->image_period->value;
-
   // How far into this period we are within the image
   uint64_t image_period_offset = self->readptr % (uint64_t)this->image_period->value;
   char direction = 'f';
-  
-  // The offset within the target we ultimately need
-  uint64_t target_offset;
-  uint64_t available_to_read = self->size->value - self->readptr;
-  FileLikeObject target;
-  int read_bytes;
   int l;
+
+  *available_to_read = self->size->value - self->readptr;
 
   // We can't interpolate forward before the first point - must
   // interpolate backwards.
@@ -260,39 +256,59 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
   /** Interpolate forward */
   if(direction=='f') {
     l = bisect_right(image_period_offset, this->points, this->number_of_points);
-    
+
     // Here this->points[l].image_offset < image_period_offset
-    target_offset = this->points[l].target_offset +        \
-      image_period_offset - this->points[l].image_offset + \
+    *target_offset_at_point = this->points[l].target_offset +   \
+      image_period_offset - this->points[l].image_offset +      \
       period_number * this->target_period->value;
-    
+
     if(l < this->number_of_points-1) {
-      available_to_read = this->points[l+1].image_offset -\
+      *available_to_read = this->points[l+1].image_offset -     \
         image_period_offset;
     } else {
-      available_to_read = min(available_to_read, this->image_period->value -
-			      image_period_offset);
+      *available_to_read = min(*available_to_read, this->image_period->value -
+                               image_period_offset);
     };
 
     /** Interpolate in reverse */
   } else {
     l = bisect_left(image_period_offset, this->points, this->number_of_points);
-    target_offset = this->points[l].target_offset - \
-      (this->points[l].image_offset - image_period_offset) + \
+    *target_offset_at_point = this->points[l].target_offset -   \
+      (this->points[l].image_offset - image_period_offset) +    \
       period_number * this->target_period->value;
 
     if(l<this->number_of_points) {
-      available_to_read = this->points[l].image_offset - image_period_offset;
+      *available_to_read = this->points[l].image_offset - image_period_offset;
     };
   };
 
+  *image_offset_at_point = self->readptr;
+
+  if(urn)
+    CALL(urn, set, this->points[l].target_urn->value);
+
+  return 1;
+};
+
+// Read as much as possible and return how much was read
+static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
+				  unsigned long int length) {
+  MapDriver this = (MapDriver)self;
+  FileLikeObject target;
+  int read_bytes;
+  uint64_t image_offset_at_point, target_offset_at_point, available_to_read;
+
+  MapDriver_get_range(this, &image_offset_at_point, &target_offset_at_point, &available_to_read,
+                      this->target_urn);
+
+  // Clamp the available_to_read to the length requested
   available_to_read = min(available_to_read, length);
 
   // Now do the read:
-  target = (FileLikeObject)CALL(oracle, open,  this->points[l].target_urn, 'r');
+  target = (FileLikeObject)CALL(oracle, open,  this->target_urn, 'r');
   if(!target) return -1;
 
-  CALL(target, seek, target_offset, SEEK_SET);
+  CALL(target, seek, target_offset_at_point, SEEK_SET);
   read_bytes = CALL(target, read, buffer, available_to_read);
 
   CALL(oracle, cache_return, (AFFObject)target);
@@ -346,6 +362,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD(add) = MapDriver_add;
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD(save_map) = MapDriver_save_map;
+     VMETHOD(get_range) = MapDriver_get_range;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
 } END_VIRTUAL
