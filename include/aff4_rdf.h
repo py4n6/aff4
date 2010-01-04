@@ -122,6 +122,11 @@ CLASS(RDFURN, RDFValue)
      // qualified URN, we replace the current value with it
      void METHOD(RDFURN, add, char *urn);
 
+     /** This adds the binary string in filename into the end of the
+     URL query string, escaping invalid characters.
+     */
+     void METHOD(RDFURN, add_query, unsigned char *query, unsigned int len);
+
      // This method returns the relative name
      TDB_DATA METHOD(RDFURN, relative_name, RDFURN volume);
 END_CLASS

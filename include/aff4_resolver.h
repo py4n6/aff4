@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Sat Jan  2 15:13:27 2010 mic
+** Last update Sat Jan  2 23:12:55 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -63,7 +63,8 @@ CLASS(Resolver, Object)
        // This is used to check the type of new objects
        XSDString type;
 
-       Resolver METHOD(Resolver, Con);
+       /** DEFAULT(mode) = 0; */
+       Resolver METHOD(Resolver, Con, int mode);
   
        // Resolvers are all in a list. Each resolver in the list is another
        // identity which can be signed.

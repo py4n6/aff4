@@ -6,6 +6,8 @@
 #include <raptor.h>
 #include <errno.h>
 
+int AFF4_TDB_FLAGS = 0;
+
 // Some prototypes
 static int Resolver_lock(Resolver self, RDFURN urn, char mode);
 static int Resolver_unlock(Resolver self, RDFURN urn, char mode);
@@ -95,7 +97,7 @@ void AFF4_Init(void) {
   if(!oracle) {
     // Create the oracle - it has a special add method which distributes
     // all the adds to the other identities
-    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL);
+    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
   };
 };
 
@@ -388,8 +390,6 @@ static int Resolver_destructor(void *this) {
   return 0;
 };
 
-int AFF4_TDB_FLAGS = 0;
-
 static void store_rdf_registry(Resolver self) {
   Cache i;
 
@@ -405,11 +405,14 @@ static void store_rdf_registry(Resolver self) {
   };
 };
 
-static Resolver Resolver_Con(Resolver self) {
+static Resolver Resolver_Con(Resolver self, int mode) {
   char buff[BUFF_SIZE];
   // The location of the TDB databases
   char *path = getenv("AFF4_TDB_PATH");
-  
+
+  if(mode == RESOLVER_MODE_NONPERSISTANT)
+    AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+
   // Make this object a singleton - the Resolver may be constructed as
   // many times as needed, but we always return a reference to the
   // singleton oracle if it exists
@@ -1141,6 +1144,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
       AFF4Volume volume = (AFF4Volume)CALL(oracle, create,
                                            ((AFFObject)class_ref)->dataType, 'r');
 
+      ClearError();
       if(CALL(volume, load_from, uri, 'r')) {
         CALL(uri, set, STRING_URNOF(volume));
         CALL(oracle, cache_return, (AFFObject)volume);

@@ -15,7 +15,7 @@ Once we register the class as an RDFValue implementation, we can obtain
 new instances from the resolver by naming its dataType.
 """
 
-oracle = pyaff4.Resolver()
+oracle = pyaff4.Resolver(pyaff4.RESOLVER_MODE_NONPERSISTANT)
 
 class RDFSpecial:
     """ This is a do nothing class to demonstate python serialization.
@@ -91,8 +91,6 @@ attr = pyaff4.PREDICATE_NAMESPACE + "sample_attribute"
 
 ## Now we can use it in the resolver as normal
 oracle.set_value(urn, attr, value)
-
-pdb.set_trace()
 
 ## Now set the same value using an alternative dataType:
 value2 = pyaff4.XSDString()

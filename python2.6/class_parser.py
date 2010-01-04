@@ -811,7 +811,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         for type in self.args:
             out.write(type.pre_call(self))
 
-        out.write("\n// Make the call\n")
+        out.write("\n// Make the call\n ClearError();")
         call = "((%s)self->base)->%s(((%s)self->base)" % (self.definition_class_name, self.name, self.definition_class_name)
         tmp = ''
         for type in self.args:
@@ -823,6 +823,15 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         out.write(self.return_type.assign(call, self))
         if self.exception:
             self.exception.write(out)
+
+        self.error_set = True
+        out.write("""//Check for errors
+         if(_global_error != EZero) {
+             PyErr_Format(PyExc_RuntimeError,
+                      "%s.%s: %%s", __error_str);
+             ClearError();
+             goto error;
+         }""" % (self.myclass.class_name, self.name))
 
         out.write("\n// Postcall preparations\n")
         ## Postcall preparations

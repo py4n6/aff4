@@ -46,7 +46,7 @@ char *from_int(uint64_t arg) {
   return buffer;
 };
 
-static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*";
+static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*# ";
 static char illegal_filename_lut[128];
 void init_luts() {
   char *i;
@@ -61,7 +61,7 @@ void init_luts() {
 char *escape_filename(void *ctx, const char *filename, unsigned int length) {
   char *buffer;
   int i,j=0;
-  
+
   if(length==0) 
     length=strlen(filename);
 

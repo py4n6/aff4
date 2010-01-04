@@ -82,6 +82,9 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
       CALL(oracle, cache_return, (AFFObject)fd);
     };
+
+    // Ignore it if we cant open the map_urn
+    ClearError();
   };
 
   this->__super__->super.Con(self, uri, mode);
@@ -137,7 +140,7 @@ static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_
 
   CALL(self, add, this->readptr, target_offset, target->value);
   this->readptr += target_length;
-  this->size = max(this->size, this->readptr);
+  this->size->value = max(this->size->value, this->readptr);
 };
 
 // This writes out the map to the stream

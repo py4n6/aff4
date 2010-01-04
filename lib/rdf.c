@@ -19,14 +19,14 @@ enum url_state {
   STATE_END
 };
 
-URLParse URLParse_Con(URLParse self, char *url) {
+static URLParse URLParse_Con(URLParse self, char *url) {
   if(url)
     CALL(self, parse ,url);
   self->ctx = talloc_size(self, 1);
   return self;
 };
 
-int URLParse_parse(URLParse self, char *url) {
+static int URLParse_parse(URLParse self, char *url) {
   int i=0,j=0,end=0;
   char buff[BUFF_SIZE];
   enum url_state state = STATE_METHOD;
@@ -50,7 +50,10 @@ int URLParse_parse(URLParse self, char *url) {
     case STATE_METHOD: {
       // This happens when the url contains no : at all - we interpret
       // it as a file URL with no netloc
-      if(url[i]==0) {
+      if(url[i]=='#' || url[i]=='/') {
+        i--;
+        state = STATE_QUERY;
+      } else if(url[i]==0) {
 	buff[j]=0; j=0;
 	self->query = talloc_strdup(self->ctx,buff);
 	state = STATE_QUERY;
@@ -71,7 +74,7 @@ int URLParse_parse(URLParse self, char *url) {
     };
 
     case STATE_NETLOCK: {
-      if(url[i]==0 || (url[i]=='/' && i--)) {
+      if(url[i]==0 || ((url[i]=='/' || url[i]=='#') && i--)) {
 	state = STATE_QUERY;
 	buff[j]=0; j=0;
 	self->netloc = talloc_strdup(self->ctx,buff);
@@ -110,10 +113,73 @@ exit:
   return 0;
 };
 
-char *URLParse_string(URLParse self, void *ctx) {
+struct path_element {
+  char *element;
+  int length;
+  struct list_head list;
+};
+
+static char *collapse_path(char *query, void *ctx) {
+  struct path_element *path = talloc(ctx, struct path_element);
+  char *i, *j;
+  struct path_element *current;
+  char *result;
+
+  INIT_LIST_HEAD(&path->list);
+
+  // Split the path into components
+  for(i=query, j=query; ; i++) {
+    if(*i=='/' || *i==0) {
+      current = talloc(ctx, struct path_element);
+      current->element = talloc_size(current, i-j);
+      memcpy(current->element, j, i-j);
+      current->length = i-j;
+
+      // If this element is .. we pop the last element from the list
+      if(!memcmp(current->element, "..", 2)) {
+        talloc_free(current);
+        if(!list_empty(&path->list)) {
+          list_prev(current, &path->list, list);
+          list_del(&current->list);
+          talloc_free(current);
+        };
+        // Drop empty path elements
+      } else if(current->length==0) {
+        talloc_free(current);
+      } else {
+        list_add_tail(&current->list, &path->list);
+      };
+      j=i+1;
+    };
+
+    // The last element is null terminated
+    if(*i==0) break;
+  };
+
+  result = talloc_size(ctx, i - query + 1);
+  j=result;
+  list_for_each_entry(current, &path->list, list) {
+    // Dont write empty elements
+    if(current->length == 0) continue;
+
+    *j++ = '/';
+    memcpy(j, current->element, current->length);
+    j+=current->length;
+  };
+
+  *j=0;
+
+  talloc_free(path);
+
+  return result;
+};
+
+
+static char *URLParse_string(URLParse self, void *ctx) {
   char *fmt;
   char *scheme = self->scheme;
   char *seperator = "/";
+  char *query, *result;
 
   if(strlen(self->query)>0 && self->query[0] == '/')
     seperator = "";
@@ -128,10 +194,16 @@ char *URLParse_string(URLParse self, void *ctx) {
   if(strlen(scheme)==0)
     scheme = "file";
 
-  return talloc_asprintf(ctx, fmt, scheme,
-			 self->netloc, seperator, 
-                         self->query,
-			 self->fragment);
+  query = collapse_path(self->query, NULL);
+
+  result = talloc_asprintf(ctx, fmt, scheme,
+                           self->netloc, seperator, 
+                           query,
+                           self->fragment);
+
+  talloc_free(query);
+
+  return result;
 };
 
 VIRTUAL(URLParse, Object) {
@@ -352,16 +424,30 @@ static void RDFURN_add(RDFURN self,  char *filename) {
     char *seperator = "/";
 
     if(strlen(self->parser->query)==0) seperator="";
-    
+
     // Relative URL
     self->parser->query = talloc_asprintf(self, "%s%s%s",
 					  self->parser->query,
 					  seperator,
 					  parser->query);
+
+    self->parser->fragment = talloc_asprintf(self, "%s%s",
+                                             self->parser->fragment,
+                                             parser->fragment);
     talloc_free(self->value);
     self->value = CALL(self->parser, string, self);
     talloc_free(parser);
   };
+};
+
+/** This adds the binary buffer to the URL by escaping it
+    appropriately */
+static void RDFURN_add_query(RDFURN self, unsigned char *query, unsigned int len) {
+  char *buffer = escape_filename(self, (const char *)query, len);
+
+  RDFURN_add(self, buffer);
+
+  talloc_free(buffer);
 };
 
 /** Compares our current URN to the volume. If we share a common base,
@@ -391,6 +477,7 @@ VIRTUAL(RDFURN, RDFValue) {
 
    VMETHOD(set) = RDFURN_set;
    VMETHOD(add) = RDFURN_add;
+   VMETHOD(add_query) = RDFURN_add_query;
    VMETHOD(copy) = RDFURN_copy;
    VMETHOD(relative_name) = RDFURN_relative_name;
 } END_VIRTUAL

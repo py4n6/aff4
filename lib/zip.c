@@ -181,6 +181,9 @@ static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned lo
 
   self->size->value = max(self->size->value, self->readptr);
 
+  // Update the size property in the resolver
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->size);
+
   return result;
 };
 
@@ -301,8 +304,12 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       CALL(oracle, cache_return, (AFFObject)fd);
     };
 
-    // Try to load this volume
-    ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+    // Try to load this volume on if its not dirty. The volume may be
+    // marked as dirty already which means it is not a valid volume.
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+             (RDFValue)this->_didModify)) {
+      ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+    };
 
     // If our URN has changed after loading we remove all previous
     // attributes

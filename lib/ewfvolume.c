@@ -21,7 +21,13 @@ static AFFObject EWFVolume_AFFObject_Con(AFFObject self, RDFURN urn, char mode) 
   };
 
   if(self && urn) {
-    if(!CALL((AFF4Volume)this, load_from, urn, 'r')) {
+    this->stored = new_RDFURN(self);
+    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->stored)) {
+      RaiseError(ERuntimeError, "EWF volume is not stored anywhere?");
+      goto error;
+    };
+
+    if(!CALL((AFF4Volume)this, load_from, this->stored, 'r')) {
       goto error;
     };
   };
@@ -101,12 +107,20 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
 
   CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_STREAM));
 
+  // Set the file we are stored in
+  CALL(oracle, set_value, urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+  CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)urn);
+
   // To support the EWF file we add a single stream URI to the
   // resolver to emulate a full AFF4 volume
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CONTAINS, (RDFValue)stream);
   CALL(oracle, set_value, stream, AFF4_STORED, (RDFValue)URNOF(self));
   CALL(oracle, set_value, stream, AFF4_TYPE, (RDFValue)string);
   CALL(oracle, set_value, stream, AFF4_SIZE, (RDFValue)size);
+
+  // Set our own type so we can be reopened
+  CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_VOLUME));
+  CALL(oracle, set_value, URNOF(self), AFF4_TYPE, (RDFValue)string);
 
   talloc_free(size);
   return 1;
@@ -171,7 +185,6 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   int res;
 
   if(!volume) {
-    RaiseError(ERuntimeError, "Unable to open our containing volume");
     goto error;
   };
 
@@ -184,9 +197,13 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   self->readptr+=res;
   self->size->value = max(self->size->value, self->readptr);
 
+  CALL((AFFObject)volume, cache_return);
   return res;
 
  error:
+  if(volume)
+    CALL((AFFObject)volume, cache_return);
+
   return -1;
 };
 
