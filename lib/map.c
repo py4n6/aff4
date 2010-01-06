@@ -26,7 +26,6 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     // Make a target cache
     this->targets = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
-    this->targets->static_objects = 1;
 
     // Check that we have a stored property
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
@@ -82,13 +81,15 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
       };
 
       CALL(oracle, cache_return, (AFFObject)fd);
+    } else if(mode == 'r') {
+      goto error;
     };
 
     // Ignore it if we cant open the map_urn
     ClearError();
   };
 
-  this->__super__->super.Con(self, uri, mode);
+  self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
   return self;
  error:
@@ -100,7 +101,7 @@ static int compare_points(const void *X, const void *Y) {
   struct map_point *x=(struct map_point *)X;
   struct map_point *y=(struct map_point *)Y;
 
-  return x->target_offset - y->target_offset;
+  return x->image_offset - y->image_offset;
 };
 
 static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target_offset,
@@ -108,15 +109,14 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
   struct map_point new_point;
   MapDriver this=self;
   // Do we already have this target in the cache?
-  RDFURN target_urn = CALL(self->targets, get_item, ZSTRING_NO_NULL(target));
+  RDFURN target_urn = (RDFURN)CALL(self->targets, borrow, ZSTRING_NO_NULL(target));
 
   if(!target_urn) {
     target_urn = new_RDFURN(self->targets);
     CALL(target_urn, set, target);
 
     // Store it in the cache
-    CALL(self->targets, put, ZSTRING_NO_NULL(target), 
-	 target_urn, sizeof(*target_urn));
+    CALL(self->targets, put, ZSTRING_NO_NULL(target), (Object)target_urn);
   };
 
   new_point.target_offset = target_offset;
@@ -124,8 +124,8 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
   new_point.target_urn = target_urn;
 
   // Now append the new point to our struct:
-  this->points = talloc_realloc(self, this->points, 
-				struct map_point, 
+  this->points = talloc_realloc(self, this->points,
+				struct map_point,
 				(this->number_of_points + 1) * sizeof(*this->points));
   memcpy(&this->points[this->number_of_points], &new_point, sizeof(new_point));
 
@@ -247,6 +247,13 @@ static void MapDriver_get_range(MapDriver this, uint64_t *image_offset_at_point,
 
   *available_to_read = self->size->value - self->readptr;
 
+  if(*available_to_read == 0) {
+    *target_offset_at_point = 0;
+    *image_offset_at_point = 0;
+
+    return;
+  };
+
   // We can't interpolate forward before the first point - must
   // interpolate backwards.
   if(image_period_offset < this->points[0].image_offset) {
@@ -279,6 +286,9 @@ static void MapDriver_get_range(MapDriver this, uint64_t *image_offset_at_point,
 
     if(l<this->number_of_points) {
       *available_to_read = this->points[l].image_offset - image_period_offset;
+    } else {
+      RaiseError(ERuntimeError, "Something went wrong...");
+      return;
     };
   };
 
@@ -287,7 +297,7 @@ static void MapDriver_get_range(MapDriver this, uint64_t *image_offset_at_point,
   if(urn)
     CALL(urn, set, this->points[l].target_urn->value);
 
-  return 1;
+  return;
 };
 
 // Read as much as possible and return how much was read
@@ -368,6 +378,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
 } END_VIRTUAL
 
 void mapdriver_init() {
-  MapDriver_init();
+  INIT_CLASS(MapDriver);
+
   register_type_dispatcher(AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
 }

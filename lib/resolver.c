@@ -6,7 +6,17 @@
 #include <raptor.h>
 #include <errno.h>
 
-int AFF4_TDB_FLAGS = 0;
+//int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
+//int AFF4_TDB_FLAGS = TDB_INTERNAL;
+int AFF4_TDB_FLAGS = TDB_DEFAULT;
+
+#ifdef NO_LOCKS
+#define tdb_lockall(x)
+#define tdb_unlockall(x)
+#endif
+
+#define TDB_HASH_SIZE 1024*128
+
 
 // Some prototypes
 static int Resolver_lock(Resolver self, RDFURN urn, char mode);
@@ -16,32 +26,10 @@ static int Resolver_unlock(Resolver self, RDFURN urn, char mode);
 // their AFFObjects::Con(urn, mode) constructor.
 static Cache type_dispatcher = NULL;
 
-// This dispatcher is for the volume handlers - we attempt to open
-// each volume with one of these handlers. Note that we actually call
-// their ZipFile::Con(fileurn, mode) constructor (since they all
-// inherit from ZipFile).
-struct dispatch_t volume_handlers[] = {
-  { 0, AFF4_ZIP_VOLUME,           (AFFObject)&__ZipFile },
-  //  { 0, AFF4_DIRECTORY_VOLUME,     (AFFObject)&__DirVolume },
-  // This is legacy support for AFF1 volumes.
-#ifdef HAVE_LIBAFFLIB
-  //{ 0, AFF4_LIBAFF_VOLUME,        (AFFObject)&__AFF1Volume },
-#endif
-
-#if 0 // Not implemented yet
-#ifdef HAVE_LIBEWF
-  //{ 0, AFF4_LIBEWF_VOLUME,        (AFFObject)&__EWFVolume },
-#endif
-#endif
-  { 0, NULL, NULL}
-};
-
 /** This is the global oracle - it knows everything about everyone. */
 Resolver oracle = NULL;
 
 void register_type_dispatcher(char *type, AFFObject *classref) {
-  Cache tmp;
-
   if(!(*classref)->dataType) {
     printf("%s has no dataType\n", NAMEOF(*classref));
   };
@@ -49,20 +37,22 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
   // Make the various dispatchers
   if(!type_dispatcher) {
     type_dispatcher = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
-    type_dispatcher->static_objects = 1;
     talloc_set_name_const(type_dispatcher, "Type Dispatcher");
   };
 
-  tmp = CALL(type_dispatcher, get, ZSTRING_NO_NULL(type));
-  if(!tmp) {
-    Cache tmp =  CALL(type_dispatcher, put, ZSTRING_NO_NULL(type),
-		      classref, sizeof(classref));
+  if(!CALL(type_dispatcher, present, ZSTRING_NO_NULL(type))) {
+    // Make a copy of the class for storage in the registry
+    Object tmp =  talloc_memdup(NULL, classref, SIZEOF(classref));
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
+
+    CALL(type_dispatcher, put, ZSTRING_NO_NULL(type), tmp);
   };
 };
 
 void AFF4_Init(void) {
-  Resolver_init();
+  INIT_CLASS(Resolver);
+  INIT_CLASS(AFFObject);
+  INIT_CLASS(Logger);
 
   image_init();
   mapdriver_init();
@@ -115,6 +105,7 @@ static int Cache_destructor(void *this) {
   // because we have a reference to the main cache object here.
   if(self->cache_head)
     self->cache_head->cache_size--;
+
   return 0;
 };
 
@@ -128,41 +119,44 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 
   // Install our destructor
   talloc_set_destructor((void *)self, Cache_destructor);
+
   return self;
 };
 
 /** Quick and simple */
-static unsigned int Cache_hash(Cache self, void *key, int len) {
-  unsigned char *name = (unsigned char *)key;
-  unsigned char result = 0;
+static unsigned int Cache_hash(Cache self, char *key, int len) {
+  // Use int size to obtain the hashes this should be faster... NOTE
+  // that we dont process up to the last 3 bytes.
+  unsigned int *name = (unsigned int *)key;
+  unsigned int result = 0;
   int i;
-  for(i=0; i<len; i++) 
+  int count = len / sizeof(unsigned int);
+
+  for(i=0; i<count; i++)
     result ^= name[i];
 
   return result % self->hash_table_width;
 };
 
-static int Cache_cmp(Cache self, void *other, int len) {
+static int Cache_cmp(Cache self, char *other, int len) {
   return memcmp((char *)self->key, (char *)other, len);
 };
 
-static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len) {
+static int print_cache(Cache self) {
+  Cache i;
+
+  list_for_each_entry(i, &self->cache_list, cache_list) {
+    printf("%s: %p\n", i->key, i);
+  };
+
+  return 0;
+};
+
+static Cache Cache_put(Cache self, char *key, int len, Object data) {
   unsigned int hash;
   Cache hash_list_head;
   Cache new_cache;
   Cache i;
-
-  // First check if the item is already in the Cache
-  Cache tmp = CALL(self, get, key, len);
-  if(tmp) {
-    tmp->data = data;
-    if(!self->static_objects) {
-      talloc_steal(tmp, key);
-      talloc_steal(tmp,data);
-    };
-
-    return tmp;
-  };
 
   // Check to see if we need to expire something else. We do this
   // first to avoid the possibility that we might expire the same key
@@ -174,10 +168,13 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
       // blocks this free. Sometimes its crucial to ensure that a
       // cached object does not get expired suddenly when its not
       // ready.
-      if(talloc_free(i->data) != -1) {
-	talloc_free(i);
+      if(ISSUBCLASS(i->data, AFFObject)) {
+        printf("Freeing %s ... \n", ((AFFObject)i->data)->urn->value);
       };
-      break;
+
+      if(talloc_free(i) != -1) {
+        break;
+      };
     };
   };
 
@@ -185,34 +182,28 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
     self->hash_table = talloc_array(self, Cache, self->hash_table_width);
 
   hash = CALL(self, hash, key, len);
-  if(hash > self->hash_table_width) {
-    printf("Error in hash function\n");
-    abort();
-  };
-  hash_list_head = self->hash_table[hash];
+  assert(hash <= self->hash_table_width);
+
   new_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   // Make sure the new cache member knows where the list head is. We
   // only keep stats about the cache here.
   new_cache->cache_head = self;
 
   // Take over the data
-  new_cache->key = key;
+  new_cache->key = talloc_memdup(new_cache, key, len);
   new_cache->key_len = len;
+
   new_cache->data = data;
-  new_cache->data_len = data_len;
-
-  if(!self->static_objects) {
-    talloc_steal(new_cache, key);
+  if(data)
     talloc_steal(new_cache, data);
-  };
 
+  hash_list_head = self->hash_table[hash];
   if(!hash_list_head) {
-    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self, 
+    hash_list_head = self->hash_table[hash] = CONSTRUCT(Cache, Cache, Con, self,
 							HASH_TABLE_SIZE, -10);
     talloc_set_name_const(hash_list_head, "Hash Head");
   };
 
-  //  printf("Adding %p\n", new_cache);
   list_add_tail(&new_cache->hash_list, &self->hash_table[hash]->hash_list);
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
@@ -220,45 +211,86 @@ static Cache Cache_put(Cache self, void *key, int len, void *data, int data_len)
   return new_cache;
 };
 
-static Cache Cache_get(Cache self, void *key, int len) {
+static Object Cache_get(Cache self, char *key, int len) {
   int hash;
   Cache hash_list_head;
   Cache i;
 
-  hash = CALL(self, hash, key, len);
   if(!self->hash_table) return NULL;
 
+  hash = CALL(self, hash, key, len);
   hash_list_head = self->hash_table[hash];
+  if(!hash_list_head) return NULL;
 
   // There are 2 lists each Cache object is on - the hash list is a
   // shorter list at the end of each hash table slot, while the cache
   // list is a big list of all objects in the cache. We find the
   // object using the hash list, but expire the object based on the
   // cache list which is also kept in sorted order.
-  if(!hash_list_head) return NULL;
   list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
-    if(!CALL(i, cmp, key, len)) {
-      // Thats it - we remove it from where its in and put it on the
-      // tail:
-      if(self->policy == CACHE_EXPIRE_LEAST_USED) {
-	list_move(&i->cache_list, &self->cache_list);
-	list_move(&i->hash_list, &hash_list_head->hash_list);
+    if(i->key_len == len && !CALL(i, cmp, key, len)) {
+      Object result = i->data;
+
+      // Make the container owned by NULL
+      if(result) {
+        talloc_steal(NULL, result);
       };
-      //      printf("Getting %p\n", i);
-      return i;
+
+      // Now free the container
+      talloc_free(i);
+
+      return result;
     };
   };
-  
+
   return NULL;
 };
 
-static void *Cache_get_item(Cache self, char *key, int len) {
-  Cache tmp = CALL(self, get, key, len);
 
-  if(tmp && tmp->data) {
-    return tmp->data;
+static Object Cache_borrow(Cache self, char *key, int len) {
+  int hash;
+  Cache hash_list_head;
+  Cache i;
+
+  if(!self->hash_table) return NULL;
+
+  hash = CALL(self, hash, key, len);
+  hash_list_head = self->hash_table[hash];
+  if(!hash_list_head) return NULL;
+
+  // There are 2 lists each Cache object is on - the hash list is a
+  // shorter list at the end of each hash table slot, while the cache
+  // list is a big list of all objects in the cache. We find the
+  // object using the hash list, but expire the object based on the
+  // cache list which is also kept in sorted order.
+  list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
+    if(i->key_len == len && !CALL(i, cmp, key, len)) {
+      return i->data;
+    };
   };
+
   return NULL;
+};
+
+
+int Cache_present(Cache self, char *key, int len) {
+  int hash;
+  Cache hash_list_head;
+  Cache i;
+
+  if(self->hash_table) {
+    hash = CALL(self, hash, key, len);
+    hash_list_head = self->hash_table[hash];
+    if(!hash_list_head) return 0;
+
+    list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
+      if(i->key_len == len && !CALL(i, cmp, key, len)) {
+        return 1;
+      };
+    };
+  };
+
+  return 0;
 };
 
 VIRTUAL(Cache, Object) {
@@ -267,7 +299,8 @@ VIRTUAL(Cache, Object) {
      VMETHOD(cmp) = Cache_cmp;
      VMETHOD(hash) = Cache_hash;
      VMETHOD(get) = Cache_get;
-     VMETHOD(get_item) = Cache_get_item;
+     VMETHOD(present) = Cache_present;
+     VMETHOD(borrow) = Cache_borrow;
 } END_VIRTUAL
 
 /**********************************************************
@@ -328,7 +361,7 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
   TDB_DATA urn_id;
   uint32_t max_id=0;
   uint32_t result=0;
-  
+
   /* We get given an ID and we retrieve the URN it belongs to */
   tdb_lockall(tdb);
   urn_id = tdb_fetch(tdb, key);
@@ -351,7 +384,7 @@ static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
     };
 
     max_id++;
-    
+
     // Update the new MAX_KEY
     urn_id.dptr = (unsigned char *)buff;
     urn_id.dsize = tdb_serialise_int(max_id, buff, BUFF_SIZE);
@@ -377,7 +410,7 @@ static int Resolver_destructor(void *this) {
   // Close all the tdb handles
   tdb_close(self->urn_db);
   self->urn_db = NULL;
-  
+
   tdb_close(self->attribute_db);
   self->attribute_db = NULL;
 
@@ -396,12 +429,16 @@ static void store_rdf_registry(Resolver self) {
   list_for_each_entry(i, &RDF_Registry->cache_list, cache_list) {
     TDB_DATA tmp;
     int attribute_id;
-    RDFValue value_class = i->data;
+    RDFValue value_class = (RDFValue)i->data;
 
-    tmp = tdb_data_from_string(value_class->dataType);
+    // Make sure the objects we are dealing with are actually of the
+    // right type:
+    if(ISSUBCLASS(value_class, RDFValue)) {
+      tmp = tdb_data_from_string(value_class->dataType);
 
-    attribute_id = get_id(self->attribute_db, tmp, 1);
-    value_class->id = attribute_id;
+      attribute_id = get_id(self->attribute_db, tmp, 1);
+      ((RDFValue)CLASSOF(value_class))->id = attribute_id;
+    };
   };
 };
 
@@ -419,6 +456,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   if(oracle) {
     talloc_free(self);
     talloc_increase_ref_count(oracle);
+
     return oracle;
   };
 
@@ -427,8 +465,8 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   // Open the TDB databases
   if(snprintf(buff, BUFF_SIZE, "%s/urn.tdb", path) >= BUFF_SIZE)
     goto error;
-  
-  self->urn_db = tdb_open(buff, 1024,
+
+  self->urn_db = tdb_open(buff, TDB_HASH_SIZE,
 			  AFF4_TDB_FLAGS,
 			  O_RDWR | O_CREAT, 0644);
   if(!self->urn_db)
@@ -437,7 +475,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   if(snprintf(buff, BUFF_SIZE, "%s/attribute.tdb", path) >= BUFF_SIZE)
     goto error1;
 
-  self->attribute_db = tdb_open(buff, 1024,
+  self->attribute_db = tdb_open(buff, TDB_HASH_SIZE,
 				AFF4_TDB_FLAGS,
 				O_RDWR | O_CREAT, 0644);
   
@@ -447,7 +485,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   if(snprintf(buff, BUFF_SIZE, "%s/data.tdb", path) >= BUFF_SIZE)
     goto error2;
 
-  self->data_db = tdb_open(buff, 1024,
+  self->data_db = tdb_open(buff, TDB_HASH_SIZE,
 			   AFF4_TDB_FLAGS,
 			   O_RDWR | O_CREAT, 0644);
 
@@ -478,10 +516,10 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   store_rdf_registry(self);
 
   // Create local read and write caches
-  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
+  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);
   talloc_set_name_const(self->read_cache, "Resolver Read Cache");
 
-  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);  
+  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);  
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
 
   INIT_LIST_HEAD(&self->identities);
@@ -732,7 +770,6 @@ static RESOLVER_ITER *Resolver_get_iter(Resolver self,
 			       attribute, &iter->head);
 
   iter->cache = CONSTRUCT(Cache, Cache, Con, iter, HASH_TABLE_SIZE, 0);
-  iter->cache->static_objects = 1;
 
   return iter;
 };
@@ -759,24 +796,25 @@ static int Resolver_iter_next(Resolver self,
       but they should be treated as different.
       */
       uint32_t id = iter->head.encoding_type;
-      char *data = talloc_size(iter, iter->head.length + sizeof(id));
+      int key_len = iter->head.length + sizeof(id);
+      char *key = talloc_size(iter, key_len);
 
       lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
-      read(self->data_store_fd, data, iter->head.length);
+      read(self->data_store_fd, key, iter->head.length);
 
-      memcpy(data + iter->head.length, &id, sizeof(id));
+      memcpy(key + iter->head.length, &id, sizeof(id));
 
       // Check if the value was already seen:
-      if(!CALL(iter->cache, get_item, data, iter->head.length + \
-               sizeof(id))) {
-        // No did not see it before - store it in the Cache
-        CALL(iter->cache, put, data, iter->head.length, data, iter->head.length +\
-             sizeof(id));
+      if(!CALL(iter->cache, present, key, key_len)) {
+        // No did not see it before - store it in the Cache. NOTE this
+        // doesnt actually store anything, but simply ensure the key
+        // is stored.
+        CALL(iter->cache, put, key, key_len, NULL);
 
-        res_code = CALL(result, decode, data, iter->head.length);
+        res_code = CALL(result, decode, key, iter->head.length);
       } else {
         // We have seen this before:
-        talloc_free(data);
+        talloc_free(key);
       };
     };
 
@@ -789,90 +827,41 @@ static int Resolver_iter_next(Resolver self,
 
 static RDFValue Resolver_iter_next_alloc(Resolver self,
 					 RESOLVER_ITER *iter) {
-  int res_code=0;
   RDFValue rdf_value_class;
   RDFValue result;
-  char buff[BUFF_SIZE];
   TDB_DATA attribute, dataType;
-  char *data;
-  uint32_t id = iter->head.encoding_type;
+  char buff[BUFF_SIZE];
 
-  // We assume the iter is valid and we write the contents of the iter
-  // on here.
   // This is our iteration exit condition
-  if(iter->offset == 0)
-    return NULL;
+  while(iter->offset != 0) {
+    // We try to find the type of the next item, instantiate it and then
+    // parse it normally.
+    attribute.dptr = (unsigned char *)buff;
+    attribute.dsize = tdb_serialise_int(iter->head.encoding_type, buff, BUFF_SIZE);
 
-  // Retrieve the rdf_value_class for this 
-  attribute.dptr = (unsigned char *)buff;
-  attribute.dsize = tdb_serialise_int(iter->head.encoding_type, buff, BUFF_SIZE);
+    dataType = tdb_fetch(self->attribute_db, attribute);
+    if(dataType.dptr) {
+      rdf_value_class = (RDFValue)CALL(RDF_Registry, borrow, (char *)dataType.dptr,
+                                       dataType.dsize);
+      if(rdf_value_class) {
+        result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
+                                                    Con, NULL);
 
-  dataType = tdb_fetch(self->attribute_db, attribute);
-  if(!dataType.dptr) {
-    RaiseError(ERuntimeError, "No decoder for dataType id %u", iter->head.encoding_type);
-    return NULL;
-  };
+        if(result) {
+          if(Resolver_iter_next(self, iter, result))
+            return result;
+          else {
+            talloc_free(result);
+          };
+        };
+      };
 
-  rdf_value_class = CALL(RDF_Registry, get_item, (char *)dataType.dptr,
-			 dataType.dsize);
-  if(!rdf_value_class) {
-    RaiseError(ERuntimeError, "No decoder for dataType %s", dataType);
-    return NULL;
-  };
-
-  result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
-					      Con, NULL);
-  free(dataType.dptr);
-
-  // Populate the result
-  lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
-  data = talloc_size(iter, iter->head.length + sizeof(id));
-
-  if(read(self->data_store_fd, data, iter->head.length) != iter->head.length)
-    return NULL;
-
-  memcpy(data + iter->head.length, &id, sizeof(id));
-
-  // Check if the value was already seen:
-  if(!CALL(iter->cache, get_item, data, iter->head.length + sizeof(id))) {
-    // No did not see it before - store it in the Cache
-    CALL(iter->cache, put, data, iter->head.length, data,
-         iter->head.length + sizeof(id));
-
-    res_code = CALL(result, decode, data, iter->head.length);
-    iter->offset = get_data_next(self, &iter->head);
-  } else {
-    // We have seen this before:
-    talloc_free(data);
-  };
-
-  if(res_code ==0) {
-    talloc_free(result);
-    return NULL;
-  };
-
-  return result;
-};
-
-static int resolver_cache_destructor(void *this) {
-  AFFObject self = (AFFObject)this;
-  Cache c;
-
-  DEBUG("Unlinking object %s from cache\n", URNOF(self)->value);
-
-  if(self->mode == 'r'){
-    c = CALL(oracle->read_cache, get, ZSTRING_NO_NULL(URNOF(self)->value));
-    if(c)
-      talloc_free(c);
-  } else {
-    if(self->mode == 'w') {
-      c = CALL(oracle->write_cache, get, ZSTRING_NO_NULL(URNOF(self)->value));
-      if(c)
-        talloc_free(c);
+      free(dataType.dptr);
+      iter->offset = get_data_next(self, &iter->head);
     };
   };
 
-  return 0;
+  return NULL;
 };
 
 /** Instantiates a single instance of the class using this
@@ -892,12 +881,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // Is this object cached?
   if(mode =='r') {
-    result = CALL(self->read_cache, get_item, ZSTRING_NO_NULL(urn->value));
+    result = (AFFObject)CALL(self->read_cache, get, ZSTRING_NO_NULL(urn->value));
   } else {
-    result = CALL(self->write_cache, get_item, ZSTRING_NO_NULL(urn->value));
+    result = (AFFObject)CALL(self->write_cache, get, ZSTRING_NO_NULL(urn->value));
   };
 
   if(result) {
+    printf("Got %s from cache.\n", result->urn->value);
+
     // If its a FileLikeObject seek it to 0
     if(ISSUBCLASS(result, FileLikeObject)) {
       CALL((FileLikeObject)result, seek, 0, SEEK_SET);
@@ -916,14 +907,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   if(strlen(scheme)==0)
     scheme = "file";
 
-  classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(scheme));
+  classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(scheme));
   if(!classref) {
     if(!CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type)) {
       RaiseError(ERuntimeError, "No type found for %s", urn->value);
       goto error;
     };
 
-    classref = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(self->type->value));
+    classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(self->type->value));
     if(!classref) {
       RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
       goto error;
@@ -941,14 +932,10 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
     // Lock it
     Resolver_lock(self, URNOF(result), mode);
-
-    // Attach a destructor to ensure it gets removed from the cache
-    // lists if ever its freed rather than returned to us.
-    talloc_set_destructor((void *)result, resolver_cache_destructor);
   };
 
  exit:
-  return result; 
+  return result;
 
  error:
   return NULL;
@@ -958,48 +945,42 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     to it after that.
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
-  char *urn = URNOF(obj)->value;
+  char *urn = talloc_strdup(NULL, URNOF(obj)->value);
 
   // Cache it
   if(!obj) return;
 
-  DEBUG("Returning %s\n", urn);
-
-  // FIXME: Grab the lock
   if(obj->mode == 'r') {
-    CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
+    CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), (Object)obj);
   } else if(obj->mode == 'w') {
-    Cache_put(self->write_cache, ZSTRING_NO_NULL(urn), obj, sizeof(*obj));
+    CALL(self->write_cache, put, ZSTRING_NO_NULL(urn), (Object)obj);
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
-  
+
   // Unlock the URN
   Resolver_unlock(self, URNOF(obj), obj->mode);
 };
 
 // A helper method to construct the class
 static AFFObject Resolver_create(Resolver self, char *name, char mode) {
-  AFFObject *class_reference;
+  AFFObject class_reference;
   AFFObject result;
 
-  class_reference = CALL(type_dispatcher, get_item, ZSTRING_NO_NULL(name));
+  class_reference = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(name));
   if(!class_reference) {
     RaiseError(ERuntimeError, "No handler for object type '%s'", name);
     goto error;
   };
 
   // Newly created objects belong in the write cache
-  result = (AFFObject)CONSTRUCT_FROM_REFERENCE((*class_reference), 
+  result = (AFFObject)CONSTRUCT_FROM_REFERENCE((class_reference),
                                                Con, self->write_cache, NULL, mode);
   if(!result) goto error;
 
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
 
   DEBUG("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
-
-  // Add a destructor to it
-  talloc_set_destructor((void *)result, resolver_cache_destructor);
 
   return result;
 
@@ -1158,6 +1139,12 @@ int Resolver_load(Resolver self, RDFURN uri) {
   return 0;
 };
 
+static void Resolver_set_logger(Resolver self, Logger logger) {
+  if(self->logger) talloc_free(self->logger);
+
+  self->logger = logger;
+};
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
@@ -1179,6 +1166,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
 
      VMETHOD(load) = Resolver_load;
+     VMETHOD(set_logger) = Resolver_set_logger;
 } END_VIRTUAL
 
 /************************************************************
@@ -1249,3 +1237,16 @@ void print_volume_drivers() {
     };
   };
 };
+
+static Logger Logger_Con(Logger self) {
+  return self;
+};
+
+static void Logger_message(Logger self, int level, char *message) {
+  printf("%s\n", message);
+};
+
+VIRTUAL(Logger, Object) {
+  VMETHOD(Con) = Logger_Con;
+  VMETHOD(message) = Logger_message;
+} END_VIRTUAL

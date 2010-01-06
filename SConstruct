@@ -25,15 +25,21 @@ vars.AddVariables(
                 allowed_values = ('release', 'debug'),
                 ignorecase = 2,
                 ),
+   BoolVariable('LOCK', 'Enable multiprocess locks', False),
    ('CC', 'The c compiler', 'gcc'),
    )
 
 args['variables'] = vars
 
+args['CFLAGS']=''
 if ARGUMENTS.get('V') == "1":
-   args['CFLAGS']='-Wall -g -O0'
+   args['CFLAGS'] += ' -Wall -g -O0 '
 else:
    utils.install_colors(args)
+
+if ARGUMENTS.get('LOCK') == '0':
+   utils.warn("Turning off locks")
+   args['CFLAGS'] += ' -DNO_LOCKS '
 
 add_option(args, 'prefix',
            type='string',

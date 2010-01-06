@@ -85,8 +85,6 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   // multiple times.
   Cache cache = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
 
-  cache->static_objects = 1;
-
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);
 
@@ -109,63 +107,14 @@ affuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
       printf("%s\n", start);
       // Check to see if we already emitted this directory
-      if(!CALL(cache, get_item, ZSTRING_NO_NULL(start))) {
-        CALL(cache, put, ZSTRING_NO_NULL(start), ZSTRING_NO_NULL(start));
+      if(!CALL(cache, present, ZSTRING_NO_NULL(start))) {
+        CALL(cache, put, ZSTRING_NO_NULL(start), NULL);
         filler(buf, start, NULL, 0);
       };
 
       talloc_free(stream_urn);
     };
   };
-
-#if 0
-  for(i=0; streams[i].urn; i++) {
-    char buffer[BUFF_SIZE];
-    char *name=NULL;
-    char *j;
-
-    // Only match the objects in this path
-    if(!startswith(streams[i].path_name, filename)) continue;
-    
-    j=streams[i].path_name + strlen(filename);
-    // Shift the buffer until we have no leading /
-    do {
-      strncpy(buffer, j, BUFF_SIZE);
-      j++;
-    } while(buffer[0]=='/');
-
-    if(strlen(buffer)==0) continue;
-
-    // Find the next path seperator
-    for(j=buffer;j<buffer + BUFF_SIZE;j++) {
-      if(*j=='/') {
-	*j=0;
-	name = talloc_strdup(dict, buffer);
-	break;
-      };
-      if(*j==0) {
-	// Its a complete image we add a .dd extension to seperate it
-	// from directories.
-	name = talloc_asprintf(dict, "%s.dd", buffer);
-	break;
-      };
-    };
-
-    // Store it in the cache
-    if(name && !CALL(dict, get_item, ZSTRING_NO_NULL(name))) {
-      CALL(dict, put, name, talloc_strdup(dict, ""),0, 0);
-    };
-  };
-
-  // Now go over all the cache and fill it into the directory
-  list_for_each_entry(dict_iter, &dict->cache_list, cache_list) {
-    char *name = (char *)dict_iter->key;
-    filler(buf, escape_filename(dict, ZSTRING_NO_NULL(name)), NULL, 0);
-  };
-
-  talloc_free(dict);
-
-#endif
 
   talloc_free(cache);
   return 0;

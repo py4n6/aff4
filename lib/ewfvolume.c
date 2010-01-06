@@ -13,7 +13,7 @@ static int EWFVolume_destructor(void *this) {
 static AFFObject EWFVolume_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   EWFVolume this = (EWFVolume)self;
 
-  self = this->__super__->super.Con(self, urn, mode);
+  self = SUPER(AFFObject, AFF4Volume, Con, urn, mode);
 
   if(mode == 'w') {
     RaiseError(ERuntimeError, "EWF files can only be opened for reading.");
@@ -143,7 +143,7 @@ VIRTUAL(EWFVolume, AFF4Volume) {
   VMETHOD_BASE(AFF4Volume, load_from) = EWFVolume_load_from;
   VMETHOD_BASE(AFF4Volume, close) = EWFVolume_close;
 
-  FileLikeObject_init();
+  INIT_CLASS(FileLikeObject);
   VMETHOD_BASE(AFFObject, delete) = ((AFFObject)GETCLASS(FileLikeObject))->delete;
 
   UNIMPLEMENTED(AFF4Volume, writestr);
@@ -152,7 +152,7 @@ VIRTUAL(EWFVolume, AFF4Volume) {
 static AFFObject EWFStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   EWFStream this = (EWFStream)self;
 
-  self = this->__super__->super.Con(self, urn, mode);
+  self = SUPER(AFFObject, FileLikeObject, Con, urn, mode);
 
   if(mode == 'w') {
     RaiseError(ERuntimeError, "EWF files can only be opened for reading.");
@@ -220,8 +220,8 @@ VIRTUAL(EWFStream, FileLikeObject) {
 } END_VIRTUAL
 
 void EWF_init() {
-  EWFVolume_init();
-  EWFStream_init();
+  INIT_CLASS(EWFVolume);
+  INIT_CLASS(EWFStream);
 
   register_type_dispatcher(AFF4_EWF_VOLUME, (AFFObject *)GETCLASS(EWFVolume));
   register_type_dispatcher(AFF4_EWF_STREAM, (AFFObject *)GETCLASS(EWFStream));

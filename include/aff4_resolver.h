@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Sat Jan  2 23:12:55 2010 mic
+** Last update Wed Jan  6 22:01:40 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -63,9 +63,13 @@ CLASS(Resolver, Object)
        // This is used to check the type of new objects
        XSDString type;
 
+       /* If this is set objects will use this to send messgaes
+          through */
+       Logger logger;
+
        /** DEFAULT(mode) = 0; */
        Resolver METHOD(Resolver, Con, int mode);
-  
+
        // Resolvers are all in a list. Each resolver in the list is another
        // identity which can be signed.
        struct list_head identities;
@@ -204,6 +208,11 @@ CLASS(Resolver, Object)
           one works and then load them from the URI.
        */
        int METHOD(Resolver, load, RDFURN uri);
+
+       /* This can be used to install a logger object. All messages
+          will then be output through this object.
+       */
+       void METHOD(Resolver, set_logger, Logger logger);
 
 END_CLASS
 

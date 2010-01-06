@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Fri Jan  1 01:24:18 2010 mic
+** Last update Wed Jan  6 12:31:26 2010 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -42,6 +42,16 @@ CLASS(AFFObject, Object)
      as the caller no longer owns it. As far as the caller is
      concerned this is a desctructor and if you need the object again,
      you need to call Resolver.open() to reobtain this.
+
+     In practice this method synchronises the object attributes so
+     that a subsequent call to open with a cache miss will be able to
+     reconstruct this object exactly as it is now. Once these
+     attributes are set, this function calls Resolver.cache_return to
+     place the object back in the cache.
+
+     Sometimes this is impossible to do accurately, in which case the
+     function can simply choose to free the object and not return it
+     to the cache.
      */
      DESTRUCTOR void METHOD(AFFObject, cache_return);
 

@@ -136,7 +136,7 @@ static char *collapse_path(char *query, void *ctx) {
       current->length = i-j;
 
       // If this element is .. we pop the last element from the list
-      if(!memcmp(current->element, "..", 2)) {
+      if(current->length == 2 && !memcmp(current->element, "..", 2)) {
         talloc_free(current);
         if(!list_empty(&path->list)) {
           list_prev(current, &path->list, list);
@@ -156,7 +156,7 @@ static char *collapse_path(char *query, void *ctx) {
     if(*i==0) break;
   };
 
-  result = talloc_size(ctx, i - query + 1);
+  result = talloc_size(ctx, i - query + 20);
   j=result;
   list_for_each_entry(current, &path->list, list) {
     // Dont write empty elements
@@ -178,16 +178,12 @@ static char *collapse_path(char *query, void *ctx) {
 static char *URLParse_string(URLParse self, void *ctx) {
   char *fmt;
   char *scheme = self->scheme;
-  char *seperator = "/";
   char *query, *result;
 
-  if(strlen(self->query)>0 && self->query[0] == '/')
-    seperator = "";
-
   if(strlen(self->fragment)>0)
-    fmt = "%s://%s%s%s#%s";
+    fmt = "%s://%s%s#%s";
   else if(strlen(self->query)>0) {
-    fmt = "%s://%s%s%s";
+    fmt = "%s://%s%s";
   } else
     fmt = "%s://%s";
 
@@ -197,7 +193,7 @@ static char *URLParse_string(URLParse self, void *ctx) {
   query = collapse_path(self->query, NULL);
 
   result = talloc_asprintf(ctx, fmt, scheme,
-                           self->netloc, seperator, 
+                           self->netloc,
                            query,
                            self->fragment);
 
@@ -579,31 +575,27 @@ VIRTUAL(XSDDatetime, RDFValue) {
 Cache RDF_Registry = NULL;
 
 void register_rdf_value_class(RDFValue classref) {
-  Cache tmp;
-
   if(!RDF_Registry) {
     RDF_Registry = CONSTRUCT(Cache, Cache, Con, NULL, 100, 0);
-    RDF_Registry->static_objects = 1;
     talloc_set_name_const(RDF_Registry, "RDFValue dispatcher");
   };
 
-  tmp = CALL(RDF_Registry, get, ZSTRING_NO_NULL(classref->dataType));
-  if(!tmp) {
-    Cache tmp =  CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType),
-		      classref, sizeof(classref));
+  if(!CALL(RDF_Registry, present, ZSTRING_NO_NULL(classref->dataType))) {
+    Object tmp = talloc_memdup(NULL, classref, SIZEOF(classref));
+
     talloc_set_name(tmp, "RDFValue type %s", NAMEOF(classref));
+    CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType), tmp);
   };
 };
-
 
 /** This function initialises the RDF types registry. */
 void rdf_init() {
   raptor_init();
-  RDFValue_init();
-  XSDInteger_init();
-  XSDString_init();
-  RDFURN_init();
-  XSDDatetime_init();
+  INIT_CLASS(RDFValue);
+  INIT_CLASS(XSDInteger);
+  INIT_CLASS(XSDString);
+  INIT_CLASS(RDFURN);
+  INIT_CLASS(XSDDatetime);
 
   // Register all the known basic types
   register_rdf_value_class((RDFValue)GETCLASS(XSDInteger));
@@ -634,24 +626,22 @@ static void triples_handler(void *data, const raptor_statement* triple)
   CALL(self->urn, set, urn_str);
 
   if(strcmp(self->volume_urn->value, urn_str)) {
-    char *name = CALL(self->member_cache, get_item, ZSTRING_NO_NULL(urn_str));
-
-    if(!name) {
+    if(!CALL(self->member_cache, present, ZSTRING_NO_NULL(urn_str))) {
       // Make sure the volume contains this object
       printf("!!! %s contains %s\n", self->volume_urn->value, urn_str);
 
       CALL(oracle, add_value, self->volume_urn, AFF4_VOLATILE_CONTAINS,
            (RDFValue)self->urn);
 
-      CALL(self->member_cache, put, ZSTRING_NO_NULL(urn_str), ZSTRING_NO_NULL(urn_str));
+      CALL(self->member_cache, put, ZSTRING_NO_NULL(urn_str), NULL);
     };
   };
 
   if(triple->object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
     class_ref = (RDFValue)GETCLASS(RDFURN);
   } else if(triple->object_literal_datatype) {
-    class_ref = CALL(RDF_Registry, get_item, 
-		     ZSTRING_NO_NULL(type_str));
+    class_ref = (RDFValue)CALL(RDF_Registry, borrow,
+                               ZSTRING_NO_NULL(type_str));
   };
 
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
@@ -745,7 +735,6 @@ static RDFParser RDFParser_Con(RDFParser self) {
   self->urn = new_RDFURN(self);
   self->volume_urn = new_RDFURN(self);
   self->member_cache = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
-  self->member_cache->static_objects = 1;
   return self;
 };
 
@@ -961,8 +950,8 @@ XSDDatetime new_XSDDateTime(void *ctx) {
 // Uses the class registry to construct a type by name
 RDFValue new_rdfvalue(void *ctx, char *type) {
   RDFValue result = NULL;
-  RDFValue class_ref = CALL(RDF_Registry, get_item,
-                            ZSTRING_NO_NULL(type));
+  RDFValue class_ref = (RDFValue)CALL(RDF_Registry, borrow,
+                                      ZSTRING_NO_NULL(type));
 
   if(class_ref) {
     result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, ctx);

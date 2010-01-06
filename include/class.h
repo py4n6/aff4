@@ -196,13 +196,9 @@ extern char __error_str[];
 
 #define CLASS(class,super_class)			\
   typedef struct class ## _t *class;				\
-  inline void class ## _init(void);				\
-  inline void class ## _Alloc(class self);			\
-  extern int __ ## class ## _initialised;		\
+  inline void class ## _init(Object self);			\
   extern struct class ## _t __ ## class;			\
   struct class ## _t { struct super_class ## _t super;		 \
-    class __class__;					 \
-    super_class __super__;
 
 #define METHOD(class,name, ... )		\
   (* name)(class self, ## __VA_ARGS__ )
@@ -236,49 +232,17 @@ extern char __error_str[];
    those with foos methods and attributes.
 
 **********************************************************/
-#define __DEBUG__
-#ifdef __DEBUG__
-
 #define VIRTUAL(class,superclass)				\
   struct class ## _t __ ## class;					\
-  inline void class ## _Alloc(class self);				\
-  inline void class ## _init(void) {					\
-    if(!__ ## class ## _initialised) {					\
-      class ## _Alloc(&__ ## class);					\
-      __ ## class ## _initialised = 1;					\
-    };									\
-  };									\
-  int __ ## class ## _initialised=0;					\
-  inline void class ## _Alloc(class self) {					\
-    superclass ## _init();						\
-    superclass ##_Alloc((superclass)self);				\
-    ((Object)self)->__class__ = (Object)&__ ## class;			\
-    self->__class__ = &__ ## class;					\
-    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
-    self->__super__ = &__ ## superclass;				\
-    ((Object)self)->__size = sizeof(struct class ## _t);			\
-    ((Object)self)->__name__ = #class;
-
-#else
-
-#define VIRTUAL(class,superclass)				\
-  struct class ## _t __ ## class;					\
-  inline void class ## _Alloc(class self);				\
-  inline void class ## _init(void) {					\
-    if(!__ ## class ## _initialised) {					\
-      class ## _Alloc(&__ ## class);					\
-      __ ## class ## _initialised = 1;					\
-    };									\
-  };									\
-  int __ ## class ## _initialised=0;					\
-  inline void class ## _Alloc(class self) {					\
-    superclass ## _init();						\
-    superclass ##_Alloc((superclass)self);				\
-    ((Object)self)->__class__ = (Object)&__ ## class;			\
-    ((Object)self)->__super__ = (Object)&__ ## superclass;		\
-    ((Object)self)->__size = sizeof(struct class ## _t);
-
-#endif
+                                                                        \
+  inline void class ## _init(Object this) {                             \
+  class self = (class)this;                                             \
+  if(this->__class__) return;                                           \
+  superclass ##_init(this);                                             \
+  this->__class__ = (Object)&__ ## class;                               \
+  this->__super__ = (Object)&__ ## superclass;                          \
+  this->__size = sizeof(struct class ## _t);                            \
+  this->__name__ = #class;
 
 #define SET_DOCSTRING(string)			\
   ((Object)self)->__doc__ = string
@@ -297,9 +261,6 @@ extern char __error_str[];
 #define VATTR(attribute)			\
   (self)->attribute
 
-#define INIT_CLASS(class)					\
-  if(!__ ## class ## _initialised) { class ## _init(); }
-
 #define NAMEOF(obj)				\
   ((Object)obj)->__name__
 
@@ -308,6 +269,9 @@ extern char __error_str[];
 
 #define DOCSTRING(obj)				\
   ((Object)obj)->__doc__
+
+#define INIT_CLASS(class)                       \
+  class ## _init((Object)&__ ## class)
 
 /*************************************************************
    This MACRO is used to construct a new Class using a constructor.
@@ -335,10 +299,9 @@ extern char __error_str[];
     virt_class is Bar because thats where method was defined.
 *************************************************************/
 
-#ifdef __DEBUG__
 #define CONSTRUCT(class, virt_class, constructor, context, ... )        \
-  (class)( class ## _init(), virt_class ## _init(),			\
-           ((virt_class)(&__ ## class))->constructor(                   \
+  (class)( class ## _init((Object)&__ ## class),                        \
+             ((virt_class)(&__ ## class))->constructor(                 \
                        (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
 
@@ -347,22 +310,8 @@ extern char __error_str[];
 */
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
   ( class->constructor(						\
-		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
+                       (void *)_talloc_memdup(context, ((Object)class)->__class__, ((Object)class)->__size,  __location__ "(" #class ")"), \
 		      ## __VA_ARGS__) )
-
-#else
-#define CONSTRUCT(class, virt_class, constructor, context, ... )		\
-  (class)( class ## _init(), virt_class ## _init(),			\
-           ((virt_class)(&__ ## class))->constructor(                   \
-		 (virt_class)talloc_memdup(context, &__ ## class, sizeof(struct class ## _t)), \
-                 ## __VA_ARGS__) )
-
-#define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
-  ( class->constructor(							\
-		       (void *)_talloc_memdup(context, class, ((Object)class)->__size,  __location__ "(" #class ")"), \
-		      ## __VA_ARGS__) )
-
-#endif
 
 /** Finds the size of the class in x */
 #define CLASS_SIZE(class)			\
@@ -387,6 +336,9 @@ struct Object_t {
   int __size;
 };
 
+#define SUPER(base, imp, method, ...)            \
+  ((base)&__ ## imp)->method((base)self, ## __VA_ARGS__)
+
 #define GETCLASS(class)				\
   (Object)&__ ## class
 
@@ -406,8 +358,7 @@ struct Object_t {
 #define CLASSOF(obj)				\
   ((Object)obj)->__class__
 
-inline void Object_init(void);
-inline void Object_Alloc(Object);
+inline void Object_init(Object);
 
 extern struct Object_t __Object;
 

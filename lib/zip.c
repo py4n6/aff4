@@ -21,7 +21,8 @@ static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char m
   if(!this->size)
     this->size = new_XSDInteger(this);
 
-  return this->__super__->Con(self, urn, mode);
+  return SUPER(AFFObject, AFFObject, Con, urn, mode);
+  //  return ((typeof(self))((Object)self)->__super__)->Con(self, urn, mode);
 };
 
 
@@ -37,7 +38,8 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
   FileBackedObject self = (FileBackedObject)this;
   uint64_t file_size;
 
-  this = self->__super__->super.Con(this, urn, mode);
+  //this = self->__super__->super.Con(this, urn, mode);
+  this = SUPER(AFFObject, FileLikeObject, Con, urn, mode);
 
   if(urn) {
     int flags;
@@ -202,14 +204,14 @@ static void FileBackedObject_close(FileLikeObject self) {
   FileBackedObject this=(FileBackedObject)self;
 
   close(this->fd);
-  this->__super__->close(self);
+  SUPER(FileLikeObject, FileLikeObject, close);
 };
 
 static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
   FileBackedObject this = (FileBackedObject)self;
 
   int64_t result = lseek(this->fd, offset, whence);
-  
+
   if(result < 0) {
     DEBUG("Error seeking %s\n", strerror(errno));
     result = 0;
@@ -255,7 +257,7 @@ static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
   FileBackedObject this=(FileBackedObject)self;
 
   ftruncate(this->fd, offset);
-  return this->__super__->truncate(self, offset);
+  return SUPER(FileLikeObject, FileLikeObject, truncate, offset);
 };
 
 /** A file backed object extends FileLikeObject */
@@ -333,7 +335,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
   } else {
     // Call ZipFile's AFFObject constructor.
-    ((AFFObject)this->__super__)->Con((AFFObject)self, urn, mode);
+    self = SUPER(AFFObject, AFF4Volume, Con, urn, mode);
   };
 
   return self;
@@ -683,6 +685,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   char *ctx=talloc_size(NULL, 1);
   RDFURN filename = URNOF(this)->copy(URNOF(this), ctx);
   ZipFile self = (ZipFile)this;
+  FileLikeObject fd = NULL;
 
   // Make the filename URN relative to us.
   CALL(filename, add, member_name);
@@ -697,7 +700,6 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   switch(mode) {
   case 'w': {
     struct ZipFileHeader header;
-    FileLikeObject fd;
     // We start writing new files at this point
     TDB_DATA relative_name = CALL(filename, relative_name, URNOF(self));
     TDB_DATA escaped_filename = escape_filename_data(filename, relative_name);
@@ -759,16 +761,16 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     CALL(oracle, set_value, filename, AFF4_VOLATILE_HEADER_OFFSET,
 	 (RDFValue)self->directory_offset);
 
-    result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
-				       ZipFileStream, Con, self, 
-				       filename, self->storage_urn, 
+    result = (FileLikeObject)CONSTRUCT(ZipFileStream,
+				       ZipFileStream, Con, NULL,
+				       filename, self->storage_urn,
 				       URNOF(self),
 				       'w', fd);
     break;
   };
   case 'r': {
-    result = (FileLikeObject)CONSTRUCT(ZipFileStream, 
-				       ZipFileStream, Con, self, 
+    result = (FileLikeObject)CONSTRUCT(ZipFileStream,
+				       ZipFileStream, Con, NULL,
 				       filename, self->storage_urn,
 				       URNOF(self),
 				       'r', NULL);
@@ -780,10 +782,13 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     goto error;
   };
 
+
+  if(fd) CALL((AFFObject)fd, cache_return);
   talloc_free(ctx);
   return result;
 
  error:
+  if(fd) CALL((AFFObject)fd, cache_return);
   talloc_free(ctx);
   return NULL;
 };
@@ -1061,18 +1066,8 @@ VIRTUAL(ZipFile, AFF4Volume) {
   VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
 
 // Initialise our private classes
-  ZipFileStream_init();
+  INIT_CLASS(ZipFileStream);
 } END_VIRTUAL
-
-/** 
-    ZipFileStream objects may not expire until they are ready - this
-    is because you cant really recreate them. Ideally they should not
-    exist for long anyway.
-*/
-
-static int ZipFileStream_destroy(void *self) {
-  return -1;
-};
 
 /** 
     NOTE - this object must only even be obtained through
@@ -1100,7 +1095,10 @@ static int ZipFileStream_destroy(void *self) {
 static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 				       RDFURN file_urn, RDFURN container_urn,
 				       char mode, FileLikeObject file_fd) {
+  FileLikeObject fd = NULL;
+
   ((AFFObject)self)->mode = mode;
+
   URNOF(self) = CALL(filename, copy, self);
 
   self->file_offset = new_XSDInteger(self);
@@ -1134,7 +1132,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->super.size);
-    
+
   DEBUG("ZipFileStream: created %s\n", STRING_URNOF(self));
 
   // If we are opened for writing we need to lock the file_urn so
@@ -1150,7 +1148,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       memset(&self->strm, 0, sizeof(self->strm));
       self->strm.next_in = talloc_size(self, BUFF_SIZE);
       self->strm.next_out = talloc_size(self, BUFF_SIZE);
-      
+
       if(deflateInit2(&self->strm, 9, Z_DEFLATED, -15,
 		      9, Z_DEFAULT_STRATEGY) != Z_OK) {
       RaiseError(ERuntimeError, "Unable to initialise zlib (%s)", self->strm.msg);
@@ -1162,8 +1160,9 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       // We assume that a compressed segment may fit in memory at once
       // This is required since it can not be seeked. All AFF4
       // compressed segments should be able to fit at once.
-      FileLikeObject fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
       z_stream strm;
+
+      fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
 
       CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
 	   (RDFValue)self->compress_size);
@@ -1181,7 +1180,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       //Now read the data in
       if(CALL(fd, read, self->cbuff, self->compress_size->value) != self->compress_size->value)
 	goto error;
-      
+
       // Decompress it
       /** Set up our decompressor */
       strm.next_in = (unsigned char *)self->cbuff;
@@ -1201,7 +1200,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 	RaiseError(ERuntimeError, "Failed to fully decompress chunk (%s)", strm.msg);
 	goto error;
       };
-      
+
       inflateEnd(&strm);
       break;
     };
@@ -1211,11 +1210,12 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
     };
   };
 
-  talloc_set_destructor((void *)self, ZipFileStream_destroy);
-  // Set important parameters in the zinfo
+  if(fd) CALL((AFFObject)fd, cache_return);
   return self;
 
  error:
+  if(fd) CALL((AFFObject)fd, cache_return);
+
   talloc_free(self);
   return NULL;
 };
@@ -1226,6 +1226,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long int length) {
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
+
 
   // Update the crc:
   this->crc32->value = crc32(this->crc32->value, 
@@ -1316,7 +1317,6 @@ static void ZipFileStream_close(FileLikeObject self) {
 
   DEBUG("ZipFileStream: closed %s\n", STRING_URNOF(self));
   if(((AFFObject)self)->mode != 'w') {
-    talloc_set_destructor((void *)self, NULL);
     talloc_free(self);
     return;
   };
@@ -1389,18 +1389,16 @@ static void ZipFileStream_close(FileLikeObject self) {
     EVP_DigestFinal(&this->digest,digest,&digest_len);
     if(digest_len < BUFF_SIZE) {
       TDB_DATA tmp;
-      
+
       tmp.dptr = digest;
       tmp.dsize = digest_len;
-      
+
       // Tell the resolver what the hash is:
       //CALL(oracle, set, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
     };
   };
 
   // Make sure the lock is removed from the underlying file:
-  CALL(oracle, cache_return, (AFFObject)this->file_fd);
-  talloc_set_destructor((void *)self, NULL);
   talloc_free(ctx);
   talloc_free(self);
 };
@@ -1411,7 +1409,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   ZipFileStream this = (ZipFileStream)self;
 
-  this->__super__->super.Con(self, urn, mode);
+  self = SUPER(AFFObject, FileLikeObject, Con, urn, mode);
 
   if(urn) {
     AFF4Volume parent;
@@ -1435,7 +1433,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
     if(!parent) goto error;
 
     // Now just return the member from the volume:
-    talloc_free(self);
+    //    talloc_free(self);
     result = (AFFObject)CALL(parent, open_member, urn->value, mode, 'r');
 
     CALL(oracle, cache_return, (AFFObject)parent);
@@ -1481,11 +1479,12 @@ char *relative_name(void *ctx, char *name, char *volume_urn) {
 };
 
 void zip_init() {
-  FileLikeObject_init();
-  FileBackedObject_init();
-  ZipFile_init();
-  ZipFileStream_init();
-  
+  INIT_CLASS(FileLikeObject);
+  INIT_CLASS(FileBackedObject);
+  INIT_CLASS(ZipFile);
+  INIT_CLASS(ZipFileStream);
+  INIT_CLASS(AFF4Volume);
+
   register_type_dispatcher(AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
   register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
   register_type_dispatcher(AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));

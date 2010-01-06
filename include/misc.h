@@ -1,6 +1,7 @@
 #ifndef MISC_H
 #define MISC_H
 #include "config.h"
+#include <assert.h>
 
 #ifdef WINDOWS
 #include <winsock2.h>
@@ -51,5 +52,13 @@ extern int AFF4_DEBUG_LEVEL;
 #else
 #define DEBUG(x, ...)
 #endif
+
+
+#define AFF4_LOG(level, msg, ...)                   \
+  if(oracle->logger) {                                     \
+  char log_buffer[BUFF_SIZE];                                 \
+  snprintf(log_buffer, BUFF_SIZE, msg, ## __VA_ARGS__);   \
+  CALL(oracle->logger, message, level, log_buffer);                   \
+  }
 
 #endif

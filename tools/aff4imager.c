@@ -8,6 +8,8 @@
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
+Resolver oracle;
+
 // Searches for an object and tries to open it
 FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
   RDFURN result = new_RDFURN(NULL);
@@ -494,7 +496,17 @@ int main(int argc, char **argv)
   // Initialise the library
   AFF4_Init();
 
-  //talloc_enable_leak_report_full();
+  {
+    RDFURN urn = new_RDFURN(NULL);
+    
+    CALL(urn, set, "heelllo");
+
+  };
+
+
+  oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
+
+  talloc_enable_leak_report_full();
 
   while (1) {
     int option_index = 0;

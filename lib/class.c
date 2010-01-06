@@ -56,13 +56,9 @@ void *raise_errors(enum _error_type t, char *reason, ...) {
 // Noone should instantiate Object directly. this should be already
 // allocated therefore:
 
-inline void Object_Alloc(Object this) {
+inline void Object_init(Object this) {
   this->__class__ = &__Object;
   this->__super__ = NULL;
-};
-
-inline void Object_init() {
-  Object_Alloc(&__Object);
 };
 
 struct Object_t __Object = {

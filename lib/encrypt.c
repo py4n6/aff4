@@ -6,6 +6,29 @@
 VIRTUAL(AFF4Cipher, RDFValue) {
 } END_VIRTUAL
 
+CLASS(KeyCache, Object)
+     unsigned char key[AES256_KEY_SIZE];
+
+     KeyCache METHOD(KeyCache, Con, char *passphrase, int round_number,
+                     unsigned char *iv, int len);
+END_CLASS
+
+KeyCache KeyCache_Con(KeyCache self, char *passphrase, int round_number,
+                      unsigned char *iv, int len) {
+  // Now make the key
+  PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
+                         iv, len,
+                         round_number,
+                         sizeof(self->key), self->key);
+
+  return self;
+};
+
+VIRTUAL(KeyCache, Object) {
+  VMETHOD(Con) = KeyCache_Con;
+} END_VIRTUAL
+
+
 static Cache key_cache;
 
   // Create a new cipher
@@ -27,27 +50,26 @@ static RDFValue AES256Password_Con(RDFValue self) {
 
 // We set the password, we basically just copy it here for later
 static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
-  uint32_t round_number;
+  KeyCache key = (KeyCache)CALL(key_cache, get,
+                                (char *)self->pub.iv, sizeof(self->pub.iv));
 
+  // Now cached - make it:
+  if(!key) {
+    uint32_t round_number;
 
-  // Round number is between 2**8 and 2**24
-  round_number = (*(uint32_t *)self->pub.iv & 0xFF) << 8;
+    // Round number is between 2**8 and 2**24
+    round_number = (*(uint32_t *)self->pub.iv & 0xFF) << 8;
 
-  // Now make the key
-  PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
-                         self->pub.iv, sizeof(self->pub.iv),
-                         round_number,
-                         sizeof(self->key), self->key);
-
-  // We now cache the key for that IV (memory will be stolen by the Cache)
-  CALL(key_cache, put,
-       talloc_memdup(NULL, self->pub.iv, sizeof(self->pub.iv)),
-       sizeof(self->pub.iv),
-       talloc_memdup(NULL, self->key, sizeof(self->key)),
-       sizeof(self->key));
+    key = CONSTRUCT(KeyCache, KeyCache, Con, self, passphrase, round_number,
+                    self->pub.iv, sizeof(self->pub.iv));
+  };
 
   AES_set_encrypt_key(self->key, sizeof(self->key) * 8, &self->ekey);
   AES_set_decrypt_key(self->key, sizeof(self->key) * 8, &self->dkey);
+
+  // We now cache the key for that IV
+  CALL(key_cache, put, (char *)self->pub.iv, sizeof(self->pub.iv),
+       (Object)key);
 
   return (RDFValue)self;
 };
@@ -99,13 +121,16 @@ static int AES256Password_decode(RDFValue self, char *data, int length) {
   memcpy((char *)&this->pub, data, length);
 
   // Try to pull the key from the cache
-  key = CALL(key_cache, get_item, (void *)&this->pub.iv, 
+  key = CALL(key_cache, borrow, (void *)&this->pub.iv,
              sizeof(this->pub.iv));
   if(key) {
     memcpy(this->key, key, sizeof(this->key));
   } else {
     if(!CALL(this, fetch_password_cb))
       goto error;
+
+    key = CALL(key_cache, borrow, (void *)&this->pub.iv,
+               sizeof(this->pub.iv));
   };
 
   AES_set_encrypt_key(this->key, sizeof(this->key) * 8, &this->ekey);
@@ -208,9 +233,9 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
   Encrypted this = (Encrypted)self;
 
   // Call our baseclass
-  this->__super__->super.Con(self, uri, mode);
+  self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
-  if(uri) {
+  if(self && uri) {
     URNOF(self) = CALL(uri, copy, self);
 
     this->chunk_size = new_XSDInteger(self);
@@ -384,7 +409,7 @@ static void Encrypted_close(FileLikeObject self) {
 	 (RDFValue)time);
   };
 
-  this->__super__->close(self);
+  SUPER(FileLikeObject, FileLikeObject, close);
 };
 
 
@@ -401,8 +426,8 @@ void encrypt_init() {
   SSL_load_error_strings();
   SSL_library_init();
 
-  AES256Password_init();
-  Encrypted_init();
+  INIT_CLASS(AES256Password);
+  INIT_CLASS(Encrypted);
 
   register_type_dispatcher(AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));

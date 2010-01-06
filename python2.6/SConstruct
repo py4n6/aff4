@@ -3,10 +3,11 @@ import SconsUtils.utils as utils
 
 Import('env')
 
-BOUND_FILES = Split("""#include/aff4_constants.h #include/aff4_rdf.h
+BOUND_FILES = Split("""#include/aff4_constants.h  #include/aff4_utils.h
+              #include/aff4_rdf.h
               #include/aff4_io.h #include/aff4_resolver.h
               #include/ewfvolume.h #include/aff4_rdf_serialise.h
-              #include/aff4_objects.h """)
+              #include/aff4_objects.h""")
 
 import class_parser
 

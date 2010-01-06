@@ -1,4 +1,4 @@
-import sys, os, re, pdb
+import sys, os, re, pdb, StringIO
 
 DEBUG = 0
 
@@ -257,6 +257,10 @@ class Type:
     def from_python_object(self, source, destination, method, **kw):
         return ''
 
+    def return_value(self, value):
+        return "return %s;" % value
+
+
 class String(Type):
     interface = 'string'
     buidstr = 's'
@@ -346,6 +350,7 @@ class Integer(Type):
     def __init__(self, name,type):
         Type.__init__(self,name,type)
         self.type = 'uint64_t '
+        self.original_type = type
 
     def definition(self, default = 0, **kw):
         return Type.definition(self, default)
@@ -358,6 +363,13 @@ class Integer(Type):
         return "PyErr_Clear();\n"\
             "%(destination)s = PyLong_AsUnsignedLong(%(source)s);\n" % dict(
             source = source, destination= destination)
+
+    def comment(self):
+        return "%s %s " % (self.original_type, self.name)
+
+class Integer64(Integer):
+    buidstr = 'I'
+    type = 'unsigned int'
 
 class Char(Integer):
     buidstr = "s"
@@ -509,6 +521,9 @@ class Void(Type):
     def assign(self, call, method, target=None):
         ## We dont assign the result to anything
         return "%s;\n" % call
+
+    def return_value(self, value):
+        return "return;"
 
 class Wrapper(Type):
     """ This class represents a wrapped C type """
@@ -682,6 +697,8 @@ type_dispatcher = {
 method_attributes = ['BORROWED', 'DESTRUCTOR']
 
 def dispatch(name, type):
+    if not type: return Void()
+
     type_components = type.split()
     attributes = set()
 
@@ -737,8 +754,9 @@ class Method:
             self.return_type.original_type = return_type
         except KeyError:
             ## Is it a wrapped type?
-            log("Unable to handle return type %s.%s %s" % (self.class_name, self.name, return_type))
-            pdb.set_trace()
+            if return_type:
+                log("Unable to handle return type %s.%s %s" % (self.class_name, self.name, return_type))
+                pdb.set_trace()
             self.return_type = Void()
 
     def clone(self, new_class_name):
@@ -1218,9 +1236,10 @@ if(!py_result) {
         ## Now convert the python value back to a value
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
 
-        out.write("Py_DECREF(py_result);\n\nreturn func_return;\n")
+        out.write("Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
+        out.write(self.return_type.return_value('func_return'))
         if self.error_set:
-            out.write("error:\n %s;\n" % self.error_condition())
+            out.write("\nerror:\n %s;\n" % self.error_condition())
 
         out.write("};\n\n")
 
@@ -1400,13 +1419,19 @@ this->proxied = py_result;
 
         out.write("\n};\n\n")
 
+class EmptryConstructor(ConstructorMethod):
+    def write_definition(self, out):
+        out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
+        out.write("""return 0;};\n\n""")
 
 class ClassGenerator:
     def __init__(self, class_name, base_class_name, module):
         self.class_name = class_name
         self.methods = []
         self.module = module
-        self.constructor = None
+        self.constructor = EmptryConstructor(class_name, base_class_name,
+                                             "Con", [], '', myclass = self)
+
         self.base_class_name = base_class_name
         self.attributes = GetattrMethod(self.class_name, self.base_class_name)
         self.modifier = ''
@@ -1497,6 +1522,7 @@ class ClassGenerator:
         """ Write prototype suitable for .h file """
         out.write("""staticforward PyTypeObject %s_Type;\n""" % self.class_name)
         self.constructor.prototype(out)
+
         if self.attributes:
             self.attributes.prototype(out)
         for method in self.methods:
@@ -1632,10 +1658,17 @@ class parser:
 
         DEBUG = verbosity
 
+        io = StringIO.StringIO("""
+// Base object
+CLASS(Object, Obj)
+END_CLASS
+""")
+        self.parse_fd(io)
+
     def add_class(self, class_name, base_class_name, class_type, handler, docstring, modifier):
         try:
             self.current_class = self.module.classes[base_class_name].clone(class_name)
-        except KeyError:
+        except (KeyError, AttributeError):
             log("Base class %s is not defined !!!!" % base_class_name)
             self.current_class = class_type(class_name, base_class_name, self.module)
 
@@ -1648,7 +1681,9 @@ class parser:
         self.module.headers += '#include "%s"\n' % filename
         self.module.files.append(filename)
         fd = open(filename)
+        self.parse_fd(fd)
 
+    def parse_fd(self, fd):
         while 1:
             line = fd.readline()
             if not line: break
@@ -1765,8 +1800,7 @@ class parser:
                     offset += m.end()
                     args.append([m.group(1).strip(), m.group(2).strip()])
 
-                if return_type == self.current_class.class_name and \
-                        not self.current_class.constructor:
+                if return_type == self.current_class.class_name:
                     self.current_class.add_constructor(method_name, args, return_type,
                                                        self.current_comment)
                 else:

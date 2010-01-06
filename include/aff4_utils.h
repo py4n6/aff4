@@ -5,12 +5,14 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:43:54 2009 mic
-** Last update Thu Nov 12 20:43:54 2009 mic
+** Last update Wed Jan  6 22:37:56 2010 mic
 */
 
 #ifndef   	AFF4_UTILS_H_
 # define   	AFF4_UTILS_H_
 
+#include "class.h"
+#include "tdb.h"
 #include "list.h"
 
 #define HASH_TABLE_SIZE 256
@@ -41,16 +43,26 @@ enum Cache_policy {
   CACHE_EXPIRE_LEAST_USED
 };
 
+/** The Cache is an object which manages a cache of Object instances
+    indexed by a key.
+
+    Each Object can either be in the Cache (in which case its owned by
+    this cache object and will not be freed) or out of the cache (in
+    which case its owned by NULL, and can be freed. When the cache
+    gets too full it will start freeing objects.
+
+    NOTE: After putting the Object in the cache you do not own it -
+    and you must not use it (because it might be freed at any time).
+*/
 CLASS(Cache, Object)
 // The key which is used to access the data
-     void *key;
+     char *key;
      int key_len;
 
      // An opaque data object and its length. The object will be
      // talloc_stealed into the cache object as we will be manging its
      // memory.
-     void *data;
-     int data_len;
+     Object data;
 
      // Cache objects are put into two lists - the cache_list contains
      // all the cache objects currently managed by us in order of
@@ -75,32 +87,40 @@ CLASS(Cache, Object)
      int hash_table_width;
      Cache *hash_table;
 
-     // If this is set to 1 this Cache contains static objects and we
-     // do not try to steal them:
-     int static_objects;
-
      // These functions can be tuned to manage the hash table. The
      // default implementation assumes key is a null terminated
      // string.
-     unsigned int METHOD(Cache, hash, void *key, int len);
-     int METHOD(Cache, cmp, void *other, int len);
+     unsigned int METHOD(Cache, hash, char *key, int len);
+     int METHOD(Cache, cmp, char *other, int len);
 
      Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
 
-// Return a cache object or NULL if its not there. Callers do not own
-// the cache object. If they want to steal the data, they can but they
-// must call talloc_free on the Cache object so it can be removed from
-// the cache.
-// (i.e. talloc_steal(result->data); talloc_free(result); )
-     Cache METHOD(Cache, get, void *key, int len);
+     // Return a cache object or NULL if its not there.
+     Object METHOD(Cache, get, char *key, int len);
 
-// A shorthand for getting the actual data itself rather than the
-// Cache object itself:
-     void *METHOD(Cache, get_item, char *key, int len);
+     // Returns a reference to the object. The object is still owned
+     // by the cache. Note that this should probably only be used in
+     // caches which do not expire objects otherwise the borrowed
+     // reference may disappear unexpectadly.
+     BORROWED Object METHOD(Cache, borrow, char *key, int len);
 
-// Store the key, data in a new Cache object. The key and data will be
-// stolen.
-     Cache METHOD(Cache, put, void *key, int len, void *data, int data_len);
+     // Store the key, data in a new Cache object. The key and data will be
+     // stolen.
+     Cache METHOD(Cache, put, char *key, int len, Object data);
+
+     // Returns true if the object is in cache
+     int METHOD(Cache, present, char *key, int len);
 END_CLASS
+
+     /** A logger may be registered with the Resolver. Any objects
+         obtained from the Resolver will then use the logger to send
+         messages to the user.
+     */
+CLASS(Logger, Object)
+     Logger METHOD(Logger, Con);
+     void METHOD(Logger, message, int level, char *message);
+END_CLASS
+
+PROXY_CLASS(Logger)
 
 #endif 	    /* !AFF4_UTILS_H_ */

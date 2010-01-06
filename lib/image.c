@@ -25,21 +25,39 @@ also maintain a chunk cache for faster read access.
 
 **************************************************************/
 
+/** This is a chunck of data we cache */
+CLASS(ChunkCache, Object)
+     char *data;
+     int len;
+
+     ChunkCache METHOD(ChunkCache, Con, int len);
+END_CLASS
+
+ChunkCache ChunkCache_Con(ChunkCache self, int len) {
+  self->len = len;
+  self->data = talloc_size(self, len);
+
+  return self;
+};
+
+VIRTUAL(ChunkCache, Object) {
+  VMETHOD(Con) = ChunkCache_Con;
+} END_VIRTUAL;
 
 // The segments created by the Image stream are named by segment
 // number with this format.
 #define IMAGE_SEGMENT_NAME_FORMAT "%s/%08d"  /** Stream URN, segment_id */
 
 /** This specialised hashing is for integer keys */
-static unsigned int cache_hash_int(Cache self, void *key, int len) {
+static unsigned int cache_hash_int(Cache self, char *key, int len) {
   uint32_t int_key = *(uint32_t *)key;
 
   return int_key % self->hash_table_width;
 };
 
-static int cache_cmp_int(Cache self, void *other, int len) {
+static int cache_cmp_int(Cache self, char *other, int len) {
   uint32_t int_key = *(uint32_t *)self->key;
-  uint32_t int_other = *(uint32_t *)other;  
+  uint32_t int_other = *(uint32_t *)other;
 
   return int_key != int_other;
 };
@@ -123,7 +141,8 @@ static int dump_bevy(ImageWorker this) {
     // Push one more offset to the index to cover the last chunk
     this->chunk_indexes[chunk_count + 1] = this->segment_buffer->readptr;
 
-    printf("Dumping bevy %s (%lld bytes)\n", buff, this->segment_buffer->readptr);
+    AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s (%lld bytes)\n", 
+             buff, this->segment_buffer->readptr);
 
     // Store the entire segment in the zip file
     CALL((AFF4Volume)parent, writestr,
@@ -146,14 +165,14 @@ static int dump_bevy(ImageWorker this) {
 
     // Done with parent
     CALL(oracle, cache_return, (AFFObject)parent);
-	 
+
     // Reset everything to the start
     CALL(this->segment_buffer, truncate, 0);
     CALL(this->bevy, truncate, 0);
     memset(this->chunk_indexes, -1,
 	   sizeof(int32_t) * this->image->chunks_in_segment->value);
   };
-    
+
   result= 1;
  error:
   result = -1;
@@ -173,9 +192,9 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   Image this=(Image)self;
 
   // Call our baseclass
-  this->__super__->super.Con(self, uri, mode);
+  self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
-  if(uri) {
+  if(self && uri) {
     URNOF(self) = CALL(uri, copy, self);
     this->chunk_size = new_XSDInteger(self);
     this->compression = new_XSDInteger(self);
@@ -350,13 +369,13 @@ static void Image_close(FileLikeObject self) {
   };
 #endif
 
-  this->__super__->close(self);
+  SUPER(FileLikeObject, FileLikeObject, close);
 };
 
 /** Reads at most a single chunk and write to result. Return how much
     data was actually read.
 */
-static int partial_read(FileLikeObject self, StringIO result, int length) {
+static int partial_read(FileLikeObject self, char *buffer, int length) {
   Image this = (Image)self;
 
   // which segment is it?
@@ -366,16 +385,10 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   int chunk_offset = self->readptr % this->chunk_size->value;
   int available_to_read = min(this->chunk_size->value - chunk_offset, length);
 
-  /* Temporary storage for the compressed chunk */
-  char compressed_chunk[this->chunk_size->value + 1024];
-  unsigned int compressed_length;
-
   /* Temporary storage for the uncompressed chunk */
-  char *uncompressed_chunk;
-  unsigned long int uncompressed_length=this->chunk_size->value + 1024;
+  unsigned long int compressed_length;
 
   /** Now we need to figure out where the segment is */
-  char buffer[BUFF_SIZE];
   FileLikeObject fd;
   int32_t chunk_offset_in_segment;
 
@@ -385,25 +398,20 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
   cached the entire segment (which could be very large) we would
   exhaust our cache memory very quickly.
   */
-  Cache chunk_cache = CALL(this->chunk_cache, get, &chunk_id, sizeof(chunk_id));
+  ChunkCache chunk_cache = (ChunkCache)CALL(this->chunk_cache, get, 
+                                            (char *)&chunk_id, sizeof(chunk_id));
+
   if(chunk_cache) {
-    available_to_read = min(available_to_read, chunk_cache->data_len);
-
-    // Copy it on the result stream
-    length = CALL(result, write, chunk_cache->data + chunk_offset, 
-		  available_to_read);
-    
-    self->readptr += length;
-
-    return length;
+    goto exit;
   };
 
-  // Make some memory on the heap - it will be stolen by the cache
-  uncompressed_chunk = talloc_size(self, uncompressed_length);
-  
+  /** Cache miss... */
+  chunk_cache = CONSTRUCT(ChunkCache, ChunkCache, Con, NULL,
+                          this->chunk_size->value);
+
   /** First we need to locate the chunk indexes */
-  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx", 
-	   ((AFFObject)this)->urn->value, 
+  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx",
+	   ((AFFObject)this)->urn->value,
 	   segment_id);
   CALL(this->bevy_urn, set, buffer);
 
@@ -419,13 +427,17 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
       RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
       goto error;
     };
-    
+
+    // FIXME - this needs to be more efficient with seeking and
+    // reading the required index from the chunk index rather than
+    // reading the entire index into memory at once.
+
     /** This holds the index into the segment of all the chunks.
 	It is an array of chunks_in_segment ints long.
     */
     chunk_index = (int32_t *)CALL(fd, get_data);
     chunks_in_segment = fd->size->value / sizeof(int32_t);
-    
+
     /** By here we have the chunk_index which is an array of offsets
 	into the segment where the chunks begin. We work out the size of
 	the chunk by subtracting the next chunk offset from the current
@@ -433,94 +445,102 @@ static int partial_read(FileLikeObject self, StringIO result, int length) {
 	make too much sense we just choose to overread.
     */
     compressed_length = min((uint32_t)chunk_index[chunk_index_in_segment+1] -
-			    (uint32_t)chunk_index[chunk_index_in_segment], 
-			    this->chunk_size->value + 1024);
-    
-    /** Now obtain a handler directly into the segment */
-    snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
-	     ((AFFObject)this)->urn->value, 
-	     segment_id);
+			    (uint32_t)chunk_index[chunk_index_in_segment],
+			    this->chunk_size->value);
 
-    CALL(this->bevy_urn, set, buffer);
-    
     chunk_offset_in_segment = (uint32_t)chunk_index[chunk_index_in_segment];
+
+    // Done with the chunk index
     CALL(oracle, cache_return, (AFFObject)fd);
   };
 
+  /** Now obtain a handle directly into the segment */
+  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
+           ((AFFObject)this)->urn->value,
+           segment_id);
+
+  CALL(this->bevy_urn, set, buffer);
+
+  // Now open the bevy
   fd = (FileLikeObject)CALL(oracle, open, this->bevy_urn, 'r');
 
   // Fetch the compressed chunk
   CALL(fd, seek, chunk_offset_in_segment, SEEK_SET);
 
-  //  printf("compressed_length %d %d ", compressed_length, uncompressed_length);
-  CALL(fd, read, compressed_chunk, compressed_length);
+  switch(this->compression->value) {
+  case ZIP_DEFLATE: {
+    /* Temporary storage for the compressed chunk */
+    char compressed_chunk[compressed_length];
 
-  // Done with parent and fd
-  CALL(oracle, cache_return, (AFFObject)fd);
+    CALL(fd, read, compressed_chunk, compressed_length);
 
-  if(this->compression->value == 8) {
     // Try to decompress it:
-    if(uncompress((unsigned char *)uncompressed_chunk, 
-		  &uncompressed_length, 
+    if(uncompress((unsigned char *)chunk_cache->data,
+		  (unsigned long int *)&chunk_cache->len,
 		  (unsigned char *)compressed_chunk,
 		  (unsigned long int)compressed_length) != Z_OK ) {
       RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
       goto error;
     };
-  } else {
-    memcpy(uncompressed_chunk, compressed_chunk, compressed_length);
-    uncompressed_length = compressed_length;
-  };
-  
-  //  printf("%d\n", uncompressed_length);
-  // Copy it on the output stream
-  length = CALL(result, write, uncompressed_chunk + chunk_offset, 
-		available_to_read);
 
+    break;
+  };
+    /** No compression */
+  case ZIP_STORED:
+    CALL(fd, read, chunk_cache->data, chunk_cache->len);
+    break;
+
+  default:
+    RaiseError(ERuntimeError, "Unknown bevy compression of %d", this->compression->value);
+    goto error;
+
+  };
+
+  // Done with fd
+  CALL(oracle, cache_return, (AFFObject)fd);
+
+ exit:
+  // Now copy the data out of the chunk_cache
+  available_to_read = min(length, chunk_cache->len);
+
+  // Copy it on the result stream
+  memcpy(buffer, chunk_cache->data + chunk_offset, available_to_read);
   self->readptr += available_to_read;
 
-  // OK - now cache the uncompressed_chunk (this will steal it so we
-  // dont need to free it):
-  CALL(this->chunk_cache, put, talloc_memdup(NULL, &chunk_id, sizeof(chunk_id)), 
-       sizeof(chunk_id), uncompressed_chunk, uncompressed_length);
+  // Cache the chunk (This ensures it goes on the head of the
+  // list):
+  CALL(this->chunk_cache, put, (char *)&chunk_id, sizeof(chunk_id),
+       (Object)chunk_cache);
 
-  return length;
+  return available_to_read;
 
+  // Pad the buffer on error:
   error: {
-    char pad[available_to_read];
-
-    memset(pad,0, this->chunk_size->value);
-    length = CALL(result, write, pad, available_to_read);
+    memset(buffer,0, length);
 
     self->readptr += available_to_read;
-    talloc_free(uncompressed_chunk);
+    if(chunk_cache)
+      talloc_free(chunk_cache);
     return length;
   };
 };
 
 // Reads from the image stream
 static int Image_read(FileLikeObject self, char *buffer, unsigned long int length) {
-  StringIO result = CONSTRUCT(StringIO, StringIO, Con, self);
-  int read_length;
-  int len = 0;
-
-  // Clip the read to the stream size
-  length = min(length, self->size->value - self->readptr);
+  int read_length=0;
+  int available_to_read = min(length, self->size->value - self->readptr);
 
   // Just execute as many partial reads as are needed to satisfy the
   // length requested
-  while(len < length ) {
-    read_length = partial_read(self, result, length - len);
-    if(read_length <=0) break;
-    len += read_length;
+  while(read_length < available_to_read ) {
+    int res = partial_read(self, buffer + read_length, available_to_read - read_length);
+
+    if(res <=0) break;
+
+    read_length += res;
   };
 
-  CALL(result, seek, 0, SEEK_SET);
-  read_length = CALL(result, read, buffer, length);
-
-  talloc_free(result);
-
-  return len;
+  return read_length;
 };
 
 VIRTUAL(Image, FileLikeObject) {
@@ -533,7 +553,8 @@ VIRTUAL(Image, FileLikeObject) {
 } END_VIRTUAL
 
 void image_init() {
-  Image_init();
+  INIT_CLASS(Image);
+
   register_type_dispatcher(AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
 
 };
