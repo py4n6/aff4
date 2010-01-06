@@ -233,7 +233,7 @@ extern char __error_str[];
 
 **********************************************************/
 #define VIRTUAL(class,superclass)				\
-  struct class ## _t __ ## class;					\
+  struct class ## _t __ ## class;                                       \
                                                                         \
   inline void class ## _init(Object this) {                             \
   class self = (class)this;                                             \

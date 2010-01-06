@@ -354,9 +354,14 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
 
   CALL((FileLikeObject)image, close);
 
+  if(in_fd) CALL((FileLikeObject)in_fd, close);
+
+  talloc_free(directory_offset);
   return 0;
 
  error:
+  if(in_fd) CALL((FileLikeObject)in_fd, close);
+
   talloc_free(directory_offset);
   PrintError();
   return -1;
@@ -495,18 +500,9 @@ int main(int argc, char **argv)
 
   // Initialise the library
   AFF4_Init();
-
-  {
-    RDFURN urn = new_RDFURN(NULL);
-    
-    CALL(urn, set, "heelllo");
-
-  };
-
-
   oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
 
-  talloc_enable_leak_report_full();
+  //talloc_enable_leak_report_full();
 
   while (1) {
     int option_index = 0;

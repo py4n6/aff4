@@ -785,6 +785,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 
   if(fd) CALL((AFFObject)fd, cache_return);
   talloc_free(ctx);
+
   return result;
 
  error:
@@ -845,6 +846,7 @@ static void dump_volume_properties(ZipFile this) {
   };
 
   CALL(serializer, close);
+  CALL((FileLikeObject)fd, close);
 
   talloc_free(urn);
 };

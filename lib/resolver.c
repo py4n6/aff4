@@ -462,6 +462,8 @@ static Resolver Resolver_Con(Resolver self, int mode) {
 
   if(!path)  path = ".";
 
+  self->logger = CONSTRUCT(Logger, Logger, Con, self);
+
   // Open the TDB databases
   if(snprintf(buff, BUFF_SIZE, "%s/urn.tdb", path) >= BUFF_SIZE)
     goto error;
@@ -583,9 +585,10 @@ static uint64_t get_data_head(Resolver self, TDB_DATA uri, TDB_DATA attribute,
 
       lseek(self->data_store_fd, offset, SEEK_SET);
       if(read(self->data_store_fd, result, sizeof(*result)) == sizeof(*result)) {
+        free(offset_serialised.dptr);
 	return offset;
       };
-      
+
       free(offset_serialised.dptr);
     };
   };
@@ -945,7 +948,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     to it after that.
 */
 static void Resolver_return(Resolver self, AFFObject obj) {
-  char *urn = talloc_strdup(NULL, URNOF(obj)->value);
+  char *urn = URNOF(obj)->value;
 
   // Cache it
   if(!obj) return;

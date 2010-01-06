@@ -130,7 +130,7 @@ static char *collapse_path(char *query, void *ctx) {
   // Split the path into components
   for(i=query, j=query; ; i++) {
     if(*i=='/' || *i==0) {
-      current = talloc(ctx, struct path_element);
+      current = talloc(path, struct path_element);
       current->element = talloc_size(current, i-j);
       memcpy(current->element, j, i-j);
       current->length = i-j;
