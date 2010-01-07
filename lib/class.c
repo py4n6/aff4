@@ -67,9 +67,7 @@ struct Object_t __Object = {
   .__size = sizeof(struct Object_t)
 };
 
-int issubclass(Object obj, Object class, void (init)()) {
-  init();
-
+int issubclass(Object obj, Object class) {
   obj = obj->__class__;
   while(1) {
     if(obj == class->__class__)

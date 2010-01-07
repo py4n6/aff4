@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Wed Jan  6 22:01:40 2010 mic
+** Last update Thu Jan  7 14:20:18 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -47,12 +47,11 @@ CLASS(Resolver, Object)
        struct tdb_context *data_db;
 
        int data_store_fd;
-       uint32_t hashsize;
-       
+
        /** This is used to restore state if the RDF parser fails */
        jmp_buf env;
        char *message;
-       
+
        // Read and write caches
        Cache read_cache;
        Cache write_cache;

@@ -199,6 +199,9 @@ extern char __error_str[];
   inline void class ## _init(Object self);			\
   extern struct class ## _t __ ## class;			\
   struct class ## _t { struct super_class ## _t super;		 \
+  class   __class__;                                             \
+  super_class  __super__;
+
 
 #define METHOD(class,name, ... )		\
   (* name)(class self, ## __VA_ARGS__ )
@@ -237,10 +240,12 @@ extern char __error_str[];
                                                                         \
   inline void class ## _init(Object this) {                             \
   class self = (class)this;                                             \
-  if(this->__class__) return;                                           \
+  if(self->__super__) return;                                     \
   superclass ##_init(this);                                             \
   this->__class__ = (Object)&__ ## class;                               \
+  self->__class__ = (class)&__ ## class;                               \
   this->__super__ = (Object)&__ ## superclass;                          \
+  self->__super__ = (superclass)&__ ## superclass;                      \
   this->__size = sizeof(struct class ## _t);                            \
   this->__name__ = #class;
 
@@ -254,7 +259,7 @@ extern char __error_str[];
 
 #define VMETHOD_BASE(base, method)		\
   (((base)self)->method)
-  
+
 #define CLASS_ATTR(self, base, method)		\
   (((base)self)->method)
 
@@ -353,7 +358,7 @@ struct Object_t {
 
 // We need to ensure that class was properly initialised:
 #define ISSUBCLASS(obj,class)			\
-  issubclass((Object)obj, (Object)&__ ## class, &class ## _init)
+  issubclass((Object)obj, (Object)&__ ## class)
 
 #define CLASSOF(obj)				\
   ((Object)obj)->__class__
@@ -362,7 +367,7 @@ inline void Object_init(Object);
 
 extern struct Object_t __Object;
 
-int issubclass(Object, Object, void (init)());
+int issubclass(Object obj, Object class);
 
 /** This is used for error reporting. This is similar to the way
     python does it, i.e. we set the error flag and return NULL.
@@ -393,7 +398,7 @@ extern void unimplemented(Object self);
 						__LINE__, __FUNCTION__); \
     raise_errors(t, ## __VA_ARGS__);					\
     _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
-  } while(0);								
+  } while(0);
 
 #define LogWarnings(format, ...)		\
   do {						\

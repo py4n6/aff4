@@ -633,23 +633,6 @@ int main(int argc, char **argv)
     }
   }
 
-#if 0
-  if(cert || key_file)
-    add_identity(key_file, cert);
-
-  // Do we want to extract a stream:
-  if(extract) {
-    if(!output_file) output_file = "/dev/stdout";
-    aff2_extract(extract, output_file);
-  }
-  // Do we just want to print the content of the resolver?
-  else if(mode == 'I') {
-    if(verify)
-      aff2_verify();
-
-    aff2_print_info(verbose);
-  } else
-#endif
     if(optind < argc) {
       // We are imaging now
       if(mode == 'i') {
