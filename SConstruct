@@ -113,7 +113,7 @@ if not env.GetOption('clean'):
    ## Headers
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
-crypt.h dlfcn.h
+crypt.h dlfcn.h stdint.h stddef.h stdio.h
 """))
 
    ## Mandatory dependencies
@@ -144,7 +144,7 @@ unsetenv seteuid setegid setresuid setresgid chown chroot link readlink symlink
 realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgroups
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
 asprintf vsyslog va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
-inet_aton connect gethostbyname getifaddrs freeifaddrs crypt
+inet_aton connect gethostbyname getifaddrs freeifaddrs crypt vsnprintf strnlen
 """))
 
    ## Libraries
@@ -152,6 +152,10 @@ inet_aton connect gethostbyname getifaddrs freeifaddrs crypt
 ewf curl afflib pthread
 """))
 
+   ## Types
+   SconsUtils.utils.check_type(conf, Split("""
+intptr_t:stdint.h uintptr_t:stdint.h ptrdiff_t:stddef.h
+"""))
 
 env = conf.Finish()
 

@@ -13,6 +13,19 @@ This file describes the high level interface.
 
 #include <stdint.h>
 #include "config.h"
+
+#ifdef HAVE_STRING_H
+#include <string.h>
+#endif
+
+#ifdef HAVE_TYPES_H
+#include <sys/types.h>
+#endif
+
+#ifdef STDC_HEADERS
+#include <stdlib.h>
+#endif
+
 #include "aff4_constants.h"
 
 // This file defines the rdf side of the AFF4 specification

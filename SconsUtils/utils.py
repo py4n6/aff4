@@ -180,6 +180,15 @@ def generate_help(vars, env):
 
 HEADERS = {}
 
+def check_type(conf, types):
+    header = None
+    for t in types:
+        if ':' in t:
+            t, header = t.split(':')
+        define = "HAVE_" + t.upper().replace(".","_")
+
+        HEADERS[define] = conf.CheckType(t, includes="#include <%s>\n" % header)
+
 def check(type, conf, headers):
     for header in headers:
         if ":" in header:

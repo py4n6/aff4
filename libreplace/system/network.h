@@ -83,6 +83,10 @@
 #include <sys/ioctl.h>
 #endif
 
+#ifdef HAVE_SYS_UIO_H
+#include <sys/uio.h>
+#endif
+
 #ifdef HAVE_STROPTS_H
 #include <stropts.h>
 #endif
@@ -191,6 +195,20 @@ int rep_socketpair(int d, int type, int protocol, int sv[2]);
 #endif
 #endif
 
+/*
+ * Some of the functions in source3/lib/util_sock.c use AI_ADDRCONFIG. On QNX
+ * 6.3.0, this macro is defined but, if it's used, getaddrinfo will fail. This
+ * prevents smbd from opening any sockets.
+ *
+ * If I undefine AI_ADDRCONFIG on such systems and define it to be 0,
+ * this works around the issue.
+ */
+#ifdef __QNX__
+#include <sys/neutrino.h>
+#if _NTO_VERSION == 630
+#undef AI_ADDRCONFIG
+#endif
+#endif
 #ifndef AI_ADDRCONFIG
 /*
  * logic copied from AI_NUMERICHOST
@@ -271,7 +289,11 @@ int rep_socketpair(int d, int type, int protocol, int sv[2]);
 #endif
 
 #ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 256
+#define HOST_NAME_MAX 255
+#endif
+
+#ifndef MAXHOSTNAMELEN
+#define MAXHOSTNAMELEN HOST_NAME_MAX
 #endif
 
 #ifndef HAVE_SA_FAMILY_T
@@ -299,6 +321,22 @@ typedef unsigned short int sa_family_t;
 #endif
 #endif
 
+#ifndef IOV_MAX
+# ifdef UIO_MAXIOV
+#  define IOV_MAX UIO_MAXIOV
+# else
+#  ifdef __sgi
+    /*
+     * IRIX 6.5 has sysconf(_SC_IOV_MAX)
+     * which might return 512 or bigger
+     */
+#   define IOV_MAX 512
+#  else
+#   error IOV_MAX and UIO_MAXIOV undefined
+#  endif
+# endif
+#endif
+
 #ifndef HAVE_STRUCT_ADDRINFO
 #define HAVE_STRUCT_ADDRINFO
 struct addrinfo {
@@ -323,10 +361,12 @@ struct addrinfo {
 #endif
 
 #ifdef SOCKET_WRAPPER
+#ifndef SOCKET_WRAPPER_DISABLE
 #ifndef SOCKET_WRAPPER_NOT_REPLACE
 #define SOCKET_WRAPPER_REPLACE
-#endif
+#endif /* SOCKET_WRAPPER_NOT_REPLACE */
 #include "../socket_wrapper/socket_wrapper.h"
-#endif
+#endif /* SOCKET_WRAPPER_DISABLE */
+#endif /* SOCKET_WRAPPER */
 
 #endif

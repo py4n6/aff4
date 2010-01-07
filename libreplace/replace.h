@@ -258,6 +258,10 @@ char *rep_realpath(const char *path, char *resolved_path);
 int rep_lchown(const char *fname,uid_t uid,gid_t gid);
 #endif
 
+#ifdef HAVE_UNIX_H
+#include <unix.h>
+#endif
+
 #ifndef HAVE_SETLINEBUF
 #define setlinebuf rep_setlinebuf
 void rep_setlinebuf(FILE *);
@@ -356,7 +360,7 @@ int rep_vasprintf(char **ptr, const char *format, va_list ap) PRINTF_ATTRIBUTE(2
 int rep_snprintf(char *,size_t ,const char *, ...) PRINTF_ATTRIBUTE(3,4);
 #endif
 
-#if !defined(HAVE_VSNPRINTF) || !defined(HAVE_C99_VSNPRINTF)
+#if !defined(HAVE_VSNPRINTF) && !defined(HAVE_C99_VSNPRINTF)
 #define vsnprintf rep_vsnprintf
 int rep_vsnprintf(char *,size_t ,const char *, va_list ap) PRINTF_ATTRIBUTE(3,0);
 #endif
@@ -434,11 +438,17 @@ char *rep_mkdtemp(char *template);
 #ifndef HAVE_PREAD
 #define pread rep_pread
 ssize_t rep_pread(int __fd, void *__buf, size_t __nbytes, off_t __offset);
+#define LIBREPLACE_PREAD_REPLACED 1
+#else
+#define LIBREPLACE_PREAD_NOT_REPLACED 1
 #endif
 
 #ifndef HAVE_PWRITE
 #define pwrite rep_pwrite
 ssize_t rep_pwrite(int __fd, const void *__buf, size_t __nbytes, off_t __offset);
+#define LIBREPLACE_PWRITE_REPLACED 1
+#else
+#define LIBREPLACE_PWRITE_NOT_REPLACED 1
 #endif
 
 #if !defined(HAVE_INET_NTOA) || defined(REPLACE_INET_NTOA)
@@ -497,18 +507,6 @@ ssize_t rep_pwrite(int __fd, const void *__buf, size_t __nbytes, off_t __offset)
   			      ? ~ (t) 0 << (sizeof (t) * CHAR_BIT - 1) : (t) 0))
 #define _TYPE_MAXIMUM(t) ((t) (~ (t) 0 - _TYPE_MINIMUM (t)))
 
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 255
-#endif
-
-/*
- * Some older systems seem not to have MAXHOSTNAMELEN
- * defined.
- */
-#ifndef MAXHOSTNAMELEN
-#define MAXHOSTNAMELEN HOST_NAME_MAX
-#endif
-
 #ifndef UINT16_MAX
 #define UINT16_MAX 65535
 #endif
@@ -539,6 +537,18 @@ ssize_t rep_pwrite(int __fd, const void *__buf, size_t __nbytes, off_t __offset)
 #else
 typedef int bool;
 #endif
+#endif
+
+#if !defined(HAVE_INTPTR_T)
+typedef long long intptr_t ;
+#endif
+
+#if !defined(HAVE_UINTPTR_T)
+typedef unsigned long long uintptr_t ;
+#endif
+
+#if !defined(HAVE_PTRDIFF_T)
+typedef unsigned long long ptrdiff_t ;
 #endif
 
 /*
@@ -691,6 +701,25 @@ char *ufc_crypt(const char *key, const char *salt);
 #else
 #ifdef HAVE_CRYPT_H
 #include <crypt.h>
+#endif
+#endif
+
+/* these macros gain us a few percent of speed on gcc */
+#if (__GNUC__ >= 3)
+/* the strange !! is to ensure that __builtin_expect() takes either 0 or 1
+   as its first argument */
+#ifndef likely
+#define likely(x)   __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+#else
+#ifndef likely
+#define likely(x) (x)
+#endif
+#ifndef unlikely
+#define unlikely(x) (x)
 #endif
 #endif
 
