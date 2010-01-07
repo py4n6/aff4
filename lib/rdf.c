@@ -585,6 +585,8 @@ void register_rdf_value_class(RDFValue classref) {
 
     talloc_set_name(tmp, "RDFValue type %s", NAMEOF(classref));
     CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType), tmp);
+
+    talloc_free(tmp);
   };
 };
 

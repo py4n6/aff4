@@ -374,7 +374,7 @@ int issubclass(Object obj, Object class);
 */
 enum _error_type {
   EZero,EGeneric,EOverflow,EWarning,
-  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError
+  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError
 };
 
 extern char _error_buff[];

@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:43:54 2009 mic
-** Last update Wed Jan  6 22:37:56 2010 mic
+** Last update Thu Jan  7 16:27:56 2010 mic
 */
 
 #ifndef   	AFF4_UTILS_H_
@@ -93,6 +93,12 @@ CLASS(Cache, Object)
      unsigned int METHOD(Cache, hash, char *key, int len);
      int METHOD(Cache, cmp, char *other, int len);
 
+     /** hash_table_width is the width of the hash table.
+         if max_cache_size is 0, we do not expire items.
+
+         DEFAULT(hash_table_width) = 100;
+         DEFAULT(max_cache_size) = 0;
+     */
      Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
 
      // Return a cache object or NULL if its not there.
@@ -106,7 +112,7 @@ CLASS(Cache, Object)
 
      // Store the key, data in a new Cache object. The key and data will be
      // stolen.
-     Cache METHOD(Cache, put, char *key, int len, Object data);
+     void METHOD(Cache, put, char *key, int len, Object data);
 
      // Returns true if the object is in cache
      int METHOD(Cache, present, char *key, int len);

@@ -46,6 +46,7 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
 
     CALL(type_dispatcher, put, ZSTRING_NO_NULL(type), tmp);
+    talloc_free(tmp);
   };
 };
 
@@ -127,10 +128,10 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 static unsigned int Cache_hash(Cache self, char *key, int len) {
   // Use int size to obtain the hashes this should be faster... NOTE
   // that we dont process up to the last 3 bytes.
-  unsigned int *name = (unsigned int *)key;
+  unsigned char *name = (unsigned char *)key;
   unsigned int result = 0;
   int i;
-  int count = len / sizeof(unsigned int);
+  int count = len / sizeof(*name);
 
   for(i=0; i<count; i++)
     result ^= name[i];
@@ -152,7 +153,7 @@ static int print_cache(Cache self) {
   return 0;
 };
 
-static Cache Cache_put(Cache self, char *key, int len, Object data) {
+static void Cache_put(Cache self, char *key, int len, Object data) {
   unsigned int hash;
   Cache hash_list_head;
   Cache new_cache;
@@ -189,13 +190,15 @@ static Cache Cache_put(Cache self, char *key, int len, Object data) {
   // only keep stats about the cache here.
   new_cache->cache_head = self;
 
+  talloc_set_name(new_cache, "Cache key %s", key);
+
   // Take over the data
   new_cache->key = talloc_memdup(new_cache, key, len);
   new_cache->key_len = len;
 
   new_cache->data = data;
   if(data)
-    talloc_steal(new_cache, data);
+    talloc_reference(self, data);
 
   hash_list_head = self->hash_table[hash];
   if(!hash_list_head) {
@@ -208,7 +211,7 @@ static Cache Cache_put(Cache self, char *key, int len, Object data) {
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
 
-  return new_cache;
+  return;
 };
 
 static Object Cache_get(Cache self, char *key, int len) {
@@ -231,9 +234,12 @@ static Object Cache_get(Cache self, char *key, int len) {
     if(i->key_len == len && !CALL(i, cmp, key, len)) {
       Object result = i->data;
 
-      // Make the container owned by NULL
+      // When we return the object we increase its reference to null,
+      // and remove the reference from us (we dont own it and NULL
+      // owns it). This makes sure it is not freed.
       if(result) {
-        talloc_steal(NULL, result);
+        talloc_reference(NULL, result);
+        talloc_unlink(self, result);
       };
 
       // Now free the container
@@ -243,6 +249,7 @@ static Object Cache_get(Cache self, char *key, int len) {
     };
   };
 
+  RaiseError(EKeyError, "Key '%s' not found in Cache", key);
   return NULL;
 };
 
@@ -963,6 +970,9 @@ static void Resolver_return(Resolver self, AFFObject obj) {
 
   // Unlock the URN
   Resolver_unlock(self, URNOF(obj), obj->mode);
+
+  // We free it here, but there should still be a cache reference.
+  talloc_free(obj);
 };
 
 // A helper method to construct the class

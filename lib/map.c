@@ -117,6 +117,7 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
 
     // Store it in the cache
     CALL(self->targets, put, ZSTRING_NO_NULL(target), (Object)target_urn);
+    talloc_free(target_urn);
   };
 
   new_point.target_offset = target_offset;

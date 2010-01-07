@@ -512,6 +512,9 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   CALL(this->chunk_cache, put, (char *)&chunk_id, sizeof(chunk_id),
        (Object)chunk_cache);
 
+  // The cache will now own this:
+  talloc_free(chunk_cache);
+
   return available_to_read;
 
   // Pad the buffer on error:
