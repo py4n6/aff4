@@ -169,10 +169,6 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
       // blocks this free. Sometimes its crucial to ensure that a
       // cached object does not get expired suddenly when its not
       // ready.
-      if(ISSUBCLASS(i->data, AFFObject)) {
-        printf("Freeing %s ... \n", ((AFFObject)i->data)->urn->value);
-      };
-
       if(talloc_free(i) != -1) {
         break;
       };
@@ -557,9 +553,9 @@ static Resolver Resolver_Con(Resolver self, int mode) {
 };
 
 /** Writes the data key onto the buffer - this is a combination of the
-    uri_id and the attribute_id 
+    uri_id and the attribute_id
 */
-static int calculate_key(Resolver self, TDB_DATA uri, 
+static int calculate_key(Resolver self, TDB_DATA uri,
 			 TDB_DATA attribute, char *buff,
 			 int buff_len, int create_new) {
   uint32_t urn_id = get_id(self->urn_db, uri, create_new);
@@ -766,22 +762,30 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   };
 };
 
-static RESOLVER_ITER *Resolver_get_iter(Resolver self,
-                                        void *ctx,
-                                        RDFURN urn,
-                                        char *attribute_str) {
-  TDB_DATA attribute;
+RESOLVER_ITER *_Resolver_get_iter(Resolver self,
+                                  void *ctx,
+                                  TDB_DATA tdb_urn,
+                                  TDB_DATA attribute) {
   RESOLVER_ITER *iter = talloc(ctx, RESOLVER_ITER);
 
-  attribute = tdb_data_from_string(attribute_str);
-
-  memset(&iter->head, 0, sizeof(iter->head));
-  iter->offset = get_data_head(self, tdb_data_from_string(urn->value),
-			       attribute, &iter->head);
+    memset(&iter->head, 0, sizeof(iter->head));
+  iter->offset = get_data_head(self, tdb_urn, attribute, &iter->head);
 
   iter->cache = CONSTRUCT(Cache, Cache, Con, iter, HASH_TABLE_SIZE, 0);
 
   return iter;
+};
+
+static RESOLVER_ITER *Resolver_get_iter(Resolver self,
+                                        void *ctx,
+                                        RDFURN urn,
+                                        char *attribute_str) {
+  TDB_DATA attribute, tdb_urn;
+
+  attribute = tdb_data_from_string(attribute_str);
+  tdb_urn = tdb_data_from_string(urn->value);
+
+  return _Resolver_get_iter(self, ctx, tdb_urn, attribute);
 };
 
 static int Resolver_iter_next(Resolver self,
@@ -849,10 +853,11 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
     attribute.dptr = (unsigned char *)buff;
     attribute.dsize = tdb_serialise_int(iter->head.encoding_type, buff, BUFF_SIZE);
 
+    // strings are always stored in the tdb with null termination
     dataType = tdb_fetch(self->attribute_db, attribute);
     if(dataType.dptr) {
       rdf_value_class = (RDFValue)CALL(RDF_Registry, borrow, (char *)dataType.dptr,
-                                       dataType.dsize);
+                                       dataType.dsize-1);
       if(rdf_value_class) {
         result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
                                                     Con, NULL);
@@ -897,8 +902,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
   if(result) {
-    printf("Got %s from cache.\n", result->urn->value);
-
     // If its a FileLikeObject seek it to 0
     if(ISSUBCLASS(result, FileLikeObject)) {
       CALL((FileLikeObject)result, seek, 0, SEEK_SET);
@@ -1156,6 +1159,7 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
   if(self->logger) talloc_free(self->logger);
 
   self->logger = logger;
+  talloc_increase_ref_count(logger);
 };
 
 /** Here we implement the resolver */

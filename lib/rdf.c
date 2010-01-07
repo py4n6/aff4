@@ -843,7 +843,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
   attribute[key.dsize]=0;
 
   // Iterate over all values for this attribute
-  iter = CALL(oracle, get_iter, attribute, self->urn, attribute);
+  iter = _Resolver_get_iter(oracle, NULL, self->tdb_urn, key);
   while(1) {
     RDFValue value = CALL(oracle, iter_next_alloc, iter);
 
@@ -882,7 +882,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 
   };
 
-  talloc_free(attribute);
+  talloc_free(iter);
  exit:
   return 0;
 };
@@ -890,7 +890,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
   self->raptor_uri = (void*)raptor_new_uri((const unsigned char*)urn->value);
-  self->urn = urn;
+  self->tdb_urn = tdb_data_from_string(urn->value);
   tdb_traverse_read(oracle->attribute_db, tdb_attribute_traverse_func, self);
   raptor_free_uri((raptor_uri*)self->raptor_uri);
   self->urn = NULL;

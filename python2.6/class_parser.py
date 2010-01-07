@@ -23,7 +23,7 @@ class Module:
 
     def initialization(self):
         result = """
-talloc_enable_leak_report_full();
+//talloc_enable_leak_report_full();
 AFF4_Init();
 
 """
@@ -1292,6 +1292,12 @@ class ProxyConstructor(ConstructorMethod):
         self->base=NULL;
     };
 };\n
+
+static int %(class_name)s_destructor(void *this) {
+  py%(class_name)s *self = (py%(class_name)s *)this;
+  Py_DECREF(self->base->proxied);
+  return 0;
+};
 """ % dict(class_name = self.class_name))
 
     def initialise_attributes(self, out):
@@ -1393,19 +1399,19 @@ this->proxied = py_result;
 
         ## Now call the wrapped function
         out.write("""
-/*
- self->base = talloc(NULL, struct %(class_name)s_t);
- memcpy(self->base, &__%(base_class_name)s, sizeof(__%(base_class_name)s));
- NAMEOF(self->base) = "%(class_name)s";
- SIZEOF(self->base) = sizeof(__%(class_name)s);
- CLASSOF(self->base) = &__%(class_name)s;
-*/
-
  self->base = %(call)s
 
 // Take over a copy of the proxied object
  self->base->proxied = proxied;
+
+ /* We take a reference to the proxied object, and the proxied base
+ class takes a reference. This way we (the python object) and the
+ proxied C class can be freed independantly and only when both are
+ freed the proxied object is freed.  */
+
  Py_INCREF(proxied);
+ Py_INCREF(proxied);
+ talloc_set_destructor((void*)self->base, %(class_name)s_destructor);
 """ % self.__dict__)
 
         ## Install the handler for the constructor

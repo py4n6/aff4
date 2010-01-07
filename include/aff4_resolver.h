@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Thu Jan  7 14:20:18 2010 mic
+** Last update Fri Jan  8 10:40:22 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -214,6 +214,12 @@ CLASS(Resolver, Object)
        void METHOD(Resolver, set_logger, Logger logger);
 
 END_CLASS
+
+       /** The following are private functions */
+RESOLVER_ITER *_Resolver_get_iter(Resolver self,
+                                  void *ctx,
+                                  TDB_DATA tdb_urn,
+                                  TDB_DATA attribute);
 
 // This is a global instance of the oracle. All AFFObjects must
 // communicate with the oracle rather than instantiate their own.

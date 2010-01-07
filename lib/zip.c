@@ -194,7 +194,7 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 };
 
 static void FileLikeObject_close(FileLikeObject self) {
-  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, 
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size);
 
   talloc_free(self);
@@ -303,14 +303,30 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->storage_urn, mode);
 
       if(!fd) goto error;
-      CALL(oracle, cache_return, (AFFObject)fd);
+
+      // Is there a directory_offset and does it make sense?
+      if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+              (RDFValue)this->directory_offset) &&	\
+         this->directory_offset->value < fd->size->value) {
+        // Everything we know about the storage urn is incorrect... we
+        // need to delete anything we know about it here:
+        ((AFFObject)fd)->delete(URNOF(fd));
+      } else {
+        CALL((AFFObject)fd, cache_return);
+      };
     };
 
     // Try to load this volume on if its not dirty. The volume may be
     // marked as dirty already which means it is not a valid volume.
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
              (RDFValue)this->_didModify)) {
-      ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+      if(!ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode)) {
+        // Its not dirty but we could not load it ... what should we
+        // do? It could be some random file (not an AFF volume at all).
+        // If we go on we will end up writing the zip file on the end
+        // of the file. Alternatively we might want to raise an error
+        // here?
+      };
     };
 
     // If our URN has changed after loading we remove all previous
@@ -449,16 +465,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   if(!fd) {
     RaiseError(ERuntimeError, "Unable to open %s", fd_urn->value);
     goto error;
-  };
-
-  // FIXME - check the directory_offset - what should we do if its not
-  // valid? We should check the signatures.
-
-  // Is there a directory_offset and does it make sense?
-  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-	  (RDFValue)self->directory_offset) &&	\
-     self->directory_offset->value < fd->size->value) {
-    goto exit;
   };
 
   // Find the End of Central Directory Record - We read about 4k of
@@ -665,16 +671,19 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   };
 
   talloc_free(ctx);
+  // Non error path:
+  ClearError();
+
   return 1;
 
  error_reason:
   RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
-  
+
  error:
   if(fd) {
     CALL(oracle, cache_return, (AFFObject)fd);
   };
-  
+
   talloc_free(ctx);
   return 0;
 };
@@ -696,7 +705,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     RaiseError(ERuntimeError, "No storage for %s?", STRING_URNOF(self));
     goto error;
   };
-  
+
   switch(mode) {
   case 'w': {
     struct ZipFileHeader header;
@@ -1126,7 +1135,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
     // offset where we are supposed to begin. This should have been
     // set previously.
     RaiseError(ERuntimeError, "Unable to resolve parameters for ZipFileStream %s", 
-	       filename);
+	       filename->value);
     goto error;
   };
 
@@ -1229,7 +1238,6 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
 
-
   // Update the crc:
   this->crc32->value = crc32(this->crc32->value, 
 			     (unsigned char*)buffer,
@@ -1277,6 +1285,8 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   self->size->value = max(self->size->value, self->readptr);
   
   exit:
+  // Non error path
+  ClearError();
   return result;
 };
 

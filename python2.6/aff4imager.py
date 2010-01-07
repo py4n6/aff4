@@ -5,6 +5,10 @@ This file contains utility functions first, followed by an optparse
 front end. This allows users to import this file as a module, or run
 it directly.  """
 import sys, pdb
+import re
+
+import time
+time.sleep(1)
 
 ## Configure colors for pretty builds
 colors = {}
@@ -27,6 +31,19 @@ def error(msg):
 
 def warn(msg):
    print "%s%s%s" % (colors['yellow'], msg, colors['end'])
+
+
+class Renderer:
+    urn_re = re.compile("(aff4|http|ftp|file)://[^ ]+")
+    def message(self, level, message):
+        last = 0
+        ## highlight URNs especially
+        for m in self.urn_re.finditer(message):
+            sys.stdout.write(message[last:m.start()])
+            last = m.end()
+            sys.stdout.write(colors['blue'] + m.group(0) + colors['end'])
+
+        print message[last:]
 
 def image(output_URI, options, fds):
     """ Copy the file like objects specified in the fds list into an
@@ -146,7 +163,11 @@ parser.add_option("-p", "--password", default='',
 
 (options, args) = parser.parse_args()
 
+## Make a new oracle
 oracle = pyaff4.Resolver()
+
+## Now register the renderer as an output module
+oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
 
 if options.image:
     ## Imaging mode

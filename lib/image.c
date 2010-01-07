@@ -515,6 +515,9 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   // The cache will now own this:
   talloc_free(chunk_cache);
 
+  // Non error path
+  ClearError();
+
   return available_to_read;
 
   // Pad the buffer on error:
