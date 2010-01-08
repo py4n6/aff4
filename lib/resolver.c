@@ -450,8 +450,11 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   // The location of the TDB databases
   char *path = getenv("AFF4_TDB_PATH");
 
-  if(mode == RESOLVER_MODE_NONPERSISTANT)
+  if(mode & RESOLVER_MODE_NONPERSISTANT)
     AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+
+  if(mode & RESOLVER_MODE_DEBUG_MEMORY)
+    talloc_enable_leak_report_full();
 
   // Make this object a singleton - the Resolver may be constructed as
   // many times as needed, but we always return a reference to the
@@ -521,11 +524,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   store_rdf_registry(self);
 
   // Create local read and write caches
-  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);
-  talloc_set_name_const(self->read_cache, "Resolver Read Cache");
-
-  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);  
-  talloc_set_name_const(self->write_cache, "Resolver Write Cache");
+  CALL(self, flush);
 
   INIT_LIST_HEAD(&self->identities);
 
@@ -860,7 +859,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
                                        dataType.dsize-1);
       if(rdf_value_class) {
         result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
-                                                    Con, NULL);
+                                                    Con, iter);
 
         if(result) {
           if(Resolver_iter_next(self, iter, result))
@@ -975,7 +974,7 @@ static void Resolver_return(Resolver self, AFFObject obj) {
   Resolver_unlock(self, URNOF(obj), obj->mode);
 
   // We free it here, but there should still be a cache reference.
-  talloc_free(obj);
+  talloc_unlink(NULL, obj);
 };
 
 // A helper method to construct the class
@@ -1162,6 +1161,20 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
   talloc_increase_ref_count(logger);
 };
 
+static void Resolver_flush(Resolver self) {
+  if(self->read_cache)
+    talloc_free(self->read_cache);
+
+  if(self->write_cache)
+    talloc_free(self->write_cache);
+
+  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);
+  talloc_set_name_const(self->read_cache, "Resolver Read Cache");
+
+  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);  
+  talloc_set_name_const(self->write_cache, "Resolver Write Cache");
+};
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
@@ -1184,6 +1197,7 @@ VIRTUAL(Resolver, Object) {
 
      VMETHOD(load) = Resolver_load;
      VMETHOD(set_logger) = Resolver_set_logger;
+     VMETHOD(flush) = Resolver_flush;
 } END_VIRTUAL
 
 /************************************************************

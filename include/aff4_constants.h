@@ -161,6 +161,8 @@
 /** These modes can be used in the resolver */
 #define RESOLVER_MODE_PERSISTANT 0
 #define RESOLVER_MODE_NONPERSISTANT 1
+#define RESOLVER_MODE_DEBUG_MEMORY 2
+
 
 #define AFF4_LOG_MESSAGE 1
 #define AFF4_LOG_WARNING 2

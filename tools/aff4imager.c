@@ -500,6 +500,9 @@ int main(int argc, char **argv)
 
   // Initialise the library
   AFF4_Init();
+
+  talloc_enable_leak_report_full();
+
   oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
 
   //talloc_enable_leak_report_full();

@@ -769,24 +769,15 @@ raptor_iostream_handler2 raptor_special_handler = {
   .write_bytes = iostream_write_bytes,
 };
 
-static int RDFSerializer_destructor(void *self) {
-  RDFSerializer this = (RDFSerializer)self;
-
-  talloc_free(this->fd);
-
-  return 0;
-};
-
 static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, 
                                        FileLikeObject fd) {
   char *type = "turtle";
 
   // We keep a reference to the FileLikeObject (although we dont
-  // technically own it) - which means we need to explicitly free it
-  // when we get destroyed.
+  // technically own it) to ensure that it doesnt get freed from under
+  // us.
   self->fd = fd;
-  talloc_increase_ref_count(fd);
-  talloc_set_destructor((void *)self, RDFSerializer_destructor);
+  talloc_reference(self, fd);
 
   self->iostream = raptor_new_iostream_from_handler2((void *)self, &raptor_special_handler);
   // Try to make a new serialiser
@@ -824,7 +815,6 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 				       TDB_DATA value, void *data) {
   RDFSerializer self=(RDFSerializer) data;
   RESOLVER_ITER *iter;
-  char *attribute;
   raptor_statement triple;
 
   // Only look at proper attributes
@@ -837,11 +827,6 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
 
   memset(&triple, 0, sizeof(triple));
 
-  // NULL terminate the attribute name
-  attribute = talloc_size(NULL, key.dsize+1);
-  memcpy(attribute, key.dptr, key.dsize);
-  attribute[key.dsize]=0;
-
   // Iterate over all values for this attribute
   iter = _Resolver_get_iter(oracle, NULL, self->tdb_urn, key);
   while(1) {
@@ -853,7 +838,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     triple.subject = self->raptor_uri;
     triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
 
-    triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute);
+    triple.predicate = (void*)raptor_new_uri((const unsigned char*)key.dptr);
     triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
     triple.object_type = value->raptor_type;
 
@@ -880,6 +865,7 @@ static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key,
     else
       talloc_free((void *)triple.object);
 
+    talloc_free(value);
   };
 
   talloc_free(iter);
@@ -893,7 +879,6 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
   self->tdb_urn = tdb_data_from_string(urn->value);
   tdb_traverse_read(oracle->attribute_db, tdb_attribute_traverse_func, self);
   raptor_free_uri((raptor_uri*)self->raptor_uri);
-  self->urn = NULL;
 
   return 1;
 };
@@ -902,6 +887,8 @@ static void RDFSerializer_close(RDFSerializer self) {
   raptor_serialize_end(self->rdf_serializer);
 
   raptor_free_serializer(self->rdf_serializer);
+
+  talloc_free(self);
 };
 
 VIRTUAL(RDFSerializer, Object) {

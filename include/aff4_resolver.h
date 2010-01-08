@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Jan  8 10:40:22 2010 mic
+** Last update Fri Jan  8 10:51:00 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -212,6 +212,9 @@ CLASS(Resolver, Object)
           will then be output through this object.
        */
        void METHOD(Resolver, set_logger, Logger logger);
+
+       /** This is used to flush all our caches */
+       void METHOD(Resolver, flush);
 
 END_CLASS
 

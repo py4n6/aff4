@@ -23,7 +23,6 @@ class Module:
 
     def initialization(self):
         result = """
-//talloc_enable_leak_report_full();
 AFF4_Init();
 
 """

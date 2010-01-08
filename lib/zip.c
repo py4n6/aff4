@@ -1329,7 +1329,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 
   DEBUG("ZipFileStream: closed %s\n", STRING_URNOF(self));
   if(((AFFObject)self)->mode != 'w') {
-    talloc_free(self);
+    talloc_unlink(NULL, self);
     return;
   };
 
@@ -1412,7 +1412,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 
   // Make sure the lock is removed from the underlying file:
   talloc_free(ctx);
-  talloc_free(self);
+  talloc_unlink(NULL, self);
 };
 
 /** We only support opening ZipFileStreams for reading through
