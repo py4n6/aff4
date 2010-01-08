@@ -10,13 +10,14 @@
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#ifdef NO_LOCKS
+#define RESOLVER_CACHE_SIZE 10
+
+#ifdef NO_LOCKSXXX
 #define tdb_lockall(x)
 #define tdb_unlockall(x)
 #endif
 
 #define TDB_HASH_SIZE 1024*128
-
 
 // Some prototypes
 static int Resolver_lock(Resolver self, RDFURN urn, char mode);
@@ -40,12 +41,12 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
     talloc_set_name_const(type_dispatcher, "Type Dispatcher");
   };
 
-  if(!CALL(type_dispatcher, present, ZSTRING_NO_NULL(type))) {
+  if(!CALL(type_dispatcher, present, ZSTRING(type))) {
     // Make a copy of the class for storage in the registry
     Object tmp =  talloc_memdup(NULL, classref, SIZEOF(classref));
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
 
-    CALL(type_dispatcher, put, ZSTRING_NO_NULL(type), tmp);
+    CALL(type_dispatcher, put, ZSTRING(type), tmp);
     talloc_free(tmp);
   };
 };
@@ -888,16 +889,30 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   AFFObject result;
   AFFObject classref;
   char *scheme;
+  TDB_DATA tdb_urn = tdb_data_from_string(urn->value);
 
-  if(!urn) goto error;
+  if(!urn) {
+    RaiseError(ERuntimeError, "No URN specified");
+    goto error;
+  };
 
   DEBUG("Opening %s for mode %c\n", urn->value, mode);
 
   // Is this object cached?
   if(mode =='r') {
-    result = (AFFObject)CALL(self->read_cache, get, ZSTRING_NO_NULL(urn->value));
+    if(CALL(self->rlocks, present, TDB_DATA_STRING(tdb_urn))) {
+      RaiseError(ERuntimeError, "URN %s is locked (r)", urn->value);
+      goto error;
+    };
+
+    result = (AFFObject)CALL(self->read_cache, get, TDB_DATA_STRING(tdb_urn));
   } else {
-    result = (AFFObject)CALL(self->write_cache, get, ZSTRING_NO_NULL(urn->value));
+    if(CALL(self->wlocks, present, TDB_DATA_STRING(tdb_urn))) {
+      RaiseError(ERuntimeError, "URN %s is locked (w)", urn->value);
+      goto error;
+    };
+
+    result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
   };
 
   if(result) {
@@ -919,14 +934,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   if(strlen(scheme)==0)
     scheme = "file";
 
-  classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(scheme));
+  classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(scheme));
   if(!classref) {
     if(!CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type)) {
       RaiseError(ERuntimeError, "No type found for %s", urn->value);
       goto error;
     };
 
-    classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(self->type->value));
+    classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(self->type->value));
     if(!classref) {
       RaiseError(ERuntimeError, "Unable to open urn - this implementation can not open objects of type %s", self->type->value);
       goto error;
@@ -947,6 +962,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
  exit:
+
+  // Lock the urn
+  if(mode == 'r') {
+    CALL(self->rlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
+  } else {
+    CALL(self->wlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
+  };
+
   // Non error path
   ClearError();
   return result;
@@ -958,16 +981,18 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 /** Return the object to the cache. Callers may not make a reference
     to it after that.
 */
-static void Resolver_return(Resolver self, AFFObject obj) {
+static void Resolver_cache_return(Resolver self, AFFObject obj) {
   char *urn = URNOF(obj)->value;
-
-  // Cache it
-  if(!obj) return;
+  Object result;
 
   if(obj->mode == 'r') {
-    CALL(self->read_cache, put, ZSTRING_NO_NULL(urn), (Object)obj);
+    result = CALL(self->rlocks, get, ZSTRING(urn));
+    if(result) talloc_unlink(NULL, result);
+    CALL(self->read_cache, put, ZSTRING(urn), (Object)obj);
   } else if(obj->mode == 'w') {
-    CALL(self->write_cache, put, ZSTRING_NO_NULL(urn), (Object)obj);
+    result = CALL(self->wlocks, get, ZSTRING(urn));
+    if(result) talloc_unlink(NULL, result);
+    CALL(self->write_cache, put, ZSTRING(urn), (Object)obj);
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
   };
@@ -984,7 +1009,7 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
   AFFObject class_reference;
   AFFObject result;
 
-  class_reference = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING_NO_NULL(name));
+  class_reference = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(name));
   if(!class_reference) {
     RaiseError(ERuntimeError, "No handler for object type '%s'", name);
     goto error;
@@ -1172,11 +1197,23 @@ static void Resolver_flush(Resolver self) {
   if(self->write_cache)
     talloc_free(self->write_cache);
 
-  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);
+  if(self->wlocks)
+    talloc_free(self->wlocks);
+
+  if(self->rlocks)
+    talloc_free(self->rlocks);
+
+  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->read_cache, "Resolver Read Cache");
 
-  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 10);  
+  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
+
+  self->rlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  talloc_set_name_const(self->rlocks, "Resolver RLock Cache");
+
+  self->wlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  talloc_set_name_const(self->wlocks, "Resolver WLock Cache");
 };
 
 /** Here we implement the resolver */
@@ -1189,7 +1226,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(iter_next) = Resolver_iter_next;
      VMETHOD(iter_next_alloc) = Resolver_iter_next_alloc;
      VMETHOD(open) = Resolver_open;
-     VMETHOD(cache_return) = Resolver_return;
+     VMETHOD(cache_return) = Resolver_cache_return;
      VMETHOD(set_value) = Resolver_set_value;
      VMETHOD(add_value) = Resolver_add_value;
      VMETHOD(del) = Resolver_del;

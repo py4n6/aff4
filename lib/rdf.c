@@ -781,6 +781,9 @@ static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key,
   if(!memcmp(key.dptr, ZSTRING_NO_NULL(VOLATILE_NS)))
     goto exit;
 
+  if(!memcmp(key.dptr, ZSTRING_NO_NULL(XSD_NAMESPACE)))
+    goto exit;
+
   {
     XSDString s = new_XSDString(self->attributes);
 
@@ -799,6 +802,8 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   // We keep a reference to the FileLikeObject (although we dont
   // technically own it) to ensure that it doesnt get freed from under
   // us.
+  if(!fd) goto error;
+
   self->fd = fd;
   talloc_reference(self, fd);
 

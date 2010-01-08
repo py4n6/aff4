@@ -392,11 +392,11 @@ extern void unimplemented(Object self);
 
 #define ZSTRING_NO_NULL(str) str , (strlen(str))
 #define ZSTRING(str) str , (strlen(str)+1)
-#define RaiseError(t, ...)			\
+#define RaiseError(t, message, ...)                                     \
   do {									\
     _traceback = (char *)talloc_asprintf_append(_traceback, "%s:%d - %s: ", __FILE__, \
 						__LINE__, __FUNCTION__); \
-    raise_errors(t, ## __VA_ARGS__);					\
+    raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__); \
     _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
   } while(0);
 

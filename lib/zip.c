@@ -470,7 +470,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   // Is there a file we need to read?
   fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
   if(!fd) {
-    RaiseError(ERuntimeError, "Unable to open %s", fd_urn->value);
     goto error;
   };
 
@@ -800,7 +799,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   };
 
 
-  if(fd) CALL((AFFObject)fd, cache_return);
+  //if(fd) CALL((AFFObject)fd, cache_return);
   talloc_free(ctx);
 
   return result;
@@ -844,10 +843,14 @@ static void dump_volume_properties(ZipFile this) {
   AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
 			   ZIP_DEFLATE);
-  RDFSerializer serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self, 
-				       STRING_URNOF(self), fd);
+  RDFSerializer serializer;
   RDFURN urn = new_RDFURN(NULL);
   XSDString type = new_XSDString(urn);
+
+  if(!fd) goto exit;
+
+  serializer = CONSTRUCT(RDFSerializer, RDFSerializer, Con, self,
+                         STRING_URNOF(self), fd);
 
   // Serialise all statements related to this volume
   CALL(serializer, serialize_urn, URNOF(self));
@@ -865,6 +868,7 @@ static void dump_volume_properties(ZipFile this) {
   CALL(serializer, close);
   CALL((FileLikeObject)fd, close);
 
+ exit:
   talloc_free(urn);
 };
 
@@ -1182,6 +1186,10 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       z_stream strm;
 
       fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
+      if(!fd) {
+        RaiseError(ERuntimeError, "Unable to open ZipFile volume %s", file_urn->value);
+        goto error;
+      };
 
       CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
 	   (RDFValue)self->compress_size);
@@ -1349,7 +1357,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 
       this->strm.avail_out = BUFF_SIZE;
       this->strm.next_out = compressed;
-      
+
       ret = deflate(&this->strm, Z_FINISH);
       ret = CALL(this->file_fd, write, (char *)compressed, 
 		 BUFF_SIZE - this->strm.avail_out);
@@ -1357,7 +1365,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 
       this->compress_size->value += ret;
     } while(this->strm.avail_out == 0);
-    
+
     (void)deflateEnd(&this->strm);
   };
 
@@ -1394,6 +1402,9 @@ static void ZipFileStream_close(FileLikeObject self) {
     CALL(this->file_fd, write, (char *)&csize, sizeof(csize));
     CALL(this->file_fd, write, (char *)&size, sizeof(size));
   };
+
+  // We unlock the file now
+  CALL((AFFObject)this->file_fd, cache_return);
 
   // This is the point where we will be writing the next file - right
   // at the end of this file.

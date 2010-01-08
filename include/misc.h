@@ -53,6 +53,8 @@ extern int AFF4_DEBUG_LEVEL;
 #define DEBUG(x, ...)
 #endif
 
+#define TDB_DATA_STRING(x)                      \
+  (char *)x.dptr, x.dsize
 
 #define AFF4_LOG(level, msg, ...)                   \
   if(oracle->logger) {                                     \

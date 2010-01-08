@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Jan  8 10:51:00 2010 mic
+** Last update Fri Jan  8 17:37:54 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -55,6 +55,8 @@ CLASS(Resolver, Object)
        // Read and write caches
        Cache read_cache;
        Cache write_cache;
+       Cache wlocks;
+       Cache rlocks;
 
        // Resolvers contain the identity behind them (see below):
        struct Identity_t *identity;

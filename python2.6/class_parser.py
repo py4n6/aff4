@@ -582,7 +582,7 @@ if((PyObject *)%(name)s==Py_None) {
 
        if(_global_error != EZero) {
          PyErr_Format(resolve_exception(),
-                    "Failed to create object %(type)s: %%s", __error_str);
+                    "%%s", __error_str);
          ClearError();
          goto error;
 
