@@ -947,6 +947,8 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
  exit:
+  // Non error path
+  ClearError();
   return result;
 
  error:
@@ -1140,10 +1142,11 @@ int Resolver_load(Resolver self, RDFURN uri) {
       AFF4Volume volume = (AFF4Volume)CALL(oracle, create,
                                            ((AFFObject)class_ref)->dataType, 'r');
 
-      ClearError();
       if(CALL(volume, load_from, uri, 'r')) {
         CALL(uri, set, STRING_URNOF(volume));
         CALL(oracle, cache_return, (AFFObject)volume);
+
+        ClearError();
         return 1;
       };
 
@@ -1151,6 +1154,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
     };
   };
 
+  ClearError();
   return 0;
 };
 

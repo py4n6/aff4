@@ -165,6 +165,7 @@ parser.add_option("-p", "--password", default='',
 
 ## Make a new oracle
 oracle = pyaff4.Resolver(pyaff4.RESOLVER_MODE_DEBUG_MEMORY)
+#oracle = pyaff4.Resolver()
 
 ## Now register the renderer as an output module
 oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
@@ -190,6 +191,3 @@ if options.image:
     finally:
         for fd in fds:
             fd.cache_return()
-
-## Clear the cache so we can detect leaks
-oracle.flush()

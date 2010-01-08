@@ -1314,6 +1314,7 @@ static int %(class_name)s_destructor(void *this) {
        ((%(definition_class_name)s)self->base)->%(name)s = %(name)s;
        Py_DECREF(py_result);
   };
+  PyErr_Clear();
 };""" % dict(definition = attribute.definition(), name=attribute.name,
              attribute_name = attribute.__class__.__name__,
              definition_class_name = definition_class_name,

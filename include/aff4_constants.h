@@ -156,7 +156,7 @@
 #define AFF4_MTIME      PREDICATE_NAMESPACE "mtime"
 #define AFF4_ATIME      PREDICATE_NAMESPACE "atime"
 #define AFF4_CTIME      PREDICATE_NAMESPACE "ctime"
-#define AFF4_FILE_TYPE  PREDICATE_NAMESPACE "type:magic"
+#define AFF4_FILE_TYPE  PREDICATE_NAMESPACE "type/magic"
 
 /** These modes can be used in the resolver */
 #define RESOLVER_MODE_PERSISTANT 0

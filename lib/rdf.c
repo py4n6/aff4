@@ -721,13 +721,13 @@ static int RDFParser_parse(RDFParser self, FileLikeObject fd, char *format, char
 						 1 */
   // Cleanup
   if(uri)
-    raptor_free_uri((raptor_uri*)uri);
+    raptor_free_uri((raptor_uri *)uri);
   raptor_free_parser(rdf_parser);
   return 1;
 
  error:
   if(uri)
-    raptor_free_uri((raptor_uri*)uri);
+    raptor_free_uri((raptor_uri *)uri);
   raptor_free_parser(rdf_parser);
 
   return 0;
@@ -769,6 +769,29 @@ raptor_iostream_handler2 raptor_special_handler = {
   .write_bytes = iostream_write_bytes,
 };
 
+static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key, 
+				       TDB_DATA value, void *data) {
+  RDFSerializer self=(RDFSerializer) data;
+
+  // Only look at proper attributes
+  if(key.dptr[0]=='_')
+    goto exit;
+
+  // Skip serializing of volatile triples
+  if(!memcmp(key.dptr, ZSTRING_NO_NULL(VOLATILE_NS)))
+    goto exit;
+
+  {
+    XSDString s = new_XSDString(self->attributes);
+
+    CALL(s, set, (char *)key.dptr, key.dsize);
+    CALL(self->attributes, put, (char *)key.dptr, key.dsize, (Object)s);
+  };
+
+ exit:
+  return 0;
+};
+
 static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, 
                                        FileLikeObject fd) {
   char *type = "turtle";
@@ -778,6 +801,13 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   // us.
   self->fd = fd;
   talloc_reference(self, fd);
+
+  // We need to cache the attributes because traversing the TDB is too
+  // slow all the time.
+  self->attributes = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
+
+  // Get a copy of all the attributes
+  tdb_traverse_read(oracle->attribute_db, tdb_attribute_extract, self);
 
   self->iostream = raptor_new_iostream_from_handler2((void *)self, &raptor_special_handler);
   // Try to make a new serialiser
@@ -808,77 +838,64 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   return NULL;
 };
 
-
-// This function will be run over all the attributes for a given URN
-// and we serialise them
-static int tdb_attribute_traverse_func(TDB_CONTEXT *tdb, TDB_DATA key, 
-				       TDB_DATA value, void *data) {
-  RDFSerializer self=(RDFSerializer) data;
-  RESOLVER_ITER *iter;
-  raptor_statement triple;
-
-  // Only look at proper attributes
-  if(key.dptr[0]=='_')
-    goto exit;
-
-  // Skip serializing of volatile triples
-  if(!memcmp(key.dptr, ZSTRING_NO_NULL(VOLATILE_NS)))
-    goto exit;
-
-  memset(&triple, 0, sizeof(triple));
-
-  // Iterate over all values for this attribute
-  iter = _Resolver_get_iter(oracle, NULL, self->tdb_urn, key);
-  while(1) {
-    RDFValue value = CALL(oracle, iter_next_alloc, iter);
-
-    if(!value) break;
-
-    // Now iterate over all the values for this
-    triple.subject = self->raptor_uri;
-    triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-
-    triple.predicate = (void*)raptor_new_uri((const unsigned char*)key.dptr);
-    triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-    triple.object_type = value->raptor_type;
-
-    // Default to something sensible
-    if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type) 
-      triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-
-    // New reference here:
-    triple.object = CALL(value, serialise);
-
-    // Ensure we have a valid raptor datatype
-    if(!value->raptor_literal_datatype)
-      value->raptor_literal_datatype = raptor_new_uri(                  \
-		   (const unsigned char*)value->dataType);
-
-    triple.object_literal_datatype = value->raptor_literal_datatype;
-
-    raptor_serialize_statement(self->rdf_serializer, &triple);
-    raptor_free_uri((raptor_uri*)triple.predicate);
-
-    // Special free function for URIs
-    if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
-      raptor_free_uri((raptor_uri*)triple.object);
-    else
-      talloc_free((void *)triple.object);
-
-    talloc_free(value);
-  };
-
-  talloc_free(iter);
- exit:
-  return 0;
-};
-
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
-  self->raptor_uri = (void*)raptor_new_uri((const unsigned char*)urn->value);
-  self->tdb_urn = tdb_data_from_string(urn->value);
-  tdb_traverse_read(oracle->attribute_db, tdb_attribute_traverse_func, self);
-  raptor_free_uri((raptor_uri*)self->raptor_uri);
+  raptor_statement triple;
+  Cache i;
+  char buff[BUFF_SIZE];
+  TDB_DATA key;
+  void *raptor_urn;
+
+  raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
+
+  // Iterate over all attributes
+  list_for_each_entry(i, &self->attributes->cache_list, cache_list) {
+    RESOLVER_ITER *iter;
+    XSDString attribute = (XSDString)i->data;
+
+    iter = CALL(oracle, get_iter, NULL, urn, attribute->value);
+
+    // Now iterate over all the values for this
+    while(1) {
+      RDFValue value = CALL(oracle, iter_next_alloc, iter);
+
+      if(!value) break;
+
+      memset(&triple, 0, sizeof(triple));
+
+      triple.subject = raptor_urn;
+      triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+
+      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute->value);
+      triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+      triple.object_type = value->raptor_type;
+
+      // Default to something sensible
+      if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
+        triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+
+      // New reference here:
+      triple.object = CALL(value, serialise);
+
+      triple.object_literal_datatype = \
+        raptor_new_uri((const unsigned char*)value->dataType);
+
+      raptor_serialize_statement(self->rdf_serializer, &triple);
+      raptor_free_uri((raptor_uri*)triple.predicate);
+      raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
+
+      // Special free function for URIs
+      if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
+        raptor_free_uri((raptor_uri*)triple.object);
+      else
+        talloc_free((void *)triple.object);
+
+      talloc_free(value);
+    };
+
+    talloc_free(iter);
+  };
+  raptor_free_uri((raptor_uri*)raptor_urn);
 
   return 1;
 };

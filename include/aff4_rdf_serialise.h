@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Wed Nov 18 12:36:21 2009 mic
-** Last update Fri Jan  8 11:19:54 2010 mic
+** Last update Fri Jan  8 15:53:23 2010 mic
 */
 
 #ifndef   	AFF4_RDF_SERIALISE_H_
@@ -20,8 +20,7 @@ CLASS(RDFSerializer, Object)
      raptor_iostream *iostream;
      FileLikeObject fd;
 
-     void *raptor_uri;
-     TDB_DATA tdb_urn;
+     Cache attributes;
 
      RDFSerializer METHOD(RDFSerializer, Con, char *base_urn, FileLikeObject fd);
      int METHOD(RDFSerializer, serialize_urn, RDFURN urn);

@@ -318,15 +318,12 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
     // Try to load this volume on if its not dirty. The volume may be
     // marked as dirty already which means it is not a valid volume.
-    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-             (RDFValue)this->_didModify)) {
-      if(!ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode)) {
+    if(!ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode)) {
         // Its not dirty but we could not load it ... what should we
         // do? It could be some random file (not an AFF volume at all).
         // If we go on we will end up writing the zip file on the end
         // of the file. Alternatively we might want to raise an error
         // here?
-      };
     };
 
     // If our URN has changed after loading we remove all previous
@@ -449,7 +446,7 @@ static int parse_extra_field(ZipFile self, FileLikeObject fd,unsigned int length
 };
 
 /** tries to open fd_urn as a zip file and populate the resolver with
-    what it found 
+    what it found
 */
 static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   char buffer[BUFF_SIZE+1];
@@ -459,6 +456,16 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   void *ctx = talloc_size(NULL, 1);
 
   memset(buffer,0,BUFF_SIZE+1);
+
+  // This check makes sure the volume does not already exist. We first
+  // see if there is a ZipFile stored on the fd_urn, and then if that
+  // ZipFile is dirty. If both conditions are true, we assume that
+  // volume is ok, and dont load it.
+  if(CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self)) && 
+     CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+          (RDFValue)self->_didModify)) {
+    goto exit;
+  };
 
   // Is there a file we need to read?
   fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
@@ -715,17 +722,18 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     time_t epoch_time = time(NULL);
     struct tm *now = localtime(&epoch_time);
 
+    self->directory_offset->value = 1;
+    // Indicate that the file is dirty - This means we will be writing
+    // a new CD on it
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+	 (RDFValue)self->directory_offset);
+
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
     // Open our current volume for writing:
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
     if(!fd) goto error;
-
-    // Indicate that the file is dirty - This means we will be writing
-    // a new CD on it
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, 
-	 (RDFValue)self->directory_offset);
 
     // Go to the start of the directory_offset
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
