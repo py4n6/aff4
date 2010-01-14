@@ -12,11 +12,6 @@ int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
 #define RESOLVER_CACHE_SIZE 10
 
-#ifdef NO_LOCKSXXX
-#define tdb_lockall(x)
-#define tdb_unlockall(x)
-#endif
-
 #define TDB_HASH_SIZE 1024*128
 
 // Some prototypes
@@ -651,6 +646,22 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
   return 0;
 };
 
+// Allocate and return the first value
+static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, char *attribute) {
+  RESOLVER_ITER *iter = CALL(self, get_iter, ctx, urn, attribute);
+
+  if(iter) {
+    RDFValue result = CALL(self, iter_next_alloc, iter);
+
+    if(result) {
+      return result;
+    };
+    talloc_free(iter);
+  };
+
+  return NULL;
+};
+
 static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
 			 TDB_DATA value, int type_id, uint64_t previous_offset) {
   TDB_DATA key,offset;
@@ -793,14 +804,14 @@ static int Resolver_iter_next(Resolver self,
 			      RDFValue result) {
   int res_code;
 
-  // We assume the iter is valid and we write the contents of the iter
-  // on here.
-  // This is our iteration exit condition
-  if(iter->offset == 0)
-    return 0;
-
   do {
     res_code = 0;
+
+    // We assume the iter is valid and we write the contents of the iter
+    // on here.
+    // This is our iteration exit condition
+    if(iter->offset == 0)
+      return 0;
 
     /* If the value is of the correct type, ask it to read from
        the file. */
@@ -950,19 +961,17 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // A special constructor from a class reference
   result = CONSTRUCT_FROM_REFERENCE(classref, Con, NULL, urn, mode);
+  if(!result) goto error;
 
   // Make sure the object mode is set, name the object for talloc
   // memory reports and lock it.
-  if(result) {
-    talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
-    ((AFFObject)result)->mode = mode;
+  talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
+  ((AFFObject)result)->mode = mode;
 
-    // Lock it
-    Resolver_lock(self, URNOF(result), mode);
-  };
+  // Lock it
+  Resolver_lock(self, URNOF(result), mode);
 
  exit:
-
   // Lock the urn
   if(mode == 'r') {
     CALL(self->rlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
@@ -986,15 +995,20 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   Object result;
 
   if(obj->mode == 'r') {
-    result = CALL(self->rlocks, get, ZSTRING(urn));
-    if(result) talloc_unlink(NULL, result);
     CALL(self->read_cache, put, ZSTRING(urn), (Object)obj);
   } else if(obj->mode == 'w') {
-    result = CALL(self->wlocks, get, ZSTRING(urn));
-    if(result) talloc_unlink(NULL, result);
     CALL(self->write_cache, put, ZSTRING(urn), (Object)obj);
   } else {
     RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
+    return;
+  };
+
+  if(obj->mode == 'r') {
+    result = CALL(self->rlocks, get, ZSTRING(urn));
+    if(result) talloc_unlink(NULL, result);
+  } else if(obj->mode == 'w') {
+    result = CALL(self->wlocks, get, ZSTRING(urn));
+    if(result) talloc_unlink(NULL, result);
   };
 
   // Unlock the URN
@@ -1117,6 +1131,7 @@ static int Resolver_lock(Resolver self, RDFURN urn, char mode) {
 
 static int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
   DEBUG("releasing %s mode %c\n", urn->value, mode);
+
   return Resolver_lock_gen(self, urn, mode, F_ULOCK);
 };
 
@@ -1191,6 +1206,17 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
 };
 
 static void Resolver_flush(Resolver self) {
+  if(self->rlocks) {
+    printf("Read locks\n");
+    print_cache(self->rlocks);
+  };
+
+  if(self->wlocks) {
+    printf("Write locks\n");
+    print_cache(self->wlocks);
+  };
+
+
   if(self->read_cache)
     talloc_free(self->read_cache);
 
@@ -1209,10 +1235,10 @@ static void Resolver_flush(Resolver self) {
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
 
-  self->rlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  self->rlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->rlocks, "Resolver RLock Cache");
 
-  self->wlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  self->wlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->wlocks, "Resolver WLock Cache");
 };
 
@@ -1222,6 +1248,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(create) = Resolver_create;
 
      VMETHOD(resolve_value) = Resolver_resolve_value;
+     VMETHOD(resolve_alloc) = Resolver_resolve_alloc;
      VMETHOD(get_iter) = Resolver_get_iter;
      VMETHOD(iter_next) = Resolver_iter_next;
      VMETHOD(iter_next_alloc) = Resolver_iter_next_alloc;

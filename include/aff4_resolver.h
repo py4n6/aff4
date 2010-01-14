@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Jan  8 17:37:54 2010 mic
+** Last update Thu Jan 14 15:58:49 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -123,6 +123,10 @@ CLASS(Resolver, Object)
   */
   int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,\
 	     RDFValue value);
+
+       /** Similar to Resolver.resolve_value, but a new RDFValue is
+           allocated with the context provided. */
+   int METHOD(Resolver, resolve_alloc, void *ctx, RDFURN uri, char *attribute);
 
   /* This is a version of the above which uses an iterator to iterate
      over the list.

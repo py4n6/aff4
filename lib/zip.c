@@ -197,7 +197,11 @@ static void FileLikeObject_close(FileLikeObject self) {
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size);
 
-  talloc_free(self);
+  if(((AFFObject)self)->mode == 'r') {
+    
+  };
+
+  talloc_unlink(NULL, self);
 };
 
 static void FileBackedObject_close(FileLikeObject self) {
@@ -316,8 +320,6 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       };
     };
 
-    // Try to load this volume on if its not dirty. The volume may be
-    // marked as dirty already which means it is not a valid volume.
     if(!ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode)) {
         // Its not dirty but we could not load it ... what should we
         // do? It could be some random file (not an AFF volume at all).
@@ -1431,7 +1433,7 @@ static void ZipFileStream_close(FileLikeObject self) {
 
   // Make sure the lock is removed from the underlying file:
   talloc_free(ctx);
-  talloc_unlink(NULL, self);
+  SUPER(FileLikeObject, FileLikeObject, close);
 };
 
 /** We only support opening ZipFileStreams for reading through

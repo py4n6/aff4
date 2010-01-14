@@ -10,6 +10,11 @@
 #define RDF_NAMESPACE "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define XSD_NAMESPACE "http://www.w3.org/2001/XMLSchema#"
 
+// Various namespaces
+#define AFF4_MAP_TEXT PREDICATE_NAMESPACE "map_text"
+#define AFF4_MAP_BINARY PREDICATE_NAMESPACE "map_binary"
+#define AFF4_MAP_INLINE PREDICATE_NAMESPACE "map_inline"
+
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"
 #define FQN NAMESPACE ""
@@ -30,6 +35,7 @@
 #define AFF4_SIZE       PREDICATE_NAMESPACE "size"
 #define AFF4_SHA        PREDICATE_NAMESPACE "sha256"
 #define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "timestamp"
+#define AFF4_MAP_DATA   PREDICATE_NAMESPACE "map"
 
 // Supported interfaces
 #define AFF4_STREAM     PREDICATE_NAMESPACE "stream"
@@ -69,7 +75,6 @@
 #define AFF4_TARGET PREDICATE_NAMESPACE "target"
 
 /** Map attributes */
-#define AFF4_BLOCKSIZE PREDICATE_NAMESPACE "blocksize"
 #define AFF4_IMAGE_PERIOD PREDICATE_NAMESPACE "image_period"
 #define AFF4_TARGET_PERIOD PREDICATE_NAMESPACE "target_period"
 

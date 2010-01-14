@@ -100,7 +100,7 @@ END_CLASS
     contains a mapping function. The file should be of the format:
 
     - lines starting with # are ignored
-    
+
     - other lines have 2 integers seperated by white space. The first
     column is the current stream offset, while the second offset if
     the target stream offset.
@@ -129,37 +129,56 @@ END_CLASS
 struct map_point {
   // The offset in the target
   uint64_t target_offset;
-  // This logical offset this represents
+  // The logical offset this represents
   uint64_t image_offset;
-  RDFURN target_urn;
+  uint32_t target_index;
 };
 
+CLASS(MapValue, RDFValue)
+  // The urn of the map object we belong to
+  RDFURN urn;
+  XSDInteger size;
+
+  int number_of_points;
+  int number_of_urns;
+  struct map_point *points;
+  RDFURN *targets;
+  Cache cache;
+
+  // The period offsets repeat within each target
+  XSDInteger target_period;
+
+  // The period offsets repear within the logical image
+  XSDInteger image_period;
+
+  // The blocksize is a constant multiple for each map offset.
+  XSDInteger blocksize;
+
+  void METHOD(MapValue, add_point, uint64_t image_offset, uint64_t target_offset,\
+              char *target);
+
+  /* This function returns information about the current file pointer
+     and its view of the target slice.
+  */
+  void METHOD(MapValue, get_range, uint64_t readptr,                   \
+              OUT uint64_t *target_offset_at_point,                     \
+              OUT uint64_t *available_to_read,                          \
+              RDFURN urn);
+
+END_CLASS
+
 CLASS(MapDriver, FileLikeObject)
-// An array of our targets
-     struct map_point *points;
-     int number_of_points;
-     
-     // The period offsets repeat within each target
-     XSDInteger target_period;
+     MapValue map;
 
-     // The period offsets repear within the logical image
-     XSDInteger image_period;
-
-     // The blocksize is a constant multiple for each map offset.
-     XSDInteger blocksize;
-   
      // This where we get stored
      RDFURN stored;
-     RDFURN map_urn;
-     RDFURN target_urn;
 
-  // This is a cache of all the targets
-  Cache targets;
+     RDFURN target_urn;
 
      // Deletes the point at the specified file offset
      void METHOD(MapDriver, del, uint64_t target_pos);
 
-     // Adds a new point ot the file offset table
+     // Adds a new point to the file offset table
      void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,\
 		 char *target);
 
@@ -172,14 +191,6 @@ CLASS(MapDriver, FileLikeObject)
                  uint64_t length);
 
      void METHOD(MapDriver, save_map);
-
-  /* This function returns information about the current file pointer
-     and its view of the target slice.
-  */
-  void METHOD(MapDriver, get_range, OUT uint64_t *image_offset_at_point, \
-              OUT uint64_t *target_offset_at_point,                     \
-              OUT uint64_t *available_to_read,                          \
-              RDFURN urn);
 
 END_CLASS
 

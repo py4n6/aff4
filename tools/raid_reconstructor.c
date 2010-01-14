@@ -9,7 +9,7 @@ be used to then build an AFF4 map of the raid set in a new volume.
 ** Login   <scudette@gmail.com>
 **
 ** Started on  Tue Nov 24 21:04:39 2009 mic
-** Last update Fri Jan  1 01:07:09 2010 mic
+** Last update Thu Jan 14 15:46:50 2010 mic
 */
 
 #include "aff4.h"
@@ -129,8 +129,10 @@ void make_map_stream(char *driver, struct map_description *map, char *output, ch
   CALL(i, set, map->target_period);
   CALL(oracle, set_value, URNOF(map_fd), AFF4_TARGET_PERIOD, (RDFValue)i);
 
+  /*
   CALL(i, set, map->blocksize);
   CALL(oracle, set_value, URNOF(map_fd), AFF4_BLOCKSIZE, (RDFValue)i);
+  */
 
   CALL(map_fd->super.size, set, map->size);
 
