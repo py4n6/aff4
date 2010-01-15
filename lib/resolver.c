@@ -42,7 +42,7 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
 
     CALL(type_dispatcher, put, ZSTRING(type), tmp);
-    talloc_free(tmp);
+    talloc_unlink(NULL, tmp);
   };
 };
 
@@ -739,6 +739,8 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
     // Done with the encoded value
     talloc_free(encoded_value);
+  } else {
+    printf("Failed to set %s:%s\n", urn->value, attribute_str);
   };
 };
 
@@ -868,7 +870,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
     dataType = tdb_fetch(self->attribute_db, attribute);
     if(dataType.dptr) {
       rdf_value_class = (RDFValue)CALL(RDF_Registry, borrow, (char *)dataType.dptr,
-                                       dataType.dsize-1);
+                                       dataType.dsize);
       if(rdf_value_class) {
         result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
                                                     Con, iter);
@@ -911,13 +913,20 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // Is this object cached?
   if(mode =='r') {
+    /*
     if(CALL(self->rlocks, present, TDB_DATA_STRING(tdb_urn))) {
       RaiseError(ERuntimeError, "URN %s is locked (r)", urn->value);
       goto error;
     };
+    */
 
     result = (AFFObject)CALL(self->read_cache, get, TDB_DATA_STRING(tdb_urn));
+    //    if(result)
+    //  printf("%s fetched from cache\n", urn->value);
+
   } else {
+    // If the object is write locked, we raise an error here.
+
     if(CALL(self->wlocks, present, TDB_DATA_STRING(tdb_urn))) {
       RaiseError(ERuntimeError, "URN %s is locked (w)", urn->value);
       goto error;
@@ -942,7 +951,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   scheme = urn->parser->scheme;
 
   // Empty schemes default to file:// URLs
-  if(strlen(scheme)==0)
+  if(!scheme || strlen(scheme)==0)
     scheme = "file";
 
   classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(scheme));
@@ -974,7 +983,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
  exit:
   // Lock the urn
   if(mode == 'r') {
-    CALL(self->rlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
+    //CALL(self->rlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
   } else {
     CALL(self->wlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
   };
@@ -1004,8 +1013,8 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   };
 
   if(obj->mode == 'r') {
-    result = CALL(self->rlocks, get, ZSTRING(urn));
-    if(result) talloc_unlink(NULL, result);
+    //result = CALL(self->rlocks, get, ZSTRING(urn));
+    //if(result) talloc_unlink(NULL, result);
   } else if(obj->mode == 'w') {
     result = CALL(self->wlocks, get, ZSTRING(urn));
     if(result) talloc_unlink(NULL, result);
@@ -1016,6 +1025,7 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
 
   // We free it here, but there should still be a cache reference.
   talloc_unlink(NULL, obj);
+  ClearError();
 };
 
 // A helper method to construct the class
@@ -1071,12 +1081,12 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
       max_id = tdb_to_int(max_key);
       free(max_key.dptr);
     };
-    
+
     for(i=0;i<max_id;i++) {
       char buff[BUFF_SIZE];
-      int urn_id =get_id(self->urn_db, 
+      int urn_id =get_id(self->urn_db,
 			 tdb_data_from_string(urn->value), 0);
-      
+
       key.dptr = (unsigned char *)buff;
       key.dsize = snprintf(buff, BUFF_SIZE, "%d:%d", urn_id, i);
 
@@ -1202,7 +1212,7 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
   if(self->logger) talloc_free(self->logger);
 
   self->logger = logger;
-  talloc_increase_ref_count(logger);
+  talloc_reference(self, logger);
 };
 
 static void Resolver_flush(Resolver self) {
@@ -1242,6 +1252,32 @@ static void Resolver_flush(Resolver self) {
   talloc_set_name_const(self->wlocks, "Resolver WLock Cache");
 };
 
+static void Resolver_expire(Resolver self, RDFURN uri) {
+  /** Remove the object from the cache */
+  Object obj;
+
+  obj = CALL(self->read_cache, get, ZSTRING(uri->value));
+  if(obj) talloc_unlink(self->read_cache, obj);
+
+  obj = CALL(self->write_cache, get, ZSTRING(uri->value));
+  if(obj) talloc_unlink(self->write_cache, obj);
+
+
+  // If the objects are in the lock cache they are outstanding... This
+  // is a problem because someone else has a hold of them right now -
+  // what to do? for now do nothing.
+
+  // Now as the object to delete itself
+  if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type)) {
+    AFFObject class_reference = CALL(type_dispatcher, borrow, ZSTRING(self->type->value));
+
+    if(class_reference) {
+      class_reference->delete(uri);
+    };
+  };
+};
+
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
@@ -1257,6 +1293,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(set_value) = Resolver_set_value;
      VMETHOD(add_value) = Resolver_add_value;
      VMETHOD(del) = Resolver_del;
+     VMETHOD(expire) = Resolver_expire;
 
      VMETHOD(get_id_by_urn) = Resolver_get_id_by_urn;
      VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;

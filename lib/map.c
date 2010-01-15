@@ -26,7 +26,6 @@ static RDFValue MapValue_Con(RDFValue self) {
     just store the URN of the map object in the resolver.
 */
 static TDB_DATA *MapValue_encode(RDFValue self) {
-  MapValue this = (MapValue)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
   result->dptr = (unsigned char *)CALL(self, serialise);
@@ -35,6 +34,7 @@ static TDB_DATA *MapValue_encode(RDFValue self) {
   result->dsize = strlen((char *)result->dptr)+1;
 
   return result;
+
  error:
   talloc_free(result);
   return NULL;
@@ -115,17 +115,27 @@ static char *MapValue_serialise(RDFValue self) {
 
   // Check if the map segment already exists - if it does we dont
   // bother re-saving it.
-  fd = CALL(oracle, open, segment, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
   if(fd) {
     CALL((AFFObject)fd, cache_return);
     goto exit;
   };
 
   // Work out where our map object is stored:
-  CALL(oracle, resolve_value, this->urn, AFF4_STORED, (RDFValue)stored);
+  if(!CALL(oracle, resolve_value, this->urn, AFF4_STORED, (RDFValue)stored)) {
+    RaiseError(ERuntimeError, "No storage for map object");
+    goto error;
+  };
 
   volume = (AFF4Volume)CALL(oracle, open, stored, 'w');
   if(!volume) goto error;
+
+  // Is it actually a volume?
+  if(!ISSUBCLASS(volume, AFF4Volume)) {
+    RaiseError(ERuntimeError, "URN %s is not a volume!!!", STRING_URNOF(volume));
+    CALL((AFFObject)volume, cache_return);
+    goto error;
+  };
 
   fd = CALL(volume, open_member, segment->value, 'w', ZIP_DEFLATE);
   // Done with our volume now
@@ -171,6 +181,8 @@ static char *MapValue_serialise(RDFValue self) {
     CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
   };
 
+  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
+
  exit:
   return this->urn->value;
 
@@ -193,7 +205,7 @@ void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_of
 
     CALL(target_urn,set, target);
 
-    target_index = new_XSDInteger(self);
+    target_index = new_XSDInteger(NULL);
     CALL(target_index, set, self->number_of_urns);
 
     self->targets = talloc_realloc_size(self, self->targets,
@@ -205,7 +217,7 @@ void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_of
 
     // Store it in the cache
     CALL(self->cache, put, ZSTRING(target), (Object)target_index);
-    talloc_free(target_index);
+    talloc_unlink(NULL, target_index);
   };
 
   new_point.target_offset = target_offset;
@@ -398,6 +410,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
   self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
   return self;
+
  error:
   talloc_free(self);
   return NULL;
@@ -417,7 +430,7 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
 static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_offset, uint64_t target_length) {
   FileLikeObject this = (FileLikeObject)self;
 
-  CALL(self, add, this->readptr, target_offset, target->value);
+  CALL(self->map, add_point, this->readptr, target_offset, target->value);
   this->readptr += target_length;
   this->size->value = max(this->size->value, this->readptr);
 };
@@ -506,6 +519,9 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
+
+     // Cant directly write to maps
+     UNIMPLEMENTED(FileLikeObject, write);
 } END_VIRTUAL
 
 void mapdriver_init() {

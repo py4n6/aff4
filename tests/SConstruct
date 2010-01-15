@@ -1,0 +1,9 @@
+import SconsUtils.utils as utils
+
+Import("env")
+
+programs = """talloc_test.c"""
+
+for prog in Split(programs):
+    prog = env.Program([prog],
+                       LIBS='aff4', LIBPATH="#lib/")

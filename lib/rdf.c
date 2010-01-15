@@ -229,10 +229,10 @@ static TDB_DATA *XSDInteger_encode(RDFValue self) {
   return result;
 };
 
-static RDFValue XSDInteger_set(XSDInteger self, uint64_t value) {
+static void XSDInteger_set(XSDInteger self, uint64_t value) {
   self->value = value;
 
-  return (RDFValue)self;
+  return;
 };
 
 static int XSDInteger_decode(RDFValue this, char *data, int length) {
@@ -288,7 +288,7 @@ static TDB_DATA *XSDString_encode(RDFValue self) {
   return result;
 };
 
-static RDFValue XSDString_set(XSDString self, char *string, int length) {
+static void XSDString_set(XSDString self, char *string, int length) {
   if(self->value) {
     talloc_free(self->value);
   };
@@ -296,7 +296,7 @@ static RDFValue XSDString_set(XSDString self, char *string, int length) {
   self->length = length;
   self->value = talloc_memdup(self, string, length);
 
-  return (RDFValue)self;
+  return;
 };
 
 static int XSDString_decode(RDFValue this, char *data, int length) {
@@ -360,14 +360,14 @@ static RDFValue RDFURN_Con(RDFValue self) {
   return self;
 };
 
-static RDFValue RDFURN_set(RDFURN self, char *string) {
+static void RDFURN_set(RDFURN self, char *string) {
   CALL(self->parser, parse, string);
 
   // Our value is the serialsed version of what the parser got:
   if(self->value) talloc_free(self->value);
   self->value = CALL(self->parser, string, self);
 
-  return (RDFValue)self;
+  return;
 };
 
 static int RDFURN_decode(RDFValue this, char *data, int length) {
@@ -495,10 +495,10 @@ static int XSDDatetime_decode(RDFValue self, char *data, int length) {
   return length;
 };
 
-static RDFValue XSDDatetime_set(XSDDatetime self, struct timeval time) {
+static void XSDDatetime_set(XSDDatetime self, struct timeval time) {
   self->value = time;
 
-  return (RDFValue)self;
+  return;
 };
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
@@ -580,13 +580,13 @@ void register_rdf_value_class(RDFValue classref) {
     talloc_set_name_const(RDF_Registry, "RDFValue dispatcher");
   };
 
-  if(!CALL(RDF_Registry, present, ZSTRING_NO_NULL(classref->dataType))) {
+  if(!CALL(RDF_Registry, present, ZSTRING(classref->dataType))) {
     Object tmp = talloc_memdup(NULL, classref, SIZEOF(classref));
 
     talloc_set_name(tmp, "RDFValue type %s", NAMEOF(classref));
-    CALL(RDF_Registry, put, ZSTRING_NO_NULL(classref->dataType), tmp);
+    CALL(RDF_Registry, put, ZSTRING(classref->dataType), tmp);
 
-    talloc_free(tmp);
+    talloc_unlink(NULL, tmp);
   };
 };
 
@@ -628,14 +628,14 @@ static void triples_handler(void *data, const raptor_statement* triple)
   CALL(self->urn, set, urn_str);
 
   if(strcmp(self->volume_urn->value, urn_str)) {
-    if(!CALL(self->member_cache, present, ZSTRING_NO_NULL(urn_str))) {
+    if(!CALL(self->member_cache, present, ZSTRING(urn_str))) {
       // Make sure the volume contains this object
       printf("!!! %s contains %s\n", self->volume_urn->value, urn_str);
 
       CALL(oracle, add_value, self->volume_urn, AFF4_VOLATILE_CONTAINS,
            (RDFValue)self->urn);
 
-      CALL(self->member_cache, put, ZSTRING_NO_NULL(urn_str), NULL);
+      CALL(self->member_cache, put, ZSTRING(urn_str), NULL);
     };
   };
 
@@ -643,7 +643,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
     class_ref = (RDFValue)GETCLASS(RDFURN);
   } else if(triple->object_literal_datatype) {
     class_ref = (RDFValue)CALL(RDF_Registry, borrow,
-                               ZSTRING_NO_NULL(type_str));
+                               ZSTRING(type_str));
   };
 
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
@@ -805,7 +805,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   if(!fd) goto error;
 
   self->fd = fd;
-  talloc_reference(self, fd);
+  (void)talloc_reference(self, fd);
 
   // We need to cache the attributes because traversing the TDB is too
   // slow all the time.
@@ -847,8 +847,6 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
 				       RDFURN urn) {
   raptor_statement triple;
   Cache i;
-  char buff[BUFF_SIZE];
-  TDB_DATA key;
   void *raptor_urn;
 
   raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
@@ -893,7 +891,7 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
       if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
         raptor_free_uri((raptor_uri*)triple.object);
       else
-        talloc_free((void *)triple.object);
+        talloc_unlink(NULL, (void *)triple.object);
 
       talloc_free(value);
     };
@@ -924,14 +922,16 @@ VIRTUAL(RDFSerializer, Object) {
 RDFValue rdfvalue_from_int(void *ctx, uint64_t value) {
   XSDInteger result = new_XSDInteger(ctx);
 
-  return result->set(result, value);  
+  result->set(result, value);
+  return result;
 };
 
 RDFValue rdfvalue_from_urn(void *ctx, char *value) {
   RDFURN result = new_RDFURN(ctx);
   if(!value) return NULL;
+  result->set(result, value);
 
-  return result->set(result, value);  
+  return result;
 };
 
 RDFValue rdfvalue_from_string(void *ctx, char *value) {
@@ -962,7 +962,7 @@ XSDDatetime new_XSDDateTime(void *ctx) {
 RDFValue new_rdfvalue(void *ctx, char *type) {
   RDFValue result = NULL;
   RDFValue class_ref = (RDFValue)CALL(RDF_Registry, borrow,
-                                      ZSTRING_NO_NULL(type));
+                                      ZSTRING(type));
 
   if(class_ref) {
     result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, ctx);

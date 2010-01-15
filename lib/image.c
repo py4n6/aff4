@@ -513,7 +513,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
        (Object)chunk_cache);
 
   // The cache will now own this:
-  talloc_free(chunk_cache);
+  talloc_unlink(NULL, chunk_cache);
 
   // Non error path
   ClearError();

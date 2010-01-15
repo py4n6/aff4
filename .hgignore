@@ -51,3 +51,4 @@ pyaff4.c
 .sconf_temp
 .sconsign*
 paper/
+talloc_test

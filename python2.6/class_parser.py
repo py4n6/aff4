@@ -23,6 +23,7 @@ class Module:
 
     def initialization(self):
         result = """
+talloc_set_log_fn(printf);
 AFF4_Init();
 
 """
@@ -75,6 +76,7 @@ static struct python_wrapper_map_t {
 typedef struct {
   PyObject_HEAD
   void *base;
+  void *ctx;
 } Gen_wrapper;
 
 /* Create the relevant wrapper from the item based on the lookup
@@ -87,7 +89,9 @@ Gen_wrapper *new_class_wrapper(Object item) {
    for(i=0; i<TOTAL_CLASSES; i++) {
      if(python_wrappers[i].class_ref == item->__class__) {
        PyErr_Clear();
+
        result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
+       result->ctx = talloc_asprintf(NULL, "new_class_wrapper %%s@%%p", NAMEOF(item), item);
        result->base = (void *)item;
 
        return result;
@@ -262,7 +266,7 @@ class Type:
 
     def post_call(self, method):
         if "DESTRUCTOR" in self.attributes:
-            return "self->base = NULL;\n"
+            return "talloc_free(self->ctx); self->base = NULL;\n"
 
         return ''
 
@@ -545,8 +549,8 @@ class Wrapper(Type):
     def to_python_object(self, **kw):
         return ''
 
-    def definition(self, default = None, sense='in', **kw):
-        result = "Gen_wrapper *%s;" % (self.name)
+    def definition(self, default = 'NULL', sense='in', **kw):
+        result = "Gen_wrapper *%s = %s;" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
             result += " %s call_%s;\n" % (self.type, self.name)
 
@@ -560,7 +564,7 @@ class Wrapper(Type):
             return ''
 
         return """
-if((PyObject *)%(name)s==Py_None) {
+if(!%(name)s || (PyObject *)%(name)s==Py_None) {
    call_%(name)s = NULL;
 } else if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
      PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
@@ -591,6 +595,7 @@ if((PyObject *)%(name)s==Py_None) {
          %(name)s = (Gen_wrapper *)Py_None;
          Py_INCREF(Py_None);
        } else {
+         //printf("%%s: Wrapping %%s@%%p\\n", __FUNCTION__, NAMEOF(returned_object), returned_object);
          %(name)s = new_class_wrapper(returned_object);
          if(!%(name)s) goto error;
        };
@@ -598,7 +603,7 @@ if((PyObject *)%(name)s==Py_None) {
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "talloc_increase_ref_count(%(name)s->base);\n" % args
+            result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
 
         return result
 
@@ -640,8 +645,8 @@ if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
     def call_arg(self):
         return "%s->base" % self.name
 
-    def definition(self, default = None, sense='in', **kw):
-        return "Gen_wrapper *%s;" % (self.name)
+    def definition(self, default = 'NULL', sense='in', **kw):
+        return "Gen_wrapper *%s = %s;" % (self.name, default)
 
 class PointerStructWrapper(StructWrapper):
     def __init__(self, name, type):
@@ -672,8 +677,9 @@ class PyObject(Type):
     """ Accept an opaque python object """
     interface = 'opaque'
     buidstr = 'O'
-    def definition(self, default = None, **kw):
-        return 'PyObject *%(name)s;\n' % self.__dict__
+    def definition(self, default = 'NULL', **kw):
+        self.default = default
+        return 'PyObject *%(name)s = %(default)s;\n' % self.__dict__
 
     def byref(self):
         return "&%s" % self.name
@@ -706,7 +712,7 @@ type_dispatcher = {
     'PyObject *': PyObject,
     }
 
-method_attributes = ['BORROWED', 'DESTRUCTOR']
+method_attributes = ['BORROWED', 'DESTRUCTOR','IGNORE']
 
 def dispatch(name, type):
     if not type: return Void()
@@ -1001,7 +1007,8 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
         ## the reference we own (which is NULL).
         free = """
     if(self->base) {
-        talloc_unlink(NULL, self->base);
+        //printf("Unlinking %s@%p\\n", NAMEOF(self->base), self->base);
+        talloc_free(self->ctx);
         self->base=NULL;
     };
 """
@@ -1024,9 +1031,11 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
             out.write(type.pre_call(self))
 
         ## Now call the wrapped function
-        out.write("\nself->base = CONSTRUCT(%s, %s, %s, NULL" % (self.class_name,
-                                                                 self.definition_class_name,
-                                                                 self.name))
+        out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
+        out.write("\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
+                self.class_name,
+                self.definition_class_name,
+                self.name))
         tmp = ''
         for type in self.args:
             tmp += ", " + type.call_arg()
@@ -1269,14 +1278,14 @@ class StructConstructor(ConstructorMethod):
     """
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
-
+        out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
         out.write("\nself->base = NULL;\n")
         out.write("  return 0;\n};\n\n")
 
     def write_destructor(self, out):
         out.write("""static void
 %(class_name)s_dealloc(py%(class_name)s *self) {
-if(self->base) talloc_free(self->base);
+   talloc_free(self->ctx);
 };\n
 """ % dict(class_name = self.class_name))
 
@@ -1287,8 +1296,8 @@ class ProxyConstructor(ConstructorMethod):
     if(self->base) {
         // Release the proxied object
         Py_DECREF(self->base->proxied);
-        talloc_free(self->base);
-        self->base=NULL;
+        talloc_free(self->ctx);
+        self->base = NULL;
     };
 };\n
 
@@ -1512,6 +1521,7 @@ class ClassGenerator:
         out.write("""\ntypedef struct {
   PyObject_HEAD
   %(class_name)s base;
+  void *ctx;
 } py%(class_name)s; \n
 """ % dict(class_name=self.class_name))
 
@@ -1621,6 +1631,7 @@ class StructGenerator(ClassGenerator):
         out.write("""\ntypedef struct {
   PyObject_HEAD
   %(class_name)s *base;
+  void *ctx;
 } py%(class_name)s; \n
 """ % dict(class_name=self.class_name))
 
@@ -1652,6 +1663,7 @@ VIRTUAL(%(class_name)s, %(base_class_name)s) {
 typedef struct {
   PyObject_HEAD
   %(class_name)s base;
+  void *ctx;
 } py%(class_name)s; \n
 """ % self.__dict__)
 

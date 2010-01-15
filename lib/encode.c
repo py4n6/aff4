@@ -1,4 +1,5 @@
 #include "encode.h"
+#include <string.h>
 
 #define LUT_SIZE 256
 #define STUFF_CHAR 'a'
@@ -327,7 +328,7 @@ int encodehex(unsigned char *inbuf, int len, unsigned char *outbuf) {
   int i;
 
   for(i=0;i<len;i++) {
-    sprintf(outbuf + i*2, "%02x", inbuf[i]);
+    sprintf((char *)outbuf + i*2, "%02x", inbuf[i]);
   };
 
   return i*2;

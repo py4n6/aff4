@@ -83,7 +83,7 @@ CLASS(XSDInteger, RDFValue)
      int64_t value;
      char *serialised;
 
-     BORROWED RDFValue METHOD(XSDInteger, set, uint64_t value);
+     void METHOD(XSDInteger, set, uint64_t value);
      uint64_t METHOD(XSDInteger, get);
 END_CLASS
 
@@ -92,7 +92,7 @@ CLASS(XSDString, RDFValue)
      char *value;
      int length;
 
-     BORROWED RDFValue METHOD(XSDString, set, char *string, int length);
+     void METHOD(XSDString, set, char *string, int length);
      BORROWED char *METHOD(XSDString, get);
 END_CLASS
 
@@ -102,7 +102,7 @@ CLASS(XSDDatetime, RDFValue)
      int gm_offset;
      char *serialised;
 
-     BORROWED RDFValue METHOD(XSDDatetime, set, struct timeval time);
+     void METHOD(XSDDatetime, set, struct timeval time);
 END_CLASS
 
      /** A URN for use in the rest of the library */
@@ -112,7 +112,7 @@ CLASS(RDFURN, RDFValue)
      // This parser maintains our internal state
      URLParse parser;
 
-     BORROWED RDFValue METHOD(RDFURN, set, char *urn);
+     void METHOD(RDFURN, set, char *urn);
      BORROWED char *METHOD(RDFURN, get);
 
      // Make a new RDFURN as a copy of this one

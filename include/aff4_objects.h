@@ -159,6 +159,8 @@ CLASS(MapValue, RDFValue)
 
   /* This function returns information about the current file pointer
      and its view of the target slice.
+
+     DEFAULT(urn) = NULL;
   */
   void METHOD(MapValue, get_range, uint64_t readptr,                   \
               OUT uint64_t *target_offset_at_point,                     \

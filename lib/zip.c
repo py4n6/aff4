@@ -131,16 +131,8 @@ static void FileLikeObject_delete(RDFURN del_urn) {
   DEBUG("Invalidating URN %s\n", del_urn->value);
 
   while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
-    // Check the type of the object
-    if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type)) {
-      AFFObject obj = CALL(oracle, create, type->value, 'r');
-      if(obj) {
-        obj->delete(urn);
-        talloc_free(obj);
-      };
-    };
-
     // Remove this URN altogether
+    CALL(oracle, expire, urn);
     CALL(oracle, del, urn, NULL);
   };
 
@@ -1053,7 +1045,7 @@ static void ZipFile_close(AFF4Volume this) {
     CALL(fd, close);
   };
   
-  talloc_free(self);
+  talloc_unlink(NULL, self);
 };
 
 /** This is just a convenience function - real simple now */

@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Thu Jan 14 15:58:49 2010 mic
+** Last update Fri Jan 15 12:41:04 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -154,8 +154,20 @@ CLASS(Resolver, Object)
        */
      RDFValue METHOD(Resolver, iter_next_alloc, RESOLVER_ITER *iter);
 
-     // Deletes all values for this attribute from the resolver
+       /* Deletes all values for this attribute from the resolver
+
+          DEFAULT(attribute) = NULL;
+        */
      void METHOD(Resolver, del, RDFURN uri, char *attribute);
+
+
+       /* Expires this object and all objects it owns.
+
+          NOTE: any outstanding objects will become invalidated. For
+          example, if you expire a volume, any outstanding streams
+          opened within the volume will become invalidated.
+        */
+       void METHOD(Resolver, expire, RDFURN uri);
 
      // Sets a new value for an attribute. Note that this function
      // clears any previously set values, if you want to create a list
