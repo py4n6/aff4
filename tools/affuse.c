@@ -241,9 +241,6 @@ struct stream_info *populate_streams(char **file_urns,
       stream.urn = CALL(stream_urn, copy, ctx);
       CALL(result, write, (char *)&stream, sizeof(stream));
     };
-
-    // Done with the volume now
-    CALL(oracle, cache_return, (AFFObject)volume);
   };
 
  exit:
@@ -274,7 +271,7 @@ int main(int argc, char **argv)
     }
 
     /* Prepare fuse args */
-    fargv = talloc_array(volume_names, char *, argc);
+    fargv = talloc_array(volume_names, char *, argc + 1);
     fargv[0] = argv[0];
     fargv[1] = argv[argc - 1];
     fargc = 2;
@@ -307,6 +304,7 @@ int main(int argc, char **argv)
 
     // Make sure the library is initialised:
     AFF4_Init();
+    oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
 
     streams = populate_streams(volume_names, argc, 0);
 

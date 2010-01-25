@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:43:54 2009 mic
-** Last update Mon Jan 25 10:47:23 2010 mic
+** Last update Mon Jan 25 11:57:02 2010 mic
 */
 
 #ifndef   	AFF4_UTILS_H_
@@ -136,7 +136,7 @@ CLASS(Cache, Object)
      // The cache must be locked the entire time between receiving the
      // iterator and getting all the objects.
      BORROWED Object METHOD(Cache, iter, char *key, int len);
-     BORROWED Object METHOD(Cache, next_borrow, Object *iter);
+     BORROWED Object METHOD(Cache, next, Object *iter);
      Object METHOD(Cache, next_get, Object iter);
 
      // Lock this cache from access from other threads

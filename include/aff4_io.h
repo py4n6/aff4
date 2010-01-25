@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Thu Jan 21 01:01:13 2010 mic
+** Last update Mon Jan 25 23:06:21 2010 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -34,7 +34,8 @@ CLASS(AFFObject, Object)
      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
 
      /** This is called to set properties on the object */
-     void METHOD(AFFObject, set_attribute, char *attribute, RDFValue value);
+     void METHOD(AFFObject, set, char *attribute, RDFValue value);
+     void METHOD(AFFObject, add, char *attribute, RDFValue value);
 
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.

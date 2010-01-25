@@ -515,7 +515,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
      VMETHOD_BASE(AFFObject, dataType) = AFF4_MAP;
 
-     VMETHOD(add) = MapDriver_add;
+     VMETHOD(add_point) = MapDriver_add;
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;

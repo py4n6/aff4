@@ -181,7 +181,7 @@ CLASS(MapDriver, FileLikeObject)
      void METHOD(MapDriver, del, uint64_t target_pos);
 
      // Adds a new point to the file offset table
-     void METHOD(MapDriver, add, uint64_t image_offset, uint64_t target_offset,\
+     void METHOD(MapDriver, add_point, uint64_t image_offset, uint64_t target_offset,\
 		 char *target);
 
   /* This interface is a more natural way to build the map, by

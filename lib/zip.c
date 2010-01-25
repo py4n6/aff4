@@ -31,6 +31,17 @@ static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char m
 FileBackedObject is a FileLikeObject which uses a real file to back
 itself.
 */
+
+/** Only close the file when we are actually freed */
+static int FileBackedObject_destructor(void *self) {
+  FileBackedObject this=(FileBackedObject)self;
+
+  close(this->fd);
+
+  return 0;
+};
+
+
 /** Note that files we create will always be escaped using standard
     URN encoding.
 */
@@ -38,7 +49,6 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
   FileBackedObject self = (FileBackedObject)this;
   uint64_t file_size;
 
-  //this = self->__super__->super.Con(this, urn, mode);
   this = SUPER(AFFObject, FileLikeObject, Con, urn, mode);
 
   if(urn) {
@@ -68,6 +78,9 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       ((AFFObject)self)->delete(URNOF(self));
       RaiseError(EIOError, "Can't open %s (%s)", urn->parser->query, strerror(errno));
       goto error;
+    } else {
+      // Add a destructor to this object
+      talloc_set_destructor((void *)self, FileBackedObject_destructor);
     };
 
     file_size = lseek(self->fd, 0, SEEK_END);
@@ -189,21 +202,11 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 };
 
 static void FileLikeObject_close(FileLikeObject self) {
+  // Update the size
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size);
 
-  if(((AFFObject)self)->mode == 'r') {
-    
-  };
-
-  talloc_unlink(NULL, self);
-};
-
-static void FileBackedObject_close(FileLikeObject self) {
-  FileBackedObject this=(FileBackedObject)self;
-
-  close(this->fd);
-  SUPER(FileLikeObject, FileLikeObject, close);
+  CALL(oracle, cache_return, (AFFObject)self);
 };
 
 static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
@@ -266,7 +269,6 @@ VIRTUAL(FileBackedObject, FileLikeObject) {
 
   VMETHOD_BASE(FileLikeObject, read) = FileBackedObject_read;
   VMETHOD_BASE(FileLikeObject, write) = FileBackedObject_write;
-  VMETHOD_BASE(FileLikeObject, close) = FileBackedObject_close;
   VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
   VMETHOD_BASE(FileLikeObject, truncate) = FileBackedObject_truncate;
 } END_VIRTUAL;
@@ -883,14 +885,12 @@ static void dump_volume_properties(ZipFile this) {
 
 static void ZipFile_close(AFF4Volume this) {
   ZipFile self = (ZipFile)this;
-  // Dump the current CD. We expect our fd is seeked to the right
-  // place:
+  // Dump the current CD.
   int k=0;
 
-  // We iterate over all the items which are contained in the
-  // volume. We then write them into the CD.
+  // If we are dirty we need to dump the CD and serialise the RDF
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-	  (RDFValue)self->_didModify)) {
+	  (RDFValue)self->_didModify) && self->_didModify) {
     struct EndCentralDirectory end;
     FileLikeObject fd;
 
@@ -1055,15 +1055,11 @@ static void ZipFile_close(AFF4Volume this) {
     CALL(fd, write, (char *)&end, sizeof(end));
     CALL(fd, write, (char *)URNOF(self)->value, end.comment_len);
 
-    // Unlock the file
-    CALL(oracle, cache_return, (AFFObject)fd);
-    
     // Close the fd
     CALL(fd, close);
   };
 
-  CALL(oracle, unlock, (AFFObject)self);
-  talloc_unlink(NULL, self);
+  CALL(oracle, cache_return, (AFFObject)self);
 };
 
 /** This is just a convenience function - real simple now */

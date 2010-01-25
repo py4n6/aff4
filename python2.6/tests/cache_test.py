@@ -27,6 +27,7 @@ print a.value
 
 print cache.cache_size, cache.max_cache_size
 
+print "Testing multiple values with the same key"
 ## Now test setting multiple values for a single key
 for x in range(0,15):
     urn = urn_base + "%s.html" % x
@@ -37,4 +38,4 @@ for x in range(0,15):
 
 iter = cache.iter(urn_base)
 while iter:
-    print cache.next_borrow(iter).value
+    print urn_base, cache.next(iter).value

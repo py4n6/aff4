@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Mon Jan 25 10:37:34 2010 mic
+** Last update Mon Jan 25 11:53:55 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -53,11 +53,16 @@ CLASS(Resolver, Object)
        jmp_buf env;
        char *message;
 
-       // Read and write caches
+       // Read and write caches. These have different policies. The
+       // read cache is just for efficiency - if an object is not in
+       // the cache or is used by another thread, we just create a new
+       // one of those.
        Cache read_cache;
+
+       // Write cache is used for locks - it is not possible to have
+       // multiple write objects at the same time, and all writers are
+       // opened exclusively.
        Cache write_cache;
-       Cache rlocks;
-       Cache wlocks;
 
        // This mutex protects our internal data structures
        pthread_mutex_t mutex;

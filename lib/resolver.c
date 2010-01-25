@@ -303,7 +303,7 @@ int Cache_present(Cache self, char *key, int len) {
   return 0;
 };
 
-Object Cache_iter(Cache self, char *key, int len) {
+static Object Cache_iter(Cache self, char *key, int len) {
   Cache i, hash_list_head;
   int hash;
 
@@ -332,7 +332,7 @@ Object Cache_iter(Cache self, char *key, int len) {
   return (Object)i;
 };
 
-Object Cache_next_borrow(Cache self, Object *opaque_iter) {
+static Object Cache_next(Cache self, Object *opaque_iter) {
   Cache iter = (Cache)*opaque_iter;
   Cache i;
   char *key;
@@ -379,7 +379,12 @@ VIRTUAL(Cache, Object) {
      VMETHOD(borrow) = Cache_borrow;
 
      VMETHOD(iter) = Cache_iter;
-     VMETHOD(next_borrow) = Cache_next_borrow;
+     VMETHOD(next) = Cache_next;
+
+     UNIMPLEMENTED(Cache, next_get);
+     UNIMPLEMENTED(Cache, lock);
+     UNIMPLEMENTED(Cache, unlock);
+
 } END_VIRTUAL
 
 /**********************************************************
@@ -1051,7 +1056,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
     stolen again.
 */
 static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
-  AFFObject result;
+  AFFObject result = NULL;
   AFFObject classref;
   char *scheme;
   TDB_DATA tdb_urn = tdb_data_from_string(urn->value);
@@ -1067,16 +1072,21 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // Is this object cached?
   if(mode =='r') {
-    /*
-    if(CALL(self->rlocks, present, TDB_DATA_STRING(tdb_urn))) {
-      RaiseError(ERuntimeError, "URN %s is locked (r)", urn->value);
-      goto error;
-    };
-    */
+    /* Try to find an available object we can use */
+    Object iter = CALL(self->read_cache, iter, TDB_DATA_STRING(tdb_urn));
 
-    result = (AFFObject)CALL(self->read_cache, get, TDB_DATA_STRING(tdb_urn));
-    //    if(result)
-    //  printf("%s fetched from cache\n", urn->value);
+    while(iter) {
+      result = (AFFObject)CALL(self->read_cache, next, &iter);
+
+      // A thread_id of 0 means noone is using it right now
+      if(result && result->thread_id == 0) {
+        break;
+      };
+    };
+
+    if(iter && result->thread_id != 0) {
+      result = NULL;
+    };
 
   } else {
     // If the object is write locked, there are two possibilities. If
@@ -1086,11 +1096,11 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
     // Note that we hold a big mutex over the entire resolver
     // including the write cache itself during this whole function.
-    AFFObject wlock = (AFFObject)CALL(self->write_cache, borrow, TDB_DATA_STRING(tdb_urn));
+    result = (AFFObject)CALL(self->write_cache, borrow, TDB_DATA_STRING(tdb_urn));
 
-    if(wlock) {
+    if(result) {
       // Make sure it does not get freed from under us
-      talloc_reference(self, wlock);
+      talloc_reference(self, result);
 
       // We need to lock it here, but we are holding a lock on the
       // entire cache. If we just took the lock here, other threads
@@ -1100,42 +1110,45 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
       pthread_mutex_unlock(&self->mutex);
 
       // Can block here
-      pthread_mutex_lock(&wlock->mutex);
+      pthread_mutex_lock(&result->mutex);
 
-      // We are already holding a lock on it... this is a deadlock
-      if(pthread_self() == wlock->thread_id) {
+      // The object is currently used by our own thread... this is a
+      // deadlock
+      if(result->thread_id == pthread_self()) {
         RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w)", urn->value);
-        pthread_mutex_unlock(&wlock->mutex);
-        talloc_unlink(self, wlock);
-        return NULL;
-      } else {
-        wlock->thread_id = pthread_self();
+        goto error;
 
-        // Wait for the rest of the resolver now:
+      } else {
+        // The object is available and is not used by anyone (since we
+        // have a lock on it )- we can now take it
+        result->thread_id = pthread_self();
+
+        // We need the resolver again
         pthread_mutex_lock(&self->mutex);
 
-        // Take the object from the wlock cache
-        result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
-        talloc_unlink(self, wlock);
+        talloc_unlink(self, result);
 
-        // Right now we are holding a lock on the object mutex
+        // Here we still hold a lock on the object
       };
-    } else {
-      // Its not locked - try to take it from the cache
-      result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
     };
   };
 
+  // Ok we got the object from the cache
   if(result) {
     // If its a FileLikeObject seek it to 0
     if(ISSUBCLASS(result, FileLikeObject)) {
       CALL((FileLikeObject)result, seek, 0, SEEK_SET);
     };
 
+    // Add a reference to the object to ensure it does not get freed
+    talloc_reference(NULL, result);
+
     // Lock it
     goto exit;
   };
 
+
+  /** Ok if we get here we did not have it in cache, we must create it */
   ClearError();
 
   // Here we need to build a new instance of this class using the
@@ -1169,13 +1182,17 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
   ((AFFObject)result)->mode = mode;
 
- exit:
-  // Lock it - if we cant lock we need to free the new object
-  if(!Resolver_lock(self, result)) {
-    talloc_free(result);
-    goto error;
+  result->thread_id = pthread_self();
+  pthread_mutex_lock(&result->mutex);
+
+  // Place it in the cache now
+  if(mode == 'r') {
+    CALL(self->read_cache, put, TDB_DATA_STRING(tdb_urn), (Object)result);
+  } else {
+    CALL(self->write_cache, put, TDB_DATA_STRING(tdb_urn), (Object)result);
   };
 
+ exit:
   pthread_mutex_unlock(&self->mutex);
   return result;
 
@@ -1189,25 +1206,34 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   char *urn = URNOF(obj)->value;
+  Cache cache = self->write_cache;
+  Object iter;
 
   pthread_mutex_lock(&self->mutex);
 
-  // We are done with it now
-  pthread_mutex_unlock(&obj->mutex);
+  if(obj->mode == 'r')
+    cache = self->read_cache;
 
-  if(obj->mode == 'r') {
-    CALL(self->read_cache, put, ZSTRING(urn), (Object)obj);
-  } else if(obj->mode == 'w') {
-    CALL(self->write_cache, put, ZSTRING(urn), (Object)obj);
-  } else {
-    RaiseError(ERuntimeError, "Programming error. %s has no valid mode", NAMEOF(obj));
-    return;
+  // Check if the object is still in the cache
+  iter = CALL(cache, iter, ZSTRING(STRING_URNOF(obj)));
+  while(iter) {
+    Object result = CALL(cache, next, &iter);
+    if(result == obj) {
+      // Its already in the cache
+      break;
+    };
   };
 
-  // Unlock the URN
-  Resolver_unlock(self, obj);
+  // The item is not in the cache - we add it then
+  if(!iter) {
+    CALL(cache, put,  ZSTRING(STRING_URNOF(obj)), obj);
+  };
 
-  // We free it here, but there should still be a cache reference.
+  // We are done with the object now
+  obj->thread_id = 0;
+  pthread_mutex_unlock(&obj->mutex);
+
+  // We unlink it from NULL here.
   talloc_unlink(NULL, obj);
   ClearError();
 
@@ -1235,6 +1261,10 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
 
   DEBUG_OBJECT("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
+
+  // Lock the object
+  result->thread_id = pthread_self();
+  pthread_mutex_lock(&result->mutex);
 
   pthread_mutex_unlock(&self->mutex);
   return result;
@@ -1443,41 +1473,37 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
 };
 
 static void Resolver_flush(Resolver self) {
-  if(self->rlocks) {
-    DEBUG_RESOLVER("Read locks\n");
-    print_cache(self->rlocks);
-  };
-
-  if(self->wlocks) {
-    DEBUG_RESOLVER("Write locks\n");
-    print_cache(self->wlocks);
-  };
-
-
   if(self->read_cache)
     talloc_free(self->read_cache);
 
   if(self->write_cache)
     talloc_free(self->write_cache);
 
-  if(self->wlocks)
-    talloc_free(self->wlocks);
-
-  if(self->rlocks)
-    talloc_free(self->rlocks);
-
   self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->read_cache, "Resolver Read Cache");
 
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
-
-  self->rlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
-  talloc_set_name_const(self->rlocks, "Resolver RLock Cache");
-
-  self->wlocks = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
-  talloc_set_name_const(self->wlocks, "Resolver WLock Cache");
 };
+
+static void Resolver_cache_expire(Resolver self, Object obj) {
+  /** Remove the object from the cache */
+  Object tmp;
+  TDB_DATA uri = tdb_data_from_string(STRING_URNOF(obj));
+
+  pthread_mutex_lock(&self->mutex);
+
+  obj = CALL(self->read_cache, get, TDB_DATA_STRING(uri));
+  if(obj) {
+    talloc_unlink(self->read_cache, obj);
+  };
+
+  obj = CALL(self->write_cache, get, TDB_DATA_STRING(uri));
+  if(obj) talloc_unlink(self->write_cache, obj);
+
+  pthread_mutex_unlock(&self->mutex);
+};
+
 
 static void Resolver_expire(Resolver self, RDFURN uri) {
   /** Remove the object from the cache */
@@ -1491,12 +1517,7 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
   obj = CALL(self->write_cache, get, ZSTRING(uri->value));
   if(obj) talloc_unlink(self->write_cache, obj);
 
-
-  // If the objects are in the lock cache they are outstanding... This
-  // is a problem because someone else has a hold of them right now -
-  // what to do? for now do nothing.
-
-  // Now as the object to delete itself
+  // Now ask the object to delete itself
   if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type)) {
     AFFObject class_reference = (AFFObject)CALL(type_dispatcher,
                                                 borrow, ZSTRING(self->type->value));
@@ -1579,6 +1600,12 @@ static void AFFObject_set_property(AFFObject self, char *attribute, RDFValue val
        attribute, value);
 };
 
+static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
+  CALL(oracle, add_value,
+       self->urn,
+       attribute, value);
+};
+
 // Prepares an object to be used
 static AFFObject AFFObject_finish(AFFObject self) {
   return CALL(self, Con, URNOF(self), self->mode);
@@ -1603,7 +1630,8 @@ VIRTUAL(AFFObject, Object) {
   };
 
      VMETHOD(finish) = AFFObject_finish;
-     VMETHOD(set_attribute) = AFFObject_set_property;
+     VMETHOD(set) = AFFObject_set_property;
+     VMETHOD(add) = AFFObject_add;
      VMETHOD(delete) = AFFObject_delete;
      VMETHOD(cache_return) = AFFObject_cache_return;
 

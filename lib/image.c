@@ -501,7 +501,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
 
  exit:
   // Now copy the data out of the chunk_cache
-  available_to_read = min(length, chunk_cache->len);
+  available_to_read = min(available_to_read, chunk_cache->len);
 
   // Copy it on the result stream
   memcpy(buffer, chunk_cache->data + chunk_offset, available_to_read);
@@ -526,7 +526,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
 
     self->readptr += available_to_read;
     if(chunk_cache)
-      talloc_free(chunk_cache);
+      talloc_unlink(NULL, chunk_cache);
     return length;
   };
 };
