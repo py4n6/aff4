@@ -262,7 +262,7 @@ class Type:
         return ''
 
     def assign(self, call, method, target=None):
-        return "%s = %s;\n" % (target or self.name, call)
+        return "Py_BEGIN_ALLOW_THREADS\n%s = %s;\nPy_END_ALLOW_THREADS\n" % (target or self.name, call)
 
     def post_call(self, method):
         if "DESTRUCTOR" in self.attributes:
@@ -536,7 +536,7 @@ class Void(Type):
 
     def assign(self, call, method, target=None):
         ## We dont assign the result to anything
-        return "%s;\n" % call
+        return "Py_BEGIN_ALLOW_THREADS\n%s;\nPy_END_ALLOW_THREADS\n" % call
 
     def return_value(self, value):
         return "return;"
@@ -582,7 +582,9 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
 
        ClearError();
 
+       Py_BEGIN_ALLOW_THREADS
        returned_object = (Object)%(call)s;
+       Py_END_ALLOW_THREADS
 
        if(_global_error != EZero) {
          PyErr_Format(resolve_exception(),
@@ -598,13 +600,14 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
          //printf("%%s: Wrapping %%s@%%p\\n", __FUNCTION__, NAMEOF(returned_object), returned_object);
          %(name)s = new_class_wrapper(returned_object);
          if(!%(name)s) goto error;
-       };
-    }
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
+            result += "           talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
 
+        result += """       };
+    }
+"""
         return result
 
     def to_python_object(self, name=None, result = 'py_result', **kw):
@@ -613,6 +616,32 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
             result=result,
             name = name)
 
+class PointerWrapper(Wrapper):
+    """ A pointer to a wrapped class """
+    def __init__(self, name, type):
+        type = type.split()[0]
+        Wrapper.__init__(self,name, type)
+
+    def definition(self, default = 'NULL', sense='in', **kw):
+        result = "Gen_wrapper *%s = %s;" % (self.name, default)
+        if sense == 'in' and not 'OUT' in self.attributes:
+            result += " %s *call_%s;\n" % (self.type, self.name)
+
+        return result
+
+    def pre_call(self, method):
+        if 'OUT' in self.attributes or self.sense == 'OUT':
+            return ''
+
+        return """
+if(!%(name)s || (PyObject *)%(name)s==Py_None) {
+   call_%(name)s = NULL;
+} else if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
+     goto error;
+} else {
+   call_%(name)s = (%(type)s *)&%(name)s->base;
+};\n""" % self.__dict__
 
 class StructWrapper(Wrapper):
     """ A wrapper for struct classes """
@@ -886,7 +915,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         for type in self.args:
             out.write(type.pre_call(self))
 
-        out.write("\n// Make the call\n ClearError();\n")
+        out.write("\n// Make the call\n ClearError();")
         call = "((%s)self->base)->%s(((%s)self->base)" % (self.definition_class_name, self.name, self.definition_class_name)
         tmp = ''
         for type in self.args:
@@ -1032,7 +1061,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
 
         ## Now call the wrapped function
         out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
-        out.write("\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
+        out.write("\n Py_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
                 self.class_name,
                 self.definition_class_name,
                 self.name))
@@ -1041,7 +1070,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
             tmp += ", " + type.call_arg()
 
         self.error_set = True
-        out.write("""%s);
+        out.write("""%s);\nPy_END_ALLOW_THREADS\n
   if(!self->base) {
     PyErr_Format(PyExc_IOError, "Unable to construct class %s");
     goto error;
@@ -1338,9 +1367,10 @@ static int %(class_name)s_destructor(void *this) {
 
         self.base_cons_method._prototype(out)
         out.write("{\nPyObject *py_result;\n")
-        out.write('PyObject *method_name = PyString_FromString("__class__");\n')
+        out.write('PyObject *method_name;')
         out.write("%(class_name)s this = (%(class_name)s)self;\n" % self.__dict__)
-
+        out.write("PyGILState_STATE gstate;\ngstate = PyGILState_Ensure();\n")
+        out.write('method_name = PyString_FromString("__class__");\n')
         for arg in self.base_cons_method.args:
             out.write("PyObject *py_%s;\n" % arg.name)
 
@@ -1378,10 +1408,10 @@ if(!py_result) {
 
 this->proxied = py_result;
 """ % dict(name=self.myclass.class_name, call = call));
-
+        out.write("PyGILState_Release(gstate);\n")
         out.write("\n\nreturn self;\n")
         if self.error_set:
-            out.write("error:\n talloc_free(self); return NULL;\n")
+            out.write("error:\n PyGILState_Release(gstate);\ntalloc_free(self); return NULL;\n")
 
         out.write("};\n\n")
 
@@ -1389,6 +1419,7 @@ this->proxied = py_result;
         self.write_constructor_proxy(out)
 
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {
+      PyGILState_STATE gstate = PyGILState_Ensure();
 """ % dict(method = self.name, class_name = self.class_name))
 
         self.write_local_vars(out)
@@ -1444,11 +1475,11 @@ this->proxied = py_result;
         ## attributes initially and populate the C struct with them.
         self.initialise_attributes(out)
 
-        out.write("  return 0;\n");
+        out.write("\n   PyGILState_Release(gstate);\n  return 0;\n");
 
         ## Write the error part of the function
         if self.error_set:
-            out.write("error:\n    " + self.error_condition());
+            out.write("error:\n  PyGILState_Release(gstate);\n  " + self.error_condition());
 
         out.write("\n};\n\n")
 
@@ -1563,6 +1594,61 @@ class ClassGenerator:
         for method in self.methods:
             method.prototype(out)
 
+    def numeric_protocol(self, out):
+        args = {'class':self.class_name}
+        out.write("""
+
+static int
+%(class)s_nonzero(py%(class)s *v)
+{
+        return v->base != 0;
+};
+
+
+static PyNumberMethods %(class)s_as_number = {
+        (binaryfunc)    0,       /*nb_add*/
+        (binaryfunc)    0,       /*nb_subtract*/
+        (binaryfunc)    0,       /*nb_multiply*/
+                        0,       /*nb_divide*/
+                        0,       /*nb_remainder*/
+                        0,       /*nb_divmod*/
+                        0,       /*nb_power*/
+        (unaryfunc)     0,       /*nb_negative*/
+        (unaryfunc)     0,       /*tp_positive*/
+        (unaryfunc)     0,       /*tp_absolute*/
+        (inquiry)       %(class)s_nonzero,   /*tp_nonzero*/
+        (unaryfunc)     0,       /*nb_invert*/
+                        0,       /*nb_lshift*/
+        (binaryfunc)    0,       /*nb_rshift*/
+                        0,       /*nb_and*/
+                        0,       /*nb_xor*/
+                        0,       /*nb_or*/
+                        0,       /*nb_coerce*/
+                        0,       /*nb_int*/
+                        0,       /*nb_long*/
+                        0,       /*nb_float*/
+                        0,       /*nb_oct*/
+                        0,       /*nb_hex*/
+        0,                              /* nb_inplace_add */
+        0,                              /* nb_inplace_subtract */
+        0,                              /* nb_inplace_multiply */
+        0,                              /* nb_inplace_divide */
+        0,                              /* nb_inplace_remainder */
+        0,                              /* nb_inplace_power */
+        0,                              /* nb_inplace_lshift */
+        0,                              /* nb_inplace_rshift */
+        0,                              /* nb_inplace_and */
+        0,                              /* nb_inplace_xor */
+        0,                              /* nb_inplace_or */
+        0,                              /* nb_floor_divide */
+        0,                              /* nb_true_divide */
+        0,                              /* nb_inplace_floor_divide */
+        0,                              /* nb_inplace_true_divide */
+        0,                              /* nb_index */
+};
+"""  % args)
+        return "&%(class)s_as_number" % args
+
     def PyTypeObject(self, out):
         args = {'class':self.class_name, 'module': self.module.name, 
                 'getattr_func': 0,
@@ -1571,6 +1657,8 @@ class ClassGenerator:
 
         if self.attributes.name:
             args['getattr_func'] = self.attributes.name
+
+        args['numeric_protocol'] = self.numeric_protocol(out)
 
         out.write("""
 static PyTypeObject %(class)s_Type = {
@@ -1585,7 +1673,7 @@ static PyTypeObject %(class)s_Type = {
     0,                         /* tp_setattr */
     0,                         /* tp_compare */
     0,                         /* tp_repr */
-    0,                         /* tp_as_number */
+    %(numeric_protocol)s,      /* tp_as_number */
     0,                         /* tp_as_sequence */
     0,                         /* tp_as_mapping */
     0,                         /* tp_hash */
@@ -1792,6 +1880,8 @@ END_CLASS
                 base_class_name = m.group(3)
                 self.add_class(class_name, base_class_name, ClassGenerator, Wrapper,
                                self.current_comment, modifier)
+                type_dispatcher["%s *" % class_name] = PointerWrapper
+
                 continue
 
             ## Make a proxy class for python callbacks

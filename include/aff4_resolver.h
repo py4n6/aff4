@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Fri Jan 15 12:41:04 2010 mic
+** Last update Mon Jan 25 10:37:34 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -24,7 +24,7 @@ typedef struct TDB_DATA_LIST {
   uint8_t encoding_type;
 }__attribute__((packed)) TDB_DATA_LIST;
 
-/** This object is returned when iterating the a result set from the
+/** This object is returned when iterating a result set from the
     resolver. Its basically a pointer into the resolver data store.*/
 BOUND typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
@@ -34,7 +34,7 @@ BOUND typedef struct RESOLVER_ITER {
   Cache cache;
 } RESOLVER_ITER;
 
-/** The resolver is at the heart of the AFF4 specification - its
+/** The resolver is at the heart of the AFF4 specification - it is
     responsible for returning objects keyed by attribute from a
     globally unique identifier (URI) and managing the central
     information store.
@@ -47,6 +47,7 @@ CLASS(Resolver, Object)
        struct tdb_context *data_db;
 
        int data_store_fd;
+       int mode;
 
        /** This is used to restore state if the RDF parser fails */
        jmp_buf env;
@@ -55,8 +56,11 @@ CLASS(Resolver, Object)
        // Read and write caches
        Cache read_cache;
        Cache write_cache;
-       Cache wlocks;
        Cache rlocks;
+       Cache wlocks;
+
+       // This mutex protects our internal data structures
+       pthread_mutex_t mutex;
 
        // Resolvers contain the identity behind them (see below):
        struct Identity_t *identity;
@@ -126,7 +130,7 @@ CLASS(Resolver, Object)
 
        /** Similar to Resolver.resolve_value, but a new RDFValue is
            allocated with the context provided. */
-   int METHOD(Resolver, resolve_alloc, void *ctx, RDFURN uri, char *attribute);
+   RDFValue METHOD(Resolver, resolve_alloc, void *ctx, RDFURN uri, char *attribute);
 
   /* This is a version of the above which uses an iterator to iterate
      over the list.
@@ -172,10 +176,10 @@ CLASS(Resolver, Object)
      // Sets a new value for an attribute. Note that this function
      // clears any previously set values, if you want to create a list
      // of values you need to call add_value.
-     void METHOD(Resolver, set_value, RDFURN uri, char *attribute, RDFValue value);
+     int METHOD(Resolver, set_value, RDFURN uri, char *attribute, RDFValue value);
 
      // Adds a new value to the value list for this attribute.
-     void METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
+     int METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
 
 
        /** This returns a unique ID for the given URN. The ID is only
@@ -231,9 +235,19 @@ CLASS(Resolver, Object)
        */
        void METHOD(Resolver, set_logger, Logger logger);
 
+       /** This closes and frees all memory used by the resolver.
+
+           This is generally needed after forking as two resolvers can
+           not exist in different processes.
+       */
+       void METHOD(Resolver, close);
+
        /** This is used to flush all our caches */
        void METHOD(Resolver, flush);
 
+       /** Unlocks an object (usually only called from a close()
+           method) */
+       int METHOD(Resolver, unlock, AFFObject obj);
 END_CLASS
 
        /** The following are private functions */

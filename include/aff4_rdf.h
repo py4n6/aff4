@@ -66,7 +66,7 @@ CLASS(RDFValue, Object)
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be
-	  allocated internally and should not be freed by the caller. 
+	  allocated to the NULL context and should be unlinked by the caller. 
       */
       char *METHOD(RDFValue, serialise);
 END_CLASS

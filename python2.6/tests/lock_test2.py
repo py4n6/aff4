@@ -1,0 +1,59 @@
+import pyaff4
+import os, time
+import pdb
+
+oracle = pyaff4.Resolver()
+urn = pyaff4.RDFURN()
+urn.set("/tmp/foobar.zip")
+
+time.sleep(1)
+
+urn2 = pyaff4.RDFURN()
+urn2.set("/tmp/foobar.zip.tmp")
+
+try:
+    os.unlink(urn.parser.query)
+except: pass
+
+def log(msg):
+    print "0x%X: %s" % (0xFFFFFFFFL & threading.current_thread().ident, msg)
+
+zip = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+oracle.set_value(zip.urn, pyaff4.AFF4_STORED, urn)
+zip = zip.finish()
+zip_urn = zip.urn
+zip.cache_return()
+
+def a():
+    log( "parent started")
+    zip = oracle.open(zip_urn, 'w')
+
+    log( "Parent: Opening")
+    segment1 = zip.open_member("hello", "w", 0)
+    log( "Parent: Starting write")
+
+    time.sleep(2)
+    segment1.write("hello")
+    segment1.close()
+    log( "Parent: Ended write")
+
+    zip.close()
+
+def b():
+    zip = oracle.open(zip_urn, 'w')
+    log( "Child: Opening")
+    segment2 = zip.open_member("world", "w", 0)
+    log( "Child: Starting write")
+    time.sleep(1)
+    segment2.write("hello")
+    segment2.close()
+    log( "Child: Ended write")
+    zip.close()
+
+import threading
+
+t1 = threading.Thread(target = a)
+#t2 = threading.Thread(target = b)
+
+t1.start()
+b()

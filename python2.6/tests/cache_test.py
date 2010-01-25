@@ -27,3 +27,14 @@ print a.value
 
 print cache.cache_size, cache.max_cache_size
 
+## Now test setting multiple values for a single key
+for x in range(0,15):
+    urn = urn_base + "%s.html" % x
+    r = pyaff4.RDFURN()
+    r.set(urn)
+    cache.put(urn_base, r)
+    del r
+
+iter = cache.iter(urn_base)
+while iter:
+    print cache.next_borrow(iter).value

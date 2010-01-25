@@ -1,0 +1,5 @@
+This document outlines what needs to be implemented:
+
+- Thread locks
+- Process locks
+- Unit tests

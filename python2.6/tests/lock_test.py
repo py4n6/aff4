@@ -38,4 +38,4 @@ def passed(urn):
     segment2.close()
     zip.close()
 
-fail(urn)
+passed(urn)

@@ -128,10 +128,11 @@ static void FileLikeObject_delete(RDFURN del_urn) {
   RDFURN urn = new_RDFURN(iter);
   XSDString type = new_XSDString(iter);
 
-  DEBUG("Invalidating URN %s\n", del_urn->value);
+  DEBUG_OBJECT("Invalidating URN %s\n", del_urn->value);
 
   while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
     // Remove this URN altogether
+
     CALL(oracle, expire, urn);
     CALL(oracle, del, urn, NULL);
   };
@@ -165,10 +166,12 @@ static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned lo
   FileBackedObject this = (FileBackedObject)self;
   int result;
 
+  if(length == 0) return 0;
+
   lseek(this->fd,self->readptr,0);
   result = write(this->fd, buffer, length);
   if(result < 0) {
-    RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self), strerror(errno));
+    RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self)->value, strerror(errno));
   };
 
   self->readptr += result;
@@ -209,7 +212,7 @@ static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int w
   int64_t result = lseek(this->fd, offset, whence);
 
   if(result < 0) {
-    DEBUG("Error seeking %s\n", strerror(errno));
+    DEBUG_OBJECT("Error seeking %s\n", strerror(errno));
     result = 0;
   };
 
@@ -284,6 +287,8 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   if(!this->_didModify) this->_didModify = new_XSDInteger(this);
 
   if(urn) {
+    int previous_volume;
+
     // Ok, we need to create ourselves from a URN. We need a
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
@@ -294,41 +299,37 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
     URNOF(self) = CALL(urn, copy, self);
 
+    previous_volume = ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+    ClearError();
+
     // Check to see that we can open the storage_urn for writing
     if(mode == 'w'){
       FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->storage_urn, mode);
 
       if(!fd) goto error;
 
-      // Is there a directory_offset and does it make sense?
-      if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-              (RDFValue)this->directory_offset) &&	\
-         this->directory_offset->value < fd->size->value) {
-        // Everything we know about the storage urn is incorrect... we
-        // need to delete anything we know about it here:
-        ((AFFObject)fd)->delete(URNOF(fd));
-      } else {
+      if(!previous_volume && fd->size->value > 0) {
         CALL((AFFObject)fd, cache_return);
-      };
-    };
 
-    if(!ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode)) {
-        // Its not dirty but we could not load it ... what should we
-        // do? It could be some random file (not an AFF volume at all).
-        // If we go on we will end up writing the zip file on the end
-        // of the file. Alternatively we might want to raise an error
-        // here?
+        RaiseError(EIOError, "Unable to append to file %s - it does not seem to be a zip file?",
+                   this->storage_urn->value);
+        goto error;
+      };
+
+      CALL((AFFObject)fd, cache_return);
     };
 
     // If our URN has changed after loading we remove all previous
     // attributes
     if(strcmp(URNOF(self)->value, urn->value)) {
-      DEBUG("%s changes URNs from %s to %s\n", NAMEOF(self), urn->value,
+      DEBUG_OBJECT("%s changes URNs from %s to %s\n", NAMEOF(self), urn->value,
             URNOF(self)->value);
       CALL(oracle, del, urn, NULL);
     };
 
-    CALL(oracle, add_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)urn);
+    // urn is no longer valid below:
+    CALL(oracle, set_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+    CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->storage_urn);
 
     CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
          (RDFValue)this->directory_offset);
@@ -447,7 +448,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   ZipFile self= (ZipFile)this;
   int length,i;
   FileLikeObject fd=NULL;
-  void *ctx = talloc_size(NULL, 1);
+  char *ctx = talloc_strdup(NULL, STRING_URNOF(self));
 
   memset(buffer,0,BUFF_SIZE+1);
 
@@ -455,15 +456,27 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   // see if there is a ZipFile stored on the fd_urn, and then if that
   // ZipFile is dirty. If both conditions are true, we assume that
   // volume is ok, and dont load it.
-  if(CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self)) && 
+  if(CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self)) &&
      CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-          (RDFValue)self->_didModify)) {
+          (RDFValue)self->_didModify) && self->_didModify) {
     goto exit;
   };
 
   // Is there a file we need to read?
   fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
   if(!fd) {
+    goto error;
+  };
+
+  // Is there a directory_offset and does it make sense?
+  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+          (RDFValue)self->directory_offset) &&                  \
+     self->directory_offset->value >= fd->size->value) {
+    CALL(oracle, unlock, (AFFObject)fd);
+    // Everything we know about the storage urn is incorrect... we
+    // need to delete anything we know about it here:
+    ((AFFObject)fd)->delete(URNOF(fd));
+
     goto error;
   };
 
@@ -655,11 +668,9 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       // Do we have as many CDFileHeaders as we expect?
       j++;
       talloc_free(filename);
-    };   
+    };
   } else {
-    // A central directory was not found, but we want to open this
-    // file in read mode - this means it is not a zip file.
-    if(mode == 'r') goto error_reason;
+    goto error_reason;
   };
 
   CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET, 
@@ -680,6 +691,9 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
 
  error:
+  // Restore the URN to its former self since we failed to load it
+  CALL(URNOF(self), set, ctx);
+
   if(fd) {
     CALL(oracle, cache_return, (AFFObject)fd);
   };
@@ -730,7 +744,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 
     // Go to the start of the directory_offset
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
-    DEBUG("seeking %p to %lld (%lld)\n", fd, self->directory_offset->value, fd->size->value);
+    DEBUG_OBJECT("seeking %p to %lld (%lld)\n", fd, self->directory_offset->value, fd->size->value);
 
     // Write a file header on
     memset(&header, 0, sizeof(header));
@@ -826,7 +840,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
   end_cd.size_of_cd = locator.offset_of_end_cd - directory_offset;
   end_cd.offset_of_cd = directory_offset;
   
-  DEBUG("writing ECD at %lld\n", fd->readptr);
+  DEBUG_OBJECT("writing ECD at %lld\n", fd->readptr);
   CALL(fd,write, (char *)&end_cd, sizeof(end_cd));
   CALL(fd,write, (char *)&locator, sizeof(locator));
 };
@@ -888,11 +902,14 @@ static void ZipFile_close(AFF4Volume this) {
       return;
     };
 
-    // Write a properties file if needed
-    dump_volume_properties(self);
-
+    // This locks our underlying file object for exclusive
+    // access. This ensures other threads are not mixing their writes
+    // on us until we complete the closing of the file:
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
     if(!fd) return;
+
+    // Write a properties file if needed
+    dump_volume_properties(self);
 
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
@@ -1044,7 +1061,8 @@ static void ZipFile_close(AFF4Volume this) {
     // Close the fd
     CALL(fd, close);
   };
-  
+
+  CALL(oracle, unlock, (AFFObject)self);
   talloc_unlink(NULL, self);
 };
 
@@ -1150,7 +1168,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->super.size);
 
-  DEBUG("ZipFileStream: created %s\n", STRING_URNOF(self));
+  DEBUG_OBJECT("ZipFileStream: created %s\n", STRING_URNOF(self));
 
   // If we are opened for writing we need to lock the file_urn so
   // noone else can write on top of us. We do this by retaining a
@@ -1248,6 +1266,8 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   ZipFileStream this = (ZipFileStream)self;
   int result=0;
 
+  if(length == 0) goto exit;
+
   // Update the crc:
   this->crc32->value = crc32(this->crc32->value, 
 			     (unsigned char*)buffer,
@@ -1337,7 +1357,7 @@ static void ZipFileStream_close(FileLikeObject self) {
   int magic = 0x08074b50;
   void *ctx = talloc_size(NULL, 1);
 
-  DEBUG("ZipFileStream: closed %s\n", STRING_URNOF(self));
+  DEBUG_OBJECT("ZipFileStream: closed %s\n", STRING_URNOF(self));
   if(((AFFObject)self)->mode != 'w') {
     talloc_unlink(NULL, self);
     return;

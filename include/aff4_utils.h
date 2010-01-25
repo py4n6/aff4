@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:43:54 2009 mic
-** Last update Thu Jan  7 16:27:56 2010 mic
+** Last update Mon Jan 25 10:47:23 2010 mic
 */
 
 #ifndef   	AFF4_UTILS_H_
@@ -46,10 +46,19 @@ enum Cache_policy {
 /** The Cache is an object which manages a cache of Object instances
     indexed by a key.
 
-    Each Object can either be in the Cache (in which case its owned by
-    this cache object and will not be freed) or out of the cache (in
-    which case its owned by NULL, and can be freed. When the cache
-    gets too full it will start freeing objects.
+    Each Object can either be in the Cache (in which case it is owned
+    by this cache object and will not be freed) or out of the cache
+    (in which case it is owned by NULL, and can be freed. When the
+    cache gets too full it will start freeing objects it owns.
+
+    Objects are cached with a key reference so this is like a python
+    dict or a hash table, except that we can have several objects
+    indexed with the same key. If you want to iterate over all the
+    objects you need to use the iterator interface.
+
+    NOTE: The cache must be locked if you are using it from multiple
+    threads. You can use the Cache->lock mutex or some other mutex
+    instead.
 
     NOTE: After putting the Object in the cache you do not own it -
     and you must not use it (because it might be freed at any time).
@@ -63,6 +72,9 @@ CLASS(Cache, Object)
      // talloc_stealed into the cache object as we will be manging its
      // memory.
      Object data;
+
+     // A mutex to lock access to the cache
+     pthread_mutex_t mutex;
 
      // Cache objects are put into two lists - the cache_list contains
      // all the cache objects currently managed by us in order of
@@ -101,13 +113,16 @@ CLASS(Cache, Object)
      */
      Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
 
-     // Return a cache object or NULL if its not there.
+     // Return a cache object or NULL if its not there. The
+     // object is removed from the cache.
      Object METHOD(Cache, get, char *key, int len);
 
      // Returns a reference to the object. The object is still owned
-     // by the cache. Note that this should probably only be used in
-     // caches which do not expire objects otherwise the borrowed
-     // reference may disappear unexpectadly.
+     // by the cache. Note that this should only be used in
+     // caches which do not expire objects or if the cache is locked,
+     // otherwise the borrowed reference may disappear
+     // unexpectadly. References may be freed when other items are
+     // added.
      BORROWED Object METHOD(Cache, borrow, char *key, int len);
 
      // Store the key, data in a new Cache object. The key and data will be
@@ -116,6 +131,17 @@ CLASS(Cache, Object)
 
      // Returns true if the object is in cache
      int METHOD(Cache, present, char *key, int len);
+
+     // This returns an opaque reference to a cache iterator. Note:
+     // The cache must be locked the entire time between receiving the
+     // iterator and getting all the objects.
+     BORROWED Object METHOD(Cache, iter, char *key, int len);
+     BORROWED Object METHOD(Cache, next_borrow, Object *iter);
+     Object METHOD(Cache, next_get, Object iter);
+
+     // Lock this cache from access from other threads
+     void METHOD(Cache, lock);
+     void METHOD(Cache, unlock);
 END_CLASS
 
      /** A logger may be registered with the Resolver. Any objects

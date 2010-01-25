@@ -5,24 +5,28 @@
 #include <tdb.h>
 #include <raptor.h>
 #include <errno.h>
+#include <pthread.h>
 
 //int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#define RESOLVER_CACHE_SIZE 10
+#define RESOLVER_CACHE_SIZE 100
 
 #define TDB_HASH_SIZE 1024*128
 
-// Some prototypes
-static int Resolver_lock(Resolver self, RDFURN urn, char mode);
-static int Resolver_unlock(Resolver self, RDFURN urn, char mode);
+// prototypes
+static int Resolver_lock(Resolver self, AFFObject obj);
+static int Resolver_unlock(Resolver self, AFFObject obj);
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
 static Cache type_dispatcher = NULL;
 
-/** This is the global oracle - it knows everything about everyone. */
+/** This is the global oracle - it knows everything about
+    everyone. Note: The Resolver() class is a singleton which returns
+    the oracle if it already exists.
+*/
 Resolver oracle = NULL;
 
 void register_type_dispatcher(char *type, AFFObject *classref) {
@@ -111,6 +115,8 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
   self->hash_table_width = hash_table_width;
   self->max_cache_size = max_cache_size;
 
+  pthread_mutex_init(&self->mutex, NULL);
+
   INIT_LIST_HEAD(&self->cache_list);
   INIT_LIST_HEAD(&self->hash_list);
 
@@ -125,6 +131,8 @@ static unsigned int Cache_hash(Cache self, char *key, int len) {
   // Use int size to obtain the hashes this should be faster... NOTE
   // that we dont process up to the last 3 bytes.
   unsigned char *name = (unsigned char *)key;
+  // Alternate function - maybe faster?
+  //  unsigned uint32_t *name = (unsigned uint32_t *)key;
   unsigned int result = 0;
   int i;
   int count = len / sizeof(*name);
@@ -177,6 +185,8 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
   hash = CALL(self, hash, key, len);
   assert(hash <= self->hash_table_width);
 
+  // FIXME - should we just make a smaller memcpy since this object
+  // will never have its methods called?
   new_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   // Make sure the new cache member knows where the list head is. We
   // only keep stats about the cache here.
@@ -234,7 +244,8 @@ static Object Cache_get(Cache self, char *key, int len) {
         talloc_unlink(self, result);
       };
 
-      // Now free the container
+      // Now free the container this will unlink it from the lists
+      // through its destructor.
       talloc_free(i);
 
       return result;
@@ -292,6 +303,72 @@ int Cache_present(Cache self, char *key, int len) {
   return 0;
 };
 
+Object Cache_iter(Cache self, char *key, int len) {
+  Cache i, hash_list_head;
+  int hash;
+
+  if(self->hash_table) {
+    hash = CALL(self, hash, key, len);
+    hash_list_head = self->hash_table[hash];
+    if(!hash_list_head)
+      goto error;
+
+    list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
+      // If we find ourselves pointing at the list head again we did
+      // not find it:
+      if(!i->cache_head)
+        goto error;
+
+      if(i->key_len == len && !CALL(i, cmp, key, len)) {
+        goto exit;
+      };
+    };
+  };
+
+ error:
+  return NULL;
+
+ exit:
+  return (Object)i;
+};
+
+Object Cache_next_borrow(Cache self, Object *opaque_iter) {
+  Cache iter = (Cache)*opaque_iter;
+  Cache i;
+  char *key;
+  int len;
+  Object result;
+
+  if(!iter) return NULL;
+
+  key = iter->key;
+  len = iter->key_len;
+
+  // Search for the next occurance. We must already be on the right
+  // hash list
+  list_for_each_entry(i, &iter->hash_list, hash_list) {
+    // If we find ourselves pointing at the list head again we did
+    // not find it:
+    if(!i->cache_head) {
+      // Indicate no more elements
+      *opaque_iter = NULL;
+      break;
+    };
+
+    if(i->key_len == len && !CALL(i, cmp, key, len)) {
+      // Set the next element
+      *opaque_iter = (Object)i;
+      break;
+    };
+  };
+
+  // Now we return a reference to the original object
+  result = iter->data;
+
+  return result;
+};
+
+
 VIRTUAL(Cache, Object) {
      VMETHOD(Con) = Cache_Con;
      VMETHOD(put) = Cache_put;
@@ -300,6 +377,9 @@ VIRTUAL(Cache, Object) {
      VMETHOD(get) = Cache_get;
      VMETHOD(present) = Cache_present;
      VMETHOD(borrow) = Cache_borrow;
+
+     VMETHOD(iter) = Cache_iter;
+     VMETHOD(next_borrow) = Cache_next_borrow;
 } END_VIRTUAL
 
 /**********************************************************
@@ -419,6 +499,8 @@ static int Resolver_destructor(void *this) {
   close(self->data_store_fd);
   self->data_store_fd = 0;
 
+  pthread_mutex_destroy(&self->mutex);
+
   return 0;
 };
 
@@ -445,6 +527,9 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   char buff[BUFF_SIZE];
   // The location of the TDB databases
   char *path = getenv("AFF4_TDB_PATH");
+  pthread_mutexattr_t mutex_attr;
+
+  self->mode = mode;
 
   if(mode & RESOLVER_MODE_NONPERSISTANT)
     AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
@@ -465,6 +550,14 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   if(!path)  path = ".";
 
   self->logger = CONSTRUCT(Logger, Logger, Con, self);
+
+  // This is recursive to ensure that only one thread can hold the
+  // resolver at once. Once the thread holds the resolver its free to
+  // continue calling functions from it.
+  pthread_mutexattr_init(&mutex_attr);
+  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE_NP);
+  pthread_mutex_init(&self->mutex, &mutex_attr);
+  pthread_mutexattr_destroy(&mutex_attr);
 
   // Open the TDB databases
   if(snprintf(buff, BUFF_SIZE, "%s/urn.tdb", path) >= BUFF_SIZE)
@@ -616,10 +709,12 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
   TDB_DATA_LIST i;
   TDB_DATA urn, attribute;
 
+  pthread_mutex_lock(&self->mutex);
+
   urn = tdb_data_from_string(urn_str->value);
   attribute = tdb_data_from_string(attribute_str);
 
-  DEBUG("Getting %s, %s\n", urn_str->value, attribute_str);
+  DEBUG_RESOLVER("Getting %s, %s\n", urn_str->value, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
     char buff[i.length];
 
@@ -639,26 +734,35 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
       goto not_found;
     };
 
+    pthread_mutex_unlock(&self->mutex);
     return i.length;
   };
 
  not_found:
+
+  pthread_mutex_unlock(&self->mutex);
   return 0;
 };
 
 // Allocate and return the first value
 static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, char *attribute) {
-  RESOLVER_ITER *iter = CALL(self, get_iter, ctx, urn, attribute);
+  RESOLVER_ITER *iter;
+
+  pthread_mutex_lock(&self->mutex);
+
+  iter = CALL(self, get_iter, ctx, urn, attribute);
 
   if(iter) {
     RDFValue result = CALL(self, iter_next_alloc, iter);
 
     if(result) {
+      pthread_mutex_unlock(&self->mutex);
       return result;
     };
     talloc_free(iter);
   };
 
+  pthread_mutex_unlock(&self->mutex);
   return NULL;
 };
 
@@ -703,16 +807,32 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
 /** This sets a single triple into the resolver replacing previous
     values set for this attribute
 */
-static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
+static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 			       RDFValue value) {
-  TDB_DATA *encoded_value = CALL(value, encode);
+  TDB_DATA *encoded_value;
+
+  pthread_mutex_lock(&self->mutex);
+
+  encoded_value = CALL(value, encode);
 
   if(encoded_value) {
     uint64_t data_offset;
     TDB_DATA_LIST iter;
     TDB_DATA attribute = tdb_data_from_string(attribute_str);
 
-    DEBUG("Setting %s, %s\n", urn->value, attribute_str);
+#ifdef AFF4_DEBUG_RESOLVER
+    {
+      char *serialised = CALL(value, serialise);
+
+      DEBUG_RESOLVER("Setting %s, %s = %s\n", urn->value, attribute_str, serialised);
+
+      // Its annoying to have different free functions
+      if(value->raptor_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
+        raptor_free_uri((raptor_uri*)serialised);
+      } else
+        talloc_unlink(NULL, serialised);
+    };
+#endif
 
     // Grab the lock
     tdb_lockall(self->data_db);
@@ -739,21 +859,32 @@ static void Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
     // Done with the encoded value
     talloc_free(encoded_value);
+
+    pthread_mutex_unlock(&self->mutex);
+    return 1;
+
   } else {
-    printf("Failed to set %s:%s\n", urn->value, attribute_str);
+    DEBUG_RESOLVER("Failed to set %s:%s\n", urn->value, attribute_str);
+    RaiseError(ERuntimeError, "Cant set attribute on %s", urn->value);
+    pthread_mutex_unlock(&self->mutex);
+    return 0;
   };
 };
 
-static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
+static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
 			       RDFValue value) {
-  TDB_DATA *encoded_value = CALL(value, encode);
+  TDB_DATA *encoded_value;
+
+  pthread_mutex_lock(&self->mutex);
+
+  encoded_value = CALL(value, encode);
 
   if(encoded_value) {
     TDB_DATA attribute;
     uint64_t previous_offset;
     TDB_DATA_LIST tmp;
 
-    DEBUG("Adding %s, %s\n", urn->value, attribute_str);
+    DEBUG_RESOLVER("Adding %s, %s\n", urn->value, attribute_str);
     attribute = tdb_data_from_string(attribute_str);
 
     // Grab the lock
@@ -773,6 +904,9 @@ static void Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     // Done with the encoded value
     talloc_free(encoded_value);
   };
+
+  pthread_mutex_unlock(&self->mutex);
+  return 1;
 };
 
 RESOLVER_ITER *_Resolver_get_iter(Resolver self,
@@ -781,7 +915,7 @@ RESOLVER_ITER *_Resolver_get_iter(Resolver self,
                                   TDB_DATA attribute) {
   RESOLVER_ITER *iter = talloc(ctx, RESOLVER_ITER);
 
-    memset(&iter->head, 0, sizeof(iter->head));
+  memset(&iter->head, 0, sizeof(iter->head));
   iter->offset = get_data_head(self, tdb_urn, attribute, &iter->head);
 
   iter->cache = CONSTRUCT(Cache, Cache, Con, iter, HASH_TABLE_SIZE, 0);
@@ -794,17 +928,25 @@ static RESOLVER_ITER *Resolver_get_iter(Resolver self,
                                         RDFURN urn,
                                         char *attribute_str) {
   TDB_DATA attribute, tdb_urn;
+  RESOLVER_ITER *result;
+
+  pthread_mutex_lock(&self->mutex);
 
   attribute = tdb_data_from_string(attribute_str);
   tdb_urn = tdb_data_from_string(urn->value);
 
-  return _Resolver_get_iter(self, ctx, tdb_urn, attribute);
+  result = _Resolver_get_iter(self, ctx, tdb_urn, attribute);
+
+  pthread_mutex_unlock(&self->mutex);
+  return result;
 };
 
 static int Resolver_iter_next(Resolver self,
 			      RESOLVER_ITER *iter,
 			      RDFValue result) {
   int res_code;
+
+  pthread_mutex_lock(&self->mutex);
 
   do {
     res_code = 0;
@@ -813,7 +955,7 @@ static int Resolver_iter_next(Resolver self,
     // on here.
     // This is our iteration exit condition
     if(iter->offset == 0)
-      return 0;
+      goto exit;
 
     /* If the value is of the correct type, ask it to read from
        the file. */
@@ -849,6 +991,8 @@ static int Resolver_iter_next(Resolver self,
     iter->offset = get_data_next(self, &iter->head);
   } while(res_code == 0);
 
+ exit:
+  pthread_mutex_unlock(&self->mutex);
   return res_code;
 };
 
@@ -858,6 +1002,8 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
   RDFValue result;
   TDB_DATA attribute, dataType;
   char buff[BUFF_SIZE];
+
+  pthread_mutex_lock(&self->mutex);
 
   // This is our iteration exit condition
   while(iter->offset != 0) {
@@ -877,7 +1023,7 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
 
         if(result) {
           if(Resolver_iter_next(self, iter, result))
-            return result;
+            goto exit;
           else {
             talloc_free(result);
           };
@@ -889,7 +1035,13 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
     };
   };
 
+  // Error path
+  pthread_mutex_unlock(&self->mutex);
   return NULL;
+
+ exit:
+  pthread_mutex_unlock(&self->mutex);
+  return result;
 };
 
 /** Instantiates a single instance of the class using this
@@ -904,12 +1056,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   char *scheme;
   TDB_DATA tdb_urn = tdb_data_from_string(urn->value);
 
+  pthread_mutex_lock(&self->mutex);
+
   if(!urn) {
     RaiseError(ERuntimeError, "No URN specified");
     goto error;
   };
 
-  DEBUG("Opening %s for mode %c\n", urn->value, mode);
+  DEBUG_OBJECT("Opening %s for mode %c\n", urn->value, mode);
 
   // Is this object cached?
   if(mode =='r') {
@@ -925,14 +1079,51 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     //  printf("%s fetched from cache\n", urn->value);
 
   } else {
-    // If the object is write locked, we raise an error here.
+    // If the object is write locked, there are two possibilities. If
+    // its our own thread that locked it, we are in a deadlock because
+    // noone is ever going to unlock it. If another thread locked it,
+    // we need to wait on it here.
 
-    if(CALL(self->wlocks, present, TDB_DATA_STRING(tdb_urn))) {
-      RaiseError(ERuntimeError, "URN %s is locked (w)", urn->value);
-      goto error;
+    // Note that we hold a big mutex over the entire resolver
+    // including the write cache itself during this whole function.
+    AFFObject wlock = (AFFObject)CALL(self->write_cache, borrow, TDB_DATA_STRING(tdb_urn));
+
+    if(wlock) {
+      // Make sure it does not get freed from under us
+      talloc_reference(self, wlock);
+
+      // We need to lock it here, but we are holding a lock on the
+      // entire cache. If we just took the lock here, other threads
+      // will be unable to unlock it. So we must release the cache
+      // lock here to give them a chance to unlock it while we block
+      // on acquiring the lock:
+      pthread_mutex_unlock(&self->mutex);
+
+      // Can block here
+      pthread_mutex_lock(&wlock->mutex);
+
+      // We are already holding a lock on it... this is a deadlock
+      if(pthread_self() == wlock->thread_id) {
+        RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w)", urn->value);
+        pthread_mutex_unlock(&wlock->mutex);
+        talloc_unlink(self, wlock);
+        return NULL;
+      } else {
+        wlock->thread_id = pthread_self();
+
+        // Wait for the rest of the resolver now:
+        pthread_mutex_lock(&self->mutex);
+
+        // Take the object from the wlock cache
+        result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
+        talloc_unlink(self, wlock);
+
+        // Right now we are holding a lock on the object mutex
+      };
+    } else {
+      // Its not locked - try to take it from the cache
+      result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
     };
-
-    result = (AFFObject)CALL(self->write_cache, get, TDB_DATA_STRING(tdb_urn));
   };
 
   if(result) {
@@ -942,9 +1133,10 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     };
 
     // Lock it
-    Resolver_lock(self, URNOF(result), mode);
     goto exit;
   };
+
+  ClearError();
 
   // Here we need to build a new instance of this class using the
   // dispatcher. We first try the scheme:
@@ -977,22 +1169,18 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
   ((AFFObject)result)->mode = mode;
 
-  // Lock it
-  Resolver_lock(self, URNOF(result), mode);
-
  exit:
-  // Lock the urn
-  if(mode == 'r') {
-    //CALL(self->rlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
-  } else {
-    CALL(self->wlocks, put, TDB_DATA_STRING(tdb_urn), (Object)result);
+  // Lock it - if we cant lock we need to free the new object
+  if(!Resolver_lock(self, result)) {
+    talloc_free(result);
+    goto error;
   };
 
-  // Non error path
-  ClearError();
+  pthread_mutex_unlock(&self->mutex);
   return result;
 
  error:
+  pthread_mutex_unlock(&self->mutex);
   return NULL;
 };
 
@@ -1001,7 +1189,11 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   char *urn = URNOF(obj)->value;
-  Object result;
+
+  pthread_mutex_lock(&self->mutex);
+
+  // We are done with it now
+  pthread_mutex_unlock(&obj->mutex);
 
   if(obj->mode == 'r') {
     CALL(self->read_cache, put, ZSTRING(urn), (Object)obj);
@@ -1012,26 +1204,22 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
     return;
   };
 
-  if(obj->mode == 'r') {
-    //result = CALL(self->rlocks, get, ZSTRING(urn));
-    //if(result) talloc_unlink(NULL, result);
-  } else if(obj->mode == 'w') {
-    result = CALL(self->wlocks, get, ZSTRING(urn));
-    if(result) talloc_unlink(NULL, result);
-  };
-
   // Unlock the URN
-  Resolver_unlock(self, URNOF(obj), obj->mode);
+  Resolver_unlock(self, obj);
 
   // We free it here, but there should still be a cache reference.
   talloc_unlink(NULL, obj);
   ClearError();
+
+  pthread_mutex_unlock(&self->mutex);
 };
 
 // A helper method to construct the class
 static AFFObject Resolver_create(Resolver self, char *name, char mode) {
   AFFObject class_reference;
   AFFObject result;
+
+  pthread_mutex_lock(&self->mutex);
 
   class_reference = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(name));
   if(!class_reference) {
@@ -1046,11 +1234,13 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
 
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
 
-  DEBUG("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
+  DEBUG_OBJECT("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
 
+  pthread_mutex_unlock(&self->mutex);
   return result;
 
  error:
+  pthread_mutex_unlock(&self->mutex);
   return NULL;
 };
 
@@ -1058,6 +1248,8 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
   TDB_DATA attribute;
   TDB_DATA key;
   char buff[BUFF_SIZE];
+
+  pthread_mutex_lock(&self->mutex);
 
   if(attribute_str) {
     attribute = tdb_data_from_string(attribute_str);
@@ -1068,12 +1260,12 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
 
     // Remove the key from the database
     tdb_delete(self->data_db, key);
-    DEBUG("Removing attribute %s from %s\n", attribute_str, urn->value);
+    DEBUG_RESOLVER("Removing attribute %s from %s\n", attribute_str, urn->value);
   } else {
     TDB_DATA max_key;
     int max_id,i;
 
-    DEBUG("Removing all attributes from %s\n", urn->value);
+    DEBUG_RESOLVER("Removing all attributes from %s\n", urn->value);
     max_key = tdb_data_from_string(MAX_KEY);
 
     max_key = tdb_fetch(self->attribute_db, max_key);
@@ -1094,6 +1286,8 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
       tdb_delete(self->data_db, key);
     };
   };
+
+  pthread_mutex_unlock(&self->mutex);
 };
 
 /** Synchronization methods. */
@@ -1134,24 +1328,51 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   return 1;
 };
 
-static int Resolver_lock(Resolver self, RDFURN urn, char mode) {
-  DEBUG("locking %s mode %c\n", urn->value, mode);
-  return Resolver_lock_gen(self, urn, mode, F_LOCK);
+static int Resolver_lock(Resolver self, AFFObject obj) {
+  int result;
+
+  pthread_mutex_lock(&self->mutex);
+
+  result = Resolver_lock_gen(self, URNOF(obj), obj->mode, F_LOCK);
+  pthread_mutex_unlock(&self->mutex);
+  return result;
 };
 
-static int Resolver_unlock(Resolver self, RDFURN urn, char mode) {
-  DEBUG("releasing %s mode %c\n", urn->value, mode);
+static int Resolver_unlock(Resolver self, AFFObject obj) {
+  int result;
 
-  return Resolver_lock_gen(self, urn, mode, F_ULOCK);
+  pthread_mutex_lock(&self->mutex);
+  DEBUG_LOCK("releasing %s mode %c\n", STRING_URNOF(obj), obj->mode);
+
+  if(obj->mode == 'r') {
+    //result = CALL(self->rlocks, get, ZSTRING(urn));
+    //if(result) talloc_unlink(NULL, result);
+  } else if(obj->mode == 'w') {
+    Object result = CALL(self->write_cache, get, ZSTRING(STRING_URNOF(obj)));
+    if(result) talloc_unlink(NULL, result);
+  };
+
+  result = Resolver_lock_gen(self, URNOF(obj), obj->mode, F_ULOCK);
+  pthread_mutex_unlock(&self->mutex);
+
+  return result;
 };
 
 static int Resolver_get_id_by_urn(Resolver self, RDFURN uri) {
-  return get_id(self->urn_db, tdb_data_from_string(uri->value), 1);
+  int result;
+
+  pthread_mutex_lock(&self->mutex);
+  result = get_id(self->urn_db, tdb_data_from_string(uri->value), 1);
+
+  pthread_mutex_unlock(&self->mutex);
+  return result;
 };
 
 static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
   TDB_DATA urn_id, result;
   char buff[BUFF_SIZE];
+
+  pthread_mutex_lock(&self->mutex);
 
   urn_id.dptr = (unsigned char *)buff;
   urn_id.dsize = tdb_serialise_int(id, buff, BUFF_SIZE);
@@ -1160,9 +1381,11 @@ static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
   if(result.dptr) {
     CALL(uri, set, (char *)result.dptr);
     free(result.dptr);
+    pthread_mutex_unlock(&self->mutex);
     return 1;
   };
 
+  pthread_mutex_unlock(&self->mutex);
   return 0;
 };
 
@@ -1186,6 +1409,8 @@ int Resolver_load(Resolver self, RDFURN uri) {
   */
   Cache i;
 
+  pthread_mutex_lock(&self->mutex);
+
   list_for_each_entry(i, &type_dispatcher->cache_list, cache_list) {
     if(ISSUBCLASS(i->data, AFF4Volume)) {
       AFF4Volume class_ref = *(AFF4Volume *)i->data;
@@ -1197,6 +1422,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
         CALL(oracle, cache_return, (AFFObject)volume);
 
         ClearError();
+        pthread_mutex_unlock(&self->mutex);
         return 1;
       };
 
@@ -1205,6 +1431,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
   };
 
   ClearError();
+  pthread_mutex_unlock(&self->mutex);
   return 0;
 };
 
@@ -1217,12 +1444,12 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
 
 static void Resolver_flush(Resolver self) {
   if(self->rlocks) {
-    printf("Read locks\n");
+    DEBUG_RESOLVER("Read locks\n");
     print_cache(self->rlocks);
   };
 
   if(self->wlocks) {
-    printf("Write locks\n");
+    DEBUG_RESOLVER("Write locks\n");
     print_cache(self->wlocks);
   };
 
@@ -1256,6 +1483,8 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
   /** Remove the object from the cache */
   Object obj;
 
+  pthread_mutex_lock(&self->mutex);
+
   obj = CALL(self->read_cache, get, ZSTRING(uri->value));
   if(obj) talloc_unlink(self->read_cache, obj);
 
@@ -1269,14 +1498,24 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
 
   // Now as the object to delete itself
   if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type)) {
-    AFFObject class_reference = CALL(type_dispatcher, borrow, ZSTRING(self->type->value));
+    AFFObject class_reference = (AFFObject)CALL(type_dispatcher,
+                                                borrow, ZSTRING(self->type->value));
 
     if(class_reference) {
       class_reference->delete(uri);
     };
   };
+
+  pthread_mutex_unlock(&self->mutex);
 };
 
+static void Resolver_close(Resolver self) {
+  int mode = self->mode;
+
+  talloc_unlink(NULL, self);
+
+  oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, mode) ;
+};
 
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
@@ -1303,6 +1542,9 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(load) = Resolver_load;
      VMETHOD(set_logger) = Resolver_set_logger;
      VMETHOD(flush) = Resolver_flush;
+     VMETHOD(close) = Resolver_close;
+
+     VMETHOD(unlock) =  Resolver_unlock;
 } END_VIRTUAL
 
 /************************************************************
@@ -1351,6 +1593,15 @@ static void AFFObject_cache_return(AFFObject self) {
 };
 
 VIRTUAL(AFFObject, Object) {
+  {
+    pthread_mutexattr_t mutex_attr;
+
+    pthread_mutexattr_init(&mutex_attr);
+    pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE_NP);
+    pthread_mutex_init(&self->mutex, &mutex_attr);
+    pthread_mutexattr_destroy(&mutex_attr);
+  };
+
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set_attribute) = AFFObject_set_property;
      VMETHOD(delete) = AFFObject_delete;

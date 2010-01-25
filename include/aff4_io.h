@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Wed Jan  6 12:31:26 2010 mic
+** Last update Thu Jan 21 01:01:13 2010 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -19,6 +19,10 @@ struct RDFValue;
     represent the globally unique URI of this object. */
 CLASS(AFFObject, Object)
      RDFURN urn;
+
+     // An object may be owned by a single thread at a time
+     pthread_mutex_t mutex;
+     unsigned int thread_id;
 
      // Is this object a reader or a writer?
      char mode;

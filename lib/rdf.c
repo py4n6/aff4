@@ -247,11 +247,12 @@ static char *XSDInteger_serialise(RDFValue self) {
   XSDInteger this = (XSDInteger)self;
 
   if(this->serialised)
-    talloc_free(this->serialised);
+    talloc_unlink(self, this->serialised);
 
   this->serialised = talloc_asprintf(self, "%llu", this->value);
 
-  talloc_increase_ref_count(this->serialised);
+  talloc_reference(NULL, this->serialised);
+
   return this->serialised;
 };
 
@@ -316,7 +317,8 @@ static int XSDString_decode(RDFValue this, char *data, int length) {
 static char *XSDString_serialise(RDFValue self) {
   XSDString this = (XSDString)self;
 
-  talloc_increase_ref_count(this->value);
+  talloc_reference(NULL, this->value);
+
   return this->value;
 };
 
@@ -507,7 +509,7 @@ static char *XSDDatetime_serialise(RDFValue self) {
   XSDDatetime this = (XSDDatetime)self;
   char buff[BUFF_SIZE];
 
-  if(this->serialised) talloc_free(this->serialised);
+  if(this->serialised) talloc_unlink(self, this->serialised);
 
   if(BUFF_SIZE > strftime(buff, BUFF_SIZE, DATETIME_FORMAT_STR,
 			  localtime(&this->value.tv_sec))) {
@@ -517,7 +519,7 @@ static char *XSDDatetime_serialise(RDFValue self) {
 				       (unsigned int)this->gm_offset / 3600,
 				       (unsigned int)this->gm_offset % 3600);
 
-    talloc_increase_ref_count(this->serialised);
+    talloc_reference(NULL, this->serialised);
     return this->serialised;
   };
 

@@ -21,6 +21,9 @@ vars = Variables()
 
 vars.AddVariables(
    BoolVariable('V', 'Set to 1 for verbose build', False),
+   EnumVariable('DEBUG', 'Set debug type',None,
+                allowed_values = ('lock','resolver','object'),
+                ignorecase = 2),
    EnumVariable('flavor', 'Choose build flavor', 'debug',
                 allowed_values = ('release', 'debug'),
                 ignorecase = 2,
@@ -36,6 +39,16 @@ if ARGUMENTS.get('V') == "1":
    args['CFLAGS'] += ' -Wall -g -O0 '
 else:
    utils.install_colors(args)
+
+arg = ARGUMENTS.get('DEBUG')
+if arg=='lock':
+   args['CFLAGS'] += ' -DAFF4_DEBUG_LOCKS '
+
+elif arg=='resolver':
+   args['CFLAGS'] += ' -DAFF4_DEBUG_RESOLVER '
+
+elif arg=='object':
+   args['CFLAGS'] += ' -DAFF4_DEBUG_OBJECT '
 
 if ARGUMENTS.get('LOCK') == '0':
    utils.warn("Turning off locks")

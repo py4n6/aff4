@@ -44,13 +44,27 @@ int endswith(const char *haystack, char *needle);
 char *normalise_url(char *url);
 extern int AFF4_DEBUG_LEVEL;
 
-#if 1
-#define DEBUG(x, ...) if(AFF4_DEBUG_LEVEL>=1){                              \
-    printf("%s:%d %d: " x,                                              \
-           __FUNCTION__, __LINE__, (int)pthread_self(), ## __VA_ARGS__); \
+#define _DEBUG(x, ...) {                                                \
+    printf("%s:%d 0x%X: " x,                                              \
+           __FUNCTION__, __LINE__, (unsigned int)pthread_self(), ## __VA_ARGS__); \
   };
+
+#ifdef AFF4_DEBUG_LOCKS
+#define DEBUG_LOCK(x, ...) _DEBUG(x, ## __VA_ARGS__)
 #else
-#define DEBUG(x, ...)
+#define DEBUG_LOCK(x, ...)
+#endif
+
+#ifdef AFF4_DEBUG_RESOLVER
+#define DEBUG_RESOLVER(x, ...) _DEBUG(x, ## __VA_ARGS__)
+#else
+#define DEBUG_RESOLVER(x, ...)
+#endif
+
+#ifdef AFF4_DEBUG_OBJECT
+#define DEBUG_OBJECT(x, ...) _DEBUG(x, ## __VA_ARGS__)
+#else
+#define DEBUG_OBJECT(x, ...)
 #endif
 
 #define TDB_DATA_STRING(x)                      \
