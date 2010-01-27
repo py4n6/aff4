@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Fri Dec  4 17:14:21 2009 mic
-** Last update Fri Dec  4 17:14:21 2009 mic
+** Last update Wed Jan 27 08:39:42 2010 mic
 */
 
 #ifndef   	EXPORTS_H_
@@ -14,7 +14,7 @@
 #pragma GCC visibility push(default)
 extern Resolver oracle;
 extern void aff4_free(void *ptr);
-extern char *_traceback;
+extern __thread char __error_str[];
 
 extern void AFF4_Init(void);
 

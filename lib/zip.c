@@ -728,8 +728,17 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     // We start writing new files at this point
     TDB_DATA relative_name = CALL(filename, relative_name, URNOF(self));
     TDB_DATA escaped_filename = escape_filename_data(filename, relative_name);
-    time_t epoch_time = time(NULL);
-    struct tm *now = localtime(&epoch_time);
+    time_t epoch_time;
+    struct tm *now;
+
+    // This might block until the file is ready to be written on. The
+    // storage file may be locked by an outstanding ZipFileStream
+    // object which is not yet closed.
+    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
+    if(!fd) goto error;
+
+    epoch_time = time(NULL);
+    now = localtime(&epoch_time);
 
     self->directory_offset->value = 1;
     // Indicate that the file is dirty - This means we will be writing
@@ -739,10 +748,6 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
-
-    // Open our current volume for writing:
-    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
-    if(!fd) goto error;
 
     // Go to the start of the directory_offset
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
@@ -779,7 +784,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 
     {
       uint64_t offset = CALL(fd, tell);
- 
+
       CALL(oracle, set_value, filename, AFF4_VOLATILE_FILE_OFFSET,
 	   rdfvalue_from_int(ctx, offset));
     };
@@ -787,6 +792,11 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     CALL(oracle, set_value, filename, AFF4_VOLATILE_HEADER_OFFSET,
 	 (RDFValue)self->directory_offset);
 
+
+    // We give the storage fd to the ZipFileStream object to hold on
+    // to until ZipFileStream_close() is called. This makes sure that
+    // noone is able to write on the storage file until this segment
+    // is closed.
     result = (FileLikeObject)CONSTRUCT(ZipFileStream,
 				       ZipFileStream, Con, NULL,
 				       filename, self->storage_urn,
@@ -899,17 +909,14 @@ static void ZipFile_close(AFF4Volume this) {
 	     (RDFValue)self->storage_urn)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", 
                  URNOF(self)->value);
-      return;
+      goto exit;
     };
-
-    // This locks our underlying file object for exclusive
-    // access. This ensures other threads are not mixing their writes
-    // on us until we complete the closing of the file:
-    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
-    if(!fd) return;
 
     // Write a properties file if needed
     dump_volume_properties(self);
+
+    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
+    if(!fd) goto exit;
 
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
@@ -1059,6 +1066,7 @@ static void ZipFile_close(AFF4Volume this) {
     CALL(fd, close);
   };
 
+ exit:
   CALL(oracle, cache_return, (AFFObject)self);
 };
 
@@ -1413,9 +1421,6 @@ static void ZipFileStream_close(FileLikeObject self) {
     CALL(this->file_fd, write, (char *)&size, sizeof(size));
   };
 
-  // We unlock the file now
-  CALL((AFFObject)this->file_fd, cache_return);
-
   // This is the point where we will be writing the next file - right
   // at the end of this file.
   CALL(oracle, set_value, this->container_urn, AFF4_DIRECTORY_OFFSET,
@@ -1434,12 +1439,16 @@ static void ZipFileStream_close(FileLikeObject self) {
       tmp.dptr = digest;
       tmp.dsize = digest_len;
 
+      // FIXME: Write hash RDF Types
       // Tell the resolver what the hash is:
       //CALL(oracle, set, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
     };
   };
 
-  // Make sure the lock is removed from the underlying file:
+  // Make sure the lock is removed from the underlying storage
+  // file. Its ok for other threads to write new segments now:
+  CALL((AFFObject)this->file_fd, cache_return);
+
   talloc_free(ctx);
   SUPER(FileLikeObject, FileLikeObject, close);
 };

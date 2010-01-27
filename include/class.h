@@ -183,9 +183,6 @@ extern "C" {
 #endif
 #define min(X, Y)  ((X) < (Y) ? (X) : (Y))
 
-extern char *_traceback;
-extern char __error_str[];
-
 #ifdef max
 #undef max
 #endif
@@ -377,8 +374,9 @@ enum _error_type {
   EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError
 };
 
-extern char _error_buff[];
-extern enum _error_type _global_error;
+extern __thread char _error_str[];
+extern __thread enum _error_type _global_error;
+extern __thread char *_traceback;
 
 void *raise_errors(enum _error_type t, char *string,  ...);
 

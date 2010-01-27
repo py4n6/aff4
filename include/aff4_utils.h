@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:43:54 2009 mic
-** Last update Mon Jan 25 11:57:02 2010 mic
+** Last update Wed Jan 27 11:02:12 2010 mic
 */
 
 #ifndef   	AFF4_UTILS_H_
@@ -72,9 +72,6 @@ CLASS(Cache, Object)
      // talloc_stealed into the cache object as we will be manging its
      // memory.
      Object data;
-
-     // A mutex to lock access to the cache
-     pthread_mutex_t mutex;
 
      // Cache objects are put into two lists - the cache_list contains
      // all the cache objects currently managed by us in order of

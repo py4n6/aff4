@@ -31,9 +31,9 @@
  */
 #define BUFF_SIZE 1024
 
-char __error_str[BUFF_SIZE];
-enum _error_type _global_error;
-char *_traceback=NULL;
+__thread char __error_str[BUFF_SIZE];
+__thread enum _error_type _global_error;
+__thread char *_traceback=NULL;
 
 void *raise_errors(enum _error_type t, char *reason, ...) {
   if(reason) {

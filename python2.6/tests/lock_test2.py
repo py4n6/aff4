@@ -27,27 +27,35 @@ zip.cache_return()
 def a():
     log( "parent started")
     zip = oracle.open(zip_urn, 'w')
-
-    log( "Parent: Opening")
-    segment1 = zip.open_member("hello", "w", 0)
-    log( "Parent: Starting write")
+    try:
+        log( "Parent: Opening")
+        segment1 = zip.open_member("hello", "w", 0)
+        log( "Parent: Starting write")
+    finally:
+        zip.cache_return()
 
     time.sleep(2)
     segment1.write("hello")
     segment1.close()
     log( "Parent: Ended write")
 
+    zip = oracle.open(zip_urn, 'w')
     zip.close()
 
 def b():
     zip = oracle.open(zip_urn, 'w')
-    log( "Child: Opening")
-    segment2 = zip.open_member("world", "w", 0)
-    log( "Child: Starting write")
-    time.sleep(1)
+    try:
+        log( "Child: Opening")
+        segment2 = zip.open_member("world", "w", 0)
+        log( "Child: Starting write")
+    finally:
+        zip.cache_return()
+
+    time.sleep(3)
     segment2.write("hello")
     segment2.close()
     log( "Child: Ended write")
+    zip = oracle.open(zip_urn, 'w')
     zip.close()
 
 import threading
