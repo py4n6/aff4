@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Mon Jan 25 11:53:55 2010 mic
+** Last update Wed Jan 27 13:52:26 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -249,10 +249,6 @@ CLASS(Resolver, Object)
 
        /** This is used to flush all our caches */
        void METHOD(Resolver, flush);
-
-       /** Unlocks an object (usually only called from a close()
-           method) */
-       int METHOD(Resolver, unlock, AFFObject obj);
 END_CLASS
 
        /** The following are private functions */

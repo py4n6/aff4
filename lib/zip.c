@@ -181,7 +181,7 @@ static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned lo
 
   if(length == 0) return 0;
 
-  lseek(this->fd,self->readptr,0);
+  lseek(this->fd,self->readptr,SEEK_SET);
   result = write(this->fd, buffer, length);
   if(result < 0) {
     RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self)->value, strerror(errno));
@@ -333,8 +333,11 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     CALL(oracle, set_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
     CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->storage_urn);
 
-    CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-         (RDFValue)this->directory_offset);
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+             (RDFValue)this->directory_offset)) {
+      CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+           (RDFValue)this->directory_offset);
+    };
 
     {
       RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
@@ -474,7 +477,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
           (RDFValue)self->directory_offset) &&                  \
      self->directory_offset->value >= fd->size->value) {
-    CALL(oracle, unlock, (AFFObject)fd);
     // Everything we know about the storage urn is incorrect... we
     // need to delete anything we know about it here:
     ((AFFObject)fd)->delete(URNOF(fd));
@@ -749,9 +751,13 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
 	 (RDFValue)self->directory_offset);
 
+    DEBUG_OBJECT("New segment %s at offset %llu\n", STRING_URNOF(self),
+                 self->directory_offset->value);
+
     // Go to the start of the directory_offset
     CALL(fd, seek, self->directory_offset->value, SEEK_SET);
-    DEBUG_OBJECT("seeking %p to %lld (%lld)\n", fd, self->directory_offset->value, fd->size->value);
+    DEBUG_OBJECT("seeking %p to %lld (%lld)\n", fd,
+                 self->directory_offset->value, fd->size->value);
 
     // Write a file header on
     memset(&header, 0, sizeof(header));
@@ -898,6 +904,10 @@ static void ZipFile_close(AFF4Volume this) {
   // Dump the current CD.
   int k=0;
 
+  if(strstr(STRING_URNOF(self),"/38473-80/")) {
+    printf("oops\n");
+  };
+
   // If we are dirty we need to dump the CD and serialise the RDF
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
 	  (RDFValue)self->_didModify) && self->_didModify) {
@@ -951,6 +961,10 @@ static void ZipFile_close(AFF4Volume this) {
 	if(!CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) ||
 	   strcmp(type->value, AFF4_SEGMENT))
 	  continue;
+
+	if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
+                 (RDFValue)header_offset))
+          continue;
 
 	// This gets the relative name of the fqn
 	relative_name = urn->relative_name(urn, URNOF(self));
@@ -1009,26 +1023,23 @@ static void ZipFile_close(AFF4Volume this) {
 
 	cd.compress_size = compressed_size->value;
 
-	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
-	     (RDFValue)header_offset);
-
 	if(header_offset->value > ZIP64_LIMIT) {
 	  cd.relative_offset_local_header = -1;
-	  CALL(zip64_header, write, (char *)&header_offset->value, 
+	  CALL(zip64_header, write, (char *)&header_offset->value,
 	       sizeof(uint64_t));
 	} else {
 	  cd.relative_offset_local_header = header_offset->value;
 	};
-	
+
 	// We need to append an extended zip64 header
 	if(zip64_header->size > 4) {
 	  uint16_t *x = (uint16_t *)(zip64_header->data +2);
-	  
+
 	  // update the size of the extra field
 	  *x=zip64_header->size-4;
 	  cd.extra_field_len = zip64_header->size;
 	};
-	
+
 	// OK - write the cd header
 	CALL(fd, write, (char *)&cd, sizeof(cd));
 	CALL(fd, write, (char *)escaped_filename.dptr, escaped_filename.dsize);

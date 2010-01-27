@@ -11,7 +11,7 @@
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#define RESOLVER_CACHE_SIZE 100
+#define RESOLVER_CACHE_SIZE 10000
 
 #define TDB_HASH_SIZE 1024*128
 
@@ -27,9 +27,8 @@ int AFF4_TDB_FLAGS = TDB_DEFAULT;
 #define UNLOCK_RESOLVER  pthread_mutex_unlock(&self->mutex);
 #endif
 
-// prototypes
-static int Resolver_lock(Resolver self, AFFObject obj);
-static int Resolver_unlock(Resolver self, AFFObject obj);
+// Prototypes
+int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense);
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
@@ -1130,6 +1129,8 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
       // Can block here
       DEBUG_LOCK("Locking object %s\n", STRING_URNOF(result));
+      Resolver_lock_gen(self, URNOF(result), result->mode, F_LOCK);
+
       pthread_mutex_lock(&result->mutex);
 
       // The object is available and is not used by anyone (since we
@@ -1245,6 +1246,7 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   // We are done with the object now
   obj->thread_id = 0;
   pthread_mutex_unlock(&obj->mutex);
+  Resolver_lock_gen(self, URNOF(obj), obj->mode, F_UNLCK);
   DEBUG_LOCK("Unlocking object %s\n", STRING_URNOF(obj));
 
   UNLOCK_RESOLVER;
@@ -1371,36 +1373,6 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   };
 
   return 1;
-};
-
-static int Resolver_lock(Resolver self, AFFObject obj) {
-  int result;
-
-  LOCK_RESOLVER;
-
-  result = Resolver_lock_gen(self, URNOF(obj), obj->mode, F_LOCK);
-  UNLOCK_RESOLVER;
-  return result;
-};
-
-static int Resolver_unlock(Resolver self, AFFObject obj) {
-  int result;
-
-  LOCK_RESOLVER;
-  DEBUG_LOCK("releasing %s mode %c\n", STRING_URNOF(obj), obj->mode);
-
-  if(obj->mode == 'r') {
-    //result = CALL(self->rlocks, get, ZSTRING(urn));
-    //if(result) talloc_unlink(NULL, result);
-  } else if(obj->mode == 'w') {
-    Object result = CALL(self->write_cache, get, ZSTRING(STRING_URNOF(obj)));
-    if(result) talloc_unlink(NULL, result);
-  };
-
-  result = Resolver_lock_gen(self, URNOF(obj), obj->mode, F_ULOCK);
-  UNLOCK_RESOLVER;
-
-  return result;
 };
 
 static int Resolver_get_id_by_urn(Resolver self, RDFURN uri) {
@@ -1579,8 +1551,6 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(set_logger) = Resolver_set_logger;
      VMETHOD(flush) = Resolver_flush;
      VMETHOD(close) = Resolver_close;
-
-     VMETHOD(unlock) =  Resolver_unlock;
 } END_VIRTUAL
 
 /************************************************************

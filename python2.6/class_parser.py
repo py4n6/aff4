@@ -650,11 +650,14 @@ class StructWrapper(Wrapper):
         result = """
 PyErr_Clear();
 %(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
+%(name)s->ctx = talloc_size(NULL, 1);
 %(name)s->base = %(call)s;
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "talloc_increase_ref_count(%(name)s->base);\n" % args
+            result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
+        else:
+            result += "talloc_steal(%(name)s->ctx, %(name)s->base);\n" % args
 
         return result
 

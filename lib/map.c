@@ -55,7 +55,7 @@ static int MapValue_decode(RDFValue self, char *data, int length) {
        (RDFValue)this->target_period);
 
   CALL(oracle, resolve_value, this->urn, AFF4_SIZE,
-       (RDFValue)((FileLikeObject)self)->size);
+       (RDFValue)this->size);
 
   CALL(segment,set, this->urn->value);
   CALL(segment, add, "map");
@@ -138,9 +138,6 @@ static char *MapValue_serialise(RDFValue self) {
   };
 
   fd = CALL(volume, open_member, segment->value, 'w', ZIP_DEFLATE);
-  // Done with our volume now
-  CALL((AFFObject)volume, cache_return);
-
   if(!fd) {
     goto error;
   };
@@ -174,6 +171,8 @@ static char *MapValue_serialise(RDFValue self) {
   };
 
   CALL(fd, close);
+  // Done with our volume now
+  CALL((AFFObject)volume, cache_return);
 
   // Now store various map parameters
   if(this->image_period->value != -1) {

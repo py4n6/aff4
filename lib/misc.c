@@ -180,7 +180,7 @@ TDB_DATA tdb_data_from_string(char *string) {
   return result;
 };
 
-static void raise_python_exception() {
+void raise_python_exception() {
   RaiseError(ERuntimeError, "Debug check");
 };
 
