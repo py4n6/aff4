@@ -343,13 +343,17 @@ VIRTUAL(XSDString, RDFValue) {
    VMETHOD(set) = XSDString_set;
 } END_VIRTUAL 
 
-// Encode urn for storage
+// Encode urn for storage - we just encode the URN id of this urn and
+// resolve it back through the resolver.
 static TDB_DATA *RDFURN_encode(RDFValue self) {
   RDFURN this = (RDFURN)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
+  uint32_t *id = talloc(result, uint32_t);
 
-  result->dptr = (unsigned char *)this->value;
-  result->dsize = strlen(this->value) + 1;
+  *id = CALL(oracle, get_id_by_urn, self);
+
+  result->dptr = (unsigned char *)id;
+  result->dsize = sizeof(*id);
 
   return result;
 };
@@ -374,14 +378,19 @@ static void RDFURN_set(RDFURN self, char *string) {
 
 static int RDFURN_decode(RDFValue this, char *data, int length, RDFValue urn) {
   RDFURN self = (RDFURN)this;
-  self->value = talloc_realloc_size(self, self->value, length+1);
+  uint32_t *id = (uint32_t *)data;
 
-  memcpy(self->value, data, length);
-  self->value[length]=0;
+  if(length != sizeof(uint32_t))
+    goto error;
 
-  CALL(self->parser, parse, self->value);
+  // Ask the resolver to set ourselves based on the provided id
+  if(!CALL(oracle, get_urn_by_id, *id, self))
+    goto error;
 
   return length;
+
+ error:
+  return 0;
 };
 
 /* We serialise the string */

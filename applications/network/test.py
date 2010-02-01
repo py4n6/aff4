@@ -44,12 +44,14 @@ def Callback(mode, packet, connection):
     if mode == 'est':
         ## Now do the reverse connection
         if 'map' not in connection:
+            base = "%s-%s/%s-%s/" % (
+                ip.source_addr, ip.dest_addr,
+                tcp.source, tcp.dest)
+
             ## Create the forward stream
             forward_stream = oracle.create(pyaff4.AFF4_MAP)
             forward_stream.urn.set(volume_urn.value)
-            forward_stream.urn.add("%s-%s" % (ip.source_addr, ip.dest_addr))
-            forward_stream.urn.add("%s-%s" % (tcp.source, tcp.dest))
-            forward_stream.urn.add("forward")
+            forward_stream.urn.add(base + "forward")
 
             forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
 
@@ -66,9 +68,7 @@ def Callback(mode, packet, connection):
             ## Make the reverse map
             reverse_stream = oracle.create(pyaff4.AFF4_MAP)
             reverse_stream.urn.set(volume_urn.value)
-            reverse_stream.urn.add("%s-%s" % (ip.source_addr, ip.dest_addr))
-            reverse_stream.urn.add("%s-%s" % (tcp.source, tcp.dest))
-            reverse_stream.urn.add("reverse")
+            reverse_stream.urn.add(base + "reverse")
 
             reverse_stream.set(pyaff4.AFF4_STORED, volume_urn)
 
@@ -102,7 +102,7 @@ while 1:
         processor.process(packet)
     except StopIteration: break
 
-## This flushes the resolver which ensures all the 
+## This flushes the resolver which ensures all the streams are closed
 del processor
 
 volume = oracle.open(volume_urn, 'w')

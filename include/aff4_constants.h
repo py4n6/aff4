@@ -173,3 +173,8 @@
 #define AFF4_LOG_MESSAGE 1
 #define AFF4_LOG_WARNING 2
 
+/** Objects can be marked as dirty in a number of cases: */
+#define DIRTY_STATE_UNKNOWN 0
+#define DIRTY_STATE_NEED_TO_CLOSE 1
+#define DIRTY_STATE_ALREADY_LOADED 2
+

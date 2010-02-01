@@ -9,6 +9,8 @@ import fnmatch, time
 import subprocess
 import readline
 
+time.sleep(1)
+
 ## Set more sane completer delimiters
 readline.set_completer_delims(' \t\n`!@#$^&*()=+[{]}\\|;:\'",<>?')
 
@@ -135,8 +137,13 @@ class Inspector(cmd.Cmd):
                         s = s[len(self.CWD):]
 
                     path = s.split("/")[0]
+                    if path == s:
+                        decoration = colors['blue']
+                    else:
+                        decoration = colors['end']
+
                     if path not in result:
-                        print path
+                        print "%s%s%s" % (decoration, path, colors['end'])
                         result.append(path)
 
     def do_less(self, line):

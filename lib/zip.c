@@ -460,12 +460,28 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
   // This check makes sure the volume does not already exist. We first
   // see if there is a ZipFile stored on the fd_urn, and then if that
-  // ZipFile is dirty. If both conditions are true, we assume that
-  // volume is ok, and dont load it.
+  // ZipFile is dirty. If we do not know the volume's dirty state we
+  // just try to load it.
   if(CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self)) &&
      CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-          (RDFValue)self->_didModify) && self->_didModify) {
-    goto exit;
+          (RDFValue)self->_didModify)) {
+    switch(self->_didModify->value) {
+      // If we already loaded this volume - no need to reload it (we
+      // assume its state could not change without the resolver
+      // knowing about it).
+    case DIRTY_STATE_ALREADY_LOADED:
+
+      // If we modified the volume by writing on it - its actually not
+      // a valid zip volume at the moment - we need to close it (and
+      // put a central directory on the end) first, so we can not load
+      // it either.
+    case DIRTY_STATE_NEED_TO_CLOSE:
+      goto exit;
+
+    default:
+      // Any other state we can keep going
+      break;
+    };
   };
 
   // Is there a file we need to read?
@@ -534,7 +550,17 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     // why we use set here...
     CALL(oracle, set_value, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
 	 (RDFValue)URNOF(self));
-    
+
+    /*
+      This mark the volume as already loaded. We are almost there -
+      just need to parse the RDF file now. This prevents recursive
+      loads which might happen if parsing the RDF file opens members in
+      this volume as well:
+    */
+    self->_didModify->value  = DIRTY_STATE_ALREADY_LOADED;
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, 
+         (RDFValue)self->_didModify);
+
     // Find the CD
     if(!find_cd(self, fd)) 
       goto error_reason;
@@ -745,9 +771,10 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     epoch_time = time(NULL);
     now = localtime(&epoch_time);
 
-    self->directory_offset->value = 1;
-    // Indicate that the file is dirty - This means we will be writing
-    // a new CD on it
+    /* Indicate that the file is dirty - This means we will need to
+       write a new CD on it
+    */
+    self->directory_offset->value = DIRTY_STATE_NEED_TO_CLOSE;
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
 	 (RDFValue)self->directory_offset);
 
@@ -891,7 +918,7 @@ static int dump_volume_properties(ZipFile this) {
   iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
   while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
     if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_DIRTY,
-            (RDFValue)dirty) && dirty->value) {
+            (RDFValue)dirty) && dirty->value == DIRTY_STATE_NEED_TO_CLOSE) {
       RaiseError(ERuntimeError, "URI %s not closed while closing volume",
                  urn->value);
       goto error;
@@ -928,7 +955,8 @@ static int ZipFile_close(AFF4Volume this) {
 
   // If we are dirty we need to dump the CD and serialise the RDF
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-	  (RDFValue)self->_didModify) && self->_didModify) {
+	  (RDFValue)self->_didModify) &&
+     self->_didModify->value == DIRTY_STATE_NEED_TO_CLOSE) {
     struct EndCentralDirectory end;
     FileLikeObject fd;
 
@@ -1092,8 +1120,8 @@ static int ZipFile_close(AFF4Volume this) {
     CALL(fd, write, (char *)&end, sizeof(end));
     CALL(fd, write, (char *)URNOF(self)->value, end.comment_len);
 
-    // We are not dirty any more:
-    self->_didModify->value = 0;
+    // We are not dirty any more - but the resolver is up to date:
+    self->_didModify->value = DIRTY_STATE_ALREADY_LOADED;
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
          (RDFValue)self->_didModify);
 
@@ -1191,7 +1219,8 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   // Make ourselves as dirty until we complete the writing
   self->dirty = new_XSDInteger(self);
   if(mode == 'w') {
-    self->dirty->value = 1;
+    // Make sure that we are marked as ready to be closed
+    self->dirty->value = DIRTY_STATE_NEED_TO_CLOSE;
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)self->dirty);
   };
 
@@ -1422,7 +1451,8 @@ static int ZipFileStream_close(FileLikeObject self) {
 
   // Make sure the volume we are writing on is actually dirty:
   if(CALL(oracle, resolve_value, this->container_urn, AFF4_VOLATILE_DIRTY,
-          (RDFValue)this->dirty) && this->dirty->value == 0) {
+          (RDFValue)this->dirty) &&
+     this->dirty->value != DIRTY_STATE_NEED_TO_CLOSE) {
     RaiseError(ERuntimeError, "Trying to write segment on a closed volume!!");
     goto error;
   };
@@ -1506,8 +1536,9 @@ static int ZipFileStream_close(FileLikeObject self) {
   };
 
   // We are no longer dirty
-  this->dirty->value = 0;
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+  this->dirty->value = DIRTY_STATE_ALREADY_LOADED;
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+       (RDFValue)this->dirty);
 
   // Make sure the lock is removed from the underlying storage
   // file. Its ok for other threads to write new segments now:

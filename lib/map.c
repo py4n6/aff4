@@ -92,7 +92,7 @@ static int MapValue_decode(RDFValue self, char *data, int length, RDFValue urn) 
 };
 
 static int MapValue_parse(RDFValue self, char *serialised, RDFValue urn) {
-  return MapValue_decode(self, serialised, 0, urn);
+  return CALL(self, decode, ZSTRING(serialised), urn);
 };
 
 static int compare_points(const void *X, const void *Y) {
@@ -624,11 +624,12 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     if(mode=='w') {
       XSDDatetime time = new_XSDDateTime(this);
 
-      this->dirty->value = 1;
+      this->dirty->value = DIRTY_STATE_NEED_TO_CLOSE;
       CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time);
       CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
       // Make sure that our containing volume becomes dirty so we get
-      // written to disk.
+      // written to disk - note that we may not write any segments for
+      // a map at all, so we need to explicitely make our volume dirty.
       CALL(oracle, set_value, this->stored, AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
 
       // Make a new map object
@@ -696,9 +697,11 @@ static int MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
 
   // We want the storage volume to be dirty while we write ourselves
-  // into it:
+  // into it - this is a sanity check which could happen if the user
+  // closed the containing volume before they closed the map:
   if(CALL(oracle, resolve_value, this->stored, AFF4_VOLATILE_DIRTY,
-          (RDFValue)this->dirty) && this->dirty->value == 0) {
+          (RDFValue)this->dirty) &&
+     this->dirty->value != DIRTY_STATE_NEED_TO_CLOSE) {
     RaiseError(ERuntimeError, "Storage volume is closed with closing map %s",
                STRING_URNOF(self));
     goto error;
@@ -730,8 +733,9 @@ static int MapDriver_close(FileLikeObject self) {
   CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map);
 
   // We are not dirty any more:
-  this->dirty->value = 0;
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+  this->dirty->value = DIRTY_STATE_ALREADY_LOADED;
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+       (RDFValue)this->dirty);
 
   // Done
   talloc_free(self);
