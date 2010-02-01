@@ -50,7 +50,7 @@ def Callback(mode, packet, connection):
             forward_stream.urn.add("%s-%s" % (ip.source_addr, ip.dest_addr))
             forward_stream.urn.add("%s-%s" % (tcp.source, tcp.dest))
             forward_stream.urn.add("forward")
-            forward_stream.set_data_type(pyaff4.AFF4_MAP_BINARY)
+            forward_stream.set_data_type(pyaff4.AFF4_MAP_INLINE)
 
             forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
 

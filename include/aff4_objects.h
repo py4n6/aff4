@@ -172,6 +172,10 @@ END_CLASS
 CLASS(MapValueBinary, MapValue)
 END_CLASS
 
+// Sometimes its quicker to just serialise the map inline
+CLASS(MapValueInline, MapValue)
+END_CLASS
+
 CLASS(MapDriver, FileLikeObject)
      MapValue map;
 
@@ -180,6 +184,10 @@ CLASS(MapDriver, FileLikeObject)
 
      RDFURN target_urn;
      XSDInteger dirty;
+
+     // This flag indicates if we should automatically set the most
+     // optimal map implementation
+     int custom_map;
 
   // Sets the data type of the map object
      void METHOD(MapDriver, set_data_type, char *type);

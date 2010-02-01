@@ -40,12 +40,12 @@ static TDB_DATA *MapValue_encode(RDFValue self) {
   return NULL;
 };
 
-static int MapValue_decode(RDFValue self, char *data, int length) {
+static int MapValue_decode(RDFValue self, char *data, int length, RDFValue urn) {
   MapValue this = (MapValue)self;
   FileLikeObject fd;
   RDFURN segment = new_RDFURN(self);
 
-  CALL(this->urn, set, data);
+  CALL(this->urn, set, ((RDFURN)urn)->value);
 
   // Load some parameters
   CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
@@ -91,8 +91,8 @@ static int MapValue_decode(RDFValue self, char *data, int length) {
   return 0;
 };
 
-static int MapValue_parse(RDFValue self, char *serialised) {
-  return MapValue_decode(self, serialised, 0);
+static int MapValue_parse(RDFValue self, char *serialised, RDFValue urn) {
+  return MapValue_decode(self, serialised, 0, urn);
 };
 
 static int compare_points(const void *X, const void *Y) {
@@ -184,7 +184,7 @@ static char *MapValue_serialise(RDFValue self) {
   CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
 
  exit:
-  return this->urn->value;
+  return talloc_strdup(self, "");
 
  error:
   if(fd)
@@ -344,14 +344,14 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
 } END_VIRTUAL
 
-static int MapValueBinary_decode(RDFValue self, char *data, int length) {
+static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue urn) {
   MapValue this = (MapValue)self;
   FileLikeObject fd;
   void *ctx = talloc_size(NULL, 1);
   RDFURN segment = new_RDFURN(ctx);
   XSDInteger urn_count = new_XSDInteger(ctx);
 
-  CALL(this->urn, set, data);
+  CALL(this->urn, set, ((RDFURN)urn)->value);
 
   // Load some parameters
   CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
@@ -373,7 +373,8 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length) {
   CALL(segment, add, "idx");
 
   fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
-  if(!fd) goto error;
+  if(!fd) goto exit;
+
   else {
     char *map = CALL(fd,get_data);
     int i;
@@ -385,7 +386,7 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length) {
       CALL(this->targets[i], set, x);
 
       // Skip to the next null termination
-      while(x-map < fd->size && *x) x++;
+      while(x-map < fd->size->value && *x) x++;
       x++;
     };
   };
@@ -398,18 +399,16 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length) {
 
   // Now do the map segment
   fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
-  if(!fd) goto error;
+  if(!fd) goto exit;
 
   this->number_of_points = fd->size->value / sizeof(struct map_point);
   this->points = talloc_size(self, fd->size->value);
   CALL(fd, read, (char *)this->points, fd->size->value);
   CALL(oracle, cache_return, (AFFObject)fd);
 
+ exit:
   talloc_free(segment);
   return 1;
- error:
-  talloc_free(segment);
-  return 0;
 };
 
 static char *MapValueBinary_serialise(RDFValue self) {
@@ -420,6 +419,10 @@ static char *MapValueBinary_serialise(RDFValue self) {
   int i;
   AFF4Volume volume;
   FileLikeObject fd;
+
+  // Do nothing if there are no points
+  if(this->number_of_points == 0)
+    goto exit;
 
   CALL(segment, set, this->urn->value);
   CALL(segment, add, "map");
@@ -456,9 +459,8 @@ static char *MapValueBinary_serialise(RDFValue self) {
   qsort(this->points, this->number_of_points, sizeof(*this->points),
 	compare_points);
 
-
   // First dump the index
-  fd = CALL(volume, open_member, index_segment->value, 'w', ZIP_STORED);
+  fd = CALL(volume, open_member, index_segment->value, 'w', ZIP_DEFLATE);
   if(!fd) {
     goto error;
   };
@@ -468,7 +470,7 @@ static char *MapValueBinary_serialise(RDFValue self) {
   CALL(fd, close);
 
   // Now the data segment
-  fd = CALL(volume, open_member, segment->value, 'w', ZIP_STORED);
+  fd = CALL(volume, open_member, segment->value, 'w', ZIP_DEFLATE);
   if(!fd) {
     goto error;
   } else {
@@ -492,7 +494,7 @@ static char *MapValueBinary_serialise(RDFValue self) {
   CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
 
  exit:
-  return this->urn->value;
+  return talloc_strdup(self, "");
 
  error:
   if(fd)
@@ -506,6 +508,93 @@ VIRTUAL(MapValueBinary, MapValue) {
 
   VMETHOD_BASE(RDFValue, serialise) = MapValueBinary_serialise;
   VMETHOD_BASE(RDFValue, decode) = MapValueBinary_decode;
+} END_VIRTUAL
+
+static char *MapValueInline_serialise(RDFValue self) {
+  MapValue this = (MapValue)self;
+  int i;
+  char *result = talloc_size(self, 1);
+
+  // Now save the map to the segment
+  // sort the array
+  qsort(this->points, this->number_of_points, sizeof(*this->points),
+	compare_points);
+
+  for(i=0; i < this->number_of_points; i++) {
+    struct map_point *point = &this->points[i];
+
+    // See if we can reduce adjacent points
+    // Note that due to the cache we can guarantee that if the
+    // target_urn pointers are different, they are in fact different
+    // URNs.
+    if(i!=0 && i!=this->number_of_points &&
+       point->target_index == this->points[i-1].target_index) {
+      struct map_point *previous = &this->points[i-1];
+      uint64_t prediction = point->image_offset - previous->image_offset + 
+	previous->target_offset;
+
+      // Dont write this point if its linearly related to previous point.
+      if(prediction == point->target_offset) continue;
+    };
+
+    result = talloc_asprintf_append(result, "%lld,%lld,%s|", point->image_offset,
+	     point->target_offset, this->targets[point->target_index]->value);
+  };
+
+  // Now store various map parameters
+  if(this->image_period->value != -1) {
+    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period);
+    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
+  };
+
+  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
+
+  return result;
+};
+
+static int MapValueInline_decode(RDFValue self, char *data, int length, RDFValue urn) {
+  MapValue this = (MapValue)self;
+
+  CALL(this->urn, set, ((RDFURN)urn)->value);
+
+  // Load some parameters
+  CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
+       (RDFValue)this->image_period);
+
+  CALL(oracle, resolve_value, this->urn, AFF4_TARGET_PERIOD,
+       (RDFValue)this->target_period);
+
+  CALL(oracle, resolve_value, this->urn, AFF4_SIZE,
+       (RDFValue)this->size);
+
+  {
+    char *map = data;
+    char *x=map, *y;
+    struct map_point point;
+    char target[1024];
+
+    while(strlen(x)>0) {
+      // Look for the end of line and null terminate it:
+      y= x + strcspn(x, "|");
+      *y=0;
+      if(sscanf(x,"%lld,%lld,%1000s", &point.image_offset,
+                &point.target_offset, target)==3) {
+        CALL(this, add_point, point.image_offset,
+             point.target_offset, target);
+      };
+      x=y+1;
+    };
+  };
+
+  return 1;
+};
+
+
+VIRTUAL(MapValueInline, MapValue) {
+  VMETHOD_BASE(RDFValue, dataType) = AFF4_MAP_INLINE;
+
+  VMETHOD_BASE(RDFValue, serialise) = MapValueInline_serialise;
+  VMETHOD_BASE(RDFValue, decode) = MapValueInline_decode;
 } END_VIRTUAL
 
 
@@ -615,6 +704,18 @@ static int MapDriver_close(FileLikeObject self) {
     goto error;
   };
 
+  // We choose the most efficient map implementation depending on the
+  // size of the map:
+  if(!this->custom_map) {
+    if(this->map->number_of_points < 2) {
+      ((RDFValue)this->map)->serialise = MapValueInline_serialise;
+    } else if(this->map->number_of_points > 10) {
+      ((RDFValue)this->map)->serialise  = MapValueBinary_serialise;
+    } else {
+      ((RDFValue)this->map)->serialise = MapValue_serialise;
+    }
+  };
+
   // Write the map to the stream:
   CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map);
 
@@ -701,6 +802,8 @@ static void MapDriver_set_data_type(MapDriver self, char *type) {
   if(tmp) {
     self->map = tmp;
   };
+
+  self->custom_map = 1;
 };
 
 VIRTUAL(MapDriver, FileLikeObject) {
@@ -721,8 +824,10 @@ void mapdriver_init() {
   INIT_CLASS(MapDriver);
   INIT_CLASS(MapValue);
   INIT_CLASS(MapValueBinary);
+  INIT_CLASS(MapValueInline);
 
   register_type_dispatcher(AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));
+  register_rdf_value_class((RDFValue)GETCLASS(MapValueInline));
 }

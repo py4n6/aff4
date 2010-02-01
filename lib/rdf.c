@@ -235,7 +235,7 @@ static void XSDInteger_set(XSDInteger self, uint64_t value) {
   return;
 };
 
-static int XSDInteger_decode(RDFValue this, char *data, int length) {
+static int XSDInteger_decode(RDFValue this, char *data, int length, RDFValue urn) {
   XSDInteger self = (XSDInteger)this;
 
   self->value = 0;
@@ -256,7 +256,7 @@ static char *XSDInteger_serialise(RDFValue self) {
   return this->serialised;
 };
 
-static int XSDInteger_parse(RDFValue self, char *serialised) {
+static int XSDInteger_parse(RDFValue self, char *serialised, RDFValue urn) {
   XSDInteger this = (XSDInteger)self;
 
   this->value = strtoll(serialised, NULL, 0);
@@ -300,7 +300,7 @@ static void XSDString_set(XSDString self, char *string, int length) {
   return;
 };
 
-static int XSDString_decode(RDFValue this, char *data, int length) {
+static int XSDString_decode(RDFValue this, char *data, int length, RDFValue urn) {
   XSDString self = (XSDString)this;
 
   self->value = talloc_realloc_size(self, self->value, length + 1);
@@ -322,7 +322,7 @@ static char *XSDString_serialise(RDFValue self) {
   return this->value;
 };
 
-static int XSDString_parse(RDFValue self, char *serialise) {
+static int XSDString_parse(RDFValue self, char *serialise, RDFValue urn) {
   XSDString this = (XSDString)self;
 
   this->value = talloc_strdup(self, serialise);
@@ -372,7 +372,7 @@ static void RDFURN_set(RDFURN self, char *string) {
   return;
 };
 
-static int RDFURN_decode(RDFValue this, char *data, int length) {
+static int RDFURN_decode(RDFValue this, char *data, int length, RDFValue urn) {
   RDFURN self = (RDFURN)this;
   self->value = talloc_realloc_size(self, self->value, length+1);
 
@@ -400,7 +400,7 @@ static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
   return result;
 };
 
-static int RDFURN_parse(RDFValue self, char *serialised) {
+static int RDFURN_parse(RDFValue self, char *serialised, RDFValue urn) {
   RDFURN_set((RDFURN)self, serialised);
   return 1;
 };
@@ -490,7 +490,7 @@ static TDB_DATA *XSDDatetime_encode(RDFValue self) {
   return result;
 };
 
-static int XSDDatetime_decode(RDFValue self, char *data, int length) {
+static int XSDDatetime_decode(RDFValue self, char *data, int length, RDFValue urn) {
   XSDDatetime this = (XSDDatetime)self;
 
   memcpy(&this->value, data, sizeof(this->value));
@@ -526,7 +526,7 @@ static char *XSDDatetime_serialise(RDFValue self) {
   return NULL;
 };
 
-static int XSDDatetime_parse(RDFValue self, char *serialised) {
+static int XSDDatetime_parse(RDFValue self, char *serialised, RDFValue urn) {
   XSDDatetime this = (XSDDatetime)self;
   struct tm time;
 
@@ -650,7 +650,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
 
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
   if(result) {
-    CALL(result, parse, value_str);
+    CALL(result, parse, value_str, (RDFValue)self->urn);
     CALL(oracle, add_value, self->urn, attribute, (RDFValue)result);
     talloc_free(result);
   };
@@ -925,7 +925,7 @@ RDFValue rdfvalue_from_int(void *ctx, uint64_t value) {
   XSDInteger result = new_XSDInteger(ctx);
 
   result->set(result, value);
-  return result;
+  return (RDFValue)result;
 };
 
 RDFValue rdfvalue_from_urn(void *ctx, char *value) {
@@ -933,7 +933,7 @@ RDFValue rdfvalue_from_urn(void *ctx, char *value) {
   if(!value) return NULL;
   result->set(result, value);
 
-  return result;
+  return (RDFValue)result;
 };
 
 RDFValue rdfvalue_from_string(void *ctx, char *value) {

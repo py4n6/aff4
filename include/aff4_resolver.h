@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Mon Feb  1 11:44:36 2010 mic
+** Last update Mon Feb  1 15:24:54 2010 mic
 */
 
 #ifndef   	AFF4_RESOLVER_H_
@@ -32,6 +32,7 @@ BOUND typedef struct RESOLVER_ITER {
   // This is used to ensure we do not iterate over multiple values
   // which are the same
   Cache cache;
+  RDFURN urn;
 } RESOLVER_ITER;
 
 /** The resolver is at the heart of the AFF4 specification - it is

@@ -10,6 +10,8 @@
 #include "aff4_utils.h"
 #include <sys/time.h>
 
+struct RDFURN;
+
 /**** A class used to parse URNs */
 CLASS(URLParse, Object)
       char *scheme;
@@ -51,7 +53,7 @@ CLASS(RDFValue, Object)
 	 instance. Return 1 if parsing is successful, 0 if error
 	 occured. 
       */
-      int METHOD(RDFValue, parse, char *serialised_form);
+      int METHOD(RDFValue, parse, char *serialised_form, RDFValue urn);
 
       /* This method is called to serialise this object into the
 	 TDB_DATA struct for storage in the TDB data store. The new
@@ -62,7 +64,7 @@ CLASS(RDFValue, Object)
 
       // This method is used to decode this object from the
       // data_store. The fd is seeked to the start of this record.
-      int METHOD(RDFValue, decode, char *data, int length);
+      int METHOD(RDFValue, decode, char *data, int length, RDFValue urn);
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be

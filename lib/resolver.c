@@ -742,7 +742,7 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
     if(read(self->data_store_fd, buff, i.length) != i.length)
       goto not_found;
 
-    if(!CALL(result, decode, buff, i.length)) {
+    if(!CALL(result, decode, buff, i.length, (RDFValue)urn_str)) {
       RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
 		 urn_str, attribute_str);
       goto not_found;
@@ -950,6 +950,8 @@ static RESOLVER_ITER *Resolver_get_iter(Resolver self,
   tdb_urn = tdb_data_from_string(urn->value);
 
   result = _Resolver_get_iter(self, ctx, tdb_urn, attribute);
+  result->urn = urn;
+  talloc_reference(result, urn);
 
   UNLOCK_RESOLVER;
   return result;
@@ -994,7 +996,7 @@ static int Resolver_iter_next(Resolver self,
         // is stored.
         CALL(iter->cache, put, key, key_len, NULL);
 
-        res_code = CALL(result, decode, key, iter->head.length);
+        res_code = CALL(result, decode, key, iter->head.length, (RDFValue)iter->urn);
       } else {
         // We have seen this before:
         talloc_free(key);
