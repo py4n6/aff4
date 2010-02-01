@@ -1,0 +1,10 @@
+import SconsUtils.utils as utils
+
+Import("env")
+
+SOURCES = Split("""pcap.c network.c tcp.c packet.c struct.c""")
+objs = [ env.SharedObject(s, CPPFLAGS=env.python_cppflags) for s in SOURCES ]
+
+env.PythonModule("pypcap", ["pypcap.c" ] + objs, LIBS="aff4")
+env.PythonModule("pypacket", ["pypacket.c" ] + objs, LIBS="aff4")
+env.PythonModule("reassembler", ["reassembler.c" ] + objs, LIBS="aff4")

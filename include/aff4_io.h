@@ -5,7 +5,7 @@
 ** Login   <mic@laptop>
 ** 
 ** Started on  Thu Nov 12 20:38:45 2009 mic
-** Last update Mon Jan 25 23:06:21 2010 mic
+** Last update Mon Feb  1 11:26:45 2010 mic
 */
 
 #ifndef   	AFF4_IO_H_
@@ -116,7 +116,7 @@ CLASS(FileLikeObject, AFFObject)
 
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this (it gets free'd).
-     DESTRUCTOR void METHOD(FileLikeObject, close);
+     DESTRUCTOR int METHOD(FileLikeObject, close);
 END_CLASS
 
 // This file like object is backed by a real disk file:
@@ -140,7 +140,7 @@ CLASS(AFF4Volume, AFFObject)
 
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
-     DESTRUCTOR void METHOD(AFF4Volume, close);
+     DESTRUCTOR int METHOD(AFF4Volume, close);
 
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).

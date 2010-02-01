@@ -139,7 +139,6 @@ static void FileLikeObject_delete(RDFURN del_urn) {
   // Remove all objects contained in this file
   RESOLVER_ITER *iter = CALL(oracle, get_iter, NULL, del_urn, AFF4_VOLATILE_CONTAINS);
   RDFURN urn = new_RDFURN(iter);
-  XSDString type = new_XSDString(iter);
 
   DEBUG_OBJECT("Invalidating URN %s\n", del_urn->value);
 
@@ -201,12 +200,14 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
   return self->readptr;
 };
 
-static void FileLikeObject_close(FileLikeObject self) {
+static int FileLikeObject_close(FileLikeObject self) {
   // Update the size
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size);
 
   CALL(oracle, cache_return, (AFFObject)self);
+
+  return 1;
 };
 
 static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
@@ -695,12 +696,14 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   RaiseError(EInvalidParameter, "%s is not a zip file", URNOF(fd));
 
  error:
+  PUSH_ERROR_STATE;
   // Restore the URN to its former self since we failed to load it
   CALL(URNOF(self), set, ctx);
 
   if(fd) {
     CALL(oracle, cache_return, (AFFObject)fd);
   };
+  POP_ERROR_STATE;
 
   talloc_free(ctx);
   return 0;
@@ -831,7 +834,10 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   return result;
 
  error:
+  PUSH_ERROR_STATE;
   if(fd) CALL((AFFObject)fd, cache_return);
+  POP_ERROR_STATE;
+
   talloc_free(ctx);
   return NULL;
 };
@@ -864,7 +870,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 };
 
 // This function dumps all the URNs contained within this volume
-static void dump_volume_properties(ZipFile this) {
+static int dump_volume_properties(ZipFile this) {
   RESOLVER_ITER *iter;
   AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
@@ -872,6 +878,7 @@ static void dump_volume_properties(ZipFile this) {
   RDFSerializer serializer;
   RDFURN urn = new_RDFURN(NULL);
   XSDString type = new_XSDString(urn);
+  XSDInteger dirty = new_XSDInteger(urn);
 
   if(!fd) goto exit;
 
@@ -883,6 +890,12 @@ static void dump_volume_properties(ZipFile this) {
 
   iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
   while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
+    if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_DIRTY,
+            (RDFValue)dirty) && dirty->value) {
+      RaiseError(ERuntimeError, "URI %s not closed while closing volume",
+                 urn->value);
+      goto error;
+    };
 
     // Only serialise URNs which are not segments
     if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) &&
@@ -892,21 +905,26 @@ static void dump_volume_properties(ZipFile this) {
   };
 
   CALL(serializer, close);
-  CALL((FileLikeObject)fd, close);
 
  exit:
+  if(fd) CALL((FileLikeObject)fd, close);
   talloc_free(urn);
+  return 1;
+
+ error:
+  PUSH_ERROR_STATE;
+  if(fd) CALL((FileLikeObject)fd, close);
+  POP_ERROR_STATE;
+
+  talloc_free(urn);
+  return 0;
 };
 
 
-static void ZipFile_close(AFF4Volume this) {
+static int ZipFile_close(AFF4Volume this) {
   ZipFile self = (ZipFile)this;
   // Dump the current CD.
   int k=0;
-
-  if(strstr(STRING_URNOF(self),"/38473-80/")) {
-    printf("oops\n");
-  };
 
   // If we are dirty we need to dump the CD and serialise the RDF
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
@@ -915,7 +933,7 @@ static void ZipFile_close(AFF4Volume this) {
     FileLikeObject fd;
 
     // Get where we are stored
-    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED, 
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
 	     (RDFValue)self->storage_urn)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", 
                  URNOF(self)->value);
@@ -923,7 +941,8 @@ static void ZipFile_close(AFF4Volume this) {
     };
 
     // Write a properties file if needed
-    dump_volume_properties(self);
+    if(!dump_volume_properties(self))
+      goto error;
 
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
     if(!fd) goto exit;
@@ -1064,7 +1083,7 @@ static void ZipFile_close(AFF4Volume this) {
     } else {
       end.offset_of_cd = self->directory_offset->value;
     };
-    
+
     end.total_entries_in_cd_on_disk = k;
     end.total_entries_in_cd = k;
     end.comment_len = strlen(URNOF(self)->value)+1;
@@ -1073,12 +1092,25 @@ static void ZipFile_close(AFF4Volume this) {
     CALL(fd, write, (char *)&end, sizeof(end));
     CALL(fd, write, (char *)URNOF(self)->value, end.comment_len);
 
+    // We are not dirty any more:
+    self->_didModify->value = 0;
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+         (RDFValue)self->_didModify);
+
     // Close the fd
     CALL(fd, close);
   };
 
  exit:
   CALL(oracle, cache_return, (AFFObject)self);
+  return 1;
+
+ error:
+  PUSH_ERROR_STATE;
+  CALL(oracle, cache_return, (AFFObject)self);
+  POP_ERROR_STATE;
+
+  return 0;
 };
 
 /** This is just a convenience function - real simple now */
@@ -1156,8 +1188,16 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   self->compress_size = new_XSDInteger(self);
   self->compression = new_XSDInteger(self);
 
+  // Make ourselves as dirty until we complete the writing
+  self->dirty = new_XSDInteger(self);
+  if(mode == 'w') {
+    self->dirty->value = 1;
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)self->dirty);
+  };
+
   self->file_urn = CALL(file_urn, copy, self);
   self->container_urn = CALL(container_urn, copy, self);
+
 
   EVP_DigestInit(&self->digest, EVP_sha256());
   //EVP_DigestInit(&self->digest, EVP_md5());
@@ -1268,7 +1308,9 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   return self;
 
  error:
+  PUSH_ERROR_STATE;
   if(fd) CALL((AFFObject)fd, cache_return);
+  POP_ERROR_STATE;
 
   talloc_free(self);
   return NULL;
@@ -1367,7 +1409,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
   return length;
 };
 
-static void ZipFileStream_close(FileLikeObject self) {
+static int ZipFileStream_close(FileLikeObject self) {
   ZipFileStream this = (ZipFileStream)self;
   int magic = 0x08074b50;
   void *ctx = talloc_size(NULL, 1);
@@ -1375,7 +1417,14 @@ static void ZipFileStream_close(FileLikeObject self) {
   DEBUG_OBJECT("ZipFileStream: closed %s\n", STRING_URNOF(self));
   if(((AFFObject)self)->mode != 'w') {
     talloc_unlink(NULL, self);
-    return;
+    goto exit;
+  };
+
+  // Make sure the volume we are writing on is actually dirty:
+  if(CALL(oracle, resolve_value, this->container_urn, AFF4_VOLATILE_DIRTY,
+          (RDFValue)this->dirty) && this->dirty->value == 0) {
+    RaiseError(ERuntimeError, "Trying to write segment on a closed volume!!");
+    goto error;
   };
 
   if(this->compression->value == ZIP_DEFLATE) {
@@ -1456,12 +1505,22 @@ static void ZipFileStream_close(FileLikeObject self) {
     };
   };
 
+  // We are no longer dirty
+  this->dirty->value = 0;
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+
   // Make sure the lock is removed from the underlying storage
   // file. Its ok for other threads to write new segments now:
   CALL((AFFObject)this->file_fd, cache_return);
 
-  talloc_free(ctx);
   SUPER(FileLikeObject, FileLikeObject, close);
+
+ exit:
+  talloc_free(ctx);
+  return 1;
+ error:
+  talloc_free(ctx);
+  return 0;
 };
 
 /** We only support opening ZipFileStreams for reading through

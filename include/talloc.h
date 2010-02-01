@@ -83,7 +83,9 @@ typedef void TALLOC_CTX;
 #define talloc_steal(ctx, ptr) (_TALLOC_TYPEOF(ptr))_talloc_steal_loc((ctx),(ptr), __location__)
 #endif
 
-#define talloc_reference(ctx, ptr) (_TALLOC_TYPEOF(ptr))_talloc_reference_loc((ctx),(ptr), __location__)
+//#define talloc_reference(ctx, ptr) (_TALLOC_TYPEOF(ptr))_talloc_reference_loc((ctx),(ptr), __location__)
+
+#define talloc_reference(ctx, ptr) _talloc_reference_loc((ctx),(ptr), __location__)
 #define talloc_move(ctx, ptr) (_TALLOC_TYPEOF(*(ptr)))_talloc_move((ctx),(void *)(ptr))
 
 /* useful macros for creating type checked pointers */

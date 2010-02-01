@@ -1219,7 +1219,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     to it after that.
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
-  char *urn = URNOF(obj)->value;
   Cache cache = self->write_cache;
   Object iter;
 
@@ -1232,7 +1231,7 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   iter = CALL(cache, iter, ZSTRING(STRING_URNOF(obj)));
   while(iter) {
     Object result = CALL(cache, next, &iter);
-    if(result == obj) {
+    if(result == (Object)obj) {
       // Its already in the cache
       break;
     };
@@ -1240,7 +1239,7 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
 
   // The item is not in the cache - we add it then
   if(!iter) {
-    CALL(cache, put,  ZSTRING(STRING_URNOF(obj)), obj);
+    CALL(cache, put,  (char *)ZSTRING(STRING_URNOF(obj)), (Object)obj);
   };
 
   // We are done with the object now
@@ -1475,7 +1474,6 @@ static void Resolver_flush(Resolver self) {
 
 static void Resolver_cache_expire(Resolver self, Object obj) {
   /** Remove the object from the cache */
-  Object tmp;
   TDB_DATA uri = tdb_data_from_string(STRING_URNOF(obj));
 
   LOCK_RESOLVER;

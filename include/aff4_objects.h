@@ -166,7 +166,10 @@ CLASS(MapValue, RDFValue)
               OUT uint64_t *target_offset_at_point,                     \
               OUT uint64_t *available_to_read,                          \
               RDFURN urn);
+END_CLASS
 
+// Some alternative implementations
+CLASS(MapValueBinary, MapValue)
 END_CLASS
 
 CLASS(MapDriver, FileLikeObject)
@@ -176,6 +179,10 @@ CLASS(MapDriver, FileLikeObject)
      RDFURN stored;
 
      RDFURN target_urn;
+     XSDInteger dirty;
+
+  // Sets the data type of the map object
+     void METHOD(MapDriver, set_data_type, char *type);
 
      // Deletes the point at the specified file offset
      void METHOD(MapDriver, del, uint64_t target_pos);
@@ -401,6 +408,7 @@ CLASS(ZipFileStream, FileLikeObject)
      XSDInteger crc32;
      XSDInteger compress_size;
      XSDInteger compression;
+     XSDInteger dirty;
 
      // For now we just decompress the entire segment into memory if
      // required

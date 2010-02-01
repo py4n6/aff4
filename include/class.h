@@ -301,8 +301,13 @@ extern "C" {
     virt_class is Bar because thats where method was defined.
 *************************************************************/
 
+// The following only initialises the class if the __super__ element
+// is NULL. This is fast as it wont call the initaliser unnecessaily
 #define CONSTRUCT(class, virt_class, constructor, context, ... )        \
-  (class)( class ## _init((Object)&__ ## class),                        \
+  (class)( __## class.__super__ == NULL ?                               \
+           class ## _init((Object)&__ ## class) : 0,                    \
+           __## virt_class.__super__ == NULL ?                          \
+           virt_class ## _init((Object)&__ ## virt_class): 0,           \
              ((virt_class)(&__ ## class))->constructor(                 \
                        (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
@@ -465,6 +470,12 @@ expect the proxied class, and internal C calls will be converted to
 python method calls on the proxied object.
   */
 #define PROXY_CLASS(name)
+
+
+  // These macros are used when we need to do something which might
+  // change the error state on the error path of a function.
+#define PUSH_ERROR_STATE { enum _error_type tmp = _global_error;
+#define POP_ERROR_STATE _global_error = tmp;};
 
 #endif
 #ifdef __cplusplus

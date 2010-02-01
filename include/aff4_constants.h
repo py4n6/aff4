@@ -14,6 +14,7 @@
 #define AFF4_MAP_TEXT PREDICATE_NAMESPACE "map_text"
 #define AFF4_MAP_BINARY PREDICATE_NAMESPACE "map_binary"
 #define AFF4_MAP_INLINE PREDICATE_NAMESPACE "map_inline"
+#define AFF4_MAP_TARGET_COUNT PREDICATE_NAMESPACE "map_points"
 
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"

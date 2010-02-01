@@ -237,6 +237,9 @@ import SCons.Environment
 class ExtendedEnvironment(SCons.Environment.Environment):
     """ Implementation from Richard Levitte email to
     org.tigris.scons.dev dated Jan 26, 2006 7:05:10 am."""
+    python_cppflags = distutils.util.split_quoted(
+        "-I"+sysconfig.get_python_inc())
+
     def PythonModule(self, libname, lib_objs=[], **kwargs):
         """ This builds a python module which is almost a library but
         is sometimes named differently.

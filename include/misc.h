@@ -67,6 +67,12 @@ extern int AFF4_DEBUG_LEVEL;
 #define DEBUG_OBJECT(x, ...)
 #endif
 
+#ifdef AFF4_DEBUG_GEN
+#define DEBUG_GEN(x, ...) _DEBUG(x, ## __VA_ARGS__)
+#else
+#define DEBUG_GEN(x, ...)
+#endif
+
 #define TDB_DATA_STRING(x)                      \
   (char *)x.dptr, x.dsize
 
@@ -76,5 +82,8 @@ extern int AFF4_DEBUG_LEVEL;
   snprintf(log_buffer, BUFF_SIZE, msg, ## __VA_ARGS__);   \
   CALL(oracle->logger, message, level, log_buffer);                   \
   }
+
+#define True 1
+#define False 0
 
 #endif

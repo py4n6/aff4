@@ -178,8 +178,8 @@ Export("env")
 
 env.AlwaysBuild(env.Command('include/config.h', 'include/sc_config.h.in', config_h_build))
 
-SConscript(['lib/SConstruct', 'tools/SConstruct', 'python2.6/SConstruct', 
-            'tests/SConstruct'])
+SConscript(['lib/SConstruct', 'tools/SConstruct', 'python2.6/SConstruct',
+            'tests/SConstruct', 'applications/SConstruct'])
 
 # env.Package( NAME           = 'libaff4',
 #              VERSION        = '0.1.rc1',

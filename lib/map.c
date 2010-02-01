@@ -171,6 +171,7 @@ static char *MapValue_serialise(RDFValue self) {
   };
 
   CALL(fd, close);
+
   // Done with our volume now
   CALL((AFFObject)volume, cache_return);
 
@@ -343,6 +344,171 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
 } END_VIRTUAL
 
+static int MapValueBinary_decode(RDFValue self, char *data, int length) {
+  MapValue this = (MapValue)self;
+  FileLikeObject fd;
+  void *ctx = talloc_size(NULL, 1);
+  RDFURN segment = new_RDFURN(ctx);
+  XSDInteger urn_count = new_XSDInteger(ctx);
+
+  CALL(this->urn, set, data);
+
+  // Load some parameters
+  CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
+       (RDFValue)this->image_period);
+
+  CALL(oracle, resolve_value, this->urn, AFF4_TARGET_PERIOD,
+       (RDFValue)this->target_period);
+
+  CALL(oracle, resolve_value, this->urn, AFF4_SIZE,
+       (RDFValue)this->size);
+
+  CALL(oracle, resolve_value, this->urn, AFF4_MAP_TARGET_COUNT,
+       (RDFValue)urn_count);
+
+  this->number_of_urns = urn_count->value;
+
+  // Now load our contents from the stored URNs
+  CALL(segment,set, this->urn->value);
+  CALL(segment, add, "idx");
+
+  fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
+  if(!fd) goto error;
+  else {
+    char *map = CALL(fd,get_data);
+    int i;
+    char *x=map;
+
+    this->targets = talloc_array(self, RDFURN, urn_count->value);
+    for(i=0; i<urn_count->value; i++) {
+      this->targets[i] = new_RDFURN(self);
+      CALL(this->targets[i], set, x);
+
+      // Skip to the next null termination
+      while(x-map < fd->size && *x) x++;
+      x++;
+    };
+  };
+
+  CALL(oracle, cache_return, (AFFObject)fd);
+
+  // Now load our contents from the stored URNs
+  CALL(segment,set, this->urn->value);
+  CALL(segment, add, "map");
+
+  // Now do the map segment
+  fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
+  if(!fd) goto error;
+
+  this->number_of_points = fd->size->value / sizeof(struct map_point);
+  this->points = talloc_size(self, fd->size->value);
+  CALL(fd, read, (char *)this->points, fd->size->value);
+  CALL(oracle, cache_return, (AFFObject)fd);
+
+  talloc_free(segment);
+  return 1;
+ error:
+  talloc_free(segment);
+  return 0;
+};
+
+static char *MapValueBinary_serialise(RDFValue self) {
+  MapValue this = (MapValue)self;
+  RDFURN stored = new_RDFURN(self);
+  RDFURN segment = new_RDFURN(stored);
+  RDFURN index_segment = new_RDFURN(stored);
+  int i;
+  AFF4Volume volume;
+  FileLikeObject fd;
+
+  CALL(segment, set, this->urn->value);
+  CALL(segment, add, "map");
+
+  CALL(index_segment, set, this->urn->value);
+  CALL(index_segment, add, "idx");
+
+  // Check if the map segment already exists - if it does we dont
+  // bother re-saving it.
+  fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
+  if(fd) {
+    CALL((AFFObject)fd, cache_return);
+    goto exit;
+  };
+
+  // Work out where our map object is stored:
+  if(!CALL(oracle, resolve_value, this->urn, AFF4_STORED, (RDFValue)stored)) {
+    RaiseError(ERuntimeError, "No storage for map object");
+    goto error;
+  };
+
+  volume = (AFF4Volume)CALL(oracle, open, stored, 'w');
+  if(!volume) goto error;
+
+  // Is it actually a volume?
+  if(!ISSUBCLASS(volume, AFF4Volume)) {
+    RaiseError(ERuntimeError, "URN %s is not a volume!!!", STRING_URNOF(volume));
+    CALL((AFFObject)volume, cache_return);
+    goto error;
+  };
+
+  // Now save the map to the segment
+  // sort the array
+  qsort(this->points, this->number_of_points, sizeof(*this->points),
+	compare_points);
+
+
+  // First dump the index
+  fd = CALL(volume, open_member, index_segment->value, 'w', ZIP_STORED);
+  if(!fd) {
+    goto error;
+  };
+  for(i=0; i < this->number_of_urns; i++) {
+    CALL(fd, write, ZSTRING(this->targets[i]->value));
+  };
+  CALL(fd, close);
+
+  // Now the data segment
+  fd = CALL(volume, open_member, segment->value, 'w', ZIP_STORED);
+  if(!fd) {
+    goto error;
+  } else {
+    XSDInteger number_of_urns = new_XSDInteger(self);
+    number_of_urns->value = this->number_of_urns;
+    CALL(oracle, set_value, this->urn, AFF4_MAP_TARGET_COUNT, (RDFValue)number_of_urns);
+  };
+
+  CALL(fd, write, (char *)this->points, sizeof(struct map_point) * this->number_of_points);
+  CALL(fd, close);
+
+  // Done with our volume now
+  CALL((AFFObject)volume, cache_return);
+
+  // Now store various map parameters
+  if(this->image_period->value != -1) {
+    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period);
+    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
+  };
+
+  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
+
+ exit:
+  return this->urn->value;
+
+ error:
+  if(fd)
+    talloc_free(fd);
+  talloc_free(stored);
+  return NULL;
+};
+
+VIRTUAL(MapValueBinary, MapValue) {
+  VMETHOD_BASE(RDFValue, dataType) = AFF4_MAP_BINARY;
+
+  VMETHOD_BASE(RDFValue, serialise) = MapValueBinary_serialise;
+  VMETHOD_BASE(RDFValue, decode) = MapValueBinary_decode;
+} END_VIRTUAL
+
+
 /*** This is the implementation of the MapDriver */
 static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){ 
   MapDriver this = (MapDriver)self;
@@ -353,6 +519,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     this->stored = new_RDFURN(self);
     this->target_urn = new_RDFURN(self);
+    this->dirty = new_XSDInteger(self);
 
     // Check that we have a stored property
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
@@ -367,17 +534,18 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
     // Only update the timestamp if we created a new map
     if(mode=='w') {
       XSDDatetime time = new_XSDDateTime(this);
-      XSDInteger i = new_XSDInteger(time);
 
-      i->value = 1;
-
+      this->dirty->value = 1;
       CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time);
+      CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
       // Make sure that our containing volume becomes dirty so we get
       // written to disk.
-      CALL(oracle, set_value, this->stored, AFF4_VOLATILE_DIRTY, (RDFValue)i);
+      CALL(oracle, set_value, this->stored, AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
 
       // Make a new map object
-      this->map = (MapValue)CALL(oracle, new_rdfvalue, self, AFF4_MAP_TEXT);
+      if(!this->map) {
+        this->map = (MapValue)CALL(oracle, new_rdfvalue, self, AFF4_MAP_TEXT);
+      };
 
       // Make sure the map belongs to us
       CALL(this->map->urn, set, uri->value);
@@ -435,14 +603,32 @@ static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_
 };
 
 
-static void MapDriver_close(FileLikeObject self) {
+static int MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
+
+  // We want the storage volume to be dirty while we write ourselves
+  // into it:
+  if(CALL(oracle, resolve_value, this->stored, AFF4_VOLATILE_DIRTY,
+          (RDFValue)this->dirty) && this->dirty->value == 0) {
+    RaiseError(ERuntimeError, "Storage volume is closed with closing map %s",
+               STRING_URNOF(self));
+    goto error;
+  };
 
   // Write the map to the stream:
   CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map);
 
+  // We are not dirty any more:
+  this->dirty->value = 0;
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+
   // Done
   talloc_free(self);
+  return 1;
+
+ error:
+  talloc_free(self);
+  return 0;
 };
 
 // Read as much as possible and return how much was read
@@ -509,11 +695,19 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
   return i;
 };
 
+static void MapDriver_set_data_type(MapDriver self, char *type) {
+  MapValue tmp = (MapValue)CALL(oracle, new_rdfvalue, self, type);
+
+  if(tmp) {
+    self->map = tmp;
+  };
+};
 
 VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
      VMETHOD_BASE(AFFObject, dataType) = AFF4_MAP;
 
+     VMETHOD(set_data_type) = MapDriver_set_data_type;
      VMETHOD(add_point) = MapDriver_add;
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
@@ -526,7 +720,9 @@ VIRTUAL(MapDriver, FileLikeObject) {
 void mapdriver_init() {
   INIT_CLASS(MapDriver);
   INIT_CLASS(MapValue);
+  INIT_CLASS(MapValueBinary);
 
   register_type_dispatcher(AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
+  register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));
 }
