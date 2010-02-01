@@ -96,6 +96,7 @@ compileFlags = [
     '-fno-strict-aliasing',
     '-msse2',
     '-D_XOPEN_SOURCE=600',
+#    '-fvisibility=hidden',
 #    '-fomit-frame-pointer',
 #    '-flto',
     ]

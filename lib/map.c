@@ -193,8 +193,8 @@ static char *MapValue_serialise(RDFValue self) {
   return NULL;
 };
 
-void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
-                        char *target) {
+static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
+                               char *target) {
   // Do we already have this target in the cache?
   XSDInteger target_index = (XSDInteger)CALL(self->cache, borrow, ZSTRING(target));
   struct map_point new_point;
