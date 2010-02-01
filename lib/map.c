@@ -707,13 +707,23 @@ static int MapDriver_close(FileLikeObject self) {
   // We choose the most efficient map implementation depending on the
   // size of the map:
   if(!this->custom_map) {
+    RDFValue map = ((RDFValue)this->map);
+
     if(this->map->number_of_points < 2) {
-      ((RDFValue)this->map)->serialise = MapValueInline_serialise;
+      map->serialise = MapValueInline_serialise;
+      map->dataType = AFF4_MAP_INLINE;
+      map->id = ((RDFValue)&__MapValueInline)->id;
+
     } else if(this->map->number_of_points > 10) {
-      ((RDFValue)this->map)->serialise  = MapValueBinary_serialise;
+      map->serialise  = MapValueBinary_serialise;
+      map->dataType = AFF4_MAP_BINARY;
+      map->id = ((RDFValue)&__MapValueBinary)->id;
+
     } else {
-      ((RDFValue)this->map)->serialise = MapValue_serialise;
-    }
+      map->serialise = MapValue_serialise;
+      map->dataType = AFF4_MAP_TEXT;
+      map->id = ((RDFValue)&__MapValue)->id;
+    };
   };
 
   // Write the map to the stream:
