@@ -425,24 +425,18 @@ static TDB_DATA LOCK = {
 
 /* Given an int serialise into the buffer */
 static int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
-  int result = snprintf(buff, buff_len, "__%lld", i);
+  if(buff_len < 8) return 0;
 
-  return min(result, buff_len);
+  *(uint64_t *)buff = i;
+
+  return sizeof(i);
 };
 
 /** Given a buffer unserialise an int from it */
 static uint64_t tdb_to_int(TDB_DATA string) {
-  unsigned char buff[BUFF_SIZE];
-  int buff_len = min(string.dsize, BUFF_SIZE-1);
+  if(string.dsize != 8) return 0;
 
-  if(buff_len < 2) return 0;
-
-  memcpy(buff, string.dptr, buff_len);
-
-  //Make sure its null terminated
-  buff[buff_len]=0;
-
-  return strtoll((char *)buff+2, NULL, 0);
+  return *(uint64_t *)(string.dptr);
 };
 
 /** Fetches the id for the given key from the database tdb - if
@@ -664,9 +658,11 @@ static int calculate_key(Resolver self, TDB_DATA uri,
   uint32_t attribute_id = get_id(self->attribute_db, attribute, create_new);
 
   // urn or attribute not found
-  if(urn_id == 0 || attribute_id == 0) return 0;
+  if(urn_id == 0 || attribute_id == 0 || buff_len < sizeof(urn_id)*2) return 0;
 
-  return snprintf(buff, buff_len, "%d:%d", urn_id, attribute_id);
+  *(uint32_t *)buff = urn_id;
+  *(uint32_t *)(buff + sizeof(urn_id)) = attribute_id;
+  return sizeof(urn_id) + sizeof(attribute_id);
 };
 
 /** returns the list head in the data file for the uri and attribute

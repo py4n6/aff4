@@ -900,7 +900,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 static int dump_volume_properties(ZipFile this) {
   RESOLVER_ITER *iter;
   AFF4Volume self = (AFF4Volume)this;
-  FileLikeObject fd = CALL(self, open_member, "information.turtle", 'w', 
+  FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w', 
 			   ZIP_DEFLATE);
   RDFSerializer serializer;
   RDFURN urn = new_RDFURN(NULL);
@@ -917,7 +917,9 @@ static int dump_volume_properties(ZipFile this) {
 
   iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
   while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
-    if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_DIRTY,
+    // information.turtle is still open from above:
+    if(!strstr(urn->value, AFF4_INFORMATION "turtle") &&
+       CALL(oracle, resolve_value, urn, AFF4_VOLATILE_DIRTY,
             (RDFValue)dirty) && dirty->value == DIRTY_STATE_NEED_TO_CLOSE) {
       RaiseError(ERuntimeError, "URI %s not closed while closing volume",
                  urn->value);
