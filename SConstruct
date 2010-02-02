@@ -36,7 +36,7 @@ args['variables'] = vars
 
 args['CFLAGS']=''
 if ARGUMENTS.get('V') == "1":
-   args['CFLAGS'] += ' -Wall -g -O0 '
+   args['CFLAGS'] += ' -Wall -g -O0 -D__DEBUG__ '
 else:
    utils.install_colors(args)
 

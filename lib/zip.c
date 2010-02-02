@@ -898,7 +898,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 
 // This function dumps all the URNs contained within this volume
 static int dump_volume_properties(ZipFile this) {
-  RESOLVER_ITER *iter;
+  RESOLVER_ITER *iter = NULL;
   AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w', 
 			   ZIP_DEFLATE);
@@ -1181,10 +1181,10 @@ VIRTUAL(ZipFile, AFF4Volume) {
   INIT_CLASS(ZipFileStream);
 } END_VIRTUAL
 
-/** 
-    NOTE - this object must only even be obtained through
-    ZipFile.open_member. 
-    
+/**
+    NOTE - this object must only ever be obtained for writing through
+    ZipFile.open_member.
+
     If the object is opened for writing, the container_fd is retained
     and locked until this object is closed, since it is impossible to
     write to the container while this specific stream is still opened
@@ -1193,11 +1193,11 @@ VIRTUAL(ZipFile, AFF4Volume) {
     You must write to the segment as quickly as possible and close it
     immediately - do not return this to the oracle cache (since it was
     not obtained through oracle.open()).
-    
+
     If the segment is opened for reading the underlying file is not
     locked, and multiple segments may be opened for reading at the
     same time.
-    
+
     container_urn is the URN of the ZipFile container which holds this
     member, file_urn is the URN of the backing FileLikeObject which
     the zip file is written on. filename is the filename of this new
@@ -1575,7 +1575,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     this->container_urn = new_RDFURN(self);
 
-    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, 
+    if(!CALL(oracle, resolve_value, urn, AFF4_STORED,
 	     (RDFValue)this->container_urn)) {
       RaiseError(ERuntimeError, "Parent not set?");
       goto error;
@@ -1591,6 +1591,9 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     CALL(oracle, cache_return, (AFFObject)parent);
 
+    // We return the opened member instead of ourselves:
+    talloc_free(self);
+
     return result;
   };
 
@@ -1599,7 +1602,6 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
  error:
   talloc_free(self);
   return NULL;
-
 };
 
 VIRTUAL(ZipFileStream, FileLikeObject) {

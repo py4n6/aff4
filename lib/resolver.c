@@ -11,7 +11,7 @@
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#define RESOLVER_CACHE_SIZE 10000
+#define RESOLVER_CACHE_SIZE 10
 
 #define TDB_HASH_SIZE 1024*128
 
@@ -177,14 +177,8 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
   // we are about to add.
   while(self->max_cache_size > 0 && self->cache_size >= self->max_cache_size) {
     list_for_each_entry(i, &self->cache_list, cache_list) {
-      // Try to free the data object and if that succeeds we free the
-      // Cache itself. This allows the data to set a destructor which
-      // blocks this free. Sometimes its crucial to ensure that a
-      // cached object does not get expired suddenly when its not
-      // ready.
-      if(talloc_free(i) != -1) {
-        break;
-      };
+      talloc_unlink(self, i);
+      break;
     };
   };
 
@@ -209,7 +203,7 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
 
   new_cache->data = data;
   if(data)
-    talloc_reference(self, data);
+    talloc_reference(new_cache, data);
 
   hash_list_head = self->hash_table[hash];
   if(!hash_list_head) {
@@ -250,7 +244,6 @@ static Object Cache_get(Cache self, char *key, int len) {
       // owns it). This makes sure it is not freed.
       if(result) {
         talloc_reference(NULL, result);
-        talloc_unlink(self, result);
       };
 
       // Now free the container this will unlink it from the lists
@@ -993,10 +986,9 @@ static int Resolver_iter_next(Resolver self,
         CALL(iter->cache, put, key, key_len, NULL);
 
         res_code = CALL(result, decode, key, iter->head.length, (RDFValue)iter->urn);
-      } else {
-        // We have seen this before:
-        talloc_free(key);
       };
+
+      talloc_free(key);
     };
 
     // Get the next iterator
@@ -1061,6 +1053,17 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
     cache_return(). We initially create the object using the NULL
     context, and when the object is returned to the cache, it will be
     stolen again.
+
+    IMPORTANT NOTE: Memory ownership:
+
+    - create - new memory is referenced by NULL
+    - open - new memory is referenced by NULL - in addition cached
+           memory is also referenced by the cache.
+    - cache_return - if object is not in cache it gets put there
+           (taking a new reference from the cache). NULL reference is
+           removed.
+    - close - object is cache_returned (i.e. loses NULL reference and
+           gains cache reference)
 */
 static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   AFFObject result = NULL;
@@ -1190,7 +1193,11 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   // Make sure the object mode is set, name the object for talloc
   // memory reports and lock it.
-  talloc_set_name(result, "%s %s", NAMEOF(result), STRING_URNOF(result));
+#ifdef __DEBUG__
+  talloc_asprintf(result, "Opened %p %s (%s %c) %s\n", result,
+                  NAMEOF(result), self->type->value, mode,
+                  STRING_URNOF(result));
+#endif
   ((AFFObject)result)->mode = mode;
 
   result->thread_id = pthread_self();
@@ -1219,6 +1226,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   Cache cache = self->write_cache;
   Object iter;
+  int found = 0;
 
   LOCK_RESOLVER;
 
@@ -1231,12 +1239,13 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
     Object result = CALL(cache, next, &iter);
     if(result == (Object)obj) {
       // Its already in the cache
+      found = 1;
       break;
     };
   };
 
   // The item is not in the cache - we add it then
-  if(!iter) {
+  if(!found) {
     CALL(cache, put,  (char *)ZSTRING(STRING_URNOF(obj)), (Object)obj);
   };
 
@@ -1248,7 +1257,8 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
 
   UNLOCK_RESOLVER;
 
-  // We unlink it from NULL here.
+  // We unlink it from NULL here - the object is owned by NULL after
+  // the open call.
   talloc_unlink(NULL, obj);
   ClearError();
 };
@@ -1266,9 +1276,9 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
     goto error;
   };
 
-  // Newly created objects belong in the write cache
+  // Newly created objects are owned by NULL
   result = (AFFObject)CONSTRUCT_FROM_REFERENCE((class_reference),
-                                               Con, self->write_cache, NULL, mode);
+                                               Con, NULL, NULL, mode);
   if(!result) goto error;
 
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
@@ -1468,6 +1478,7 @@ static void Resolver_flush(Resolver self) {
 
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
+  NAMEOF(self->write_cache) = talloc_get_name(self->write_cache);
 };
 
 static void Resolver_cache_expire(Resolver self, Object obj) {

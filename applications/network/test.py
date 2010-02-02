@@ -1,12 +1,16 @@
 import pypcap, reassembler
 import time
-import pyaff4, os
+import pyaff4, os,pdb
 time.sleep(1)
 
-oracle = pyaff4.Resolver()
+import gc
+gc.set_debug(gc.DEBUG_LEAK)
+
+oracle = pyaff4.Resolver(pyaff4.RESOLVER_MODE_DEBUG_MEMORY)
 
 image_urn = pyaff4.RDFURN()
 image_urn.set("/var/tmp/uploads/testimages/stdcapture_0.4.pcap")
+image_urn.set("/var/tmp/uploads/a5912_01_03.pcap")
 
 image = oracle.open(image_urn, 'r')
 pcap_file = pypcap.PyPCAP(image)
@@ -83,8 +87,9 @@ def Callback(mode, packet, connection):
             connection['reverse']['map'] = reverse_stream
 
     elif mode == 'data':
-        length = len(tcp.data)
-        connection['map'].write_from(image_urn, packet.offset + tcp.data_offset, length)
+        if tcp.data:
+            length = len(tcp.data)
+            connection['map'].write_from(image_urn, packet.offset + tcp.data_offset, length)
 
     elif mode == 'destroy':
         if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
@@ -110,7 +115,8 @@ volume.close()
 
 stream_urn = pyaff4.RDFURN()
 stream_urn.set(volume_urn.value)
-stream_urn.add("192.168.0.2-203.134.152.45/40290-110/reverse")
+stream_urn.add("58.173.160.185-87.233.149.138/61498-80/reverse")
+
 
 fd = oracle.open(stream_urn, 'r')
 print fd.read(100)

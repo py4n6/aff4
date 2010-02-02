@@ -257,7 +257,8 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             "-I"+sysconfig.get_python_inc())
         shlink_flags = ['-laff4']
         install_dest = distutils.util.split_quoted(
-            sysconfig.get_config_var('BINLIBDEST'))
+            os.path.join(
+                sysconfig.get_config_var('BINLIBDEST'),os.path.dirname(libname)))
 
         flags = distutils.util.split_quoted(
             sysconfig.get_config_var('LDSHARED'))

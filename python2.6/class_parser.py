@@ -889,7 +889,7 @@ class Method:
     def error_condition(self):
         result = ""
         if "DESTRUCTOR" in self.return_type.attributes:
-            result += "self->base = NULL;\n"
+            result += "talloc_free(self->ctx); self->base = NULL;\n"
 
         return result +"return NULL;\n";
 
@@ -1047,6 +1047,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
         out.write("""static void
 %(class_name)s_dealloc(py%(class_name)s *self) {
 %(free)s
+ PyObject_Del(self);
 };\n
 """ % dict(class_name = self.class_name, free=free))
 

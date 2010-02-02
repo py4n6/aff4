@@ -407,7 +407,7 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   CALL(oracle, cache_return, (AFFObject)fd);
 
  exit:
-  talloc_free(segment);
+  talloc_free(ctx);
   return 1;
 };
 
@@ -738,11 +738,14 @@ static int MapDriver_close(FileLikeObject self) {
        (RDFValue)this->dirty);
 
   // Done
-  talloc_free(self);
+  SUPER(FileLikeObject, FileLikeObject, close);
   return 1;
 
  error:
-  talloc_free(self);
+  PUSH_ERROR_STATE;
+  SUPER(FileLikeObject, FileLikeObject, close);
+  POP_ERROR_STATE;
+
   return 0;
 };
 
