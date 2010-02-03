@@ -411,6 +411,6 @@ PyMODINIT_FUNC initpypcap(void) {
 
   // Do all the local import statements: FIXME: handle the case where
   // we cant import it.
-  g_pypacket_module = PyImport_ImportModule("pypacket");
+  g_pypacket_module = PyImport_ImportModule("pyreassembler.pypacket");
 
 }

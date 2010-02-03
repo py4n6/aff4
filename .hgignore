@@ -26,9 +26,6 @@ conf.py
 .libs/
 *.so
 *.so.*
-pyflag
-pyflag_launch
-pyflash
 src/lib/evtool
 src/lib/sgzip
 src/mailtools/readpst

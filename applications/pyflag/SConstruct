@@ -2,4 +2,4 @@ import SconsUtils.utils as utils
 
 Import("env")
 
-SConscript(['pyflag/SConstruct'])
+SConscript(['network/SConstruct'])
