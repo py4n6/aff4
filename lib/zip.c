@@ -154,6 +154,31 @@ static void FileLikeObject_delete(RDFURN del_urn) {
   talloc_free(iter);
 };
 
+static int FileLikeObject_readline(FileLikeObject self, char *buffer, unsigned long int length) {
+  int result;
+  int i;
+  uint64_t offset = self->readptr;
+
+  result = CALL(self, read, buffer, length);
+  if(result >0) {
+    for(i=0; i<result-1; i++) {
+      switch(buffer[i]) {
+      case '\r':
+        if(buffer[i+1] != '\n') break;
+        offset++;
+      case '\n':
+        buffer[i]=0;
+        self->readptr = offset + i+1;
+        return i;
+      default:
+        break;
+      };
+    };
+  };
+
+  return result;
+};
+
 /** 
     read some data from our file into the buffer (which is assumed to
     be large enough).
@@ -252,6 +277,7 @@ VIRTUAL(FileLikeObject, AFFObject) {
      VMETHOD(truncate) = FileLikeObject_truncate;
      VMETHOD(get_data) = FileLikeObject_get_data;
      VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
+     VMETHOD(readline) = FileLikeObject_readline;
 
      VATTR(data) = NULL;
 } END_VIRTUAL
@@ -640,7 +666,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
       CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSED_SIZE, 
 	   rdfvalue_from_int(ctx, tmp));
-      
+
       tmp = cd_header.relative_offset_local_header == -1 ? self->offset_of_member_header 
 	: cd_header.relative_offset_local_header;
       CALL(oracle, set_value, filename, AFF4_VOLATILE_HEADER_OFFSET, 
@@ -667,32 +693,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	     rdfvalue_from_int(ctx, file_offset));
       };
 
-      // Is this file a properties file?
-      {
-	char tmp[BUFF_SIZE];
-	int properties_length = strlen(AFF4_INFORMATION);
-	char *base_name;
-
-	strncpy(tmp, (char *)filename->value, BUFF_SIZE);
-	base_name = basename(tmp);
-
-	// We identify streams by their filename being information.encoding
-	// for example information.turtle. The basename is then taken
-	// to be the volume name.
-	if(!memcmp(AFF4_INFORMATION, base_name, properties_length)) {
-	  FileLikeObject fd = CALL((AFF4Volume)self, open_member, escaped_filename, 'r',
-				   ZIP_STORED);
-	  if(fd) {
-	    RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
-            char *rdf_format = (char *)base_name + properties_length;
-
-	    CALL(parser, parse, fd, rdf_format, URNOF(self)->value);
-	    talloc_free(parser);
-	    CALL(oracle, cache_return, (AFFObject)fd);
-	  };
-	};
-      };
-
       // Get ready to read the next record
       CALL(fd, seek, current_offset, SEEK_SET);
 
@@ -706,6 +706,38 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
   CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET, 
        (RDFValue)self->directory_offset);
+
+
+  // Now find the information.turtle file and parse it (We need to do
+  // this after we loaded all the segments in case the
+  // information.turtle file addresses some of the segments in the
+  // volume - which could happen if the dataType refers to external
+  // segments
+  {
+    RESOLVER_ITER *iter = CALL(oracle, get_iter, ctx, URNOF(self), AFF4_CONTAINS);
+    RDFURN urn = new_RDFURN(ctx);
+    int properties_length = strlen(AFF4_INFORMATION);
+
+      // Is this file a properties file?
+    while(CALL(oracle, iter_next, iter, urn)) {
+      char *base_name = basename(urn->value);
+
+      // We identify streams by their filename being information.encoding
+      // for example information.turtle. The basename is then taken
+      // to be the volume name.
+      if(!memcmp(AFF4_INFORMATION, base_name, properties_length)) {
+        FileLikeObject fd = CALL((AFF4Volume)self, open_member, base_name, 'r', 0);
+        if(fd) {
+          RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
+          char *rdf_format = (char *)base_name + properties_length;
+
+          CALL(parser, parse, fd, rdf_format, URNOF(self)->value);
+          talloc_free(parser);
+          CALL(oracle, cache_return, (AFFObject)fd);
+        };
+      };
+    };
+  };
 
  exit:
   if(fd) {

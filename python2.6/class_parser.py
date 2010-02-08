@@ -292,8 +292,8 @@ class String(Type):
     def to_python_object(self, name=None, result='py_result',**kw):
         name = name or self.name
 
-        result = "PyErr_Clear();\n%s = PyString_FromStringAndSize((char *)%s, %s);\n" % (
-            result, name, self.length)
+        result = "PyErr_Clear();\n%s = PyString_FromStringAndSize((char *)%s, %s);\nif(!%s) goto error;\n" % (
+            result, name, self.length, name)
         if "BORROWED" not in self.attributes and 'BORROWED' not in kw:
             result += "talloc_free(%s);\n" % name
 
@@ -356,8 +356,8 @@ class Char_and_Length(Type):
 
     def to_python_object(self, name=None, result='py_result', **kw):
         return "PyErr_Clear();\n"\
-            "%s = PyString_FromStringAndSize(%s, %s);\n" % (
-            result, self.name, self.length);
+            "%s = PyString_FromStringAndSize(%s, %s);\nif(!%s) goto error;" % (
+            result, self.name, self.length, result);
 
 class Integer(Type):
     interface = 'integer'
@@ -396,6 +396,7 @@ class Char(Integer):
         return """str_%(name)s = &%(name)s;
     PyErr_Clear();
     %(result)s = PyString_FromStringAndSize(str_%(name)s, 1);
+if(!%(result)s) goto error;
 """ % dict(result=result, name = name or self.name)
 
     def definition(self, default = '"\\x0"', **kw):
@@ -437,8 +438,10 @@ class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT_DONE'
     buidstr = 'l'
 
-    def definition(self, default = None, **kw):
-        return Char_and_Length.definition(self) + "PyObject *tmp_%s;\n" % self.name
+    def definition(self, default = 0, **kw):
+        return "char *%s=NULL; Py_ssize_t %s=%s;\n" % (
+            self.name,
+            self.length, default) + "PyObject *tmp_%s;\n" % self.name
 
     def python_name(self):
         return self.length
@@ -449,8 +452,9 @@ class Char_and_Length_OUT(Char_and_Length):
     def pre_call(self, method):
         return """PyErr_Clear();
 tmp_%s = PyString_FromStringAndSize(NULL, %s);
+if(!tmp_%s) goto error;
 PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
-""" % (self.name, self.length, self.name, self.name, self.length)
+""" % (self.name, self.length, self.name, self.name, self.name, self.length)
 
     def to_python_object(self, name=None, result='py_result', **kw):
         name = name or self.name
@@ -845,31 +849,34 @@ class Method:
         ## Mandatory
         for type in self.args:
             python_name = type.python_name()
-            if python_name and type.name not in self.defaults:
+            if python_name and python_name not in self.defaults:
                 kwlist += '"%s",' % python_name
 
         for type in self.args:
             python_name = type.python_name()
-            if python_name and type.name in self.defaults:
+            if python_name and python_name in self.defaults:
                 kwlist += '"%s",' % python_name
 
         kwlist += ' NULL};\n'
 
         for type in self.args:
+            python_name = type.python_name()
             try:
-                out.write(type.definition(default = self.defaults[type.name]))
+                out.write(type.definition(default = self.defaults[python_name]))
             except KeyError:
                 out.write(type.definition())
 
         ## Make up the format string for the parse args in two pases
         parse_line = ''
         for type in self.args:
-            if type.buidstr and type.name not in self.defaults:
+            python_name = type.python_name()
+            if type.buidstr and python_name not in self.defaults:
                 parse_line += type.buidstr
 
         parse_line += '|'
         for type in self.args:
-            if type.buidstr and type.name in self.defaults:
+            python_name = type.python_name()
+            if type.buidstr and python_name in self.defaults:
                 parse_line += type.buidstr
 
         if parse_line != '|':
@@ -998,10 +1005,14 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
                 else:
                     cls = Char_and_Length
 
-                self.args[-1] = cls(
+
+                cls = cls(
                     previous.name,
                     previous.type,
                     name, type)
+
+                self.args[-1] = cls
+
                 return
         except IndexError:
             pass

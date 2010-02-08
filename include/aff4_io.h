@@ -102,6 +102,13 @@ CLASS(FileLikeObject, AFFObject)
      */
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
      int METHOD(FileLikeObject, read, OUT char *buffer, unsigned long int length);
+
+     /* A variant of read above that will read upto the next \r or
+        \r\n.
+
+        DEFAULT(length) = 1024
+     */
+     int METHOD(FileLikeObject, readline, OUT char *buffer, unsigned long int length);
      int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
      uint64_t METHOD(FileLikeObject, tell);
 

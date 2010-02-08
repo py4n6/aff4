@@ -2,6 +2,7 @@
 fit anywhere else.
 """
 import pyflag.Registry as Registry
+import pyaff4
 
 class EventHandler:
     """ An event handler object allows plugins to register their
@@ -22,3 +23,15 @@ def post_event(event, *args, **kwargs):
         e = e()
         method = getattr(e, event)
         method(*args, **kwargs)
+
+
+oracle = pyaff4.Resolver()
+
+def VFSCreate(fd, name, volume_urn, type=pyaff4.AFF4_MAP):
+    """ Creates a new map object based on fd with a name specified """
+    obj = oracle.create(type)
+    obj.urn.set(fd.urn.value)
+    obj.urn.add(name)
+
+    obj.set(pyaff4.AFF4_STORED, volume_urn)
+    return obj.finish()

@@ -5,10 +5,50 @@ import pyreassembler.reassembler as reassembler
 import pyflag.Framework as Framework
 import pyaff4
 import pyflag.Scanner as Scanner
+import pdb
 
 oracle = pyaff4.Resolver()
 
+## A cache of pcap files
+PCAP_FILE_CACHE = {}
+
+def dissect_packet(stream_fd, stream_pkt_fd):
+    """ Return a dissected packet in stream fd. Based on the current readptr.
+    """
+    ## What is the current range?
+    offset = stream_fd.readptr
+    stream_pkt_fd.seek(offset)
+
+    urn = pyaff4.RDFURN()
+    (target_offset_at_point,
+     available_to_read) =  stream_pkt_fd.map.get_range(offset, urn)
+
+    ## Get the file from cache
+    try:
+        pcap_file = PCAP_FILE_CACHE[urn.value]
+    except KeyError:
+        pcap_fd = oracle.open(urn, 'r')
+        pcap_file = pypcap.PyPCAP(pcap_fd)
+        PCAP_FILE_CACHE[urn.value] = pcap_file
+
+    if available_to_read:
+        ## Go to the packet
+        pcap_file.seek(target_offset_at_point)
+
+        ## Dissect it
+        try:
+            return pcap_file.dissect()
+        except: pass
+
 class Reassembler:
+    def make_stream(self, name, volume_urn, base):
+        forward_stream = oracle.create(pyaff4.AFF4_MAP)
+        forward_stream.urn.set(volume_urn.value)
+        forward_stream.urn.add(base + name)
+
+        forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
+        return forward_stream.finish()
+
     def Callback(self, mode, packet, connection):
         volume_urn = self.volume_urn
         if packet:
@@ -32,45 +72,27 @@ class Reassembler:
                     ip.source_addr, ip.dest_addr,
                     tcp.source, tcp.dest)
 
-                ## Create the forward stream
-                forward_stream = oracle.create(pyaff4.AFF4_MAP)
-                forward_stream.urn.set(volume_urn.value)
-                forward_stream.urn.add(base + "forward")
-
-                forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
-
+                ## Note that we hold the map locked while its in the
+                ## reassembler - this prevents it from getting freed
+                connection['map'] = forward_stream = self.make_stream("forward", volume_urn, base)
+                connection['map.pkt'] = self.make_stream("forward.pkt", volume_urn, base)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 forward_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)
 
-                forward_stream = forward_stream.finish()
-
-                ## Note that we hold the map locked while its in the
-                ## reassembler - this prevents it from getting freed
-                connection['map'] = forward_stream
-
                 ## Make the reverse map
-                reverse_stream = oracle.create(pyaff4.AFF4_MAP)
-                reverse_stream.urn.set(volume_urn.value)
-                reverse_stream.urn.add(base + "reverse")
-
-                reverse_stream.set(pyaff4.AFF4_STORED, volume_urn)
-
+                connection['reverse']['map'] = reverse_stream = self.make_stream("reverse", volume_urn, base)
+                connection['reverse']['map.pkt'] = self.make_stream("reverse.pkt", volume_urn, base)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 reverse_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)
-
-                reverse_stream = reverse_stream.finish()
-
-                ## Note that we hold the map locked while its in the
-                ## reassembler - this prevents it from getting freed
-                connection['reverse']['map'] = reverse_stream
 
         elif mode == 'data':
             if tcp.data:
                 if oracle.get_urn_by_id(packet.pcap_file_id, self.image_urn):
                     length = len(tcp.data)
                     connection['map'].write_from(self.image_urn, packet.offset + tcp.data_offset, length)
+                    connection['map.pkt'].write_from(self.image_urn, packet.offset, length)
 
         elif mode == 'destroy':
             if connection['map'].size > 0 or connection['reverse']['map'].size > 0:
@@ -81,6 +103,9 @@ class Reassembler:
                 r_map_stream = connection['reverse']['map']
                 r_map_stream_urn = r_map_stream.urn
                 r_map_stream.close()
+
+                connection['map.pkt'].close()
+                connection['reverse']['map.pkt'].close()
 
                 ## Now scan the resulting with the active scanners
                 Scanner.scan_urn(map_stream_urn, self.volume_urn, self.scanners)
@@ -112,16 +137,16 @@ class Reassembler:
                 break
 
 ## We use a global processor. This means multiple pcap files will be
-## processed as one unit. Therefore users can feed up many pcap files
+## processed as one unit. Therefore users can feed us many pcap files
 ## (possibly split) and we do them as if they are merged.
-Processor = Reassembler()
+PROCESSOR = Reassembler()
 
 class PCAPEvents(Framework.EventHandler):
     def finish(self, outfd):
         ## This flushes the resolver which ensures all the streams are
         ## closed
-        global Processor
-        Processor.flush()
+        global PROCESSOR
+        PROCESSOR.flush()
 
 class PCAPScanner(Scanner.BaseScanner):
     """ Reassemble packets in a pcap file """
@@ -131,4 +156,4 @@ class PCAPScanner(Scanner.BaseScanner):
 
     def process(self, fd, outurn, scanners):
         print "Opening %s as a PCAP file" % fd.urn.parser.query
-        Processor.process(fd, outurn, scanners)
+        PROCESSOR.process(fd, outurn, scanners)
