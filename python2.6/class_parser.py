@@ -373,7 +373,7 @@ class Integer(Type):
 
     def to_python_object(self, name=None, result='py_result', **kw):
         name = name or self.name
-        return "PyErr_Clear();\n%s = PyLong_FromLong(%s);\n" % (result, name)
+        return "PyErr_Clear();\n%s = PyLong_FromLongLong(%s);\n" % (result, name)
 
     def from_python_object(self, source, destination, method, **kw):
         return "PyErr_Clear();\n"\
@@ -384,7 +384,7 @@ class Integer(Type):
         return "%s %s " % (self.original_type, self.name)
 
 class Integer64(Integer):
-    buidstr = 'I'
+    buidstr = 'K'
     type = 'unsigned int'
 
 class Char(Integer):

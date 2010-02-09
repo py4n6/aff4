@@ -1382,11 +1382,11 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   return 1;
 };
 
-static int Resolver_get_id_by_urn(Resolver self, RDFURN uri) {
+static int Resolver_get_id_by_urn(Resolver self, RDFURN uri, int create) {
   int result;
 
   LOCK_RESOLVER;
-  result = get_id(self->urn_db, tdb_data_from_string(uri->value), 1);
+  result = get_id(self->urn_db, tdb_data_from_string(uri->value), create);
 
   UNLOCK_RESOLVER;
   return result;

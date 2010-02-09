@@ -99,7 +99,11 @@ static int compare_points(const void *X, const void *Y) {
   struct map_point *x=(struct map_point *)X;
   struct map_point *y=(struct map_point *)Y;
 
-  return x->image_offset - y->image_offset;
+  if(x->image_offset > y->image_offset) {
+    return 1;
+  } else if(x->image_offset == y->image_offset)
+    return 0;
+  else return -1;
 };
 
 static char *MapValue_serialise(RDFValue self) {
@@ -191,6 +195,12 @@ static char *MapValue_serialise(RDFValue self) {
     talloc_free(fd);
   talloc_free(stored);
   return NULL;
+};
+
+static void MapValue_sort(MapValue this) {
+  // sort the array
+  qsort(this->points, this->number_of_points, sizeof(*this->points),
+	compare_points);
 };
 
 static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
@@ -342,6 +352,7 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(RDFValue, serialise) = MapValue_serialise;
   VMETHOD_BASE(MapValue, add_point) = MapValue_add_point;
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
+  VMETHOD_BASE(MapValue, sort) = MapValue_sort;
 } END_VIRTUAL
 
 static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue urn) {
@@ -802,6 +813,7 @@ static int MapDriver_read(FileLikeObject self, char *buffer, unsigned long int l
 
       if(pad) {
 	memset(buffer + i ,0, length -i);
+        read_length = length;
       } else {
 	PrintError();
 	return -1;

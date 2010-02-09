@@ -55,7 +55,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
     int flags;
 
     // Make sure that the urn passed has a file scheme
-    if(strlen(urn->parser->scheme) > 0 && strcmp("file", urn->parser->scheme)) {
+    if(!urn->parser || strlen(urn->parser->scheme) > 0 && strcmp("file", urn->parser->scheme)) {
       RaiseError(ERuntimeError, "%s must be called with a file:// scheme", NAMEOF(self));
       goto error;
     };

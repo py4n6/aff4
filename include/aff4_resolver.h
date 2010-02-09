@@ -190,8 +190,10 @@ CLASS(Resolver, Object)
 
        /** This returns a unique ID for the given URN. The ID is only
            unique within this resolver.
+
+           DEFAULT(create) = 0
        */
-       int METHOD(Resolver, get_id_by_urn, RDFURN uri);
+       int METHOD(Resolver, get_id_by_urn, RDFURN uri, int create);
 
        /** This fills the URI specified by id into the uri container
        passed. Returns 1 if the ID is found, or 0 if the ID is not

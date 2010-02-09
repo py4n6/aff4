@@ -157,6 +157,8 @@ CLASS(MapValue, RDFValue)
   void METHOD(MapValue, add_point, uint64_t image_offset, uint64_t target_offset,\
               char *target);
 
+  void METHOD(MapValue, sort);
+
   /* This function returns information about the current file pointer
      and its view of the target slice.
 

@@ -350,7 +350,7 @@ static TDB_DATA *RDFURN_encode(RDFValue self) {
   TDB_DATA *result = talloc(self, TDB_DATA);
   uint32_t *id = talloc(result, uint32_t);
 
-  *id = CALL(oracle, get_id_by_urn, self);
+  *id = CALL(oracle, get_id_by_urn, self, 1);
 
   result->dptr = (unsigned char *)id;
   result->dsize = sizeof(*id);
