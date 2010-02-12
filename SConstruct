@@ -3,6 +3,9 @@ import os
 import SconsUtils.utils as utils
 import distutils.sysconfig
 
+## Users should alter the configuration in this file
+import config
+
 from SconsUtils.utils import error, warn, add_option, generate_help, config_h_build
 import SconsUtils.utils
 
@@ -20,58 +23,35 @@ args = dict(CPPPATH='#include/', tools=['default', 'packaging'],
 vars = Variables()
 
 vars.AddVariables(
-   BoolVariable('V', 'Set to 1 for verbose build', False),
-   EnumVariable('DEBUG', 'Set debug type',None,
-                allowed_values = ('lock','resolver','object'),
-                ignorecase = 2),
-   EnumVariable('flavor', 'Choose build flavor', 'debug',
-                allowed_values = ('release', 'debug'),
-                ignorecase = 2,
-                ),
-   BoolVariable('LOCK', 'Enable multiprocess locks', False),
    ('CC', 'The c compiler', 'gcc'),
    )
 
 args['variables'] = vars
 
 args['CFLAGS']=''
-if ARGUMENTS.get('V') == "1":
+if config.V:
    args['CFLAGS'] += ' -Wall -g -O0 -D__DEBUG__ '
 else:
    utils.install_colors(args)
 
-arg = ARGUMENTS.get('DEBUG')
-if arg=='lock':
+if 'lock' in config.DEBUG:
    args['CFLAGS'] += ' -DAFF4_DEBUG_LOCKS '
 
-elif arg=='resolver':
+elif 'resolver' in config.DEBUG:
    args['CFLAGS'] += ' -DAFF4_DEBUG_RESOLVER '
 
-elif arg=='object':
+elif 'object' in config.DEBUG:
    args['CFLAGS'] += ' -DAFF4_DEBUG_OBJECT '
 
-if ARGUMENTS.get('LOCK') == '0':
+if not config.PROCESS_LOCKS:
    utils.warn("Turning off locks")
    args['CFLAGS'] += ' -DNO_LOCKS '
-
-add_option(args, 'prefix',
-           type='string',
-           nargs=1,
-           action='store',
-           metavar='DIR',
-           default='/usr/local/',
-           help='installation prefix')
-
-add_option(args, 'disable_ewf', action='store_true', default=False,
-              help = 'Disable compilation of libewf support')
-
-add_option(args, 'disable_curl', action='store_true', default=False,
-              help = 'Disable http support')
 
 add_option(args, 'mingw', action='store_true', default=False,
            help = 'Use mingw to cross compile windows binaries')
 
 env = utils.ExtendedEnvironment(**args)
+env.config = config
 
 Progress(['-\r', '\\\r', '|\r', '/\r'], interval=5)
 
@@ -101,20 +81,13 @@ compileFlags = [
 #    '-flto',
     ]
 
-flavour = ARGUMENTS.get('flavor')
-if (flavour == 'debug'):
-   compileFlags.extend(['-ggdb', '-O0', '-Wall'])
-   cppDefines.append('_DEBUG') #enables LOGGING
-elif (flavour == 'release'):
-    compileFlags.append('-O3')
-    compileFlags.append('-fomit-frame-pointer')
-
 # add the warnings to the compile flags
 compileFlags += [ ('-W' + warning) for warning in warnings ]
 
 env['CCFLAGS'] = compileFlags
 env['CPPDEFINES'] = cppDefines
 
+## Not working yet
 if env['mingw']:
    import SconsUtils.crossmingw as crossmingw
 
@@ -123,7 +96,7 @@ if env['mingw']:
 conf = Configure(env)
 
 ## Check for different things
-if not env.GetOption('clean'):
+if not env.GetOption('clean') and not env.GetOption('help'):
    ## Headers
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h

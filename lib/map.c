@@ -99,11 +99,13 @@ static int compare_points(const void *X, const void *Y) {
   struct map_point *x=(struct map_point *)X;
   struct map_point *y=(struct map_point *)Y;
 
-  if(x->image_offset > y->image_offset) {
+  if(x->image_offset > y->image_offset)
     return 1;
-  } else if(x->image_offset == y->image_offset)
+
+  if(x->image_offset == y->image_offset)
     return 0;
-  else return -1;
+
+  return -1;
 };
 
 static char *MapValue_serialise(RDFValue self) {

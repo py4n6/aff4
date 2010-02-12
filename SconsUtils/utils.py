@@ -212,6 +212,7 @@ def check(type, conf, headers):
 ## Build the config.h file
 def config_h_build(target, source, env):
     config_h_defines = env.Dictionary()
+    config_h_defines.update(env.config.__dict__)
     warn("Generating config.h")
 
     for a_target, a_source in zip(target, source):
@@ -274,7 +275,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         kwargs['SHLIBSUFFIX'] = shlib_suffix
         kwargs['SHLINKFLAGS'] = shlink_flags
 
-        if not self.get('V'):
+        if not self.config.V:
             kwargs['SHCCCOMSTR'] = compile_python_source_message
             kwargs['SHLINKCOMSTR'] = link_python_module_message
 
