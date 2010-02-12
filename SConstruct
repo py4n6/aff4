@@ -47,6 +47,14 @@ if not config.PROCESS_LOCKS:
    utils.warn("Turning off locks")
    args['CFLAGS'] += ' -DNO_LOCKS '
 
+add_option(args, 'prefix',
+           type='string',
+           nargs=1,
+           action='store',
+           metavar='DIR',
+           default=config.PREFIX,
+           help='installation prefix')
+
 add_option(args, 'mingw', action='store_true', default=False,
            help = 'Use mingw to cross compile windows binaries')
 

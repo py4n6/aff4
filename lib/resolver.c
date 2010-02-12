@@ -548,7 +548,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
     return oracle;
   };
 
-  if(!path)  path = ".";
+  if(!path)  path = TDB_LOCATION;
 
   self->logger = CONSTRUCT(Logger, Logger, Con, self);
 
