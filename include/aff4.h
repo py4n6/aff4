@@ -12,7 +12,6 @@ This file describes the high level interface.
 #define __AFF4_H
 
 #include <stdint.h>
-#include "config.h"
 
 #ifdef HAVE_STRING_H
 #include <string.h>
@@ -98,5 +97,7 @@ void add_identity(char *key_file, char *cert);
 void AFF4_Init(void);
 
 #include "exports.h"
+
+#define PACKAGE_VERSION "0.1"
 
 #endif

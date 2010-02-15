@@ -180,6 +180,14 @@ def generate_help(vars, env):
 
 HEADERS = {}
 
+def check_size(conf, types):
+    global _DEFAULTS
+
+    for t in types:
+        name = "SIZEOF_" + t.replace(" ","_").upper()
+        HEADERS[name] = conf.CheckTypeSize(
+            t, size = _DEFAULTS[t][0])
+
 def check_type(conf, types):
     header = None
     for t in types:
@@ -187,7 +195,11 @@ def check_type(conf, types):
             t, header = t.split(':')
         define = "HAVE_" + t.upper().replace(".","_")
 
-        HEADERS[define] = conf.CheckType(t, includes="#include <%s>\n" % header)
+        result = 0
+        if conf.CheckType(t, includes="#include <%s>\n" % header):
+            result = 1
+
+        HEADERS[define] = result
 
 def check(type, conf, headers):
     for header in headers:
@@ -202,18 +214,22 @@ def check(type, conf, headers):
             define = "HAVE_" + tmp.upper().replace(".","_")
 
         global HEADERS
+        result = 0
         if type == 'header':
-            HEADERS[define] = conf.CheckCHeader(header)
+            if conf.CheckCHeader(header): result = 1
+            HEADERS[define] = result
         elif type == 'func':
-            HEADERS[define] = conf.CheckFunc(header)
+            if conf.CheckFunc(header): result = 1
+            HEADERS[define] = result
         elif type == 'lib':
-            HEADERS[define] = conf.CheckLib(header)
+            if conf.CheckLib(header): result =1
+            HEADERS[define] = result
 
 ## Build the config.h file
 def config_h_build(target, source, env):
     config_h_defines = env.Dictionary()
     config_h_defines.update(env.config.__dict__)
-    warn("Generating config.h")
+    warn("Generating %s" % (target[0].path))
 
     for a_target, a_source in zip(target, source):
         config_h = file(str(a_target), "w")
@@ -221,13 +237,12 @@ def config_h_build(target, source, env):
         config_h.write(config_h_in.read() % config_h_defines)
         config_h_in.close()
 
-
     keys = HEADERS.keys()
     keys.sort()
 
     for k in keys:
         if HEADERS[k]:
-            config_h.write("#define %s 1\n" % k)
+            config_h.write("#define %s %s\n" % (k,HEADERS[k]))
         else:
             config_h.write("/** %s unset */\n" % k)
 
@@ -355,3 +370,121 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         if shlib_install_post_action:
             shlib_install_post_action_output = re.sub(shlib_install_post_action_output_re[0], shlib_install_post_action_output_re[1], str(ilib[0]))
             self.Command(shlib_install_post_action_output, ilib, shlib_install_post_action)
+
+
+import subprocess
+
+def pkg_config(pkg, type):
+    result = subprocess.Popen(["%s-config" % pkg, "--%s" % type],
+                              stdout=subprocess.PIPE).communicate()[0]
+
+    return result.strip()
+
+
+# Sensible default for common types on common platforms.
+_DEFAULTS = {
+    'char': [1,],
+    'short' : [2,],
+    'int' : [4, 2],
+    'long' : [4, 8],
+    'long long' : [8, 4],
+    # Normally, there is no need to check unsigned types, because they are
+    # guaranteed to be of the same size than their signed counterpart.
+    'unsigned char': [1,],
+    'unsigned short' : [2,],
+    'unsigned int' : [4, 2],
+    'unsigned long' : [4, 8],
+    'unsigned long long' : [8, 4],
+    'float' : [4,],
+    'double' : [8,],
+    'long double' : [12,],
+    'size_t' : [4,],
+}
+
+def CheckTypeSize(context, type, includes = None, language = 'C', size = None):
+    """This check can be used to get the size of a given type, or to check whether
+    the type is of expected size.
+
+    Arguments:
+        - type : str
+            the type to check
+        - includes : sequence
+            list of headers to include in the test code before testing the type
+        - language : str
+            'C' or 'C++'
+        - size : int
+            if given, will test wether the type has the given number of bytes.
+            If not given, will test against a list of sizes (all sizes between
+            0 and 16 bytes are tested).
+
+        Returns:
+                status : int
+                        0 if the check failed, or the found size of the type if the check succeeded."""
+    minsz = 0
+    maxsz = 16
+
+    if includes:
+        src = "\n".join([r"#include <%s>\n" % i for i in includes])
+    else:
+        src = ""
+
+    if language == 'C':
+        ext = '.c'
+    elif language == 'C++':
+        ext = '.cpp'
+    else:
+        raise NotImplementedError("%s is not a recognized language" % language)
+
+    # test code taken from autoconf: this is a pretty clever hack to find that
+    # a type is of a given size using only compilation. This speeds things up
+    # quite a bit compared to straightforward code using TryRun
+    src += r"""
+typedef %s scons_check_type;
+
+int main()
+{
+    static int test_array[1 - 2 * !(((long int) (sizeof(scons_check_type))) <= %d)];
+    test_array[0] = 0;
+
+    return 0;
+}
+"""
+
+    if size:
+        # Only check if the given size is the right one
+        context.Message('Checking %s is %d bytes... ' % (type, size))
+        st = context.TryCompile(src % (type, size), ext)
+        context.Result(st)
+
+        if st:
+            return size
+        else:
+            return 0
+    else:
+        # Only check if the given size is the right one
+        context.Message('Checking size of %s ... ' % type)
+
+        # Try sensible defaults first
+        try:
+            szrange = _DEFAULTS[type]
+        except KeyError:
+            szrange = []
+        szrange.extend(xrange(minsz, maxsz))
+        st = 0
+
+        # Actual test
+        for sz in szrange:
+            st = context.TryCompile(src % (type, sz), ext)
+            if st:
+                break
+
+        if st:
+            context.Result('%d' % sz)
+            return sz
+        else:
+            context.Result('Failed !')
+            return 0
+
+#For example, to check wether long is 4 bytes on your platform, you can do:
+#config.CheckTypeSize('long', size = 4).
+## Now check the sizes

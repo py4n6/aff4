@@ -1,6 +1,5 @@
 #ifndef MISC_H
 #define MISC_H
-#include "config.h"
 #include <assert.h>
 
 #ifdef WINDOWS

@@ -1,6 +1,5 @@
 /* This is the configuration file for the scons build system */
 
 #define DISABLE_EWF %(disable_ewf)d
-#define PACKAGE_VERSION "%(package_version)s"
 #define DISABLE_CURL %(disable_curl)d
 #define TDB_LOCATION "%(TDB_LOCATION)s"

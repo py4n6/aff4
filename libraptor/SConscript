@@ -1,0 +1,63 @@
+Import("env")
+import SconsUtils.utils as utils
+import pdb
+from SconsUtils.utils import config_h_build, error, pkg_config
+
+raptor_env = env.Clone()
+
+raptor_env.Append(CFLAGS=" -DRAPTOR_INTERNAL -DHAVE_CONFIG_H -Ilibraptor/ ")
+
+if not env.config.LIBXML2_INCLUDES:
+    env.config.LIBXML2_INCLUDES = utils.pkg_config("xml2", "cflags")
+
+if not env.config.LIBXML2_LINK:
+    env.config.LIBXML2_LINK = utils.pkg_config("xml2", "ldflags")
+
+raptor_env.Append(CFLAGS = env.config.LIBXML2_INCLUDES,
+                  LDFLAGS= env.config.LIBXML2_LINK)
+
+conf = Configure(raptor_env)
+
+utils.check("header", conf, Split(""" LIBXML_PARSER_H:libxml/parser.h
+LIBXML_SAX2_H:libxml/SAX2.h
+LIBXSLT_XSLT_H:libxslt/xslt.h
+"""))
+
+f= Split("""raptor_parse.c raptor_serialize.c
+raptor_rfc2396.c raptor_uri.c raptor_locator.c
+raptor_namespace.c raptor_qname.c
+raptor_feature.c raptor_general.c raptor_utf8.c
+raptor_www.c strcasecmp.c
+raptor_identifier.c raptor_statement.c
+raptor_sequence.c raptor_stringbuffer.c raptor_iostream.c
+raptor_xml.c raptor_xml_writer.c raptor_set.c turtle_common.c
+raptor_turtle_writer.c raptor_xsd.c raptor_avltree.c snprintf.c
+raptor_json_writer.c
+raptor_nfc_data.c raptor_nfc.c
+""")
+
+h = utils.HEADERS
+
+if env.config.RAPTOR_TURTLE:
+    h['RAPTOR_PARSER_TURTLE'] = 1
+    h['RAPTOR_SERIALIZER_TURTLE'] = 1
+    f.extend(Split("turtle_lexer.c turtle_parser.c raptor_serialize_turtle.c raptor_abbrev.c"))
+
+if env.config.RAPTOR_NTRIPLES:
+    h['RAPTOR_PARSER_NTRIPLES'] = 1
+    h['RAPTOR_SERIALIZER_NTRIPLES'] = 1
+    f.extend(Split("ntriples_parse.c raptor_serialize_ntriples.c"))
+
+if env.config.RAPTOR_RDFXML:
+    h['RAPTOR_PARSER_RDFXML'] = 1
+    h['RAPTOR_SERIALIZER_RDFXML'] = 1
+    f.extend(Split("raptor_serialize_rdfxml.c raptor_serialize_simple.c raptor_libxml.c raptor_rdfxml.c raptor_sax2.c"))
+    if not conf.CheckLib("xml2"):
+        error("You must use libxml2 for RDFXML")
+
+    env.Append(SHLINKFLAGS = utils.pkg_config("xml2","libs"))
+
+env.libraptor_objs = raptor_env.SharedObject( [ "#libraptor/%s" % x for x in f] )
+
+
+config_h_build([File('raptor_config.h')], [File('sc_config.h.in')], env)

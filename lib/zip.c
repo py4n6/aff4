@@ -1020,6 +1020,7 @@ static int ZipFile_close(AFF4Volume this) {
       RESOLVER_ITER *iter;
       StringIO zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
       RDFURN urn = new_RDFURN(zip64_header);
+      StringIO cache = CONSTRUCT(StringIO, StringIO, Con, urn);
       XSDInteger compression_method = new_XSDInteger(urn);
       XSDInteger crc = new_XSDInteger(urn);
       XSDInteger size = new_XSDInteger(urn);
@@ -1028,15 +1029,23 @@ static int ZipFile_close(AFF4Volume this) {
       XSDString type = new_XSDString(urn);
       XSDInteger epoch_time = new_XSDInteger(urn);
 
+      CALL(cache,seek, 10*BUFF_SIZE, 0);
+      CALL(cache,truncate, 0);
+
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
       // Iterate over all the AFF4_VOLATILE_CONTAINS URNs
       iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
       while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
-	// We use type to anchor temporary allocations
 	struct tm *now;
         TDB_DATA relative_name, escaped_filename;
+
+        // Flush the cache if needed
+        if(cache->readptr > BUFF_SIZE * 10) {
+          CALL(fd, write, cache->data, cache->readptr);
+          CALL(cache, truncate, 0);
+        };
 
 	// Only store segments here
 	if(!CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) ||
@@ -1122,14 +1131,17 @@ static int ZipFile_close(AFF4Volume this) {
 	};
 
 	// OK - write the cd header
-	CALL(fd, write, (char *)&cd, sizeof(cd));
-	CALL(fd, write, (char *)escaped_filename.dptr, escaped_filename.dsize);
+	CALL(cache, write, (char *)&cd, sizeof(cd));
+	CALL(cache, write, (char *)escaped_filename.dptr, escaped_filename.dsize);
 	if(zip64_header->size > 4) {
-	  CALL(fd, write, zip64_header->data, zip64_header->size);
+	  CALL(cache, write, zip64_header->data, zip64_header->size);
 	};
 
 	k++;
       };
+
+      // Flush the cache
+      CALL(fd, write, cache->data, cache->readptr);
 
       talloc_free(zip64_header);
     };

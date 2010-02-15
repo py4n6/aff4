@@ -350,7 +350,7 @@ static TDB_DATA *RDFURN_encode(RDFValue self) {
   TDB_DATA *result = talloc(self, TDB_DATA);
   uint32_t *id = talloc(result, uint32_t);
 
-  *id = CALL(oracle, get_id_by_urn, self, 1);
+  *id = CALL(oracle, get_id_by_urn, this, 1);
 
   result->dptr = (unsigned char *)id;
   result->dsize = sizeof(*id);
@@ -762,16 +762,40 @@ VIRTUAL(RDFParser, Object) {
 
 static int iostream_write_byte(void *context, const int byte) {
   RDFSerializer self=(RDFSerializer)context;
-  char c = byte;
+  self->buff[self->i] = (char)byte;
+  self->i++;
 
-  return CALL(self->fd, write, AS_BUFFER(c));
+  if(self->i >= BUFF_SIZE) {
+    CALL(self->fd, write, self->buff, self->i);
+    self->i = 0;
+  };
+
+  return 1;
 };
 
 static int iostream_write_bytes(void *context, const void *ptr, size_t size, size_t nmemb) {
   RDFSerializer self=(RDFSerializer)context;
-  int length = nmemb * size;
+  unsigned int length = nmemb * size;
+  char *src = (char *)ptr;
+  unsigned int available;
 
-  return CALL(self->fd, write, (char *)ptr, length);
+  if(self->i > BUFF_SIZE) abort();
+
+  while(length > 0) {
+    available = min(length, BUFF_SIZE - self->i);
+    if(available <= 0) {
+      CALL(self->fd, write, self->buff, self->i);
+      self->i = 0;
+      continue;
+    };
+
+    memcpy(self->buff + self->i, src, available);
+    self->i += available;
+    src += available;
+    length -= available;
+  };
+
+  return size * nmemb;
 }
 
 raptor_iostream_handler2 raptor_special_handler = {
@@ -785,7 +809,7 @@ static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key,
   RDFSerializer self=(RDFSerializer) data;
 
   // Only look at proper attributes
-  if(key.dptr[0]=='_')
+  if(memcmp(key.dptr,"http",4))
     goto exit;
 
   // Skip serializing of volatile triples
@@ -837,6 +861,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
     raptor_uri uri = raptor_new_uri((const unsigned char*)base);
     raptor_serialize_start(self->rdf_serializer,
 			   uri, self->iostream);
+
     raptor_free_uri(uri);
     uri = (void*)raptor_new_uri((const unsigned char*)PREDICATE_NAMESPACE);
     raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)"aff4");
@@ -859,6 +884,9 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
   raptor_statement triple;
   Cache i;
   void *raptor_urn;
+
+  printf(".");
+  fflush(stdout);
 
   raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
 
@@ -910,6 +938,12 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
     talloc_free(iter);
   };
   raptor_free_uri((raptor_uri*)raptor_urn);
+
+  self->count ++;
+  if(self->count > 100) {
+    self->count =0;
+    raptor_serialize_end(self->rdf_serializer);
+  };
 
   return 1;
 };

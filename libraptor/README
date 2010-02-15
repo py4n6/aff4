@@ -1,0 +1,4 @@
+This is the source taken from libraptor 1.4.18
+
+We need to make some performance related modifications which is why
+the source is incorporated in the AFF4 tree.

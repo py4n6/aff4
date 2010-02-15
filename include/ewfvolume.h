@@ -1,4 +1,3 @@
-#include "config.h"
 #ifndef EWFVOLUME_H
 #define EWFVOLUME_H
 

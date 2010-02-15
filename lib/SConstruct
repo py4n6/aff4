@@ -3,7 +3,9 @@ import pdb
 import SCons.Util, SCons.Subst
 import SconsUtils.utils as utils
 
-env = env.Clone()
+nenv = env.Clone()
+
+nenv.Append(CFLAGS = "-include lib/config.h -Ilibraptor/ ")
 
 source_files = """
 #lib/class.c #lib/talloc.c
@@ -34,15 +36,14 @@ tdb_files = """
 #libtdb/traverse.c
 """
 
-env.Append(CPPFLAGS = ['-DHAVE_VA_COPY', '-Ilibreplace/'])
-
+nenv.Append(CPPFLAGS = ['-DHAVE_VA_COPY ', '-Ilibreplace/'], CFLAGS=" -DNO_CONFIG_H")
 env.libaff4_sources = Split(source_files +
                             uuid_files +
-                            tdb_files)
+                            tdb_files) + env.libraptor_objs
 
-library = env.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
+library = nenv.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
 
-env.InstallVersionedSharedLibrary("${prefix}/lib/", library)
-env.Alias('install', '${prefix}')
+nenv.InstallVersionedSharedLibrary("${prefix}/lib/", library)
+nenv.Alias('install', '${prefix}')
 
-utils.libaff4_static_lib = env.StaticLibrary('aff4', env.libaff4_sources)
+utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)

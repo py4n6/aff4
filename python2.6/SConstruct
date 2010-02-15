@@ -3,6 +3,8 @@ import SconsUtils.utils as utils
 
 Import('env')
 
+nenv = env.Clone()
+
 BOUND_FILES = Split("""#include/aff4_constants.h  #include/aff4_utils.h
               #include/aff4_rdf.h
               #include/aff4_io.h #include/aff4_resolver.h
@@ -24,10 +26,12 @@ def build_python_bindings(target, source, env):
     p.write(fd)
     fd.close()
 
-if not env.get("disable_curl"):
+nenv.Append(CFLAGS = " -include lib/config.h ")
+
+if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
-env.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
-env.Depends('pyaff4.c', 'class_parser.py')
+nenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
+nenv.Depends('pyaff4.c', 'class_parser.py')
 
-env.PythonModule("pyaff4", ["pyaff4.c"],LIBS="aff4")
+nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS="aff4")

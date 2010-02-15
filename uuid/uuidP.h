@@ -32,8 +32,6 @@
  * %End-Header%
  */
 
-#include "config.h"
-
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
 #else

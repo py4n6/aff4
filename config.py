@@ -25,3 +25,15 @@ PROCESS_LOCKS = False
 ## This is where the installation leaves
 PREFIX = "/usr/local/"
 
+## Location of the libxml2 headers - If this is None we call xml2-config
+LIBXML2_INCLUDES = None
+LIBXML2_LINK = None
+
+## Location of libxslt header
+LIBXSLT_INCLUDES = None
+LIBXSLT_LINK = None
+
+## Should we build these optional components of libraptor
+RAPTOR_TURTLE = True
+RAPTOR_NTRIPLES = True
+RAPTOR_RDFXML = True

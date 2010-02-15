@@ -102,13 +102,20 @@ if env['mingw']:
    crossmingw.generate(env)
 
 conf = Configure(env)
+conf.AddTests({'CheckTypeSize': utils.CheckTypeSize})
+
+config_h_build([File('include/aff4.h')], [File('include/sc_aff4.h.in')], env)
 
 ## Check for different things
 if not env.GetOption('clean') and not env.GetOption('help'):
+   ## Sizeof
+   SconsUtils.utils.check_size(conf, ["unsigned int","unsigned char",
+                                      "unsigned long","unsigned short"])
+
    ## Headers
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
-crypt.h dlfcn.h stdint.h stddef.h stdio.h
+crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h
 """))
 
    ## Mandatory dependencies
@@ -127,9 +134,9 @@ crypt.h dlfcn.h stdint.h stddef.h stdio.h
       if not conf.CheckFunc(func):
          error("Openssl installation seems to be missing function %s" % func)
 
-   if not conf.CheckLibWithHeader('raptor', 'raptor.h','c') or \
-          not conf.CheckFunc('raptor_init'):
-      error("You must have libraptor-dev installed")
+#   if not conf.CheckLibWithHeader('raptor', 'raptor.h','c') or \
+#          not conf.CheckFunc('raptor_init'):
+#      error("You must have libraptor-dev installed")
 
    ## Optional stuff:
    ## Functions
@@ -158,9 +165,10 @@ generate_help(vars, env)
 
 Export("env")
 
-env.AlwaysBuild(env.Command('include/config.h', 'include/sc_config.h.in', config_h_build))
+config_h_build([File('lib/config.h')], [File('lib/sc_config.h.in')], env)
 
-SConscript(['lib/SConstruct', 'tools/SConstruct', 'python2.6/SConstruct',
+SConscript(['libraptor/SConscript', 'lib/SConstruct', 'tools/SConstruct',
+            'python2.6/SConstruct',
             'tests/SConstruct', 'applications/SConstruct'])
 
 # env.Package( NAME           = 'libaff4',

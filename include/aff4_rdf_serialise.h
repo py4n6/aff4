@@ -19,6 +19,10 @@ CLASS(RDFSerializer, Object)
      raptor_serializer *rdf_serializer;
      raptor_iostream *iostream;
      FileLikeObject fd;
+     int count;
+
+     char buff[BUFF_SIZE*2];
+     int i;
 
      Cache attributes;
 

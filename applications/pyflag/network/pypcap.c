@@ -1,4 +1,3 @@
-#include "config.h"
 #include "pcap.h"
 #include "stringio.h"
 #include "network.h"

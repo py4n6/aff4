@@ -3,13 +3,15 @@ import pdb
 
 Import("env")
 
+nenv = env.Clone()
+
 common_files = env.Object('common','common.c')
 
 programs = """aff4imager.c raid_reconstructor.c"""
 
 for prog in Split(programs):
-    prog = env.Program([prog] + common_files,
+    prog = nenv.Program([prog] + common_files,
                        LIBS='aff4', LIBPATH="#lib/")
 
-env.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
-env.Install("$prefix/bin/", Split("aff4fuse aff4imager raid_reconstructor"))
+nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
+nenv.Install("$prefix/bin/", Split("aff4fuse aff4imager raid_reconstructor"))
