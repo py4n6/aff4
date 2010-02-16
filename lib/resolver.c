@@ -11,21 +11,16 @@
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#define RESOLVER_CACHE_SIZE 10
+#define RESOLVER_CACHE_SIZE 0
 
 #define TDB_HASH_SIZE 1024*128
 
 // Some extra debugging
-#if 0
 #define LOCK_RESOLVER pthread_mutex_lock(&self->mutex); \
   DEBUG_LOCK("Locking resolver %u\n", self->mutex.__data.__count)
 
 #define UNLOCK_RESOLVER  pthread_mutex_unlock(&self->mutex);    \
   DEBUG_LOCK("Unlocking resolver %u\n", self->mutex.__data.__count)
-#else
-#define LOCK_RESOLVER pthread_mutex_lock(&self->mutex);
-#define UNLOCK_RESOLVER  pthread_mutex_unlock(&self->mutex);
-#endif
 
 // Prototypes
 int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense);
@@ -557,6 +552,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   // continue calling functions from it.
   pthread_mutexattr_init(&mutex_attr);
   pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE_NP);
+  //pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
   pthread_mutex_init(&self->mutex, &mutex_attr);
   pthread_mutexattr_destroy(&mutex_attr);
 
@@ -1090,14 +1086,18 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
       // A thread_id of 0 means noone is using it right now
       if(result && result->thread_id == 0) {
-        break;
+        // The object is available and is not used by anyone.
+        // we can now take it
+
+        // If its a FileLikeObject seek it to 0
+        if(ISSUBCLASS(result, FileLikeObject)) {
+          CALL((FileLikeObject)result, seek, 0, SEEK_SET);
+        };
+
+        talloc_reference(NULL, result);
+        goto exit;
       };
     };
-
-    if(iter && result->thread_id != 0) {
-      result = NULL;
-    };
-
   } else {
     // If the object is write locked, there are two possibilities. If
     // its our own thread that locked it, we are in a deadlock because
@@ -1109,16 +1109,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     result = (AFFObject)CALL(self->write_cache, borrow, TDB_DATA_STRING(tdb_urn));
 
     if(result) {
-      // Make sure it does not get freed from under us
-      talloc_reference(self, result);
-
-      // We need to lock it here, but we are holding a lock on the
-      // entire cache. If we just took the lock here, other threads
-      // will be unable to unlock it. So we must release the cache
-      // lock here to give them a chance to unlock it while we block
-      // on acquiring the lock:
-      UNLOCK_RESOLVER;
-
       // The object is currently used by our own thread... this is a
       // deadlock. This is not a race since we are the only thread to
       // be setting the thread_id to our own.
@@ -1128,39 +1118,40 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
       };
 
-      // Can block here
-      DEBUG_LOCK("Locking object %s\n", STRING_URNOF(result));
-      Resolver_lock_gen(self, URNOF(result), result->mode, F_LOCK);
+      /* We need to lock the object here, but we are holding a
+       recursive lock on the entire cache. If we just took the lock
+       here, other threads will be unable to proceed and unlock it. So
+       we must release the cache lock here to give them a chance to
+       unlock it while we block on acquiring the lock. The matter is
+       complicated by the fact that we could be holding a recursive
+       lock on the resolver which means even if we release it once,
+       other threads may still not get to run.
 
-      pthread_mutex_lock(&result->mutex);
+       The solution is to completely unlock the cache as many times as
+       needed here, recording the recursion level, then block on
+       acquiring the object lock. Finally we acquire the required
+       number of locks on the resolver mutex.
+      */
+      {
+        int count = 0;
 
-      // The object is available and is not used by anyone (since we
-      // have a lock on it )- we can now take it
-      result->thread_id = pthread_self();
+        while(pthread_mutex_unlock(&self->mutex) != EPERM) count ++;
 
-      // We need the resolver again
-      LOCK_RESOLVER;
+        // Take the object
+        pthread_mutex_lock(&result->mutex);
+        result->thread_id = pthread_self();
 
-      talloc_unlink(self, result);
+        // Relock the resolver mutex the required number of times:
+        for(;count > 0;count--) pthread_mutex_lock(&self->mutex);
+      };
 
-      // Here we still hold a lock on the object
+      // Reference it to NULL for giving it to the caller
+      talloc_reference(NULL, result);
+
+      UNLOCK_RESOLVER;
+      return result;
     };
   };
-
-  // Ok we got the object from the cache
-  if(result) {
-    // If its a FileLikeObject seek it to 0
-    if(ISSUBCLASS(result, FileLikeObject)) {
-      CALL((FileLikeObject)result, seek, 0, SEEK_SET);
-    };
-
-    // Add a reference to the object to ensure it does not get freed
-    talloc_reference(NULL, result);
-
-    // Lock it
-    goto exit;
-  };
-
 
   /** Ok if we get here we did not have it in cache, we must create it */
   ClearError();
@@ -1200,10 +1191,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 #endif
   ((AFFObject)result)->mode = mode;
 
-  result->thread_id = pthread_self();
-  pthread_mutex_lock(&result->mutex);
-  DEBUG_LOCK("Locking object %s\n", STRING_URNOF(result));
-
   // Place it in the cache now
   if(mode == 'r') {
     CALL(self->read_cache, put, TDB_DATA_STRING(tdb_urn), (Object)result);
@@ -1212,6 +1199,10 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   };
 
  exit:
+  pthread_mutex_lock(&result->mutex);
+  result->thread_id = pthread_self();
+  DEBUG_LOCK("Locking object %s\n", STRING_URNOF(result));
+
   UNLOCK_RESOLVER;
   return result;
 
@@ -1221,13 +1212,32 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 };
 
 /** Return the object to the cache. Callers may not make a reference
-    to it after that.
+    to it after that. Note that the object is already in the cache
+    anyway since it was created through create() or open(). In this
+    case all we need to do is to just unlock it.
+
+    We deliberatly do not need to grab a lock on the resolver because
+    we dont touch it.
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
-  Cache cache = self->write_cache;
-  Object iter;
-  int found = 0;
+  //  Cache cache = self->write_cache;
+  // Object iter;
+  // int found = 0;
 
+  // We are done with the object now
+  obj->thread_id = 0;
+  pthread_mutex_unlock(&obj->mutex);
+  Resolver_lock_gen(self, URNOF(obj), obj->mode, F_UNLCK);
+  DEBUG_LOCK("Unlocking object %s\n", STRING_URNOF(obj));
+
+  // We unlink it from NULL here - the object is owned by NULL after
+  // the open call.
+  talloc_unlink(NULL, obj);
+  ClearError();
+
+  return;
+
+  /*
   LOCK_RESOLVER;
 
   if(obj->mode == 'r')
@@ -1261,6 +1271,7 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   // the open call.
   talloc_unlink(NULL, obj);
   ClearError();
+  */
 };
 
 // A helper method to construct the class
@@ -1349,6 +1360,9 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   TDB_DATA attribute;
   uint64_t offset;
   TDB_DATA_LIST data_list;
+
+  // Noop for now
+  return 1;
 
   if(mode == 'r') attribute=RLOCK;
   else if(mode =='w') attribute=WLOCK;

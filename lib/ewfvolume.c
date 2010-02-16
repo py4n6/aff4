@@ -1,11 +1,26 @@
 /** This file implements support for ewf volumes */
 #include "aff4.h"
 
+// All access to libewf must be protected by mutex since libewf is
+// not threadsafe
+pthread_mutex_t LIBEWF_LOCK;
+
+#if 0
+#define LOCK_EWF pthread_mutex_lock(&LIBEWF_LOCK)
+#define UNLOCK_EWF pthread_mutex_unlock(&LIBEWF_LOCK)
+#else
+#define LOCK_EWF
+#define UNLOCK_EWF
+#endif
+
 static int EWFVolume_destructor(void *this) {
   EWFVolume self = (EWFVolume)this;
 
-  if(self->handle)
+  if(self->handle) {
+    LOCK_EWF;
     libewf_close(self->handle);
+    UNLOCK_EWF;
+  };
 
   return 0;
 };
@@ -56,19 +71,23 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
     goto error;
   };
 
+  LOCK_EWF;
   amount_of_filenames = libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
                                     LIBEWF_FORMAT_UNKNOWN,
                                     &filenames);
 
   this->handle = libewf_open(filenames, amount_of_filenames, LIBEWF_OPEN_READ);
+  UNLOCK_EWF;
   if(!this->handle) {
     RaiseError(ERuntimeError, "Unable to open EWF volume %s", urn->value);
     goto error;
   };
 
+  LOCK_EWF;
   if(-1==libewf_get_media_size(this->handle, &media_size)) {
     goto error;
   };
+  UNLOCK_EWF;
 
   // Only seems to exist in experimental API
   //  libewf_glob_free(filenames, amount_of_filenames
@@ -164,7 +183,7 @@ static AFFObject EWFStream_AFFObject_Con(AFFObject self, RDFURN urn, char mode) 
     CALL(URNOF(self), set, urn->value);
 
     if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->stored)) {
-      RaiseError(ERuntimeError, "EWF Stream %s has not AFF4_STORED attribute?", urn);
+      RaiseError(ERuntimeError, "EWF Stream %s has no AFF4_STORED attribute?", urn);
       goto error;
     };
 
@@ -188,7 +207,9 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
     goto error;
   };
 
+  LOCK_EWF;
   res = libewf_read_random(volume->handle, buffer, length, self->readptr);
+  UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");
     goto error;
@@ -226,4 +247,5 @@ void EWF_init() {
   register_type_dispatcher(AFF4_EWF_VOLUME, (AFFObject *)GETCLASS(EWFVolume));
   register_type_dispatcher(AFF4_EWF_STREAM, (AFFObject *)GETCLASS(EWFStream));
 
+  pthread_mutex_init(&LIBEWF_LOCK, NULL);
 };
