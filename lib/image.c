@@ -233,11 +233,11 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
 
     this->bevy_size = this->chunks_in_segment->value * this->chunk_size->value;
     this->segment_count = 0;
-    
+
     // Build writer workers
     if(mode=='w') {
       int i;
-      
+
       this->workers = CONSTRUCT(Queue, Queue, Con, self);
       this->busy = CONSTRUCT(Queue, Queue, Con, self);
       // Make this many workers
@@ -264,7 +264,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   talloc_free(self);
   return NULL;
 };
-  
+
 static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Image this = (Image)self;
   int available_to_read;
@@ -286,9 +286,9 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
       CALL(this->busy, put, this->current);
 
       // Just call it in place for now (no multithreading right now).
-      dump_bevy(this->current);
-      //      pthread_create( &this->current->thread, NULL, 
-      //		      (void *(*) (void *))dump_bevy, (void *)this->current);
+      //dump_bevy(this->current);
+      pthread_create( &this->current->thread, NULL,
+      		      (void *(*) (void *))dump_bevy, (void *)this->current);
       this->segment_count++;
 
       // Get another worker from the queue:
@@ -303,7 +303,7 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
   self->size->value += length;
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)((FileLikeObject)self)->size);
-  
+
   return length;
 };
 

@@ -201,6 +201,9 @@ static PyMethodDef %(module)s_methods[] = {
 };
 
 PyMODINIT_FUNC init%(module)s(void) {
+   /* Make sure threads are enabled */
+   PyEval_InitThreads();
+
    /* create module */
    PyObject *m = Py_InitModule3("%(module)s", %(module)s_methods,
                                    "%(module)s module.");
