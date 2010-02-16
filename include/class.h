@@ -192,9 +192,9 @@ extern "C" {
 #include "talloc.h"
 
 #define CLASS(class,super_class)			\
-  typedef struct class ## _t *class;				\
-  inline void class ## _init(Object self);			\
-  extern struct class ## _t __ ## class;			\
+  typedef struct class ## _t *class;                             \
+  int class ## _init(Object self);                               \
+  extern struct class ## _t __ ## class;                         \
   struct class ## _t { struct super_class ## _t super;		 \
   class   __class__;                                             \
   super_class  __super__;
@@ -235,9 +235,9 @@ extern "C" {
 #define VIRTUAL(class,superclass)				\
   struct class ## _t __ ## class;                                       \
                                                                         \
-  inline void class ## _init(Object this) {                             \
+  int class ## _init(Object this) {                                    \
   class self = (class)this;                                             \
-  if(self->__super__) return;                                     \
+  if(self->__super__) return 1;                                         \
   superclass ##_init(this);                                             \
   this->__class__ = (Object)&__ ## class;                               \
   self->__class__ = (class)&__ ## class;                               \
@@ -249,7 +249,7 @@ extern "C" {
 #define SET_DOCSTRING(string)			\
   ((Object)self)->__doc__ = string
 
-#define END_VIRTUAL };
+#define END_VIRTUAL return 1; };
 
 #define VMETHOD(method)				\
   (self)->method
