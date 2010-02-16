@@ -11,7 +11,7 @@
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
-#define RESOLVER_CACHE_SIZE 0
+#define RESOLVER_CACHE_SIZE 20
 
 #define TDB_HASH_SIZE 1024*128
 
@@ -1135,6 +1135,8 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
       {
         int count = 0;
 
+        // We dont want it to be freed from right under us
+        talloc_reference(self, result);
         while(pthread_mutex_unlock(&self->mutex) != EPERM) count ++;
 
         // Take the object
@@ -1147,6 +1149,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
       // Reference it to NULL for giving it to the caller
       talloc_reference(NULL, result);
+      talloc_unlink(self, result);
 
       UNLOCK_RESOLVER;
       return result;
@@ -1211,67 +1214,58 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   return NULL;
 };
 
+static inline void trim_cache(Cache cache) {
+  Cache i,j;
+
+  list_for_each_entry_safe(i,j,&cache->cache_list, cache_list) {
+    AFFObject obj = (AFFObject)i->data;
+
+    // If the cache size is not too full its ok
+    if(cache->cache_size < RESOLVER_CACHE_SIZE) break;
+
+    // Only remove objects which are not currently locked.
+    if(obj->thread_id == 0) talloc_unlink(cache, i);
+  };
+};
+
+
 /** Return the object to the cache. Callers may not make a reference
     to it after that. Note that the object is already in the cache
     anyway since it was created through create() or open(). In this
     case all we need to do is to just unlock it.
 
-    We deliberatly do not need to grab a lock on the resolver because
-    we dont touch it.
+    We also trim back the cache if needed.
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
-  //  Cache cache = self->write_cache;
-  // Object iter;
-  // int found = 0;
-
-  // We are done with the object now
-  obj->thread_id = 0;
-  pthread_mutex_unlock(&obj->mutex);
-  Resolver_lock_gen(self, URNOF(obj), obj->mode, F_UNLCK);
-  DEBUG_LOCK("Unlocking object %s\n", STRING_URNOF(obj));
-
-  // We unlink it from NULL here - the object is owned by NULL after
-  // the open call.
-  talloc_unlink(NULL, obj);
-  ClearError();
-
-  return;
-
-  /*
   LOCK_RESOLVER;
 
-  if(obj->mode == 'r')
-    cache = self->read_cache;
-
-  // Check if the object is still in the cache
-  iter = CALL(cache, iter, ZSTRING(STRING_URNOF(obj)));
-  while(iter) {
-    Object result = CALL(cache, next, &iter);
-    if(result == (Object)obj) {
-      // Its already in the cache
-      found = 1;
-      break;
-    };
-  };
-
-  // The item is not in the cache - we add it then
-  if(!found) {
-    CALL(cache, put,  (char *)ZSTRING(STRING_URNOF(obj)), (Object)obj);
-  };
+  // We unlink it from NULL here - the object is owned by NULL after
+  // the open call. This should not actually free it because the
+  // object is in the cache now.
+  talloc_unlink(NULL, obj);
 
   // We are done with the object now
   obj->thread_id = 0;
   pthread_mutex_unlock(&obj->mutex);
   Resolver_lock_gen(self, URNOF(obj), obj->mode, F_UNLCK);
   DEBUG_LOCK("Unlocking object %s\n", STRING_URNOF(obj));
+
+  ClearError();
+
+  // Make sure caches are not too big
+  trim_cache(self->read_cache);
+  trim_cache(self->write_cache);
 
   UNLOCK_RESOLVER;
 
-  // We unlink it from NULL here - the object is owned by NULL after
-  // the open call.
-  talloc_unlink(NULL, obj);
-  ClearError();
-  */
+  return;
+};
+
+
+int obj_dest(void *obj) {
+  printf("Destroyed\n");
+
+  return 0;
 };
 
 // A helper method to construct the class
@@ -1292,7 +1286,10 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
                                                Con, NULL, NULL, mode);
   if(!result) goto error;
 
+  //talloc_set_destructor((void *)result, obj_dest);
+#ifdef __DEBUG__
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
+#endif
 
   DEBUG_OBJECT("Created %s with URN %s\n", NAMEOF(result), URNOF(result)->value);
 
@@ -1487,10 +1484,10 @@ static void Resolver_flush(Resolver self) {
   if(self->write_cache)
     talloc_free(self->write_cache);
 
-  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  self->read_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->read_cache, "Resolver Read Cache");
 
-  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, RESOLVER_CACHE_SIZE);
+  self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
   NAMEOF(self->write_cache) = talloc_get_name(self->write_cache);
 };
@@ -1623,8 +1620,17 @@ static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
        attribute, value);
 };
 
-// Prepares an object to be used
+// Prepares an object to be used at this point we add the object to
+// the relevant cache
 static AFFObject AFFObject_finish(AFFObject self) {
+  Cache cache = oracle->read_cache;
+
+  if(self->mode == 'w')
+    cache = oracle->write_cache;
+
+  // Put us in the right cache
+  CALL(cache, put, ZSTRING(STRING_URNOF(self)), (Object)self);
+
   return CALL(self, Con, URNOF(self), self->mode);
 };
 

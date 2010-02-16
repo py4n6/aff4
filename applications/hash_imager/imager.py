@@ -16,8 +16,8 @@ oracle = pyaff4.Resolver()
 out_urn = pyaff4.RDFURN()
 out_urn.set("/tmp/test3.aff4")
 
-IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
-#IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
+#IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
+IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
 in_urn = pyaff4.RDFURN()
 in_urn.set(IN_FILENAME)
 
@@ -100,14 +100,14 @@ class HashWorker(threading.Thread):
                     image_stream.map.add_point(
                         block * self.blocksize, file_block * self.blocksize, hashed_urn.value)
 
-                    print "%s,%s,%s " % (block * self.blocksize,
-                                         file_block * self.blocksize, hashed_urn.value)
+                    #print "%s,%s,%s " % (block * self.blocksize,
+                    #                     file_block * self.blocksize, hashed_urn.value)
                     last_block = block
 
                 file_block += 1
                 last_block += 1
 
-            print
+            #print
             ## This is the last block of the file - it may not be a full block
             extra = self.size % self.blocksize
             image_stream.map.add_point(block * self.blocksize + extra, 0, ZERO_URN.value)
@@ -199,7 +199,7 @@ class HashImager:
 
         while 1:
             self.workers = [ x for x in self.workers if x.isAlive() ]
-            print self.workers
+            #print self.workers
             if len(self.workers) < self.MAX_THREADS:
                 ## Start a new worker
                 worker = HashWorker(self.in_urn, self.volume_urn,
@@ -309,6 +309,13 @@ class HashImager:
                 offset += available
         finally:
             image_stream.cache_return()
+
+## Shut up messages
+class Renderer:
+    def message(self, level, message):
+        pass
+
+oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
 
 imager = HashImager(in_urn, out_urn)
 imager.image()
