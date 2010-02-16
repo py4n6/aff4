@@ -1274,6 +1274,13 @@ static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
         self._write_definition(out)
 
     def _write_definition(self, out):
+        ## We need to grab the GIL before we do anything
+        out.write("""{
+      //Grab the GIL so we can do python stuff
+      PyGILState_STATE gstate;
+      gstate = PyGILState_Ensure();
+      """)
+
         out.write("{\nPyObject *py_result;\n")
         out.write('PyObject *method_name = PyString_FromString("%s");\n' % self.name)
         out.write(self.return_type.definition())
@@ -1307,11 +1314,12 @@ if(!py_result) {
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
 
         out.write("Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
+        out.write("PyGILState_Release(gstate);\n")
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:
-            out.write("\nerror:\n %s;\n" % self.error_condition())
+            out.write("\nerror:\n PyGILState_Release(gstate);\n %s;\n" % self.error_condition())
 
-        out.write("};\n\n")
+        out.write("   };\n};\n")
 
     def error_condition(self):
         return self.return_type.error_value

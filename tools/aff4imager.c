@@ -266,6 +266,8 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
     goto error;
   };
 
+  CALL(output_urn, set, output_file);
+
   // Need to make a new zipfile
   if(!*zipfile) {
     *zipfile = (AFF4Volume)CALL(oracle, create, driver, 'w');
@@ -275,8 +277,7 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
       goto error;
     };
 
-    CALL((AFFObject)*zipfile, set, AFF4_STORED, 
-         rdfvalue_from_urn(directory_offset, output_file));
+    CALL((AFFObject)*zipfile, set, AFF4_STORED, (RDFValue)output_urn);
 
     // Is it ok?
     if(!CALL((AFFObject)*zipfile, finish)) {
@@ -290,15 +291,20 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
 
   // We have to give the stream a specific name
   if(stream_name) {
-    URNOF(image) = CALL(URNOF(*zipfile), copy, image);
+    CALL(URNOF(image), set, STRING_URNOF(*zipfile));
     CALL(URNOF(image), add, stream_name);
   };
 
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set, AFF4_STORED, (RDFValue)URNOF(*zipfile));
-  if(chunks_in_segment > 0)
-    CALL((AFFObject)image, set, AFF4_CHUNKS_IN_SEGMENT, 
-         rdfvalue_from_int(directory_offset, chunks_in_segment));
+  if(chunks_in_segment > 0) {
+    XSDInteger rdf_chunks_in_segment = new_XSDInteger(directory_offset);
+
+    CALL(rdf_chunks_in_segment, set, chunks_in_segment);
+
+    CALL((AFFObject)image, set, AFF4_CHUNKS_IN_SEGMENT,
+         (RDFValue)rdf_chunks_in_segment);
+  };
 
   // Done with the volume now
   CALL(oracle, cache_return, (AFFObject)*zipfile);
