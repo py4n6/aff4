@@ -1,5 +1,26 @@
 #include "aff4.h"
 
+  /* The comparison function for the treap. */
+static int map_point_cmp(map_point_node_t *a, map_point_node_t *b) {
+  int rVal = (a->image_offset > b->image_offset) -  \
+    (a->image_offset < b->image_offset);
+
+  if (rVal == 0) {
+    // Duplicates are not allowed in the tree, so force an arbitrary
+    // ordering for non-identical items with equal keys.
+    rVal = (((uintptr_t) a) > ((uintptr_t) b))
+      - (((uintptr_t) a) < ((uintptr_t) b));
+  };
+
+  return rVal;
+};
+
+/* This huge macro generates all the tree tranversal and searching
+   functions.
+*/
+trp_gen(static, tree_, map_point_tree_t, map_point_node_t, head, \
+        link, map_point_cmp, 1297, 1301);
+
 static RDFValue MapValue_Con(RDFValue self) {
   MapValue this = (MapValue)self;
 
@@ -7,7 +28,11 @@ static RDFValue MapValue_Con(RDFValue self) {
   this->number_of_points = 0;
   this->number_of_urns = 0;
   this->cache = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
-  this->points = talloc_array(self, struct map_point, 1);
+
+  /* Initialize tree. */
+  tree_new(&this->tree, 42);
+  this->tree.value = this;
+
   this->targets = talloc_array(self, RDFURN, 1);
 
   this->size = new_XSDInteger(self);
@@ -95,6 +120,7 @@ static int MapValue_parse(RDFValue self, char *serialised, RDFValue urn) {
   return CALL(self, decode, ZSTRING(serialised), urn);
 };
 
+/*
 static int compare_points(const void *X, const void *Y) {
   struct map_point *x=(struct map_point *)X;
   struct map_point *y=(struct map_point *)Y;
@@ -102,10 +128,31 @@ static int compare_points(const void *X, const void *Y) {
   if(x->image_offset > y->image_offset)
     return 1;
 
-  if(x->image_offset == y->image_offset)
-    return 0;
+  if(x->image_offset == y->image_offset) {
+    if(x->version > y->version) return 1;
+    if(x->version < y->version) return -1;
 
+    return 0;
+  };
   return -1;
+};
+*/
+
+static map_point_node_t *text_map_iterate_cb(map_point_tree_t *tree,
+                                       map_point_node_t *node,
+                                       void *data) {
+  FileLikeObject fd = (FileLikeObject)data;
+  MapValue self = tree->value;
+  char buff[BUFF_SIZE];
+  int length;
+
+  length = snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", node->image_offset,
+                    node->target_offset, self->targets[node->target_idx]->value);
+
+  length = min(length, BUFF_SIZE);
+  CALL(fd, write, buff, length);
+
+  return NULL;
 };
 
 static char *MapValue_serialise(RDFValue self) {
@@ -148,34 +195,11 @@ static char *MapValue_serialise(RDFValue self) {
     goto error;
   };
 
-  // Now save the map to the segment
-  // sort the array
-  qsort(this->points, this->number_of_points, sizeof(*this->points),
-	compare_points);
+  // Now save the map to the segment - Iterating over the treap in
+  // forward order will produce a sorted array.
+  tree_iter(&this->tree, NULL, text_map_iterate_cb, (void *)fd);
 
-  for(i=0; i < this->number_of_points; i++) {
-    char buff[BUFF_SIZE];
-    struct map_point *point = &this->points[i];
-
-    // See if we can reduce adjacent points
-    // Note that due to the cache we can guarantee that if the
-    // target_urn pointers are different, they are in fact different
-    // URNs.
-    if(i!=0 && i!=this->number_of_points &&
-       point->target_index == this->points[i-1].target_index) {
-      struct map_point *previous = &this->points[i-1];
-      uint64_t prediction = point->image_offset - previous->image_offset + 
-	previous->target_offset;
-
-      // Dont write this point if its linearly related to previous point.
-      if(prediction == point->target_offset) continue;
-    };
-
-    snprintf(buff, BUFF_SIZE, "%lld,%lld,%s\n", point->image_offset,
-	     point->target_offset, this->targets[point->target_index]->value);
-    CALL(fd, write, ZSTRING_NO_NULL(buff));
-  };
-
+  // Done writing
   CALL(fd, close);
 
   // Done with our volume now
@@ -199,17 +223,11 @@ static char *MapValue_serialise(RDFValue self) {
   return NULL;
 };
 
-static void MapValue_sort(MapValue this) {
-  // sort the array
-  qsort(this->points, this->number_of_points, sizeof(*this->points),
-	compare_points);
-};
-
 static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
                                char *target) {
   // Do we already have this target in the cache?
   XSDInteger target_index = (XSDInteger)CALL(self->cache, borrow, ZSTRING(target));
-  struct map_point new_point;
+  map_point_node_t *node = talloc_zero(self, map_point_node_t);
 
   // Add another target to the array
   if(!target_index) {
@@ -232,21 +250,44 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
     talloc_unlink(NULL, target_index);
   };
 
-  new_point.target_offset = target_offset;
-  new_point.image_offset = image_offset;
-  new_point.target_index = target_index->value;
+  // Now check if the new point is redundant. The new point will be
+  // redundant if the predicted target and target offset based on the
+  // existing map points are the same as what we are about to add.
+  {
+    uint64_t old_target_offset, old_available_to_read;
+    uint32_t existing_target_idx;
+    RDFURN existing_target = CALL(self, get_range, image_offset, &old_target_offset,
+                                  &old_available_to_read, &existing_target_idx);
 
-  // Now append the new point to our struct:
-  self->points = talloc_realloc(self, self->points,
-				struct map_point,
-				(self->number_of_points+1) *    \
-                                sizeof(*self->points));
+    if(existing_target && existing_target_idx == target_index->value &&
+       old_target_offset == target_offset) {
+      goto error;
+    };
+    ClearError();
+  };
 
-  memcpy(&self->points[self->number_of_points], &new_point, sizeof(new_point));
+  node->image_offset = image_offset;
+  node->target_offset = target_offset;
+  node->target_idx = target_index->value;
 
-  self->number_of_points ++;
+  // Now make sure that the current point is not already in the treap:
+  tree_remove(&self->tree, node);
+
+  /** This might leak as we dont free anything here. Typically it
+      does not matter because all nodes are allocated from the same
+      slab.
+  */
+
+  // Now add the new point:
+  tree_insert(&self->tree, node);
+  return;
+
+ error:
+  talloc_free(node);
+  return;
 };
 
+/*
 // searches the array of map points and returns the offset in the
 // array such that array[result].file_offset > offset
 static int bisect_left(uint64_t offset, struct map_point *array, int hi) {
@@ -279,68 +320,57 @@ static int bisect_right(uint64_t offset, struct map_point *array, int hi) {
 
   return lo-1;
 };
+*/
 
-static void MapValue_get_range(MapValue this, uint64_t readptr,
-                     uint64_t *target_offset_at_point,
-                     uint64_t *available_to_read,
-                     RDFURN urn) {
+static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
+                                 uint64_t *target_offset_at_point,
+                                 uint64_t *available_to_read,
+                                 uint32_t *target_idx
+                                 ) {
   // How many periods we are from the start
-  uint64_t period_number = readptr / (this->image_period->value);
+  uint64_t period_number = readptr / (self->image_period->value);
   // How far into this period we are within the image
-  uint64_t image_period_offset = readptr % (this->image_period->value);
+  uint64_t image_period_offset = readptr % (self->image_period->value);
   char direction = 'f';
-  int l;
+  map_point_node_t *pnode, *nnode, node;
+  uint64_t next_offset;
 
-  *available_to_read = this->size->value - readptr;
+  memset(&node, 0, sizeof(node));
 
-  if(*available_to_read == 0) {
-    *target_offset_at_point = 0;
+  node.image_offset = readptr;
 
-    return;
+  pnode = tree_psearch(&self->tree, &node);
+  nnode = tree_nsearch(&self->tree, &node);
+
+  // Now we have a range for our point:
+  if(!nnode) {
+    next_offset = self->size->value;
+  } else next_offset = nnode->image_offset;
+
+  if(pnode) { // Interpolate forward:
+    *target_offset_at_point = pnode->target_offset  +             \
+      image_period_offset - pnode->image_offset  +                \
+      period_number * self->target_period->value;
+
+    *available_to_read = next_offset - readptr;
+    if(target_idx)
+      *target_idx = pnode->target_idx;
+
+    return self->targets[pnode->target_idx];
+  } else if(nnode) { // Interpolate in reverse
+    *target_offset_at_point = nnode->target_offset -                     \
+      (nnode->image_offset - image_period_offset) +                      \
+      period_number * self->target_period->value;
+
+    *available_to_read = nnode->image_offset - readptr;
+    if(target_idx)
+      *target_idx = nnode->target_idx;
+
+    return self->targets[nnode->target_idx];
   };
 
-  // We can't interpolate forward before the first point - must
-  // interpolate backwards.
-  if(image_period_offset < this->points[0].image_offset) {
-    direction = 'r';
-  };
-
-  /** Interpolate forward */
-  if(direction=='f') {
-    l = bisect_right(image_period_offset, this->points, this->number_of_points);
-
-    // Here this->points[l].image_offset < image_period_offset
-    *target_offset_at_point = this->points[l].target_offset  +   \
-      image_period_offset - this->points[l].image_offset  +      \
-      period_number * this->target_period->value;
-
-    if(l < this->number_of_points-1) {
-      *available_to_read = this->points[l+1].image_offset - \
-        image_period_offset;
-    } else {
-      *available_to_read = min(*available_to_read, this->image_period->value -
-                               image_period_offset);
-    };
-
-    /** Interpolate in reverse */
-  } else {
-    l = bisect_left(image_period_offset, this->points, this->number_of_points);
-    *target_offset_at_point = this->points[l].target_offset - \
-      (this->points[l].image_offset - image_period_offset) +    \
-      period_number * this->target_period->value;
-
-    if(l<this->number_of_points) {
-      *available_to_read = this->points[l].image_offset - image_period_offset;
-    } else {
-      RaiseError(ERuntimeError, "Something went wrong...");
-      return;
-    };
-  };
-
-  if(urn && this->points[l].target_index < this->number_of_urns)
-    CALL(urn, set, this->targets[this->points[l].target_index]->value);
-
-  return;
+  RaiseError(ERuntimeError, "Map is empty...");
+  return NULL;
 };
 
 VIRTUAL(MapValue, RDFValue) {
@@ -354,7 +384,6 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(RDFValue, serialise) = MapValue_serialise;
   VMETHOD_BASE(MapValue, add_point) = MapValue_add_point;
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
-  VMETHOD_BASE(MapValue, sort) = MapValue_sort;
 } END_VIRTUAL
 
 static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue urn) {
@@ -415,8 +444,12 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   if(!fd) goto exit;
 
   this->number_of_points = fd->size->value / sizeof(struct map_point);
-  this->points = talloc_size(self, fd->size->value);
-  CALL(fd, read, (char *)this->points, fd->size->value);
+
+  /* FIXME....
+
+    this->points = talloc_size(self, fd->size->value);
+    CALL(fd, read, (char *)this->points, fd->size->value);
+  */
   CALL(oracle, cache_return, (AFFObject)fd);
 
  exit:
@@ -467,6 +500,9 @@ static char *MapValueBinary_serialise(RDFValue self) {
     goto error;
   };
 
+  //FIXME
+#if 0
+
   // Now save the map to the segment
   // sort the array
   qsort(this->points, this->number_of_points, sizeof(*this->points),
@@ -506,6 +542,8 @@ static char *MapValueBinary_serialise(RDFValue self) {
 
   CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
 
+#endif
+
  exit:
   return talloc_strdup(self, "");
 
@@ -523,46 +561,35 @@ VIRTUAL(MapValueBinary, MapValue) {
   VMETHOD_BASE(RDFValue, decode) = MapValueBinary_decode;
 } END_VIRTUAL
 
+static map_point_node_t *inline_map_iterate_cb(map_point_tree_t *tree,
+                                               map_point_node_t *node,
+                                               void *data) {
+  MapValueInline self = (MapValueInline)data;
+  int available_to_write =  BUFF_SIZE - self->i -1;
+  uint32_t idx = min(self->super.number_of_points, node->target_idx);
+
+  int need_to_write = snprintf(self->buffer + self->i, available_to_write,
+                               "%lld,%lld,%s|", node->image_offset,
+                               node->target_offset, tree->value->targets[idx]->value);
+
+  self->i += need_to_write;
+
+  self->i = min(self->i, BUFF_SIZE);
+  return NULL;
+};
+
 static char *MapValueInline_serialise(RDFValue self) {
-  MapValue this = (MapValue)self;
+  MapValueInline this = (MapValueInline)self;
   int i;
-  char *result = talloc_size(self, 1);
 
-  // Now save the map to the segment
-  // sort the array
-  qsort(this->points, this->number_of_points, sizeof(*this->points),
-	compare_points);
+  this->buffer = talloc_zero_size(NULL, BUFF_SIZE);
+  this->i = 0;
 
-  for(i=0; i < this->number_of_points; i++) {
-    struct map_point *point = &this->points[i];
+  // Now save the map to the segment - Iterating over the treap in
+  // forward order will produce a sorted array.
+  tree_iter(&((MapValue)this)->tree, NULL, inline_map_iterate_cb, (void *)self);
 
-    // See if we can reduce adjacent points
-    // Note that due to the cache we can guarantee that if the
-    // target_urn pointers are different, they are in fact different
-    // URNs.
-    if(i!=0 && i!=this->number_of_points &&
-       point->target_index == this->points[i-1].target_index) {
-      struct map_point *previous = &this->points[i-1];
-      uint64_t prediction = point->image_offset - previous->image_offset + 
-	previous->target_offset;
-
-      // Dont write this point if its linearly related to previous point.
-      if(prediction == point->target_offset) continue;
-    };
-
-    result = talloc_asprintf_append(result, "%lld,%lld,%s|", point->image_offset,
-	     point->target_offset, this->targets[point->target_index]->value);
-  };
-
-  // Now store various map parameters
-  if(this->image_period->value != -1) {
-    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period);
-    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
-  };
-
-  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
-
-  return result;
+  return this->buffer;
 };
 
 static int MapValueInline_decode(RDFValue self, char *data, int length, RDFValue urn) {
@@ -675,9 +702,9 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     // Ignore it if we cant open the map_urn
     ClearError();
+  } else {
+    self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
   };
-
-  self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
   return self;
 
@@ -692,9 +719,6 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
 
   CALL(this->map, add_point, image_offset, target_offset, target);
 
-  if(self->super.size->value < image_offset) {
-    self->super.size->value = image_offset;
-  };
 };
 
 static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_offset, uint64_t target_length) {
@@ -766,24 +790,28 @@ static int MapDriver_close(FileLikeObject self) {
 static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
 				  unsigned long int length) {
   MapDriver this = (MapDriver)self;
-  FileLikeObject target;
+  FileLikeObject target_fd;
   int read_bytes;
   uint64_t target_offset_at_point, available_to_read;
+  RDFURN target =  CALL(this->map, get_range, self->readptr,
+                        &target_offset_at_point, &available_to_read, NULL);
 
-  CALL(this->map, get_range, self->readptr, &target_offset_at_point, &available_to_read,
-       this->target_urn);
+  if(!target) {
+    ClearError();
+    return 0;
+  };
 
   // Clamp the available_to_read to the length requested
   available_to_read = min(available_to_read, length);
 
   // Now do the read:
-  target = (FileLikeObject)CALL(oracle, open,  this->target_urn, 'r');
-  if(!target) return -1;
+  target_fd = (FileLikeObject)CALL(oracle, open,  target, 'r');
+  if(!target_fd) return -1;
 
-  CALL(target, seek, target_offset_at_point, SEEK_SET);
-  read_bytes = CALL(target, read, buffer, available_to_read);
+  CALL(target_fd, seek, target_offset_at_point, SEEK_SET);
+  read_bytes = CALL(target_fd, read, buffer, available_to_read);
 
-  CALL(oracle, cache_return, (AFFObject)target);
+  CALL(oracle, cache_return, (AFFObject)target_fd);
 
   if(read_bytes >0) {
     ((FileLikeObject)self)->readptr += read_bytes;
@@ -832,9 +860,8 @@ static void MapDriver_set_data_type(MapDriver self, char *type) {
 
   if(tmp) {
     self->map = tmp;
+    self->custom_map = 1;
   };
-
-  self->custom_map = 1;
 };
 
 VIRTUAL(MapDriver, FileLikeObject) {

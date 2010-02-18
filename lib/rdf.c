@@ -951,6 +951,9 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
 static void RDFSerializer_close(RDFSerializer self) {
   raptor_serialize_end(self->rdf_serializer);
 
+  // Flush the buffer
+  CALL(self->fd, write, self->buff, self->i);
+
   raptor_free_serializer(self->rdf_serializer);
 
   talloc_free(self);

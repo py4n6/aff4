@@ -231,7 +231,10 @@ static int FileLikeObject_close(FileLikeObject self) {
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size);
 
-  CALL(oracle, cache_return, (AFFObject)self);
+  // Ask the resolver to expire ourselves - we no longer exist after
+  // this and can not access our memory any more - this must be the
+  // last statement:
+  CALL(oracle, expire, URNOF(self));
 
   return 1;
 };
@@ -485,6 +488,16 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
   memset(buffer,0,BUFF_SIZE+1);
 
+  /* Is there a file we need to read? This checks the file and ensures
+     it still as we expect. This needs to occur even before we look at
+     the volume specifically because we depend on the storage URN to
+     be sane.
+  */
+  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
+  if(!fd) {
+    goto error;
+  };
+
   // This check makes sure the volume does not already exist. We first
   // see if there is a ZipFile stored on the fd_urn, and then if that
   // ZipFile is dirty. If we do not know the volume's dirty state we
@@ -511,12 +524,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     };
   };
 
-  // Is there a file we need to read?
-  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
-  if(!fd) {
-    goto error;
-  };
-
   // Is there a directory_offset and does it make sense?
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
           (RDFValue)self->directory_offset) &&                  \
@@ -531,13 +538,13 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   // Find the End of Central Directory Record - We read about 4k of
   // data and scan for the header from the end, just in case there is
   // an archive comment appended to the end
-  self->directory_offset->set(self->directory_offset, 
+  self->directory_offset->set(self->directory_offset,
 	      CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END));
 
   memset(buffer, 0, BUFF_SIZE);
   length = CALL(fd, read, buffer, BUFF_SIZE);
 
-  if(length<0) 
+  if(length<0)
     goto error;
 
   // Scan the buffer backwards for an End of Central Directory magic
@@ -546,11 +553,11 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       break;
     };
   };
-  
+
   if(i!=0) {
     // This is now the offset to the end of central directory record
     self->directory_offset->value += i;
-    self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i, 
+    self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer+i,
 							    sizeof(*self->end));
     int j=0;
 
@@ -705,9 +712,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     goto error_reason;
   };
 
-  CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET, 
+  CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
        (RDFValue)self->directory_offset);
-
 
   // Now find the information.turtle file and parse it (We need to do
   // this after we loaded all the segments in case the

@@ -386,6 +386,18 @@ class Integer(Type):
     def comment(self):
         return "%s %s " % (self.original_type, self.name)
 
+class Integer32(Integer):
+    buidstr = 'k'
+
+    def __init__(self, name,type):
+        Type.__init__(self,name,type)
+        self.type = 'uint32_t '
+        self.original_type = type
+
+    def to_python_object(self, name=None, result='py_result', **kw):
+        name = name or self.name
+        return "PyErr_Clear();\n%s = PyLong_FromLong(%s);\n" % (result, name)
+
 class Integer64(Integer):
     buidstr = 'K'
     type = 'unsigned int'
@@ -425,6 +437,19 @@ class StringOut(String):
     sense = 'OUT'
 
 class IntegerOut(Integer):
+    sense = 'OUT_DONE'
+    buidstr = ''
+
+    def python_name(self):
+        return None
+
+    def byref(self):
+        return ''
+
+    def call_arg(self):
+        return "&%s" % self.name
+
+class Integer32Out(Integer32):
     sense = 'OUT_DONE'
     buidstr = ''
 
@@ -735,6 +760,7 @@ type_dispatcher = {
     "unsigned int": Integer,
     'int': Integer,
     'OUT uint64_t *': IntegerOut,
+    'OUT uint32_t *': Integer32Out,
     'char': Char,
     'void': Void,
     'void *': Void,
@@ -927,6 +953,16 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         out.write(self.return_type.pre_call(self))
         for type in self.args:
             out.write(type.pre_call(self))
+
+        out.write("""// Check the function is implemented
+  {  void *method = ((%(def_class_name)s)self->base)->%(method)s;
+     if(!method || (void *)unimplemented == (void *)method) {
+         PyErr_Format(PyExc_RuntimeError, "%(class_name)s.%(method)s is not implemented");
+         goto error;
+     };
+  };
+""" % dict(def_class_name = self.definition_class_name, method=self.name,
+           class_name = self.class_name))
 
         out.write("\n// Make the call\n ClearError();")
         call = "((%s)self->base)->%s(((%s)self->base)" % (self.definition_class_name, self.name, self.definition_class_name)

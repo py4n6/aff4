@@ -17,6 +17,9 @@ extern "C" {
 #include <sys/stat.h>
 #include <fcntl.h>
 
+  // Treap implementation
+#include "trp.h"
+
 #include "queue.h"
 /** This class is used by the image worker thread to dump the segments
     out. It is only created by the Image class internally.
@@ -89,7 +92,6 @@ END_CLASS
 /** The map stream driver maps an existing stream using a
     transformation.
 
-
     We require the stream properties to specify a 'target'. This can
     either be a plain stream name or can begin with 'file://'. In the
     latter case this indicates that we should be opening an external
@@ -113,7 +115,7 @@ END_CLASS
     that we fetch bytes from offset 4000.
 
     Required properties:
-    
+
     - target%d starts with 0 the number of target (may be specified as
       a URL). e.g. target0, target1, target2
 
@@ -125,12 +127,34 @@ END_CLASS
     - image_period - number of bytes in the target image each period
       will advance by. (Useful for RAID)
 */
+/* This is the serialised struct on disk. All values are given in
+   little endian format. A map is:
+
+   struct map_point map[];
+
+*/
 struct map_point {
-  // The offset in the target
-  uint64_t target_offset;
   // The logical offset this represents
   uint64_t image_offset;
+  // The offset in the target
+  uint64_t target_offset;
   uint32_t target_index;
+};
+
+  /* The points form a tree here */
+typedef struct map_point_node_s map_point_node_t;
+struct map_point_node_s {
+  uint64_t image_offset;
+  uint64_t target_offset;
+  uint32_t target_idx;
+  trp_node(map_point_node_t) link;
+};
+
+typedef struct map_point_tree_s map_point_tree_t;
+struct map_point_tree_s {
+  trp(map_point_node_t) head;
+  // A back reference to the MapValue that owns this tree.
+  struct MapValue_t *value;
 };
 
 CLASS(MapValue, RDFValue)
@@ -140,7 +164,11 @@ CLASS(MapValue, RDFValue)
 
   int number_of_points;
   int number_of_urns;
-  struct map_point *points;
+
+  // This is where we store the node treap
+  map_point_tree_t tree;
+
+  // An array of all the targets we know about
   RDFURN *targets;
   Cache cache;
 
@@ -156,17 +184,16 @@ CLASS(MapValue, RDFValue)
   void METHOD(MapValue, add_point, uint64_t image_offset, uint64_t target_offset,\
               char *target);
 
-  void METHOD(MapValue, sort);
-
   /* This function returns information about the current file pointer
      and its view of the target slice.
 
-     DEFAULT(urn) = NULL;
+     DEFAULT(target_idx) = NULL;
   */
-  void METHOD(MapValue, get_range, uint64_t readptr,                   \
-              OUT uint64_t *target_offset_at_point,                     \
-              OUT uint64_t *available_to_read,                          \
-              RDFURN urn);
+  BORROWED RDFURN METHOD(MapValue, get_range, uint64_t readptr,         \
+                         OUT uint64_t *target_offset_at_point,          \
+                         OUT uint64_t *available_to_read,               \
+                         OUT uint32_t *target_idx                       \
+                         );
 END_CLASS
 
 // Some alternative implementations
@@ -175,6 +202,8 @@ END_CLASS
 
 // Sometimes its quicker to just serialise the map inline
 CLASS(MapValueInline, MapValue)
+  char *buffer;
+  int i;
 END_CLASS
 
 CLASS(MapDriver, FileLikeObject)

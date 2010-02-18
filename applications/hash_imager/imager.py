@@ -16,8 +16,9 @@ oracle = pyaff4.Resolver()
 out_urn = pyaff4.RDFURN()
 out_urn.set("/tmp/test3.aff4")
 
-#IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
-IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
+IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
+#IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
+IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
 in_urn = pyaff4.RDFURN()
 in_urn.set(IN_FILENAME)
 
@@ -25,9 +26,10 @@ ZERO_URN = pyaff4.RDFURN()
 ZERO_URN.set("aff4://zero")
 
 class HashWorker(threading.Thread):
-    def __init__(self, in_urn, volume_urn, image_stream_urn,
-                 blocks, size,
-                 blocksize, condition, *args, **kwargs):
+    def __init__(self, in_urn, volume_urn, slack_urn,
+                 image_stream_urn,
+                 blocks, size, blocksize,
+                 condition, *args, **kwargs):
         threading.Thread.__init__(self, *args, **kwargs)
 
         self.in_urn = in_urn
@@ -38,17 +40,18 @@ class HashWorker(threading.Thread):
         self.image_stream_urn = image_stream_urn
         ## We signal this when we are done
         self.condition = condition
+        self.slack_urn = slack_urn
 
     def run(self):
         try:
-            self.dump_block()
+            self.dump_blocks()
         finally:
             ## Signal the condition variable
             self.condition.acquire()
             self.condition.notify()
             self.condition.release()
 
-    def dump_block(self):
+    def dump_blocks(self):
         ## Read all the data into a single string
         data_blocks = []
 
@@ -100,16 +103,38 @@ class HashWorker(threading.Thread):
                     image_stream.map.add_point(
                         block * self.blocksize, file_block * self.blocksize, hashed_urn.value)
 
-                    #print "%s,%s,%s " % (block * self.blocksize,
-                    #                     file_block * self.blocksize, hashed_urn.value)
+                    print "%s,%s,%s " % (block * self.blocksize,
+                                         file_block * self.blocksize, hashed_urn.value)
                     last_block = block
 
                 file_block += 1
                 last_block += 1
 
-            #print
-            ## This is the last block of the file - it may not be a full block
+            print
+            ## This is the last block of the file - We store the slack
+            ## block in a special slack object
             extra = self.size % self.blocksize
+            if extra > 0:
+                slack = oracle.open(self.slack_urn, 'w')
+                try:
+                    fd = oracle.open(self.in_urn, 'r')
+                    try:
+                        start = slack.readptr
+                        fd.seek(block * self.blocksize + extra)
+                        data = fd.read(self.blocksize - extra)
+                        slack.write(data)
+                    finally:
+                        fd.cache_return()
+
+                    image_stream.map.add_point(block * self.blocksize +
+                                               extra, start, self.slack_urn.value)
+                    print "%s,%s,%s " % (block * self.blocksize + extra,
+                                         start, self.slack_urn.value)
+
+                    extra = self.blocksize
+                finally:
+                    slack.cache_return()
+
             image_stream.map.add_point(block * self.blocksize + extra, 0, ZERO_URN.value)
         finally:
             image_stream.cache_return()
@@ -153,16 +178,28 @@ class HashImager:
 
             ## We create a new output map to hold the image:
             image = oracle.create(pyaff4.AFF4_MAP)
+            image.set_data_type(pyaff4.AFF4_MAP_TEXT)
             image.urn.set(self.volume_urn.value)
             image.urn.add(os.path.basename(IN_FILENAME))
             image.set(pyaff4.AFF4_STORED, self.volume_urn)
             image_stream = image.finish()
+
             self.image_urn = image_stream.urn
 
             ## By default we set the target to the ZERO_URN
             image_stream.add_point(0,0,ZERO_URN.value)
             image_stream.size.set(fd.size.value)
             image_stream.cache_return()
+
+            ## Create a stream for slack:
+            slack = oracle.create(pyaff4.AFF4_IMAGE)
+            slack.urn.set(self.image_urn.value)
+            slack.urn.add("slack")
+            slack.set(pyaff4.AFF4_STORED, self.volume_urn)
+            slack = slack.finish()
+
+            self.slack_urn = slack.urn
+            slack.cache_return()
         finally:
             fd.cache_return()
 
@@ -189,6 +226,9 @@ class HashImager:
             image_stream = oracle.open(self.image_urn, 'w')
             image_stream.close()
 
+            slack = oracle.open(self.slack_urn, 'w')
+            slack.close()
+
             volume = oracle.open(self.volume_urn, 'w')
             volume.close()
         finally:
@@ -203,10 +243,12 @@ class HashImager:
             if len(self.workers) < self.MAX_THREADS:
                 ## Start a new worker
                 worker = HashWorker(self.in_urn, self.volume_urn,
-                                    self.image_urn, blocks, size, self.blocksize,
+                                    self.slack_urn,
+                                    self.image_urn, blocks,
+                                    size, self.blocksize,
                                     self.condition)
                 worker.start()
-                #worker.join()
+                worker.join()
                 self.workers.append(worker)
                 return
             else:
@@ -257,14 +299,16 @@ class HashImager:
                 i = 0
                 size = stat.st_size
                 while 1:
-                    run = blocks[i:i+self.MAX_SIZE]
-                    if not run: break
-
-                    if len(run) == self.MAX_SIZE:
-                        size -= self.blocksize * self.MAX_SIZE
-
-                    self.dump_block_run(run, size)
-                    i+=self.MAX_SIZE
+                    ## Split the file into smaller runs
+                    if len(blocks) - i > self.MAX_SIZE:
+                        run = blocks[i:i+self.MAX_SIZE]
+                        self.dump_block_run(run, self.blocksize * len(run))
+                        i += self.MAX_SIZE
+                    else:
+                        print "Last run size = %s" % (size - i * self.blocksize)
+                        run = blocks[i:]
+                        self.dump_block_run(run, size - i * self.blocksize)
+                        break
 
                 continue
                 ## Now we also add a map for the file from the image
@@ -293,18 +337,23 @@ class HashImager:
                 map.close()
 
     def dump_unallocated(self):
-        return
         image_stream = oracle.open(self.image_urn, 'w')
         try:
             image_stream.map.sort()
             offset = 0
             urn = pyaff4.RDFURN()
             while 1:
-                target_offset, available = self.image_stream.map.get_range(offset, urn)
+                target_offset, available = image_stream.map.get_range(offset, urn)
 
                 if not available: break
 
-                print offset/4096, offset, target_offset, available, urn.value
+                ## We only want gaps
+                print offset % self.blocksize, offset, target_offset, available, urn.value
+
+                if urn.value == ZERO_URN.value:
+                    ## At this point the gaps should be even blocksizes.
+                    if (available % self.blocksize) != 0:
+                        print "????"
 
                 offset += available
         finally:

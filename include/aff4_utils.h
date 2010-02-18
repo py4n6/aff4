@@ -134,11 +134,8 @@ CLASS(Cache, Object)
      // iterator and getting all the objects.
      BORROWED Object METHOD(Cache, iter, char *key, int len);
      BORROWED Object METHOD(Cache, next, Object *iter);
-     Object METHOD(Cache, next_get, Object iter);
 
-     // Lock this cache from access from other threads
-     void METHOD(Cache, lock);
-     void METHOD(Cache, unlock);
+     int METHOD(Cache, print_cache);
 END_CLASS
 
      /** A logger may be registered with the Resolver. Any objects

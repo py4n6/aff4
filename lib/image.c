@@ -300,7 +300,8 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
     buffer_readptr += result;
   };
 
-  self->size->value += length;
+  self->readptr += length;
+  self->size->value = max(self->size->value, self->readptr);
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)((FileLikeObject)self)->size);
 

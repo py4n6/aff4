@@ -2,7 +2,7 @@ import pyaff4
 import pdb, os
 import time, sys
 
-#time.sleep(1)
+time.sleep(1)
 
 DD_DIR = "/var/tmp/uploads/testimages/raid/linux/"
 
@@ -45,25 +45,22 @@ oracle.set_value(map.urn, pyaff4.AFF4_TARGET_PERIOD, i)
 i.set(6 * blocksize)
 oracle.set_value(map.urn, pyaff4.AFF4_IMAGE_PERIOD, i)
 
-i.set(5242880 * 2)
-oracle.set_value(map.urn, pyaff4.AFF4_SIZE, i)
+map.set_data_type(pyaff4.AFF4_MAP_TEXT)
 
 map = map.finish()
+map.size.set(5242880 * 2)
 
-size = map.size
-
-map.add(0 * blocksize,0 * blocksize,d2)
-map.add(1 * blocksize,0 * blocksize,d1)
-map.add(2 * blocksize,1 * blocksize,d3)
-map.add(3 * blocksize,1 * blocksize,d2)
-map.add(4 * blocksize,2 * blocksize,d1)
-map.add(5 * blocksize,2 * blocksize,d3)
+map.add_point(0 * blocksize,0 * blocksize,d2)
+map.add_point(0 * blocksize + 10,0 * blocksize + 10,d2)
+map.add_point(1 * blocksize,0 * blocksize,d1)
+map.add_point(2 * blocksize,1 * blocksize,d3)
+map.add_point(3 * blocksize,1 * blocksize,d2)
+map.add_point(4 * blocksize,2 * blocksize,d1)
+map.add_point(5 * blocksize,2 * blocksize,d3)
 
 map_urn = map.urn
 
 map.close()
-
-sys.exit(0)
 
 volume = oracle.open(volume_urn, 'w')
 volume.close()

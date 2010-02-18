@@ -378,9 +378,7 @@ VIRTUAL(Cache, Object) {
      VMETHOD(iter) = Cache_iter;
      VMETHOD(next) = Cache_next;
 
-     UNIMPLEMENTED(Cache, next_get);
-     UNIMPLEMENTED(Cache, lock);
-     UNIMPLEMENTED(Cache, unlock);
+     VMETHOD(print_cache) = print_cache;
 
 } END_VIRTUAL
 
@@ -1252,20 +1250,13 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
 
   ClearError();
 
-  // Make sure caches are not too big
+  // Make sure read caches are not too big. Write caches are emptied
+  // by the close() method.
   trim_cache(self->read_cache);
-  trim_cache(self->write_cache);
 
   UNLOCK_RESOLVER;
 
   return;
-};
-
-
-int obj_dest(void *obj) {
-  printf("Destroyed\n");
-
-  return 0;
 };
 
 // A helper method to construct the class
@@ -1286,7 +1277,6 @@ static AFFObject Resolver_create(Resolver self, char *name, char mode) {
                                                Con, NULL, NULL, mode);
   if(!result) goto error;
 
-  //talloc_set_destructor((void *)result, obj_dest);
 #ifdef __DEBUG__
   talloc_set_name(result, "%s (%c) (created by resolver)", NAMEOF(class_reference), mode);
 #endif
@@ -1492,37 +1482,24 @@ static void Resolver_flush(Resolver self) {
   NAMEOF(self->write_cache) = talloc_get_name(self->write_cache);
 };
 
-static void Resolver_cache_expire(Resolver self, Object obj) {
-  /** Remove the object from the cache */
-  TDB_DATA uri = tdb_data_from_string(STRING_URNOF(obj));
-
-  LOCK_RESOLVER;
-
-  obj = CALL(self->read_cache, get, TDB_DATA_STRING(uri));
-  if(obj) {
-    talloc_unlink(self->read_cache, obj);
-  };
-
-  obj = CALL(self->write_cache, get, TDB_DATA_STRING(uri));
-  if(obj) talloc_unlink(self->write_cache, obj);
-
-  UNLOCK_RESOLVER;
-};
-
-
 static void Resolver_expire(Resolver self, RDFURN uri) {
   /** Remove the object from the cache */
   Object obj;
 
   LOCK_RESOLVER;
 
+  // Free the object
   obj = CALL(self->read_cache, get, ZSTRING(uri->value));
-  if(obj) talloc_unlink(self->read_cache, obj);
+  if(obj) {
+    talloc_unlink(NULL, obj);
+  }
 
   obj = CALL(self->write_cache, get, ZSTRING(uri->value));
-  if(obj) talloc_unlink(self->write_cache, obj);
+  if(obj) {
+    talloc_unlink(NULL, obj);
+  };
 
-  // Now ask the object to delete itself
+  // Now ask the object class to delete itself
   if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type)) {
     AFFObject class_reference = (AFFObject)CALL(type_dispatcher,
                                                 borrow, ZSTRING(self->type->value));
