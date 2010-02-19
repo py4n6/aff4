@@ -49,6 +49,12 @@
 #ifndef TRP_H_
 #define	TRP_H_
 
+#ifdef __GNUC__
+#define ATTRIBUTE_UNUSED __attribute__ ((unused))
+#else
+#define ATTRIBUTE_UNUSED
+#endif
+
 /* Node structure. */
 #define	trp_node(a_type)						\
 struct {								\
@@ -290,23 +296,23 @@ struct {								\
 #define	trp_gen(a_attr, a_prefix, a_trp_type, a_type, t_field,          \
                 a_field, a_cmp,                                         \
                 a_a, a_c)                                               \
-a_attr void								\
+  a_attr void	ATTRIBUTE_UNUSED                                        \
 a_prefix##new(a_trp_type *treap, uint32_t seed) {			\
   trp_new(a_type, a_field, seed, treap->t_field);                       \
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##first(a_trp_type *treap) {					\
     a_type *ret;							\
-    trpn_first(a_type, a_field, treap->t_field.trp_root, ret);         \
+    trpn_first(a_type, a_field, treap->t_field.trp_root, ret);          \
     return (ret);							\
-}									\
-a_attr a_type *								\
+ }									\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##last(a_trp_type *treap) {					\
     a_type *ret;							\
     trpn_last(a_type, a_field, treap->t_field.trp_root, ret);          \
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##next(a_trp_type *treap, a_type *node) {			\
     a_type *ret;							\
     if (trp_right_get(a_type, a_field, node) != NULL) {			\
@@ -331,7 +337,7 @@ a_prefix##next(a_trp_type *treap, a_type *node) {			\
     }									\
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##prev(a_trp_type *treap, a_type *node) {			\
     a_type *ret;							\
     if (trp_left_get(a_type, a_field, node) != NULL) {			\
@@ -356,7 +362,7 @@ a_prefix##prev(a_trp_type *treap, a_type *node) {			\
     }									\
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##search(a_trp_type *treap, a_type *key) {			\
     a_type *ret;							\
     int cmp;								\
@@ -371,7 +377,7 @@ a_prefix##search(a_trp_type *treap, a_type *key) {			\
     }									\
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##nsearch(a_trp_type *treap, a_type *key) {			\
     a_type *ret;							\
     a_type *tnode = treap->t_field.trp_root;                           \
@@ -390,7 +396,7 @@ a_prefix##nsearch(a_trp_type *treap, a_type *key) {			\
     }									\
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##psearch(a_trp_type *treap, a_type *key) {			\
     a_type *ret;							\
     a_type *tnode = treap->t_field.trp_root;                           \
@@ -409,7 +415,7 @@ a_prefix##psearch(a_trp_type *treap, a_type *key) {			\
     }									\
     return (ret);							\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##insert_recurse(a_type *cur_node, a_type *ins_node) {		\
     if (cur_node == NULL) {						\
 	return (ins_node);						\
@@ -441,13 +447,13 @@ a_prefix##insert_recurse(a_type *cur_node, a_type *ins_node) {		\
 	return (ret);							\
     }									\
 }									\
-a_attr void								\
-a_prefix##insert(a_trp_type *treap, a_type *node) {			\
+ a_attr void ATTRIBUTE_UNUSED                                           \
+ a_prefix##insert(a_trp_type *treap, a_type *node) {			\
   trp_node_new(a_type, a_field, a_a, a_c, &treap->t_field, node);       \
   treap->t_field.trp_root = a_prefix##insert_recurse(treap->t_field.trp_root, node); \
 }									\
-a_attr a_type *								\
-a_prefix##remove_recurse(a_type *cur_node, a_type *rem_node) {		\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
+ a_prefix##remove_recurse(a_type *cur_node, a_type *rem_node) {		\
   int cmp;                                                              \
                                                                         \
   if(!cur_node) return NULL;                                            \
@@ -486,13 +492,13 @@ a_prefix##remove_recurse(a_type *cur_node, a_type *rem_node) {		\
 	return (cur_node);						\
     }									\
 }									\
-a_attr void								\
+ a_attr void ATTRIBUTE_UNUSED                                           \
  a_prefix##remove(a_trp_type *treap, a_type *node) {			\
   if(treap->t_field.trp_root) {                                         \
     treap->t_field.trp_root = a_prefix##remove_recurse(treap->t_field.trp_root, node); \
  };                                                                     \
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##iter_recurse(a_trp_type *treap, a_type *node,			\
   a_type *(*cb)(a_trp_type *, a_type *, void *), void *arg) {		\
     if (node == NULL) {							\
@@ -508,7 +514,7 @@ a_prefix##iter_recurse(a_trp_type *treap, a_type *node,			\
 	  a_field, node), cb, arg));					\
     }									\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##iter_start(a_trp_type *treap, a_type *start, a_type *node,	\
   a_type *(*cb)(a_trp_type *, a_type *, void *), void *arg) {		\
     int cmp = a_cmp(start, node);					\
@@ -533,7 +539,7 @@ a_prefix##iter_start(a_trp_type *treap, a_type *start, a_type *node,	\
 	  a_field, node), cb, arg));					\
     }									\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##iter(a_trp_type *treap, a_type *start, a_type *(*cb)(		\
   a_trp_type *, a_type *, void *), void *arg) {				\
     if (start != NULL) {						\
@@ -544,7 +550,7 @@ a_prefix##iter(a_trp_type *treap, a_type *start, a_type *(*cb)(		\
 	  arg));							\
     }									\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##reverse_iter_recurse(a_trp_type *treap, a_type *node,		\
   a_type *(*cb)(a_trp_type *, a_type *, void *), void *arg) {		\
     if (node == NULL) {							\
@@ -560,7 +566,7 @@ a_prefix##reverse_iter_recurse(a_trp_type *treap, a_type *node,		\
 	  trp_left_get(a_type, a_field, node), cb, arg));		\
     }									\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##reverse_iter_start(a_trp_type *treap, a_type *start,		\
   a_type *node, a_type *(*cb)(a_trp_type *, a_type *, void *),		\
   void *arg) {								\
@@ -586,7 +592,7 @@ a_prefix##reverse_iter_start(a_trp_type *treap, a_type *start,		\
 	  trp_left_get(a_type, a_field, node), cb, arg));		\
     }									\
 }									\
-a_attr a_type *								\
+ a_attr a_type ATTRIBUTE_UNUSED *                                       \
 a_prefix##reverse_iter(a_trp_type *treap, a_type *start, a_type *(*cb)(	\
   a_trp_type *, a_type *, void *), void *arg) {				\
     if (start != NULL) {						\

@@ -141,7 +141,6 @@ static char *MapValue_serialise(RDFValue self) {
   MapValue this = (MapValue)self;
   RDFURN stored = new_RDFURN(self);
   RDFURN segment = new_RDFURN(stored);
-  int i;
   AFF4Volume volume;
   FileLikeObject fd;
 
@@ -280,7 +279,6 @@ static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
   uint64_t period_number = readptr / (self->image_period->value);
   // How far into this period we are within the image
   uint64_t image_period_offset = readptr % (self->image_period->value);
-  char direction = 'f';
   map_point_node_t *pnode, *nnode, node;
   uint64_t next_offset;
 
@@ -340,7 +338,6 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   FileLikeObject fd;
   void *ctx = talloc_size(NULL, 1);
   RDFURN segment = new_RDFURN(ctx);
-  XSDInteger urn_count = new_XSDInteger(ctx);
   int i;
 
   CALL(this->urn, set, ((RDFURN)urn)->value);
@@ -364,7 +361,6 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
 
   {
     char *map = CALL(fd,get_data);
-    int i;
     char *x=map;
 
     // Skip to the next null termination
@@ -545,7 +541,6 @@ static map_point_node_t *inline_map_iterate_cb(map_point_tree_t *tree,
 
 static char *MapValueInline_serialise(RDFValue self) {
   MapValueInline this = (MapValueInline)self;
-  int i;
 
   this->buffer = talloc_zero_size(NULL, BUFF_SIZE);
   this->i = 0;
