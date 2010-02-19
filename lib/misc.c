@@ -185,3 +185,20 @@ void raise_python_exception() {
 };
 
 int AFF4_DEBUG_LEVEL = 0;
+
+#ifndef HAVE_HTONLL
+// http://www.rkeene.org/viewer/devel/backuppcd-200601171056/htonll.c.htm
+// Copyright (C) 2005  Roy Keene backuppcd-bugs@psislidell.com
+uint64_t htonll(uint64_t n) {
+  uint64_t retval;
+
+#if __BYTE_ORDER == __BIG_ENDIAN
+  retval = n;
+#else
+  retval = ((uint64_t) htonl(n & 0xFFFFFFFFLLU)) << 32;
+  retval |= htonl((n & 0xFFFFFFFF00000000LLU) >> 32);
+#endif
+  return(retval);
+}
+
+#endif  //HAVE_HTONLL

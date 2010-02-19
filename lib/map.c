@@ -120,24 +120,6 @@ static int MapValue_parse(RDFValue self, char *serialised, RDFValue urn) {
   return CALL(self, decode, ZSTRING(serialised), urn);
 };
 
-/*
-static int compare_points(const void *X, const void *Y) {
-  struct map_point *x=(struct map_point *)X;
-  struct map_point *y=(struct map_point *)Y;
-
-  if(x->image_offset > y->image_offset)
-    return 1;
-
-  if(x->image_offset == y->image_offset) {
-    if(x->version > y->version) return 1;
-    if(x->version < y->version) return -1;
-
-    return 0;
-  };
-  return -1;
-};
-*/
-
 static map_point_node_t *text_map_iterate_cb(map_point_tree_t *tree,
                                        map_point_node_t *node,
                                        void *data) {
@@ -280,47 +262,14 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
 
   // Now add the new point:
   tree_insert(&self->tree, node);
+  self->number_of_points++;
+
   return;
 
  error:
   talloc_free(node);
   return;
 };
-
-/*
-// searches the array of map points and returns the offset in the
-// array such that array[result].file_offset > offset
-static int bisect_left(uint64_t offset, struct map_point *array, int hi) {
-  uint64_t lo=0;
-  uint64_t mid;
-
-  while(lo < hi) {
-    mid = (lo+hi)/2;
-    if (array[mid].image_offset <= offset) {
-      lo = mid+1;
-    } else {
-      hi = mid;
-    };
-  };
-  return lo;
-};
-
-static int bisect_right(uint64_t offset, struct map_point *array, int hi) {
-  uint64_t lo=0;
-  uint64_t mid;
-
-  while(lo < hi) {
-    mid = (lo+hi)/2;
-    if (offset < array[mid].image_offset) {
-      hi = mid;
-    } else {
-      lo = mid+1;
-    };
-  };
-
-  return lo-1;
-};
-*/
 
 static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
                                  uint64_t *target_offset_at_point,
@@ -392,6 +341,7 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   void *ctx = talloc_size(NULL, 1);
   RDFURN segment = new_RDFURN(ctx);
   XSDInteger urn_count = new_XSDInteger(ctx);
+  int i;
 
   CALL(this->urn, set, ((RDFURN)urn)->value);
 
@@ -405,11 +355,6 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   CALL(oracle, resolve_value, this->urn, AFF4_SIZE,
        (RDFValue)this->size);
 
-  CALL(oracle, resolve_value, this->urn, AFF4_MAP_TARGET_COUNT,
-       (RDFValue)urn_count);
-
-  this->number_of_urns = urn_count->value;
-
   // Now load our contents from the stored URNs
   CALL(segment,set, this->urn->value);
   CALL(segment, add, "idx");
@@ -417,18 +362,21 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
   fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
   if(!fd) goto exit;
 
-  else {
+  {
     char *map = CALL(fd,get_data);
     int i;
     char *x=map;
 
-    this->targets = talloc_array(self, RDFURN, urn_count->value);
-    for(i=0; i<urn_count->value; i++) {
-      this->targets[i] = new_RDFURN(self);
-      CALL(this->targets[i], set, x);
+    // Skip to the next null termination
+    while(x - map < fd->size->value && *x) x++;
+    if(x!=map) {
+      this->targets = talloc_realloc_size(self, this->targets,
+                                          (this->number_of_urns + 1) *  \
+                                          sizeof(*this->targets));
+      this->targets[this->number_of_urns] = new_RDFURN(self);
+      CALL(this->targets[this->number_of_urns], set, map);
 
-      // Skip to the next null termination
-      while(x-map < fd->size->value && *x) x++;
+      this->number_of_urns ++ ;
       x++;
     };
   };
@@ -445,16 +393,47 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue
 
   this->number_of_points = fd->size->value / sizeof(struct map_point);
 
-  /* FIXME....
+  for(i=this->number_of_points; i>0; i--) {
+    // Clump up big reads for efficiency
+    struct map_point buff[BUFF_SIZE];
+    int res = CALL(fd, read, (char *)buff, sizeof(buff));
+    int j;
 
-    this->points = talloc_size(self, fd->size->value);
-    CALL(fd, read, (char *)this->points, fd->size->value);
-  */
+    if(res < 0) break;
+
+    res /= sizeof(struct map_point);
+
+    for(j=0;j<res; j++) {
+      map_point_node_t *node = talloc(this, map_point_node_t);
+
+      node->image_offset = ntohll(buff[j].image_offset);
+      node->target_offset = ntohll(buff[j].target_offset);
+      node->target_idx = ntohll(buff[j].target_index);
+
+      tree_insert(&this->tree, node);
+      i--;
+    };
+  };
   CALL(oracle, cache_return, (AFFObject)fd);
 
  exit:
   talloc_free(ctx);
   return 1;
+};
+
+static map_point_node_t *binary_map_iterate_cb(map_point_tree_t *tree,
+                                       map_point_node_t *node,
+                                       void *data) {
+  FileLikeObject fd = (FileLikeObject)data;
+  struct map_point point;
+
+  point.image_offset = htonll(node->image_offset);
+  point.target_offset = htonll(node->target_offset);
+  point.target_index = htonl(node->target_idx);
+
+  CALL(fd, write, (char *)&point, sizeof(point));
+
+  return NULL;
 };
 
 static char *MapValueBinary_serialise(RDFValue self) {
@@ -500,14 +479,6 @@ static char *MapValueBinary_serialise(RDFValue self) {
     goto error;
   };
 
-  //FIXME
-#if 0
-
-  // Now save the map to the segment
-  // sort the array
-  qsort(this->points, this->number_of_points, sizeof(*this->points),
-	compare_points);
-
   // First dump the index
   fd = CALL(volume, open_member, index_segment->value, 'w', ZIP_DEFLATE);
   if(!fd) {
@@ -522,13 +493,9 @@ static char *MapValueBinary_serialise(RDFValue self) {
   fd = CALL(volume, open_member, segment->value, 'w', ZIP_DEFLATE);
   if(!fd) {
     goto error;
-  } else {
-    XSDInteger number_of_urns = new_XSDInteger(self);
-    number_of_urns->value = this->number_of_urns;
-    CALL(oracle, set_value, this->urn, AFF4_MAP_TARGET_COUNT, (RDFValue)number_of_urns);
   };
 
-  CALL(fd, write, (char *)this->points, sizeof(struct map_point) * this->number_of_points);
+  tree_iter(&this->tree, NULL, binary_map_iterate_cb, (void *)fd);
   CALL(fd, close);
 
   // Done with our volume now
@@ -542,10 +509,8 @@ static char *MapValueBinary_serialise(RDFValue self) {
 
   CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
 
-#endif
-
  exit:
-  return talloc_strdup(self, "");
+  return talloc_strdup(self, "/map");
 
  error:
   if(fd)

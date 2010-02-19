@@ -147,6 +147,7 @@ realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgrou
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
 asprintf vsyslog va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
 inet_aton connect gethostbyname getifaddrs freeifaddrs crypt vsnprintf strnlen
+ntohll
 """))
 
    ## Libraries

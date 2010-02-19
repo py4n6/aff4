@@ -85,4 +85,9 @@ extern int AFF4_DEBUG_LEVEL;
 #define True 1
 #define False 0
 
+#ifndef HAVE_HTONLL
+uint64_t htonll(uint64_t n);
+#define ntohll(x) htonll(x)
+#endif
+
 #endif
