@@ -46,25 +46,6 @@ static RDFValue MapValue_Con(RDFValue self) {
   return self;
 };
 
-/** Its far more efficient for us to reload ourselves from our
-    underlying segment than to serialise into the tdb. We therefore
-    just store the URN of the map object in the resolver.
-*/
-static TDB_DATA *MapValue_encode(RDFValue self) {
-  TDB_DATA *result = talloc(self, TDB_DATA);
-
-  result->dptr = (unsigned char *)CALL(self, serialise);
-  if(!result->dptr) goto error;
-
-  result->dsize = strlen((char *)result->dptr)+1;
-
-  return result;
-
- error:
-  talloc_free(result);
-  return NULL;
-};
-
 static int MapValue_decode(RDFValue self, char *data, int length, RDFValue urn) {
   MapValue this = (MapValue)self;
   FileLikeObject fd;
@@ -114,10 +95,6 @@ static int MapValue_decode(RDFValue self, char *data, int length, RDFValue urn) 
  error:
   talloc_free(segment);
   return 0;
-};
-
-static int MapValue_parse(RDFValue self, char *serialised, RDFValue urn) {
-  return CALL(self, decode, ZSTRING(serialised), urn);
 };
 
 static map_point_node_t *text_map_iterate_cb(map_point_tree_t *tree,
@@ -325,9 +302,7 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(RDFValue, dataType) = AFF4_MAP_TEXT;
 
   VMETHOD_BASE(RDFValue, Con) = MapValue_Con;
-  VMETHOD_BASE(RDFValue, encode) = MapValue_encode;
   VMETHOD_BASE(RDFValue, decode) = MapValue_decode;
-  VMETHOD_BASE(RDFValue, parse) = MapValue_parse;
   VMETHOD_BASE(RDFValue, serialise) = MapValue_serialise;
   VMETHOD_BASE(MapValue, add_point) = MapValue_add_point;
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
@@ -735,6 +710,7 @@ static int MapDriver_close(FileLikeObject self) {
        (RDFValue)this->dirty);
 
   // Done
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size);
   SUPER(FileLikeObject, FileLikeObject, close);
   return 1;
 

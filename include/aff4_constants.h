@@ -38,6 +38,14 @@
 #define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "timestamp"
 #define AFF4_MAP_DATA   PREDICATE_NAMESPACE "map"
 
+/** These are volatile versions of the above - they are mostly used
+    for segments which pass these using the Zip file format itself. 
+*/
+#define AFF4_VOLATILE_SIZE VOLATILE_NS "size"
+#define AFF4_VOLATILE_TIMESTAMP VOLATILE_NS "timestamp"
+#define AFF4_VOLATILE_STORED VOLATILE_NS "stored"
+#define AFF4_VOLATILE_TYPE VOLATILE_NS "type"
+
 // Supported interfaces
 #define AFF4_STREAM     PREDICATE_NAMESPACE "stream"
 #define AFF4_VOLUME     PREDICATE_NAMESPACE "volume"

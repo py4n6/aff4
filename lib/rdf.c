@@ -214,8 +214,32 @@ static RDFValue RDFValue_Con(RDFValue self) {
   return self;
 };
 
+/** By default we encode into the tdb the same way as we serialise to
+    RDF */
+static TDB_DATA *RDFValue_encode(RDFValue self) {
+  TDB_DATA *result = talloc(self, TDB_DATA);
+
+  result->dptr = (unsigned char *)CALL(self, serialise);
+  if(!result->dptr) goto error;
+
+  result->dsize = strlen((char *)result->dptr)+1;
+
+  return result;
+
+ error:
+  talloc_free(result);
+  return NULL;
+};
+
+static int RDFValue_parse(RDFValue self, char *serialised, RDFValue urn) {
+  return CALL(self, decode, ZSTRING(serialised), urn);
+};
+
+
 VIRTUAL(RDFValue, Object) {
     VMETHOD(Con) = RDFValue_Con;
+    VMETHOD(encode) = RDFValue_encode;
+    VMETHOD(parse) = RDFValue_parse;
 } END_VIRTUAL
 
 // Encode integers for storage

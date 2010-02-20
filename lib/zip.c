@@ -86,7 +86,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
 
     file_size = lseek(self->fd, 0, SEEK_END);
 
-    if(CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
+    if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_SIZE,
             (RDFValue)self->super.size) &&
        self->super.size->value != file_size) {
       // The size is not what we expect. Therefore the data stored in
@@ -99,7 +99,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
 
     self->super.size->value = file_size;
 
-    CALL(oracle, set_value, URNOF(self), AFF4_SIZE, 
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, 
 	 (RDFValue)self->super.size);
   };
 
@@ -217,7 +217,7 @@ static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned lo
   self->size->value = max(self->size->value, self->readptr);
 
   // Update the size property in the resolver
-  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->size);
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size);
 
   return result;
 };
@@ -227,10 +227,6 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 };
 
 static int FileLikeObject_close(FileLikeObject self) {
-  // Update the size
-  CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
-       (RDFValue)self->size);
-
   // Ask the resolver to expire ourselves - we no longer exist after
   // this and can not access our memory any more - this must be the
   // last statement:
@@ -326,8 +322,15 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     // FileLikeObject first. We ask the oracle what object should be
     // used as our underlying FileLikeObject:
     if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->storage_urn)) {
-      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn->value);
-      goto error;
+      if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn)) {
+        RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn->value);
+        goto error;
+      };
+    } else {
+      // The user set the AFF4_STORED property, but we really prefer
+      // the AFF4_VOLATILE_STORED:
+      CALL(oracle, set_value, urn, AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn);
+      CALL(oracle, del, urn, AFF4_STORED);
     };
 
     URNOF(self) = CALL(urn, copy, self);
@@ -362,7 +365,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
     // urn is no longer valid below:
     CALL(oracle, set_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
-    CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->storage_urn);
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn);
 
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
              (RDFValue)this->directory_offset)) {
@@ -373,7 +376,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     {
       RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
 
-      CALL(oracle, set_value, URNOF(self), AFF4_TYPE, tmp);
+      CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_TYPE, tmp);
       talloc_free(tmp);
     };
 
@@ -385,7 +388,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   return self;
 
  error:
-  talloc_free(self);
+  talloc_unlink(NULL, self);
   return NULL;
 };
 
@@ -577,7 +580,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     // FIXME: should be Volatile?
     // Note that our URN has changed above which means we can not set
     // any resolver properties until now that our URN is finalised.
-    CALL(oracle, set_value, URNOF(self), AFF4_STORED, 
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED, 
 	 (RDFValue)URNOF(fd));
 
     // NOTE!! A backing store can only hold one ZipFile volume - thats
@@ -629,10 +632,10 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       CALL(filename, add, (char *)unescaped.dptr);
 
       // Tell the oracle about this new member
-      CALL(oracle, set_value, filename, AFF4_STORED, 
+      CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED, 
 	   (RDFValue)URNOF(self));
 
-      CALL(oracle, set_value, filename, AFF4_TYPE, 
+      CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE, 
 	   rdfvalue_from_string(ctx, AFF4_SEGMENT));
 
       CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS, 
@@ -652,7 +655,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	int64_t now = mktime(&x);
 
 	if(now > 0) {
-	  CALL(oracle, set_value, filename, AFF4_TIMESTAMP, rdfvalue_from_int(ctx, now));
+	  CALL(oracle, set_value, filename, AFF4_VOLATILE_TIMESTAMP,
+               rdfvalue_from_int(ctx, now));
 	};
       };
 
@@ -666,7 +670,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
       // The following checks for zip64 values
       tmp64 = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
-      CALL(oracle, set_value, filename, AFF4_SIZE, 
+      CALL(oracle, set_value, filename, AFF4_VOLATILE_SIZE, 
 	   rdfvalue_from_int(ctx, tmp64));
 
       tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
@@ -786,7 +790,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   CALL(filename, add, member_name);
 
   // Where are we stored?
-  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
+  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_STORED,
 	   (RDFValue)self->storage_urn)) {
     RaiseError(ERuntimeError, "No storage for %s?", STRING_URNOF(self));
     goto error;
@@ -848,10 +852,10 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSION,
 	 rdfvalue_from_int(ctx, compression));
 
-    CALL(oracle, set_value, filename, AFF4_TYPE,
+    CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE,
 	 rdfvalue_from_string(ctx, AFF4_SEGMENT));
 
-    CALL(oracle, set_value, filename, AFF4_STORED,
+    CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED,
 	 (RDFValue)URNOF(self));
 
     //    CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS,
@@ -965,11 +969,8 @@ static int dump_volume_properties(ZipFile this) {
       goto error;
     };
 
-    // Only serialise URNs which are not segments
-    if(CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) &&
-       strcmp(type->value, AFF4_SEGMENT)) {
-      CALL(serializer, serialize_urn, urn);
-    };
+    // Serialise all objects
+    CALL(serializer, serialize_urn, urn);
   };
 
   CALL(serializer, close);
@@ -1002,7 +1003,7 @@ static int ZipFile_close(AFF4Volume this) {
     FileLikeObject fd;
 
     // Get where we are stored
-    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
+    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_STORED,
 	     (RDFValue)self->storage_urn)) {
       RaiseError(ERuntimeError, "Can not find the storage for Volume %s", 
                  URNOF(self)->value);
@@ -1055,7 +1056,7 @@ static int ZipFile_close(AFF4Volume this) {
         };
 
 	// Only store segments here
-	if(!CALL(oracle, resolve_value, urn, AFF4_TYPE, (RDFValue)type) ||
+	if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_TYPE, (RDFValue)type) ||
 	   strcmp(type->value, AFF4_SEGMENT))
 	  continue;
 
@@ -1067,7 +1068,7 @@ static int ZipFile_close(AFF4Volume this) {
 	relative_name = urn->relative_name(urn, URNOF(self));
         escaped_filename = escape_filename_data(urn, relative_name);
 
-	CALL(oracle, resolve_value, urn, AFF4_TIMESTAMP,
+	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_TIMESTAMP,
 	     (RDFValue)epoch_time);
 
 	now = localtime((time_t *)&epoch_time->value);
@@ -1104,7 +1105,7 @@ static int ZipFile_close(AFF4Volume this) {
 
 	// The following are optional zip64 fields. They must appear
 	// in this order:
-	CALL(oracle, resolve_value, urn, AFF4_SIZE, (RDFValue)size);
+	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_SIZE, (RDFValue)size);
 
 	if(size->value > ZIP64_LIMIT) {
 	  cd.file_size = -1;
@@ -1302,7 +1303,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   self->super.size = new_XSDInteger(self);
 
-  CALL(oracle, resolve_value, URNOF(self), AFF4_SIZE,
+  CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_SIZE,
        (RDFValue)self->super.size);
 
   DEBUG_OBJECT("ZipFileStream: created %s\n", STRING_URNOF(self));
@@ -1532,14 +1533,14 @@ static int ZipFileStream_close(FileLikeObject self) {
 
   // Store important information about this file
   CALL(oracle, add_value, this->container_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
-  CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)this->container_urn);
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED, (RDFValue)this->container_urn);
   {
     uint32_t tmp = time(NULL);
-    CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, 
+    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_TIMESTAMP, 
 	 rdfvalue_from_int(ctx, tmp));
   };
 
-  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->size);
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size);
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE, 
        (RDFValue)this->compress_size);
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CRC, 
@@ -1626,7 +1627,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     this->container_urn = new_RDFURN(self);
 
-    if(!CALL(oracle, resolve_value, urn, AFF4_STORED,
+    if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_STORED,
 	     (RDFValue)this->container_urn)) {
       RaiseError(ERuntimeError, "Parent not set?");
       goto error;

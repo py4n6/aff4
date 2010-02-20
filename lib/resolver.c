@@ -1167,7 +1167,8 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
 
   classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(scheme));
   if(!classref) {
-    if(!CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type)) {
+    if(!CALL(self, resolve_value, urn, AFF4_TYPE, (RDFValue)self->type) &&
+       !CALL(self, resolve_value, urn, AFF4_VOLATILE_TYPE, (RDFValue)self->type)) {
       RaiseError(ERuntimeError, "No type found for %s", urn->value);
       goto error;
     };
@@ -1500,7 +1501,8 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
   };
 
   // Now ask the object class to delete itself
-  if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type)) {
+  if(CALL(self, resolve_value, uri, AFF4_TYPE, (RDFValue)self->type) || \
+     CALL(self, resolve_value, uri, AFF4_VOLATILE_TYPE, (RDFValue)self->type)) {
     AFFObject class_reference = (AFFObject)CALL(type_dispatcher,
                                                 borrow, ZSTRING(self->type->value));
 

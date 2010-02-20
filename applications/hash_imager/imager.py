@@ -84,33 +84,21 @@ class HashWorker(threading.Thread):
             out_fd.close()
 
         ## Now make a reverse map
-        ## The following logic makes the maps more compact by only
-        ## adding blocks which are not contiguous. This would have
-        ## been made simpler if we could just ask the map what the
-        ## next contiguous block should be, but the map would need
-        ## to be sorted each time.
         image_stream = oracle.open(self.image_stream_urn, 'w')
         try:
-            file_block = 0
-            last_block = -1
-            for block in self.blocks:
-                #print file_block, hashed_urn.value, block
-                if last_block != block:
-                    if last_block > 0:
-                        image_stream.map.add_point(
-                            (last_block+1) * self.blocksize, 0, ZERO_URN.value)
+            for file_block in range(len(self.blocks)):
+                block = self.blocks[file_block]
+                offset = block * self.blocksize
 
-                    image_stream.map.add_point(
-                        block * self.blocksize, file_block * self.blocksize, hashed_urn.value)
+                ## Add the point to the map
+                image_stream.map.add_point(
+                    block * self.blocksize,
+                    file_block * self.blocksize,
+                    hashed_urn.value)
 
-                    print "%s,%s,%s " % (block * self.blocksize,
-                                         file_block * self.blocksize, hashed_urn.value)
-                    last_block = block
+#                print "%s,%s,%s " % (block * self.blocksize,
+#                                     file_block * self.blocksize, hashed_urn.value)
 
-                file_block += 1
-                last_block += 1
-
-            print
             ## This is the last block of the file - We store the slack
             ## block in a special slack object
             extra = self.size % self.blocksize
@@ -128,14 +116,24 @@ class HashWorker(threading.Thread):
 
                     image_stream.map.add_point(block * self.blocksize +
                                                extra, start, self.slack_urn.value)
-                    print "%s,%s,%s " % (block * self.blocksize + extra,
-                                         start, self.slack_urn.value)
+#                    print "%s,%s,%s " % (block * self.blocksize + extra,
+#                                         start, self.slack_urn.value)
 
                     extra = self.blocksize
                 finally:
                     slack.cache_return()
 
-            image_stream.map.add_point(block * self.blocksize + extra, 0, ZERO_URN.value)
+            ## Now we need to add another point to terminate our
+            ## mapping. We need to determine if another map point
+            ## already exists at this point and if not we add one for
+            ## the ZERO_URN.
+            target, target_offset, available, target_id = image_stream.map.get_range(
+                block * self.blocksize + extra + 1)
+
+            ## No its still refering to slack space:
+            if target.value == self.slack_urn.value:
+                image_stream.map.add_point(block * self.blocksize + extra, 0, ZERO_URN.value)
+
         finally:
             image_stream.cache_return()
 
@@ -148,6 +146,7 @@ class HashImager:
     MAX_THREADS = 5
     workers = []
 
+    ## A condition variable for threads to sync on
     condition = threading.Condition()
 
     def __init__(self, in_urn, output_urn, *args, **kwargs):
@@ -260,8 +259,6 @@ class HashImager:
         """ This method analyses the filesystem and dumps all the
         files in it based on hashes.
         """
-        count = 0
-
         ## FIXME - handle partitions here
         self.fd.seek(0)
         fs = sk.skfs(self.fd)
@@ -269,10 +266,6 @@ class HashImager:
 
         for root, dirs, files in fs.walk('/', unalloc=False, inodes=True):
             for f, filename in files:
-#                if count == 100:
-#                    return
-
-                count += 1
                 skfs = fs.open(inode = f)
                 blocks = skfs.blocks()
 
@@ -293,9 +286,6 @@ class HashImager:
                 print "Dumping %s %s (%s bytes)" % (f, filename,
                                                     stat.st_size)
 
-                sys.stdout.flush()
-
-
                 i = 0
                 size = stat.st_size
                 while 1:
@@ -305,7 +295,6 @@ class HashImager:
                         self.dump_block_run(run, self.blocksize * len(run))
                         i += self.MAX_SIZE
                     else:
-                        print "Last run size = %s" % (size - i * self.blocksize)
                         run = blocks[i:]
                         self.dump_block_run(run, size - i * self.blocksize)
                         break
@@ -328,7 +317,9 @@ class HashImager:
                 file_block = 0
                 for block in blocks:
                     if last_block != block:
-                        map.map.add_point(file_block * self.blocksize, block * self.blocksize, self.image_urn.value)
+                        map.map.add_point(file_block * self.blocksize,
+                                          block * self.blocksize,
+                                          self.image_urn.value)
                         last_block = block
 
                     last_block += 1
@@ -339,11 +330,9 @@ class HashImager:
     def dump_unallocated(self):
         image_stream = oracle.open(self.image_urn, 'w')
         try:
-            image_stream.map.sort()
             offset = 0
-            urn = pyaff4.RDFURN()
             while 1:
-                target_offset, available = image_stream.map.get_range(offset, urn)
+                urn, target_offset, available, target_id = image_stream.map.get_range(offset)
 
                 if not available: break
 
@@ -352,7 +341,8 @@ class HashImager:
 
                 if urn.value == ZERO_URN.value:
                     ## At this point the gaps should be even blocksizes.
-                    if (available % self.blocksize) != 0:
+                    if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
+                        pdb.set_trace()
                         print "????"
 
                 offset += available

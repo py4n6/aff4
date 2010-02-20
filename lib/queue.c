@@ -22,7 +22,7 @@ void *Queue_get(Queue self, void *ctx) {
   while(list_empty(&self->list)) {
     pthread_cond_wait( &self->condition, &self->mutex);
   };
-  
+
   list_next(item, &self->list, list);
   list_del(&item->list);
   result = item->data;
@@ -43,7 +43,7 @@ void Queue_put(Queue self, void *data) {
 
   // Let waiters know there is a new item in the queue
   pthread_cond_signal(&self->condition);
-  
+
   pthread_mutex_unlock(&self->mutex);
 };
 
