@@ -10,12 +10,15 @@
 #define RDF_NAMESPACE "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define XSD_NAMESPACE "http://www.w3.org/2001/XMLSchema#"
 
-// Various namespaces
+// RDFValues we use
 #define AFF4_MAP_TEXT PREDICATE_NAMESPACE "map_text"
 #define AFF4_MAP_BINARY PREDICATE_NAMESPACE "map_binary"
 #define AFF4_MAP_INLINE PREDICATE_NAMESPACE "map_inline"
 #define AFF4_MAP_TARGET_COUNT PREDICATE_NAMESPACE "map_target_count"
+#define AFF4_INTEGER_ARRAY_BINARY PREDICATE_NAMESPACE "integer_array_binary"
+#define AFF4_INTEGER_ARRAY_INLINE PREDICATE_NAMESPACE "integer_array_inline"
 
+// Various namespaces
 #define VOLATILE_NS "aff4volatile:"
 #define CONFIGURATION_NS VOLATILE_NS "config:"
 #define FQN NAMESPACE ""
@@ -144,6 +147,8 @@
 #define AFF4_ERROR_STREAM     "error"
 #define AFF4_FILE             "file"
 #define AFF4_EWF_STREAM       "ewf_stream"
+
+#define AFF4_INDEX            PREDICATE_NAMESPACE "index"
 
 /** Miscellaneous objects */
 #define AFF4_IDENTITY         "identity"

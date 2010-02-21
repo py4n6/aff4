@@ -46,12 +46,12 @@ static RDFValue MapValue_Con(RDFValue self) {
   return self;
 };
 
-static int MapValue_decode(RDFValue self, char *data, int length, RDFValue urn) {
+static int MapValue_decode(RDFValue self, char *data, int length, RDFURN subject) {
   MapValue this = (MapValue)self;
   FileLikeObject fd;
   RDFURN segment = new_RDFURN(self);
 
-  CALL(this->urn, set, ((RDFURN)urn)->value);
+  CALL(this->urn, set, subject->value);
 
   // Load some parameters
   CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
@@ -114,7 +114,7 @@ static map_point_node_t *text_map_iterate_cb(map_point_tree_t *tree,
   return NULL;
 };
 
-static char *MapValue_serialise(RDFValue self) {
+static char *MapValue_serialise(RDFValue self, RDFURN subject) {
   MapValue this = (MapValue)self;
   RDFURN stored = new_RDFURN(self);
   RDFURN segment = new_RDFURN(stored);
@@ -308,14 +308,14 @@ VIRTUAL(MapValue, RDFValue) {
   VMETHOD_BASE(MapValue, get_range) = MapValue_get_range;
 } END_VIRTUAL
 
-static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFValue urn) {
+static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFURN subject) {
   MapValue this = (MapValue)self;
   FileLikeObject fd;
   void *ctx = talloc_size(NULL, 1);
   RDFURN segment = new_RDFURN(ctx);
   int i;
 
-  CALL(this->urn, set, ((RDFURN)urn)->value);
+  CALL(this->urn, set, subject->value);
 
   // Load some parameters
   CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,
@@ -407,7 +407,7 @@ static map_point_node_t *binary_map_iterate_cb(map_point_tree_t *tree,
   return NULL;
 };
 
-static char *MapValueBinary_serialise(RDFValue self) {
+static char *MapValueBinary_serialise(RDFValue self, RDFURN subject) {
   MapValue this = (MapValue)self;
   RDFURN stored = new_RDFURN(self);
   RDFURN segment = new_RDFURN(stored);
@@ -514,7 +514,7 @@ static map_point_node_t *inline_map_iterate_cb(map_point_tree_t *tree,
   return NULL;
 };
 
-static char *MapValueInline_serialise(RDFValue self) {
+static char *MapValueInline_serialise(RDFValue self, RDFURN subject) {
   MapValueInline this = (MapValueInline)self;
 
   this->buffer = talloc_zero_size(NULL, BUFF_SIZE);
@@ -527,10 +527,10 @@ static char *MapValueInline_serialise(RDFValue self) {
   return this->buffer;
 };
 
-static int MapValueInline_decode(RDFValue self, char *data, int length, RDFValue urn) {
+static int MapValueInline_decode(RDFValue self, char *data, int length, RDFURN subject) {
   MapValue this = (MapValue)self;
 
-  CALL(this->urn, set, ((RDFURN)urn)->value);
+  CALL(this->urn, set, subject->value);
 
   // Load some parameters
   CALL(oracle, resolve_value, this->urn, AFF4_IMAGE_PERIOD,

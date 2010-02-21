@@ -725,7 +725,7 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
     if(read(self->data_store_fd, buff, i.length) != i.length)
       goto not_found;
 
-    if(!CALL(result, decode, buff, i.length, (RDFValue)urn_str)) {
+    if(!CALL(result, decode, buff, i.length, urn_str)) {
       RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
 		 urn_str, attribute_str);
       goto not_found;
@@ -810,7 +810,7 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
   LOCK_RESOLVER;
 
-  encoded_value = CALL(value, encode);
+  encoded_value = CALL(value, encode, urn);
 
   if(encoded_value) {
     uint64_t data_offset;
@@ -862,7 +862,6 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
   } else {
     DEBUG_RESOLVER("Failed to set %s:%s\n", urn->value, attribute_str);
-    RaiseError(ERuntimeError, "Cant set attribute on %s", urn->value);
     UNLOCK_RESOLVER;
     return 0;
   };
@@ -874,7 +873,7 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
 
   LOCK_RESOLVER;
 
-  encoded_value = CALL(value, encode);
+  encoded_value = CALL(value, encode, urn);
 
   if(encoded_value) {
     TDB_DATA attribute;
@@ -958,7 +957,7 @@ static int Resolver_iter_next(Resolver self,
 
     /* If the value is of the correct type, ask it to read from
        the file. */
-    if(result->id == iter->head.encoding_type) {
+    if(result && result->id == iter->head.encoding_type) {
       /** We need to cache the triple "data", RDFValue_id because two
       different RDFValue implementations may use the same encoding,
       but they should be treated as different.
@@ -979,7 +978,7 @@ static int Resolver_iter_next(Resolver self,
         // is stored.
         CALL(iter->cache, put, key, key_len, NULL);
 
-        res_code = CALL(result, decode, key, iter->head.length, (RDFValue)iter->urn);
+        res_code = CALL(result, decode, key, iter->head.length, iter->urn);
       };
 
       talloc_free(key);

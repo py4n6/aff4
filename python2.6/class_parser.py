@@ -387,11 +387,11 @@ class Integer(Type):
         return "%s %s " % (self.original_type, self.name)
 
 class Integer32(Integer):
-    buidstr = 'k'
+    buidstr = 'I'
 
     def __init__(self, name,type):
         Type.__init__(self,name,type)
-        self.type = 'uint32_t '
+        self.type = 'unsigned int '
         self.original_type = type
 
     def to_python_object(self, name=None, result='py_result', **kw):
@@ -768,7 +768,7 @@ type_dispatcher = {
     'TDB_DATA *': TDB_DATA_P,
     'TDB_DATA': TDB_DATA,
     'uint64_t': Integer,
-    'uint32_t': Integer,
+    'uint32_t': Integer32,
     'uint16_t': Integer,
     'int64_t': Integer,
     'unsigned long int': Integer,
@@ -812,6 +812,7 @@ class ResultException:
 class Method:
     default_re = re.compile("DEFAULT\(([A-Z_a-z0-9]+)\) =(.+)")
     exception_re = re.compile("RAISES\(([^,]+),\s*([^\)]+)\) =(.+)")
+    typedefed_re = re.compile(r"struct (.+)_t \*")
 
     def __init__(self, class_name, base_class_name, method_name, args, return_type,
                  myclass = None):
@@ -1027,8 +1028,15 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         try:
             t = type_dispatcher[type](name, type)
         except KeyError:
-            log( "Unable to handle type %s.%s %s" % (self.class_name, self.name, type))
-            return
+            ## Sometimes types must be typedefed in advance
+            try:
+                m = self.typedefed_re.match(type)
+                type = m.group(1)
+                print "Trying %s for %s" % (type, m.group(0))
+                t = type_dispatcher[type](name, type)
+            except (KeyError, AttributeError):
+                log( "Unable to handle type %s.%s %s" % (self.class_name, self.name, type))
+                return
 
         ## Here we collapse char * + int type interfaces into a
         ## coherent string like interface.
@@ -1870,6 +1878,12 @@ END_CLASS
         fd = open(filename)
         self.parse_fd(fd)
 
+        ## We parse stuff twice to allow for forward declerations -
+        ## now its possible to use classes that will be declared later
+        ## (via struct CLASS_t *)
+        fd.seek(0)
+        self.parse_fd(fd)
+
     def parse_fd(self, fd):
         while 1:
             line = fd.readline()
@@ -1878,7 +1892,6 @@ END_CLASS
             ## Handle c++ style comments //
             m = self.comment_re.match(line)
             if m:
-
                 self.current_comment = line[m.end():]
                 while 1:
                     line = fd.readline()

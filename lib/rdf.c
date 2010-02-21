@@ -216,10 +216,10 @@ static RDFValue RDFValue_Con(RDFValue self) {
 
 /** By default we encode into the tdb the same way as we serialise to
     RDF */
-static TDB_DATA *RDFValue_encode(RDFValue self) {
+static TDB_DATA *RDFValue_encode(RDFValue self, RDFURN subject) {
   TDB_DATA *result = talloc(self, TDB_DATA);
 
-  result->dptr = (unsigned char *)CALL(self, serialise);
+  result->dptr = (unsigned char *)CALL(self, serialise, subject);
   if(!result->dptr) goto error;
 
   result->dsize = strlen((char *)result->dptr)+1;
@@ -231,7 +231,7 @@ static TDB_DATA *RDFValue_encode(RDFValue self) {
   return NULL;
 };
 
-static int RDFValue_parse(RDFValue self, char *serialised, RDFValue urn) {
+static int RDFValue_parse(RDFValue self, char *serialised, RDFURN urn) {
   return CALL(self, decode, ZSTRING(serialised), urn);
 };
 
@@ -243,7 +243,7 @@ VIRTUAL(RDFValue, Object) {
 } END_VIRTUAL
 
 // Encode integers for storage
-static TDB_DATA *XSDInteger_encode(RDFValue self) {
+static TDB_DATA *XSDInteger_encode(RDFValue self, RDFURN subject) {
   XSDInteger this = (XSDInteger)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
@@ -259,7 +259,7 @@ static void XSDInteger_set(XSDInteger self, uint64_t value) {
   return;
 };
 
-static int XSDInteger_decode(RDFValue this, char *data, int length, RDFValue urn) {
+static int XSDInteger_decode(RDFValue this, char *data, int length, RDFURN subject) {
   XSDInteger self = (XSDInteger)this;
 
   self->value = 0;
@@ -267,7 +267,7 @@ static int XSDInteger_decode(RDFValue this, char *data, int length, RDFValue urn
   return length;
 };
 
-static char *XSDInteger_serialise(RDFValue self) {
+static char *XSDInteger_serialise(RDFValue self, RDFURN subject) {
   XSDInteger this = (XSDInteger)self;
 
   if(this->serialised)
@@ -280,7 +280,7 @@ static char *XSDInteger_serialise(RDFValue self) {
   return this->serialised;
 };
 
-static int XSDInteger_parse(RDFValue self, char *serialised, RDFValue urn) {
+static int XSDInteger_parse(RDFValue self, char *serialised, RDFURN urn) {
   XSDInteger this = (XSDInteger)self;
 
   this->value = strtoll(serialised, NULL, 0);
@@ -303,7 +303,7 @@ VIRTUAL(XSDInteger, RDFValue) {
 } END_VIRTUAL
 
 // Encode strings for storage
-static TDB_DATA *XSDString_encode(RDFValue self) {
+static TDB_DATA *XSDString_encode(RDFValue self, RDFURN subject) {
   XSDString this = (XSDString)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
@@ -324,7 +324,7 @@ static void XSDString_set(XSDString self, char *string, int length) {
   return;
 };
 
-static int XSDString_decode(RDFValue this, char *data, int length, RDFValue urn) {
+static int XSDString_decode(RDFValue this, char *data, int length, RDFURN subject) {
   XSDString self = (XSDString)this;
 
   self->value = talloc_realloc_size(self, self->value, length + 1);
@@ -338,7 +338,7 @@ static int XSDString_decode(RDFValue this, char *data, int length, RDFValue urn)
 };
 
 /* We serialise the string */
-static char *XSDString_serialise(RDFValue self) {
+static char *XSDString_serialise(RDFValue self, RDFURN subject) {
   XSDString this = (XSDString)self;
 
   talloc_reference(NULL, this->value);
@@ -346,7 +346,7 @@ static char *XSDString_serialise(RDFValue self) {
   return this->value;
 };
 
-static int XSDString_parse(RDFValue self, char *serialise, RDFValue urn) {
+static int XSDString_parse(RDFValue self, char *serialise, RDFURN subject) {
   XSDString this = (XSDString)self;
 
   this->value = talloc_strdup(self, serialise);
@@ -369,7 +369,7 @@ VIRTUAL(XSDString, RDFValue) {
 
 // Encode urn for storage - we just encode the URN id of this urn and
 // resolve it back through the resolver.
-static TDB_DATA *RDFURN_encode(RDFValue self) {
+static TDB_DATA *RDFURN_encode(RDFValue self, RDFURN subject) {
   RDFURN this = (RDFURN)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
   uint32_t *id = talloc(result, uint32_t);
@@ -418,7 +418,7 @@ static int RDFURN_decode(RDFValue this, char *data, int length, RDFValue urn) {
 };
 
 /* We serialise the string */
-static char *RDFURN_serialise(RDFValue self) {
+static char *RDFURN_serialise(RDFValue self, RDFURN subject) {
   RDFURN this = (RDFURN)self;
 
   // This is incompatible with talloc - it has a special freer
@@ -433,7 +433,7 @@ static RDFURN RDFURN_copy(RDFURN self, void *ctx) {
   return result;
 };
 
-static int RDFURN_parse(RDFValue self, char *serialised, RDFValue urn) {
+static int RDFURN_parse(RDFValue self, char *serialised, RDFURN subject) {
   RDFURN_set((RDFURN)self, serialised);
   return 1;
 };
@@ -513,7 +513,7 @@ VIRTUAL(RDFURN, RDFValue) {
    VMETHOD(relative_name) = RDFURN_relative_name;
 } END_VIRTUAL
 
-static TDB_DATA *XSDDatetime_encode(RDFValue self) {
+static TDB_DATA *XSDDatetime_encode(RDFValue self, RDFURN subject) {
   XSDDatetime this = (XSDDatetime)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
@@ -523,7 +523,7 @@ static TDB_DATA *XSDDatetime_encode(RDFValue self) {
   return result;
 };
 
-static int XSDDatetime_decode(RDFValue self, char *data, int length, RDFValue urn) {
+static int XSDDatetime_decode(RDFValue self, char *data, int length, RDFURN subject) {
   XSDDatetime this = (XSDDatetime)self;
 
   memcpy(&this->value, data, sizeof(this->value));
@@ -538,7 +538,7 @@ static void XSDDatetime_set(XSDDatetime self, struct timeval time) {
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
 
-static char *XSDDatetime_serialise(RDFValue self) {
+static char *XSDDatetime_serialise(RDFValue self, RDFURN subject) {
   XSDDatetime this = (XSDDatetime)self;
   char buff[BUFF_SIZE];
 
@@ -559,7 +559,7 @@ static char *XSDDatetime_serialise(RDFValue self) {
   return NULL;
 };
 
-static int XSDDatetime_parse(RDFValue self, char *serialised, RDFValue urn) {
+static int XSDDatetime_parse(RDFValue self, char *serialised, RDFURN subject) {
   XSDDatetime this = (XSDDatetime)self;
   struct tm time;
 
@@ -593,6 +593,170 @@ VIRTUAL(XSDDatetime, RDFValue) {
 } END_VIRTUAL
 
 
+/** This is the Bevy Index RDF type. */
+static RDFValue IntegerArrayBinary_Con(RDFValue this) {
+  IntegerArrayBinary self = (IntegerArrayBinary)this;
+
+  self->alloc_size = 0;
+  self->array = NULL;
+  self->current = 0;
+
+  return SUPER(RDFValue, RDFValue, Con);
+};
+
+static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFURN subject) {
+  /* We interpret the data as a suffix to our present URL or a fully
+     qualified URL. */
+  FileLikeObject fd;
+  IntegerArrayBinary this = (IntegerArrayBinary)self;
+  RDFURN array_urn = CALL(subject, copy, self);
+  int i;
+
+  // We use the data given as an extension
+  if(this->extension) talloc_free(this->extension);
+  this->extension = talloc_strdup(this, data);
+
+  CALL(array_urn, add, this->extension);
+
+  // Now we read the index segment
+  fd = (FileLikeObject)CALL(oracle, open, array_urn, 'r');
+  if(!fd) {
+    goto error;
+  };
+
+  /** This holds the index into the segment of all the chunks.
+      It is an array of chunks_in_segment ints long. NOTE - on disk
+      all uint32_t are encoded in big endian format.
+  */
+  this->array = (int32_t *)CALL(fd, get_data);
+
+  // Make sure the array does not get freed from under us.
+  talloc_reference(this, this->array);
+
+  this->size = fd->size->value / sizeof(*this->array);
+
+  // Fix up endianess:
+  for(i=0;i<this->size; i++) {
+    this->array[i] = ntohl(this->array[i]);
+  };
+
+  CALL((AFFObject)fd, cache_return);
+
+  return 1;
+
+ error:
+  return 0;
+};
+
+static char *IntegerArrayBinary_serialise(RDFValue self, RDFURN subject) {
+  IntegerArrayBinary this = (IntegerArrayBinary) self;
+  RDFURN segment = CALL(subject, copy, self);
+  RDFURN stored = new_RDFURN(segment);
+  XSDInteger size = new_XSDInteger(segment);
+  AFF4Volume volume;
+
+  CALL(segment, add, this->extension);
+
+  // Check if the segment is already written and its the same size we
+  // dont do anything with it
+  if(CALL(oracle, resolve_value, segment, AFF4_VOLATILE_SIZE, (RDFValue)size) &&\
+     size->value == this->size * sizeof(*this->array))
+    goto exit;
+
+  if(!CALL(oracle, resolve_value, subject, AFF4_VOLATILE_STORED, (RDFValue)stored) && \
+     !CALL(oracle, resolve_value, subject, AFF4_STORED, (RDFValue)stored)) {
+    RaiseError(ERuntimeError, "Subject URN %s has no storage", subject->value);
+    goto error;
+  };
+
+  volume = (AFF4Volume)CALL(oracle, open, stored, 'w');
+  if(!volume) {
+    RaiseError(ERuntimeError, "Unable to open storage for %s", subject->value);
+    goto error;
+  } else {
+    uint32_t *stored_array = talloc_array_size(segment, sizeof(uint32_t), this->size);
+    int i;
+    for(i=0; i<this->size; i++) {
+      stored_array[i] = htonl(this->array[i]);
+    };
+
+    CALL(volume, writestr, segment->value,
+         (char *)stored_array, this->size * sizeof(uint32_t), ZIP_DEFLATE);
+
+    CALL(oracle, cache_return, (AFFObject)volume);
+  };
+
+ exit:
+  talloc_free(segment);
+  return talloc_strdup(self,this->extension);
+
+ error:
+  talloc_free(segment);
+  return NULL;
+};
+
+static void IntegerArrayBinary_add(IntegerArrayBinary self, unsigned int item) {
+  printf("%u ,",item);
+  while(self->current >= self->alloc_size) {
+    self->alloc_size += BUFF_SIZE;
+    self->array = talloc_realloc_size(self, self->array,
+                                      sizeof(uint32_t) * self->alloc_size);
+  };
+
+  self->array[self->current++] = item;
+  self->size = max(self->current, self->size);
+};
+
+VIRTUAL(IntegerArrayBinary, RDFValue) {
+  VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+  VATTR(super.dataType) = AFF4_INTEGER_ARRAY_BINARY;
+
+  VATTR(extension) = talloc_strdup(NULL, "index");
+
+  VMETHOD_BASE(RDFValue, Con) = IntegerArrayBinary_Con;
+  VMETHOD_BASE(RDFValue, decode) = IntegerArrayBinary_decode;
+  VMETHOD_BASE(RDFValue, serialise) = IntegerArrayBinary_serialise;
+  VMETHOD_BASE(IntegerArrayBinary, add) = IntegerArrayBinary_add;
+} END_VIRTUAL
+
+static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
+  IntegerArrayBinary this = (IntegerArrayBinary)self;
+  int available = this->size * 10;
+  char *buffer = talloc_zero_size(self, available);
+  int i,buffer_ptr=0;
+
+  for(i=0; i < this->size && buffer_ptr < available; i++) {
+    buffer_ptr += snprintf(buffer + buffer_ptr, available - buffer_ptr, "%lu,", this->array[i]);
+  };
+
+  return buffer;
+};
+
+static int IntegerArrayInline_decode(RDFValue self, char *data, int length, RDFURN subject) {
+  IntegerArrayInline this = (IntegerArrayInline)self;
+  uint32_t number;
+  char *x, *y=data;
+
+  for(x=data; x-data < length && *x; x++) {
+    if(*x==',') {
+      *x=0;
+      number = atol(y);
+      CALL((IntegerArrayBinary)self, add, number);
+      y = x+1;
+    };
+  };
+
+  return 1;
+};
+
+VIRTUAL(IntegerArrayInline, IntegerArrayBinary) {
+  VMETHOD_BASE(RDFValue, dataType) = AFF4_INTEGER_ARRAY_INLINE;
+
+  VMETHOD_BASE(RDFValue, decode) = IntegerArrayInline_decode;
+  VMETHOD_BASE(RDFValue, serialise) = IntegerArrayInline_serialise;
+} END_VIRTUAL
+
+
 /* This RDF_Registry is a lookup table of class handlers and their
    IDs.
 
@@ -615,6 +779,10 @@ void register_rdf_value_class(RDFValue classref) {
     talloc_set_name_const(RDF_Registry, "RDFValue dispatcher");
   };
 
+  if(!classref->dataType) {
+    AFF4_ABORT("No dataType specified in %s", NAMEOF(classref));
+  };
+
   if(!CALL(RDF_Registry, present, ZSTRING(classref->dataType))) {
     Object tmp = talloc_memdup(NULL, classref, SIZEOF(classref));
 
@@ -633,12 +801,16 @@ void rdf_init() {
   INIT_CLASS(XSDString);
   INIT_CLASS(RDFURN);
   INIT_CLASS(XSDDatetime);
+  INIT_CLASS(IntegerArrayBinary);
+  INIT_CLASS(IntegerArrayInline);
 
   // Register all the known basic types
   register_rdf_value_class((RDFValue)GETCLASS(XSDInteger));
   register_rdf_value_class((RDFValue)GETCLASS(XSDString));
   register_rdf_value_class((RDFValue)GETCLASS(RDFURN));
   register_rdf_value_class((RDFValue)GETCLASS(XSDDatetime));
+  register_rdf_value_class((RDFValue)GETCLASS(IntegerArrayBinary));
+  register_rdf_value_class((RDFValue)GETCLASS(IntegerArrayInline));
 };
 
 /** RDF parsing */
@@ -683,7 +855,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
 
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
   if(result) {
-    CALL(result, parse, value_str, (RDFValue)self->urn);
+    CALL(result, parse, value_str, self->urn);
     CALL(oracle, add_value, self->urn, attribute, (RDFValue)result);
     talloc_free(result);
   };
@@ -941,7 +1113,11 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
         triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
 
       // New reference here:
-      triple.object = CALL(value, serialise);
+      triple.object = CALL(value, serialise, urn);
+      if(!triple.object) {
+        AFF4_LOG(AFF4_LOG_MESSAGE, "Unable to serialise %s:%s\n", urn->value, attribute->value);
+        continue;
+      };
 
       triple.object_literal_datatype = \
         raptor_new_uri((const unsigned char*)value->dataType);

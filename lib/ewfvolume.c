@@ -152,8 +152,10 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   return 0;
 };
 
-static void EWFVolume_close(AFF4Volume self) {
+static int EWFVolume_close(AFF4Volume self) {
   talloc_free(self);
+
+  return 1;
 };
 
 VIRTUAL(EWFVolume, AFF4Volume) {

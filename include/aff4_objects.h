@@ -21,35 +21,14 @@ extern "C" {
 #include "trp.h"
 
 #include "queue.h"
-/** Image objects use an index to represent the index into the bevy */
-CLASS(ImageIndexBinary, RDFValue)
-  int32_t *indexes;
-  int current;
-  // The total number of indexes in this array
-  int size;
-  RDFURN urn;
-  RDFURN stored;
-
-  char *extension;
-
-  /** This is a specialised constructor for the bevy index.
-
-      bevy_urn is the URN of the bevy we are indexing, and size is the
-      total number of chunks in that bevy.
-   */
-  ImageIndexBinary METHOD(ImageIndexBinary, Con, RDFURN urn,\
-                          RDFURN stored, int size);
-  void METHOD(ImageIndexBinary, add, int offset);
-END_CLASS
-
 /** This class is used by the image worker thread to dump the segments
     out. It is only created by the Image class internally.
 */
 PRIVATE CLASS(ImageWorker, AFFObject)
        struct list_head list;
-  // The filename where the volume is stored - we fetch that just
-  // prior to writing it
-       RDFURN stored;
+
+  // The URL of the bevy we are working on now:
+       RDFURN bevy_urn;
 
        int segment_count;
 
@@ -59,7 +38,7 @@ PRIVATE CLASS(ImageWorker, AFFObject)
        // The bevy is written here in its entirety. When its finished,
        // we compress it all and dump it to the output file.
        StringIO bevy;
-       
+
        // The segment is written here until it is complete and then it
        // gets flushed
        StringIO segment_buffer;
@@ -69,9 +48,10 @@ PRIVATE CLASS(ImageWorker, AFFObject)
        pthread_t thread;
        struct Image_t *image;
 
-       // The index into the bevy
-       ImageIndexBinary index;
-       int32_t *chunk_indexes;
+       // The index into the bevy - we use an IntegerArrayBinary
+       // RDFValue, unless the array is very small in which case we
+       // switch to the IntegerArrayInline
+       IntegerArrayBinary index;
 
        ImageWorker METHOD(ImageWorker, Con, struct Image_t *image);
 

@@ -60,6 +60,13 @@ map.add_point(5 * blocksize,2 * blocksize,d3)
 
 map_urn = map.urn
 
+
+array = pyaff4.IntegerArrayBinary()
+for i in range(10000):
+    array.add(i)
+
+oracle.set_value(map.urn, pyaff4.PREDICATE_NAMESPACE + "array", array)
+
 map.close()
 
 volume = oracle.open(volume_urn, 'w')

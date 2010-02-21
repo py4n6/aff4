@@ -76,11 +76,13 @@ extern int AFF4_DEBUG_LEVEL;
   (char *)x.dptr, x.dsize
 
 #define AFF4_LOG(level, msg, ...)                   \
-  if(oracle->logger) {                                     \
+  if(oracle && oracle->logger) {                                     \
   char log_buffer[BUFF_SIZE];                                 \
   snprintf(log_buffer, BUFF_SIZE, msg, ## __VA_ARGS__);   \
   CALL(oracle->logger, message, level, log_buffer);                   \
-  }
+  } else {                                                            \
+    printf(msg, ## __VA_ARGS__); fflush(stdout);                      \
+  };
 
 #define True 1
 #define False 0
@@ -89,5 +91,8 @@ extern int AFF4_DEBUG_LEVEL;
 uint64_t htonll(uint64_t n);
 #define ntohll(x) htonll(x)
 #endif
+
+#define AFF4_ABORT(fmt, ...) AFF4_LOG(10, "FATAL (%s:%u): " fmt "\n\n", \
+                                      __FUNCTION__, __LINE__, ##__VA_ARGS__); abort();
 
 #endif

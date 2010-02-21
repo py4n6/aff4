@@ -25,76 +25,6 @@ also maintain a chunk cache for faster read access.
 
 **************************************************************/
 
-/** This is the Bevy Index RDF type. */
-static ImageIndexBinary ImageIndexBinary_Con(ImageIndexBinary self,
-                                             RDFURN bevy_urn,
-                                             RDFURN stored, int size) {
-  self->indexes = talloc_array(self, int32_t, size);
-  self->current = 0;
-  self->size = size;
-  self->urn = CALL(bevy_urn, copy, self);
-  self->stored = CALL(stored, copy, self);
-
-  // Store us in the same volume as the bevy
-  if(!CALL(oracle, resolve_value, bevy_urn, AFF4_STORED, (RDFValue)self->stored)) {
-    RaiseError(ERuntimeError, "No storage for bevy %s", bevy_urn->value);
-    goto error;
-  };
-
-  return (ImageIndexBinary)SUPER(RDFValue, RDFValue, Con);
-
- error:
-  talloc_free(self);
-  return NULL;
-};
-
-static int ImageIndexBinary_decode(RDFValue self, char *data, int length, RDFValue urn) {
-  /* We interpret the data as a suffix to our present URL or a fully
-     qualified URL. */
-  FileLikeObject fd;
-  ImageIndexBinary this = (ImageIndexBinary)self;
-  RDFURN index_urn = CALL(this->urn, copy, self);
-  int i;
-
-  CALL(index_urn, add, data);
-
-  // Now we read the index segment
-  fd = (FileLikeObject)CALL(oracle, open, index_urn, 'r');
-  if(!fd) {
-    goto error;
-  };
-
-  /** This holds the index into the segment of all the chunks.
-      It is an array of chunks_in_segment ints long. NOTE - on disk
-      all uint32_t are encoded in big endian format.
-  */
-  this->indexes = (int32_t *)CALL(fd, get_data);
-  this->size = fd->size->value / sizeof(*this->indexes);
-
-  // Fix up endianess:
-  for(i=0;i<this->size; i++) {
-    this->indexes[i] = ntohl(this->indexes[i]);
-  };
-
-  CALL((AFFObject)fd, cache_return);
-
-  return 1;
-
- error:
-  return 0;
-};
-
-static char *ImageIndexBinary_serialise(RDFValue self) {
-  ImageIndexBinary this = (ImageIndexBinary) self;
-  return this->extension;
-};
-
-VIRTUAL(ImageIndexBinary, RDFValue) {
-  VMETHOD_BASE(RDFValue, Con) = ImageIndexBinary_Con;
-  VMETHOD_BASE(RDFValue, decode) = ImageIndexBinary_decode;
-  VMETHOD_BASE(RDFValue, serialise) = ImageIndexBinary_serialise;
-} END_VIRTUAL
-
 /** This is a chunck of data we cache */
 CLASS(ChunkCache, Object)
      char *data;
@@ -116,7 +46,7 @@ VIRTUAL(ChunkCache, Object) {
 
 // The segments created by the Image stream are named by segment
 // number with this format.
-#define IMAGE_SEGMENT_NAME_FORMAT "%s/%08d"  /** Stream URN, segment_id */
+#define IMAGE_SEGMENT_NAME_FORMAT "%08d"  /** Stream URN, segment_id */
 
 /** This specialised hashing is for integer keys */
 static unsigned int cache_hash_int(Cache self, char *key, int len) {
@@ -137,31 +67,63 @@ static ImageWorker ImageWorker_Con(ImageWorker self, Image image) {
 
   URNOF(self) = CALL(URNOF(image), copy, self);
 
-  this->stored = new_RDFURN(self);
+  this->bevy_urn = new_RDFURN(self);
 
   this->image = image;
   this->bevy = CONSTRUCT(StringIO, StringIO, Con, self);
 
   this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
-  this->chunk_indexes = talloc_array(self, int32_t,
-				     image->chunks_in_segment->value + 2);
-
-  // Fill it with -1 to indicate an invalid pointer
-  memset(this->chunk_indexes, 0xff,
-	 sizeof(int32_t) * image->chunks_in_segment->value);
+  this->index = (IntegerArrayBinary)CALL(oracle, new_rdfvalue,
+                                         self, AFF4_INTEGER_ARRAY_INLINE);
 
   return self;
 };
+
+static int dump_bevy_thread(ImageWorker this);
 
 // Compresses all the data in the current bevy and dumps it on the
 // storage. The bevy must be as full as can be (image->bevy_size)
 // before we dump it (except for the last bevy in the image which can
 // be short).
-static int dump_bevy(ImageWorker this) {
-  int segment_number = this->segment_count;
+static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
+  char buff[BUFF_SIZE];
+  RDFURN stream_urn = URNOF(this->image);
+
+  snprintf(buff, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, bevy_number);
+
+  // We prepare the bevy's URN accordingly
+  CALL(URNOF(this), set, stream_urn->value);
+  CALL(URNOF(this), add, buff);
+
+  // Make the bevy get stored in the same place the image is:
+  CALL(oracle, set_value, URNOF(this),
+       AFF4_VOLATILE_STORED, (RDFValue)this->image->stored);
+
+  if(backgroud) {
+    // put the worker in the busy queue
+    CALL(this->image->busy, put, this);
+
+    // Invoke a thread to do the work
+    pthread_create( &this->thread, NULL,
+                    (void *(*) (void *))dump_bevy_thread, (void *)this);
+
+
+    // Get another worker from the queue:
+    this->image->current = CALL(this->image->workers, get, this->image);
+  } else {
+    dump_bevy_thread(this);
+  };
+
+  return 0;
+};
+
+static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
-  int chunk_count=0;
   int result;
+  FileLikeObject bevy;
+
+  AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s (%d bytes)\n",
+           URNOF(this)->value, this->bevy->size);
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -183,74 +145,42 @@ static int dump_bevy(ImageWorker this) {
 
     // Update the index to point at the current segment stream buffer
     // offset
-    this->chunk_indexes[chunk_count] = this->segment_buffer->readptr;
+    CALL(this->index, add, this->segment_buffer->readptr);
 
     // Now write the buffer to the stream buffer
     CALL(this->segment_buffer, write, cbuffer, clength);
-    chunk_count ++;
     bevy_index += length;
   };
 
-  // Dump the bevy to the zip volume
-  {
-    char buff[BUFF_SIZE];
-    AFF4Volume parent;
+  bevy = (FileLikeObject)CALL(oracle, create, AFF4_SEGMENT, 'w');
+  CALL(URNOF(bevy), set, URNOF(this)->value);
 
-    if(!CALL(oracle, resolve_value, URNOF(this), AFF4_STORED, (RDFValue)this->stored)) {
-      RaiseError(ERuntimeError, "No storage for Image stream?");
-      goto error;
-    }
-
-    parent  = (AFF4Volume)CALL(oracle, open, this->stored, 'w');
-    if(!parent) {
-      RaiseError(ERuntimeError, "Unable to open volume %s", this->stored->value);
-      goto error;
-    };
-
-    // Format the segment name
-    snprintf(buff, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
-	     ((AFFObject)this)->urn->value,
-	     segment_number);
-
-    // Push one more offset to the index to cover the last chunk
-    this->chunk_indexes[chunk_count + 1] = this->segment_buffer->readptr;
-
-    AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s (%lld bytes)\n", 
-             buff, this->segment_buffer->readptr);
-
-    // Store the entire segment in the zip file
-    CALL((AFF4Volume)parent, writestr,
-	 buff, this->segment_buffer->data,
-	 this->segment_buffer->readptr,
-	 // No compression for these segments
-	 ZIP_STORED
-	 );
-
-    // Now write the index file which accompanies the segment
-    snprintf(buff, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx",
-	     ((AFFObject)this)->urn->value,
-	     segment_number);
-
-    CALL((AFF4Volume)parent, writestr,
-	 buff, (char *)this->chunk_indexes,
-	 (chunk_count + 1) * sizeof(uint32_t),
-	 ZIP_STORED
-	 );
-
-    // Done with parent
-    CALL(oracle, cache_return, (AFFObject)parent);
-
-    // Reset everything to the start
-    CALL(this->segment_buffer, truncate, 0);
-    CALL(this->bevy, truncate, 0);
-    memset(this->chunk_indexes, -1,
-	   sizeof(int32_t) * this->image->chunks_in_segment->value);
+  bevy = (FileLikeObject)CALL((AFFObject)bevy, finish);
+  if(!bevy) {
+    result = -1;
+    goto error;
   };
 
-  result= 1;
- error:
-  result = -1;
+  CALL(bevy, write, this->segment_buffer->data,
+       this->segment_buffer->readptr);
 
+  CALL(bevy, close);
+
+  // Set the index on the bevy
+  CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index);
+
+  // Reset everything to the start
+  CALL(this->segment_buffer, truncate, 0);
+  CALL(this->bevy, truncate, 0);
+
+  // Make a new index
+  talloc_free(this->index);
+  this->index = (IntegerArrayBinary)CALL(oracle, new_rdfvalue,
+                                         this, AFF4_INTEGER_ARRAY_BINARY);
+
+  result = 1;
+
+ error:
   // Return ourselves to the queue of workers so we can be called
   // again:
   CALL(this->image->busy, remove, this->image, (void *)this);
@@ -353,19 +283,12 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 			    this->current->bevy->size);
     if(available_to_read==0) {
       // This bevy is complete - we send it on its way - The worker
-      // will be returned to the workers queue when its done.
-      this->current->segment_count = this->segment_count;
-
-      // put the worker in the busy queue
-      CALL(this->busy, put, this->current);
+      // will be returned to the workers queue when its done. Note
+      // that the worker has the same URN of the bevy it will produce.
 
       // Invoke a thread to do the work
-      pthread_create( &this->current->thread, NULL,
-      		      (void *(*) (void *))dump_bevy, (void *)this->current);
+      dump_bevy(this->current, this->segment_count, 1);
       this->segment_count++;
-
-      // Get another worker from the queue:
-      this->current = CALL(this->workers, get, self);
       continue;
     };
 
@@ -386,7 +309,7 @@ static void Image_close(FileLikeObject self) {
 
   // Write the last chunk
   this->current->segment_count = this->segment_count;
-  dump_bevy(this->current);
+  dump_bevy(this->current, this->segment_count, 0);
 
   // Wait for all busy threads to finish - its not safe to traverse
   // the busy list without locking it. So we lock it - pull the first
@@ -469,6 +392,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   /** Now we need to figure out where the segment is */
   FileLikeObject fd;
   int32_t chunk_offset_in_segment;
+  IntegerArrayBinary index;
 
   /** Fast path - check if the chunk is already cached.  If it is - we
   can just copy a subset of it on the result and get out of here....
@@ -476,7 +400,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   cached the entire segment (which could be very large) we would
   exhaust our cache memory very quickly.
   */
-  ChunkCache chunk_cache = (ChunkCache)CALL(this->chunk_cache, get, 
+  ChunkCache chunk_cache = (ChunkCache)CALL(this->chunk_cache, get,
                                             (char *)&chunk_id, sizeof(chunk_id));
 
   if(chunk_cache) {
@@ -487,57 +411,33 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   chunk_cache = CONSTRUCT(ChunkCache, ChunkCache, Con, NULL,
                           this->chunk_size->value);
 
-  /** First we need to locate the chunk indexes */
-  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT ".idx",
-	   ((AFFObject)this)->urn->value,
-	   segment_id);
-  CALL(this->bevy_urn, set, buffer);
-
-  // Now we work out the offsets on the chunk in the segment - we read
-  // the segment index which is a segment:
+  // Form the bevy name
   {
-    FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->bevy_urn, 'r');
-    int32_t *chunk_index;
-    int chunks_in_segment;
+    char buff[BUFF_SIZE];
 
-    if(!fd) {
-      ClearError();
-      RaiseError(ERuntimeError, "Unable to locate index %s", buffer);
-      goto error;
-    };
-
-    // FIXME - this needs to be more efficient with seeking and
-    // reading the required index from the chunk index rather than
-    // reading the entire index into memory at once.
-
-    /** This holds the index into the segment of all the chunks.
-	It is an array of chunks_in_segment ints long.
-    */
-    chunk_index = (int32_t *)CALL(fd, get_data);
-    chunks_in_segment = fd->size->value / sizeof(int32_t);
-
-    /** By here we have the chunk_index which is an array of offsets
-	into the segment where the chunks begin. We work out the size of
-	the chunk by subtracting the next chunk offset from the current
-	one. It seems to be ok to over read here so if the numbers dont
-	make too much sense we just choose to overread.
-    */
-    compressed_length = min((uint32_t)chunk_index[chunk_index_in_segment+1] -
-			    (uint32_t)chunk_index[chunk_index_in_segment],
-			    this->chunk_size->value);
-
-    chunk_offset_in_segment = (uint32_t)chunk_index[chunk_index_in_segment];
-
-    // Done with the chunk index
-    CALL(oracle, cache_return, (AFFObject)fd);
+    snprintf(buff, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT, segment_id);
+    CALL(this->bevy_urn, set, URNOF(self)->value);
+    CALL(this->bevy_urn, add, buff);
   };
 
-  /** Now obtain a handle directly into the segment */
-  snprintf(buffer, BUFF_SIZE, IMAGE_SEGMENT_NAME_FORMAT,
-           ((AFFObject)this)->urn->value,
-           segment_id);
+  // Try to resolve it
+  index = (IntegerArrayBinary)CALL(oracle, resolve_alloc,
+                                   chunk_cache, this->bevy_urn, AFF4_INDEX);
+  if(!index) {
+    RaiseError(ERuntimeError, "No index for bevy %s?", this->bevy_urn->value);
+    goto error;
+  };
 
-  CALL(this->bevy_urn, set, buffer);
+  if(chunk_index_in_segment + 1 > index->size) {
+    RaiseError(ERuntimeError, "Index is too small");
+    goto error;
+  };
+
+  compressed_length = min(index->array[chunk_index_in_segment+1] -
+                          index->array[chunk_index_in_segment],
+                          this->chunk_size->value);
+
+  chunk_offset_in_segment = index->array[chunk_index_in_segment];
 
   // Now open the bevy
   fd = (FileLikeObject)CALL(oracle, open, this->bevy_urn, 'r');

@@ -116,7 +116,7 @@ CLASS(FileLikeObject, AFFObject)
   // big buffer of data. The data will be cached with the
   // FileLikeObject. Its only really suitable for smallish amounts of
   // data - and checks to ensure that file size is less than MAX_CACHED_FILESIZE
-     char *METHOD(FileLikeObject, get_data);
+     BORROWED char *METHOD(FileLikeObject, get_data);
 
 // This method is just like the standard ftruncate call
      int METHOD(FileLikeObject, truncate, uint64_t offset);

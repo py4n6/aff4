@@ -730,7 +730,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     int properties_length = strlen(AFF4_INFORMATION);
 
       // Is this file a properties file?
-    while(CALL(oracle, iter_next, iter, urn)) {
+    while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
       char *base_name = basename(urn->value);
 
       // We identify streams by their filename being information.encoding
@@ -1620,7 +1620,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
     AFF4Volume parent;
     AFFObject result;
 
-    if(mode!='r') {
+    if(0 && mode!='r') {
       RaiseError(ERuntimeError, "This implementation only supports opening ZipFileStreams for writing through ZipFile::open_member");
       goto error;
     };
@@ -1639,12 +1639,12 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     // Now just return the member from the volume:
     //    talloc_free(self);
-    result = (AFFObject)CALL(parent, open_member, urn->value, mode, 'r');
+    result = (AFFObject)CALL(parent, open_member, urn->value, mode, ZIP_STORED);
 
     CALL(oracle, cache_return, (AFFObject)parent);
 
     // We return the opened member instead of ourselves:
-    talloc_free(self);
+    talloc_unlink(NULL,  self);
 
     return result;
   };
@@ -1652,7 +1652,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
   return self;
 
  error:
-  talloc_free(self);
+  talloc_unlink(NULL, self);
   return NULL;
 };
 

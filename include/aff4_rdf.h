@@ -10,7 +10,7 @@
 #include "aff4_utils.h"
 #include <sys/time.h>
 
-struct RDFURN;
+struct RDFURN_t;
 
 /**** A class used to parse URNs */
 CLASS(URLParse, Object)
@@ -51,26 +51,26 @@ CLASS(RDFValue, Object)
 
       /* This method is called to parse a serialised form into this
 	 instance. Return 1 if parsing is successful, 0 if error
-	 occured. 
+	 occured.
       */
-      int METHOD(RDFValue, parse, char *serialised_form, RDFValue urn);
+      int METHOD(RDFValue, parse, char *serialised_form, struct RDFURN_t *subject);
 
       /* This method is called to serialise this object into the
 	 TDB_DATA struct for storage in the TDB data store. The new
 	 memory will be allocated with this object's context and must
 	 be freed by the caller.
       */
-      TDB_DATA *METHOD(RDFValue, encode);
+      TDB_DATA *METHOD(RDFValue, encode, struct RDFURN_t *subject);
 
       // This method is used to decode this object from the
       // data_store. The fd is seeked to the start of this record.
-      int METHOD(RDFValue, decode, char *data, int length, RDFValue urn);
+      int METHOD(RDFValue, decode, char *data, int length, struct RDFURN_t *subject);
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be
-	  allocated to the NULL context and should be unlinked by the caller. 
+	  allocated to the NULL context and should be unlinked by the caller.
       */
-      char *METHOD(RDFValue, serialise);
+      char *METHOD(RDFValue, serialise, struct RDFURN_t *subject);
 END_CLASS
 
       /** The following is a direction for the autogenerator to create
@@ -131,6 +131,35 @@ CLASS(RDFURN, RDFValue)
 
      // This method returns the relative name
      TDB_DATA METHOD(RDFURN, relative_name, RDFURN volume);
+END_CLASS
+
+
+     /** An integer array stores an array of integers
+         efficiently. This variant stores it in a binary file.
+     */
+CLASS(IntegerArrayBinary, RDFValue)
+     uint32_t *array;
+
+  // Current pointer for adding members
+  int current;
+
+  // The total number of indexes in this array
+  int size;
+
+  // The available allocated memory (we allocate chunks of BUFF_SIZE)
+  int alloc_size;
+
+  // The urn of the array is derived from the subject by appending
+  // this extension.
+  char *extension;
+
+  void METHOD(IntegerArrayBinary, add, unsigned int offset);
+END_CLASS
+
+
+  /** This is used when the array is fairly small and it can fit
+      inline */
+CLASS(IntegerArrayInline, IntegerArrayBinary)
 END_CLASS
 
      /** This function is used to register a new RDFValue class with
