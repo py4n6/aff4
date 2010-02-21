@@ -74,7 +74,7 @@ static ImageWorker ImageWorker_Con(ImageWorker self, Image image) {
 
   this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
   this->index = (IntegerArrayBinary)CALL(oracle, new_rdfvalue,
-                                         self, AFF4_INTEGER_ARRAY_INLINE);
+                                         self, AFF4_INTEGER_ARRAY_BINARY);
 
   return self;
 };
@@ -165,6 +165,13 @@ static int dump_bevy_thread(ImageWorker this) {
        this->segment_buffer->readptr);
 
   CALL(bevy, close);
+
+  // If the index is small enough, make it inline
+  if(this->index->size < 2) {
+    ((RDFValue)this->index)->dataType = ((RDFValue)&__IntegerArrayInline)->dataType;
+    ((RDFValue)this->index)->serialise = ((RDFValue)&__IntegerArrayInline)->serialise;
+    ((RDFValue)this->index)->id = ((RDFValue)&__IntegerArrayInline)->id;
+  };
 
   // Set the index on the bevy
   CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index);
@@ -428,13 +435,17 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
     goto error;
   };
 
+  // The last index point is maxint - this makes the following
+  // calculations easier
+  CALL(index, add, 0xFFFFFFFF);
+
   if(chunk_index_in_segment + 1 > index->size) {
     RaiseError(ERuntimeError, "Index is too small");
     goto error;
   };
 
-  compressed_length = min(index->array[chunk_index_in_segment+1] -
-                          index->array[chunk_index_in_segment],
+  compressed_length = min((uint32_t)index->array[chunk_index_in_segment+1] -
+                          (uint32_t)index->array[chunk_index_in_segment],
                           this->chunk_size->value);
 
   chunk_offset_in_segment = index->array[chunk_index_in_segment];

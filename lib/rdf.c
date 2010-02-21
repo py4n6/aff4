@@ -400,7 +400,7 @@ static void RDFURN_set(RDFURN self, char *string) {
   return;
 };
 
-static int RDFURN_decode(RDFValue this, char *data, int length, RDFValue urn) {
+static int RDFURN_decode(RDFValue this, char *data, int length, RDFURN subject) {
   RDFURN self = (RDFURN)this;
   uint32_t *id = (uint32_t *)data;
 
@@ -600,6 +600,7 @@ static RDFValue IntegerArrayBinary_Con(RDFValue this) {
   self->alloc_size = 0;
   self->array = NULL;
   self->current = 0;
+  self->extension = talloc_strdup(self, self->extension);
 
   return SUPER(RDFValue, RDFValue, Con);
 };
@@ -611,6 +612,7 @@ static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFU
   IntegerArrayBinary this = (IntegerArrayBinary)self;
   RDFURN array_urn = CALL(subject, copy, self);
   int i;
+  uint32_t *ptr;
 
   // We use the data given as an extension
   if(this->extension) talloc_free(this->extension);
@@ -628,16 +630,15 @@ static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFU
       It is an array of chunks_in_segment ints long. NOTE - on disk
       all uint32_t are encoded in big endian format.
   */
-  this->array = (int32_t *)CALL(fd, get_data);
+  ptr = (uint32_t *)CALL(fd, get_data);
 
-  // Make sure the array does not get freed from under us.
-  talloc_reference(this, this->array);
-
+  this->array = talloc_size(self, fd->size->value);
   this->size = fd->size->value / sizeof(*this->array);
 
   // Fix up endianess:
   for(i=0;i<this->size; i++) {
-    this->array[i] = ntohl(this->array[i]);
+    this->array[i] = ntohl(ptr[i]);
+    this->current ++;
   };
 
   CALL((AFFObject)fd, cache_return);
@@ -681,7 +682,7 @@ static char *IntegerArrayBinary_serialise(RDFValue self, RDFURN subject) {
     };
 
     CALL(volume, writestr, segment->value,
-         (char *)stored_array, this->size * sizeof(uint32_t), ZIP_DEFLATE);
+         (char *)stored_array, this->size * sizeof(uint32_t), ZIP_STORED);
 
     CALL(oracle, cache_return, (AFFObject)volume);
   };
@@ -696,8 +697,7 @@ static char *IntegerArrayBinary_serialise(RDFValue self, RDFURN subject) {
 };
 
 static void IntegerArrayBinary_add(IntegerArrayBinary self, unsigned int item) {
-  printf("%u ,",item);
-  while(self->current >= self->alloc_size) {
+  while(!self->array || self->current >= self->alloc_size) {
     self->alloc_size += BUFF_SIZE;
     self->array = talloc_realloc_size(self, self->array,
                                       sizeof(uint32_t) * self->alloc_size);
@@ -711,7 +711,7 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
   VATTR(super.dataType) = AFF4_INTEGER_ARRAY_BINARY;
 
-  VATTR(extension) = talloc_strdup(NULL, "index");
+  VATTR(extension) = "index";
 
   VMETHOD_BASE(RDFValue, Con) = IntegerArrayBinary_Con;
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayBinary_decode;
@@ -726,7 +726,7 @@ static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
   int i,buffer_ptr=0;
 
   for(i=0; i < this->size && buffer_ptr < available; i++) {
-    buffer_ptr += snprintf(buffer + buffer_ptr, available - buffer_ptr, "%lu,", this->array[i]);
+    buffer_ptr += snprintf(buffer + buffer_ptr, available - buffer_ptr, "%u,", this->array[i]);
   };
 
   return buffer;
