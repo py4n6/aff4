@@ -396,7 +396,7 @@ static void Encrypted_close(FileLikeObject self) {
   };
 
   CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
-       rdfvalue_from_string(this, AFF4_ENCRYTED));
+       rdfvalue_from_urn(this, AFF4_ENCRYTED));
 
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)((FileLikeObject)self)->size);

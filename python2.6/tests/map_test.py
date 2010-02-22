@@ -45,13 +45,14 @@ oracle.set_value(map.urn, pyaff4.AFF4_TARGET_PERIOD, i)
 i.set(6 * blocksize)
 oracle.set_value(map.urn, pyaff4.AFF4_IMAGE_PERIOD, i)
 
-map.set_data_type(pyaff4.AFF4_MAP_BINARY)
+map.set_data_type(pyaff4.AFF4_MAP_TEXT)
 
 map = map.finish()
 map.size.set(5242880 * 2)
 
-map.add_point(0 * blocksize,0 * blocksize,d2)
+map.add_point(0 * blocksize,10 * blocksize,d1)
 map.add_point(0 * blocksize + 10,0 * blocksize + 10,d2)
+map.add_point(0 * blocksize,0 * blocksize,d2)
 map.add_point(1 * blocksize,0 * blocksize,d1)
 map.add_point(2 * blocksize,1 * blocksize,d3)
 map.add_point(3 * blocksize,1 * blocksize,d2)

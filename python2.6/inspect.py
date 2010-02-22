@@ -42,14 +42,15 @@ for arg in args:
     volume.set(arg)
     if oracle.load(volume):
         VOLUMES.append(volume)
+        urn = pyaff4.RDFURN()
         iter = oracle.get_iter(volume, pyaff4.AFF4_CONTAINS)
-        while iter:
-            urn = oracle.iter_next_alloc(iter)
-            if not urn: break
+        while oracle.iter_next(iter, urn):
+           print urn.value
+           if not urn: break
 
-            ## We store is as a simplified path
-            path = "/%s%s" % (urn.parser.netloc, urn.parser.query)
-            STREAMS[path] = urn
+           ## We store is as a simplified path
+           path = "/%s%s" % (urn.parser.netloc, urn.parser.query)
+           STREAMS[path] = urn
 
 class Inspector(cmd.Cmd):
     prompt = "/:>"
@@ -172,6 +173,40 @@ class Inspector(cmd.Cmd):
                         pipe.write(data)
 
                     pipe.close()
+
+    def do_cp(self, line):
+        """ Copy a stream from a source to a destination. """
+        pdb.set_trace()
+        globs = shlex.split(line)
+        src = globs[0]
+        dest = globs[1]
+        if(len(globs) > 2):
+           print "usage: cp src dest"
+           return
+
+        if not src.startswith("/"):
+           src = self.CWD + src
+
+        src = os.path.normpath(src)
+        src_urn = pyaff4.RDFURN()
+        src_urn.set("aff4:/" + src)
+        ## Try to open the stream
+        try:
+           fd = oracle.open(src_urn, 'r')
+        except IOError, e:
+           raise
+
+        dest_fd = open(dest, "w")
+        while 1:
+           data = fd.read(1024 * 1024)
+           if not data: break
+
+           dest_fd.write(data)
+
+        dest_fd.close()
+
+    def complete_cp(self, *args):
+       return self.complete_stream(*args)
 
     def complete_less(self, *args):
         return self.complete_stream(*args)

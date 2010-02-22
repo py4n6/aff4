@@ -620,7 +620,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   talloc_set_destructor((void *)self, Resolver_destructor);
 
   // Cache this so we dont need to rebuilt it all the time.
-  self->type = new_XSDString(self);
+  self->type = new_RDFURN(self);
 
   return self;
 
@@ -826,7 +826,7 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
 #ifdef AFF4_DEBUG_RESOLVER
     {
-      char *serialised = CALL(value, serialise);
+      char *serialised = CALL(value, serialise, urn);
 
       DEBUG_RESOLVER("Setting %s, %s = %s\n", urn->value, attribute_str, serialised);
 
@@ -1555,6 +1555,8 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
   };
 
   UNLOCK_RESOLVER;
+
+  ClearError();
 };
 
 static void Resolver_close(Resolver self) {

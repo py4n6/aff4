@@ -6,7 +6,7 @@
 
 // This is the URI namespace for the AFF4 scheme
 #define NAMESPACE "aff4://"
-#define PREDICATE_NAMESPACE "http://afflib.org/2009/aff4/#"
+#define PREDICATE_NAMESPACE "http://afflib.org/2009/aff4#"
 #define RDF_NAMESPACE "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define XSD_NAMESPACE "http://www.w3.org/2001/XMLSchema#"
 
@@ -131,22 +131,22 @@
 #define AFF4_CRYPTO_ALGORITHM_AES_SHA254 "AES256/SHA256"
 
 /** These are standard aff4 types. */
-/** Volumes **/
-#define AFF4_ZIP_VOLUME       "zip_volume"
-#define AFF4_DIRECTORY_VOLUME "directory"
-#define AFF4_LIBAFF_VOLUME    "aff1_volume"
-#define AFF4_EWF_VOLUME    "ewf_volume"
+/** Volume types **/
+#define AFF4_ZIP_VOLUME       PREDICATE_NAMESPACE "zip_volume"
+#define AFF4_DIRECTORY_VOLUME PREDICATE_NAMESPACE "directory"
+#define AFF4_LIBAFF_VOLUME    PREDICATE_NAMESPACE "aff1_volume"
+#define AFF4_EWF_VOLUME       PREDICATE_NAMESPACE "ewf_volume"
 
-/** Streams */
-#define AFF4_SEGMENT          "segment"
-#define AFF4_LINK             "link"
-#define AFF4_IMAGE            "image"
-#define AFF4_MAP              "map"
-#define AFF4_ENCRYTED         "encrypted"
-#define AFF4_LIBAFF_STREAM    "aff1_stream"
-#define AFF4_ERROR_STREAM     "error"
+/** Stream types */
+#define AFF4_SEGMENT          PREDICATE_NAMESPACE "segment"
+#define AFF4_LINK             PREDICATE_NAMESPACE "link"
+#define AFF4_IMAGE            PREDICATE_NAMESPACE "image"
+#define AFF4_MAP              PREDICATE_NAMESPACE "map"
+#define AFF4_ENCRYTED         PREDICATE_NAMESPACE "encrypted"
+#define AFF4_LIBAFF_STREAM    PREDICATE_NAMESPACE "aff1_stream"
+#define AFF4_ERROR_STREAM     PREDICATE_NAMESPACE "error"
 #define AFF4_FILE             "file"
-#define AFF4_EWF_STREAM       "ewf_stream"
+#define AFF4_EWF_STREAM       PREDICATE_NAMESPACE "ewf_stream"
 
 #define AFF4_INDEX            PREDICATE_NAMESPACE "index"
 
@@ -194,4 +194,4 @@
 /* This is the largest size of the inline integer array - bigger
    arrays get their own segments.
 */
-#define MAX_SIZE_OF_INLINE_ARRAY 10
+#define MAX_SIZE_OF_INLINE_ARRAY 100

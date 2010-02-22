@@ -374,7 +374,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     };
 
     {
-      RDFValue tmp = rdfvalue_from_string(NULL, AFF4_ZIP_VOLUME);
+      RDFValue tmp = rdfvalue_from_urn(NULL, AFF4_ZIP_VOLUME);
 
       CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_TYPE, tmp);
       talloc_free(tmp);
@@ -636,7 +636,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	   (RDFValue)URNOF(self));
 
       CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE, 
-	   rdfvalue_from_string(ctx, AFF4_SEGMENT));
+	   rdfvalue_from_urn(ctx, AFF4_SEGMENT));
 
       CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS, 
 	   (RDFValue)filename);
@@ -853,7 +853,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 	 rdfvalue_from_int(ctx, compression));
 
     CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE,
-	 rdfvalue_from_string(ctx, AFF4_SEGMENT));
+	 rdfvalue_from_urn(ctx, AFF4_SEGMENT));
 
     CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED,
 	 (RDFValue)URNOF(self));
@@ -1034,7 +1034,7 @@ static int ZipFile_close(AFF4Volume this) {
       XSDInteger size = new_XSDInteger(urn);
       XSDInteger compressed_size = new_XSDInteger(urn);
       XSDInteger header_offset = new_XSDInteger(urn);
-      XSDString type = new_XSDString(urn);
+      RDFURN type = new_RDFURN(urn);
       XSDInteger epoch_time = new_XSDInteger(urn);
 
       CALL(cache,seek, 10*BUFF_SIZE, 0);

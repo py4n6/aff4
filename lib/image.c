@@ -351,7 +351,7 @@ static void Image_close(FileLikeObject self) {
        (RDFValue)this->chunks_in_segment);
 
   CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
-       rdfvalue_from_string(this, AFF4_IMAGE));
+       rdfvalue_from_urn(this, AFF4_IMAGE));
 
   {
     XSDDatetime time = new_XSDDateTime(this);

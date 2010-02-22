@@ -81,7 +81,7 @@ CLASS(Resolver, Object)
        struct Identity_t *identity;
 
        // This is used to check the type of new objects
-       XSDString type;
+       RDFURN type;
 
        /* If this is set objects will use this to send messgaes
           through */

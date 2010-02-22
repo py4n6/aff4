@@ -208,6 +208,21 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
     talloc_unlink(NULL, target_index);
   };
 
+
+
+  // Now make sure that the current point is not already in the treap:
+  {
+    map_point_node_t q;
+
+    q.image_offset = node->image_offset;
+
+    if(tree_search(&self->tree, &q)) {
+      tree_remove(&self->tree, &q);
+      printf("Removed point %llu %s\n", node->image_offset, self->targets[node->target_idx]->value);
+      fflush(stdout);
+    };
+  };
+
   // Now check if the new point is redundant. The new point will be
   // redundant if the predicted target and target offset based on the
   // existing map points are the same as what we are about to add.
@@ -227,9 +242,6 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
   node->image_offset = image_offset;
   node->target_offset = target_offset;
   node->target_idx = target_index->value;
-
-  // Now make sure that the current point is not already in the treap:
-  tree_remove(&self->tree, node);
 
   /** This might leak as we dont free anything here. Typically it
       does not matter because all nodes are allocated from the same
@@ -592,7 +604,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
       goto error;
     };
 
-    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_string(self, AFF4_MAP));
+    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_urn(self, AFF4_MAP));
     CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
 
     // Only update the timestamp if we created a new map

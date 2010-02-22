@@ -74,7 +74,7 @@ class HashWorker(threading.Thread):
 
         ## Check if the hashed file already exists
         if oracle.get_id_by_urn(hashed_urn, 0):
-            print "Skipping...."
+            print "Skipping.... %s" % hashed_urn.value
         else:
             ## Save a copy of the data
             out_fd = oracle.create(pyaff4.AFF4_IMAGE)
@@ -87,7 +87,7 @@ class HashWorker(threading.Thread):
         if self.inode:
             string = pyaff4.XSDString()
             string.set(self.inode)
-            print "%s %s" % (hashed_urn.value, self.inode)
+            print "Setting %s filename %s" % (hashed_urn.value, self.inode)
             oracle.add_value(hashed_urn, pyaff4.PREDICATE_NAMESPACE + "filename", string)
 
         ## Now make a reverse map
@@ -103,8 +103,8 @@ class HashWorker(threading.Thread):
                     file_block * self.blocksize,
                     hashed_urn.value)
 
-#                print "%s,%s,%s " % (block * self.blocksize,
-#                                     file_block * self.blocksize, hashed_urn.value)
+                print "Adding %s,%s,%s " % (block * self.blocksize,
+                                            file_block * self.blocksize, hashed_urn.value)
 
             ## This is the last block of the file - We store the slack
             ## block in a special slack object
@@ -123,12 +123,14 @@ class HashWorker(threading.Thread):
 
                     image_stream.map.add_point(block * self.blocksize +
                                                extra, start, self.slack_urn.value)
-#                    print "%s,%s,%s " % (block * self.blocksize + extra,
-#                                         start, self.slack_urn.value)
+                    print "Adding %s,%s,%s " % (block * self.blocksize + extra,
+                                                start, self.slack_urn.value)
 
                     extra = self.blocksize
                 finally:
                     slack.cache_return()
+
+            else: extra = self.blocksize
 
             ## Now we need to add another point to terminate our
             ## mapping. We need to determine if another map point
@@ -138,8 +140,10 @@ class HashWorker(threading.Thread):
                 block * self.blocksize + extra + 1)
 
             ## No its still refering to slack space:
-            if target.value == self.slack_urn.value:
+            if target.value == self.slack_urn.value or target.value == hashed_urn.value:
                 image_stream.map.add_point(block * self.blocksize + extra, 0, ZERO_URN.value)
+                print "Adding %s,%s,%s " % (block * self.blocksize + extra,
+                                            0, ZERO_URN.value)
 
         finally:
             image_stream.cache_return()
@@ -149,7 +153,7 @@ class HashImager:
 
     in_urn can be a file containing the volume, or an existing stream.
     """
-    MAX_SIZE = 4000
+    MAX_SIZE = 10000
     MAX_THREADS = 5
     workers = []
 
@@ -264,6 +268,19 @@ class HashImager:
                 self.condition.wait(0.5)
                 self.condition.release()
 
+    def dump_blocks(self, blocks, size, filename):
+        i = 0
+        while 1:
+            ## Split the file into smaller runs
+            if len(blocks) - i > self.MAX_SIZE:
+                run = blocks[i:i+self.MAX_SIZE]
+                self.dump_block_run(run, self.blocksize * len(run), inode = filename)
+                i += self.MAX_SIZE
+            else:
+                run = blocks[i:]
+                self.dump_block_run(run, size - i * self.blocksize, inode = filename)
+                break
+
     def dump_filesystem(self):
         """ This method analyses the filesystem and dumps all the
         files in it based on hashes.
@@ -294,69 +311,63 @@ class HashImager:
 
                 print "Dumping %s %s (%s bytes)" % (f, filename,
                                                     stat.st_size)
-
-                i = 0
                 size = stat.st_size
-                while 1:
-                    ## Split the file into smaller runs
-                    if len(blocks) - i > self.MAX_SIZE:
-                        run = blocks[i:i+self.MAX_SIZE]
-                        self.dump_block_run(run, self.blocksize * len(run), inode = filename)
-                        i += self.MAX_SIZE
-                    else:
-                        run = blocks[i:]
-                        self.dump_block_run(run, size - i * self.blocksize, inode = filename)
-                        break
+                self.dump_blocks(blocks, size, filename)
 
-                continue
-                ## Now we also add a map for the file from the image
-                ## itself for convenience - this allows us to read the
-                ## file, through the image, accessing the original hashed
-                ## file.
-                map = oracle.create(pyaff4.AFF4_MAP)
-                map.urn.set(self.image_urn.value)
-                map.urn.add(urllib.quote(filename))
-                map.set(pyaff4.AFF4_STORED, self.volume_urn)
-                map = map.finish()
+    def dump_file_name(self):
+        ## Now we also add a map for the file from the image
+        ## itself for convenience - this allows us to read the
+        ## file, through the image, accessing the original hashed
+        ## file.
+        map = oracle.create(pyaff4.AFF4_MAP)
+        map.urn.set(self.image_urn.value)
+        map.urn.add(urllib.quote(filename))
+        map.set(pyaff4.AFF4_STORED, self.volume_urn)
+        map = map.finish()
 
-                ## Update the map size to the correct value
-                map.size.set(stat.st_size)
+        ## Update the map size to the correct value
+        map.size.set(stat.st_size)
 
-                last_block = -1
-                file_block = 0
-                for block in blocks:
-                    if last_block != block:
-                        map.map.add_point(file_block * self.blocksize,
-                                          block * self.blocksize,
-                                          self.image_urn.value)
-                        last_block = block
+        last_block = -1
+        file_block = 0
+        for block in blocks:
+            if last_block != block:
+                map.map.add_point(file_block * self.blocksize,
+                                  block * self.blocksize,
+                                  self.image_urn.value)
+                last_block = block
 
-                    last_block += 1
-                    file_block += 1
+            last_block += 1
+            file_block += 1
 
-                map.close()
+        map.close()
 
     def dump_unallocated(self):
-        image_stream = oracle.open(self.image_urn, 'w')
-        try:
-            offset = 0
-            while 1:
+        offset = 0
+        while 1:
+            image_stream = oracle.open(self.image_urn, 'w')
+            try:
                 urn, target_offset, available, target_id = image_stream.map.get_range(offset)
+            finally:
+                image_stream.cache_return()
 
-                if not available: break
+            if not available: break
 
-                ## We only want gaps
-                print offset % self.blocksize, offset, target_offset, available, urn.value
+            ## We only want gaps
+            print "Checking map point %s,%s,%s,%s" % (offset, target_offset, available, urn.value)
 
-                if urn.value == ZERO_URN.value:
-                    ## At this point the gaps should be even blocksizes.
-                    if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
-                        pdb.set_trace()
-                        print "????"
+            if urn.value == ZERO_URN.value:
+                ## At this point the gaps should be even blocksizes.
+                if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
+                    pdb.set_trace()
+                    print "????"
 
-                offset += available
-        finally:
-            image_stream.cache_return()
+                print "Dumping from %s to %s" % (offset, offset+available)
+                blocks = [ x for x in range(offset / self.blocksize,
+                                            (offset + available) / self.blocksize) ]
+                self.dump_blocks(blocks, len(blocks) * self.blocksize, "unallocated@%s" % offset)
+
+            offset += available
 
 ## Shut up messages
 class Renderer:
@@ -367,3 +378,25 @@ oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
 
 imager = HashImager(in_urn, out_urn)
 imager.image()
+
+fd = oracle.open(imager.image_urn, 'r')
+print "\nMap %s" % fd.urn.value
+print "---------\n\n"
+
+offset = 0
+while 1:
+    urn, target_offset, available, target_id = fd.map.get_range(offset)
+    print "%s,%s,%s,%s"%(offset, target_offset, available, urn.value)
+    if available == 0 : break
+
+    offset += available
+
+outfd = open("/tmp/foobar.dd", "w")
+while 1:
+    data = fd.read(1024*1024)
+    if not data: break
+
+    outfd.write(data)
+
+outfd.close()
+fd.cache_return()
