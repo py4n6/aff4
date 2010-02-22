@@ -43,6 +43,10 @@ CLASS(RDFValue, Object)
       int id;
       raptor_identifier_type raptor_type;
 
+      // These flags will be stored in the TDB_DATA_LIST and specify
+      // our behaviour - used for optimizations.
+      uint8_t flags;
+
       // This is only required for special handling - Leave as NULL to
       // be the same as dataType above
       raptor_uri *raptor_literal_datatype;

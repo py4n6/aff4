@@ -359,6 +359,9 @@ VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = XSD_NAMESPACE "string";
 
+   // Our serialised form is the same as encoded form
+   VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
+
    VMETHOD(super.encode) = XSDString_encode;
    VMETHOD(super.decode) = XSDString_decode;
    VMETHOD(super.serialise) = XSDString_serialise;
@@ -713,6 +716,9 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
 
   VATTR(extension) = "index";
 
+  // Our serialised form is the same as encoded form
+  VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
+
   VMETHOD_BASE(RDFValue, Con) = IntegerArrayBinary_Con;
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayBinary_decode;
   VMETHOD_BASE(RDFValue, serialise) = IntegerArrayBinary_serialise;
@@ -752,6 +758,9 @@ static int IntegerArrayInline_decode(RDFValue self, char *data, int length, RDFU
 VIRTUAL(IntegerArrayInline, IntegerArrayBinary) {
   VMETHOD_BASE(RDFValue, dataType) = AFF4_INTEGER_ARRAY_INLINE;
 
+  // Our serialised form is the same as encoded form
+  VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
+
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayInline_decode;
   VMETHOD_BASE(RDFValue, serialise) = IntegerArrayInline_serialise;
 } END_VIRTUAL
@@ -772,6 +781,19 @@ VIRTUAL(IntegerArrayInline, IntegerArrayBinary) {
    parse it.
  */
 Cache RDF_Registry = NULL;
+
+/** FIXME - make this faster by using a tree */
+static RDFValue find_rdfvalue_by_id(int id) {
+  Cache i;
+
+  list_for_each_entry(i, &RDF_Registry->cache_list, cache_list) {
+    RDFValue tmp = i->data;
+
+    if(id == tmp->id) return tmp;
+  };
+
+  return NULL;
+};
 
 void register_rdf_value_class(RDFValue classref) {
   if(!RDF_Registry) {
@@ -1094,12 +1116,29 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
     iter = CALL(oracle, get_iter, NULL, urn, attribute->value);
 
     // Now iterate over all the values for this
-    while(1) {
-      RDFValue value = CALL(oracle, iter_next_alloc, iter);
-
-      if(!value) break;
+    while(iter) {
+      RDFValue value;
 
       memset(&triple, 0, sizeof(triple));
+
+      // If the encoding is the same as serialised version we can
+      // just copy it into the serialiser directly from the iterator.
+      if(iter->head.flags & RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED) {
+        triple.object = CALL(oracle, encoded_data_from_iter, &value, iter);
+
+        if(!triple.object) break;
+      } else {
+        value = CALL(oracle, alloc_from_iter, iter);
+
+        if(!value) break;
+
+        // New reference here:
+        triple.object = CALL(value, serialise, urn);
+        if(!triple.object) {
+          AFF4_LOG(AFF4_LOG_MESSAGE, "Unable to serialise %s:%s\n", urn->value, attribute->value);
+          continue;
+        };
+      };
 
       triple.subject = raptor_urn;
       triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
@@ -1111,13 +1150,6 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
       // Default to something sensible
       if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
         triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-
-      // New reference here:
-      triple.object = CALL(value, serialise, urn);
-      if(!triple.object) {
-        AFF4_LOG(AFF4_LOG_MESSAGE, "Unable to serialise %s:%s\n", urn->value, attribute->value);
-        continue;
-      };
 
       triple.object_literal_datatype = \
         raptor_new_uri((const unsigned char*)value->dataType);
@@ -1132,7 +1164,6 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
       else
         talloc_unlink(NULL, (void *)triple.object);
 
-      talloc_free(value);
     };
 
     talloc_free(iter);

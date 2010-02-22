@@ -41,6 +41,7 @@ class HashWorker(threading.Thread):
         ## We signal this when we are done
         self.condition = condition
         self.slack_urn = slack_urn
+        self.inode = None
 
     def run(self):
         try:
@@ -82,6 +83,12 @@ class HashWorker(threading.Thread):
             out_fd = out_fd.finish()
             out_fd.write(data)
             out_fd.close()
+
+        if self.inode:
+            string = pyaff4.XSDString()
+            string.set(self.inode)
+            print "%s %s" % (hashed_urn.value, self.inode)
+            oracle.add_value(hashed_urn, pyaff4.PREDICATE_NAMESPACE + "filename", string)
 
         ## Now make a reverse map
         image_stream = oracle.open(self.image_stream_urn, 'w')
@@ -233,7 +240,7 @@ class HashImager:
         finally:
             self.fd.cache_return()
 
-    def dump_block_run(self, blocks, size):
+    def dump_block_run(self, blocks, size, inode=None):
         """ Dump the block run given as a reverse map """
 
         while 1:
@@ -246,6 +253,8 @@ class HashImager:
                                     self.image_urn, blocks,
                                     size, self.blocksize,
                                     self.condition)
+                worker.inode = inode
+
                 worker.start()
                 worker.join()
                 self.workers.append(worker)
@@ -292,11 +301,11 @@ class HashImager:
                     ## Split the file into smaller runs
                     if len(blocks) - i > self.MAX_SIZE:
                         run = blocks[i:i+self.MAX_SIZE]
-                        self.dump_block_run(run, self.blocksize * len(run))
+                        self.dump_block_run(run, self.blocksize * len(run), inode = filename)
                         i += self.MAX_SIZE
                     else:
                         run = blocks[i:]
-                        self.dump_block_run(run, size - i * self.blocksize)
+                        self.dump_block_run(run, size - i * self.blocksize, inode = filename)
                         break
 
                 continue

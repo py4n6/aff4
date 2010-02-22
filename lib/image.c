@@ -167,7 +167,7 @@ static int dump_bevy_thread(ImageWorker this) {
   CALL(bevy, close);
 
   // If the index is small enough, make it inline
-  if(this->index->size < 2) {
+  if(this->index->size < MAX_SIZE_OF_INLINE_ARRAY) {
     ((RDFValue)this->index)->dataType = ((RDFValue)&__IntegerArrayInline)->dataType;
     ((RDFValue)this->index)->serialise = ((RDFValue)&__IntegerArrayInline)->serialise;
     ((RDFValue)this->index)->id = ((RDFValue)&__IntegerArrayInline)->id;

@@ -119,9 +119,10 @@ static int type_check(PyObject *obj, PyTypeObject *type) {
    PyTypeObject *tmp;
 
    // Recurse through the inheritance tree and check if the types are expected
-   for(tmp = obj->ob_type; tmp != &PyBaseObject_Type; tmp = tmp->tp_base) {
-     if(tmp == type) return 1;
-   };
+   if(obj)
+     for(tmp = obj->ob_type; tmp && tmp != &PyBaseObject_Type; tmp = tmp->tp_base) {
+       if(tmp == type) return 1;
+     };
 
   return 0;
 };
@@ -1339,6 +1340,8 @@ static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
         for arg in self.args:
             out.write(arg.to_python_object(result = "py_%s" % arg.name, BORROWED=True))
 
+        out.write('if(!((%s)self)->proxied) {\n RaiseError(ERuntimeError, "No proxied object in %s"); goto error;\n};\n' % (self.myclass.class_name, self.myclass.class_name))
+
         out.write("\n//Now call the method\n")
         out.write("""PyErr_Clear();
 py_result = PyObject_CallMethodObjArgs(((%s)self)->proxied,method_name,""" % self.myclass.class_name)
@@ -1447,6 +1450,8 @@ static int %(class_name)s_destructor(void *this) {
         out.write("\n//Obtain python objects for all the args:\n")
         for arg in self.base_cons_method.args:
             out.write(arg.to_python_object(result = "py_%s" % arg.name, BORROWED=True))
+
+        out.write('if(!((%s)self)->proxied) {\n RaiseError(ERuntimeError, "No proxied object in %s"); goto error;\n};\n' % (self.myclass.class_name, self.myclass.class_name))
 
         out.write("""
 // Enlarge the object size to accomodate the extended class
@@ -1984,6 +1989,9 @@ END_CLASS
                 args = []
                 method_name = m.group(3)
                 return_type = m.group(1).strip()
+                ## Ignore private methods
+                if return_type.startswith("PRIVATE"): continue
+
                 ## Now parse the args
                 offset = m.end()
                 while 1:

@@ -512,7 +512,11 @@ static void store_rdf_registry(Resolver self) {
       tmp = tdb_data_from_string(value_class->dataType);
 
       attribute_id = get_id(self->attribute_db, tmp, 1);
+      ((RDFValue)value_class)->id = attribute_id;
       ((RDFValue)CLASSOF(value_class))->id = attribute_id;
+
+      DEBUG_OBJECT("RDF type %p %s - %u\n", value_class,\
+                   NAMEOF(value_class), ((RDFValue)value_class)->id);
     };
   };
 };
@@ -750,12 +754,13 @@ static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, cha
   iter = CALL(self, get_iter, ctx, urn, attribute);
 
   if(iter) {
-    RDFValue result = CALL(self, iter_next_alloc, iter);
+    RDFValue result = CALL(self, alloc_from_iter, iter);
 
     if(result) {
       UNLOCK_RESOLVER;
       return result;
     };
+
     talloc_free(iter);
   };
 
@@ -764,7 +769,8 @@ static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, cha
 };
 
 static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
-			 TDB_DATA value, int type_id, uint64_t previous_offset) {
+			 TDB_DATA value, int type_id, uint8_t flags,
+                         uint64_t previous_offset) {
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
@@ -786,6 +792,7 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   i.next_offset = previous_offset;
   i.length = value.dsize;
   i.encoding_type = type_id;
+  i.flags = flags;
 
   write(self->data_store_fd, &i, sizeof(i));
   write(self->data_store_fd, value.dptr, value.dsize);
@@ -845,11 +852,12 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
       lseek(self->data_store_fd, data_offset, SEEK_SET);
       iter.next_offset = 0;
       iter.encoding_type = value->id;
+      iter.flags = value->flags;
       write(self->data_store_fd, (char *)&iter, sizeof(iter));
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
       set_new_value(self, tdb_data_from_string(urn->value),
-		    attribute, *encoded_value, value->id, 0);
+		    attribute, *encoded_value, value->id, value->flags, 0);
     };
 
     tdb_unlockall(self->data_db);
@@ -893,7 +901,8 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
 	   tdb_data_from_string(urn->value), attribute, &tmp);
 
     set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, *encoded_value, value->id, previous_offset);
+		  attribute, *encoded_value, value->id, value->flags,
+                  previous_offset);
 
     tdb_unlockall(self->data_db);
 
@@ -993,17 +1002,58 @@ static int Resolver_iter_next(Resolver self,
   return res_code;
 };
 
-static RDFValue Resolver_iter_next_alloc(Resolver self,
+static char *Resolver_encoded_data_from_iter(Resolver self, RDFValue *rdf_value_class,
+                                             RESOLVER_ITER *iter) {
+  TDB_DATA attribute, dataType;
+  char buff[BUFF_SIZE];
+  // Now read the data from the file
+  char *result = NULL;
+
+  LOCK_RESOLVER;
+
+  // This is our iteration exit condition
+  if(iter->offset != 0) {
+    // We try to find the type of the next item, instantiate it and then
+    // parse it normally.
+    attribute.dptr = (unsigned char *)buff;
+    attribute.dsize = tdb_serialise_int(iter->head.encoding_type, buff, BUFF_SIZE);
+
+    // strings are always stored in the tdb with null termination
+    dataType = tdb_fetch(self->attribute_db, attribute);
+    if(dataType.dptr) {
+      *rdf_value_class = (RDFValue)CALL(RDF_Registry, borrow, (char *)dataType.dptr,
+                                       dataType.dsize);
+
+      result = talloc_size(NULL, iter->head.length + 1);
+      lseek(self->data_store_fd, iter->offset + sizeof(TDB_DATA_LIST), SEEK_SET);
+      read(self->data_store_fd, result, iter->head.length);
+
+      result[iter->head.length] = 0;
+      free(dataType.dptr);
+    };
+  };
+
+  // Advance the iterator:
+  Resolver_iter_next(self, iter, NULL);
+
+  UNLOCK_RESOLVER;
+
+  return result;
+};
+
+
+/* Given an iterator, allocate an RDFValue from it */
+static RDFValue Resolver_alloc_from_iter(Resolver self,
 					 RESOLVER_ITER *iter) {
   RDFValue rdf_value_class;
-  RDFValue result;
+  RDFValue result = NULL;
   TDB_DATA attribute, dataType;
   char buff[BUFF_SIZE];
 
   LOCK_RESOLVER;
 
   // This is our iteration exit condition
-  while(iter->offset != 0) {
+  if(iter->offset != 0) {
     // We try to find the type of the next item, instantiate it and then
     // parse it normally.
     attribute.dptr = (unsigned char *)buff;
@@ -1017,27 +1067,21 @@ static RDFValue Resolver_iter_next_alloc(Resolver self,
       if(rdf_value_class) {
         result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
                                                     Con, iter);
+      };
 
-        if(result) {
-          if(Resolver_iter_next(self, iter, result))
-            goto exit;
-          else {
-            talloc_free(result);
-          };
+      if(result) {
+        if(!Resolver_iter_next(self, iter, result)){
+          talloc_free(result);
+          result = NULL;
         };
       };
 
       free(dataType.dptr);
-      iter->offset = get_data_next(self, &iter->head);
     };
   };
 
-  // Error path
   UNLOCK_RESOLVER;
-  return NULL;
 
- exit:
-  UNLOCK_RESOLVER;
   return result;
 };
 
@@ -1363,7 +1407,7 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   if(!offset){
     // The attribute is not set - make it now:
     set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, LOCK, -1, 0);
+		  attribute, LOCK, -1, 0, 0);
 
     offset = get_data_head(self, tdb_data_from_string(urn->value),
 			   attribute, &data_list);
@@ -1530,7 +1574,8 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(resolve_alloc) = Resolver_resolve_alloc;
      VMETHOD(get_iter) = Resolver_get_iter;
      VMETHOD(iter_next) = Resolver_iter_next;
-     VMETHOD(iter_next_alloc) = Resolver_iter_next_alloc;
+     VMETHOD(encoded_data_from_iter) = Resolver_encoded_data_from_iter;
+     VMETHOD(alloc_from_iter) = Resolver_alloc_from_iter;
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_cache_return;
      VMETHOD(set_value) = Resolver_set_value;

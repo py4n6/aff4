@@ -190,3 +190,8 @@
 #define DIRTY_STATE_UNKNOWN 0
 #define DIRTY_STATE_NEED_TO_CLOSE 1
 #define DIRTY_STATE_ALREADY_LOADED 2
+
+/* This is the largest size of the inline integer array - bigger
+   arrays get their own segments.
+*/
+#define MAX_SIZE_OF_INLINE_ARRAY 10

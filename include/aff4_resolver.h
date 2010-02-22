@@ -15,6 +15,12 @@
 
 extern int AFF4_TDB_FLAGS;
 
+/* The TDB_DATA_LIST flags */
+/* This signals that the RDFValue entry has the same encoding and
+   serialised form. This allows us to do some optimizations.
+*/
+#define RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED 1
+
 // The data store is basically a singly linked list of these records:
 typedef struct TDB_DATA_LIST {
   uint64_t next_offset;
@@ -22,6 +28,9 @@ typedef struct TDB_DATA_LIST {
 
   // This type refers to the full name type as stored in types.tdb
   uint8_t encoding_type;
+
+  // This field contains various flags about this entry
+  uint8_t flags;
 }__attribute__((packed)) TDB_DATA_LIST;
 
 /** This object is returned when iterating a result set from the
@@ -155,21 +164,26 @@ CLASS(Resolver, Object)
 
        /* This method reads the next result from the iterator. result
 	  must be an allocated and valid RDFValue object */
-  int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, RDFValue result);
+       int METHOD(Resolver, iter_next, RESOLVER_ITER *iter, RDFValue result);
 
        /* This method is similar to iter_next except the result is
 	  allocated to the NULL context. Callers need to talloc_free
 	  the result. This advantage of this method is that we dont
 	  need to know in advance what type the value is.
        */
-     RDFValue METHOD(Resolver, iter_next_alloc, RESOLVER_ITER *iter);
+       RDFValue METHOD(Resolver, alloc_from_iter, RESOLVER_ITER *iter);
+
+       /* This is a shortcut method for retrieving the encoded version
+          from the iterator.
+       */
+       PRIVATE char *METHOD(Resolver, encoded_data_from_iter, RDFValue *rdf_value_class,
+                    RESOLVER_ITER *iter);
 
        /* Deletes all values for this attribute from the resolver
 
           DEFAULT(attribute) = NULL;
         */
-     void METHOD(Resolver, del, RDFURN uri, char *attribute);
-
+       void METHOD(Resolver, del, RDFURN uri, char *attribute);
 
        /* Expires this object and all objects it owns.
 
@@ -210,13 +224,14 @@ CLASS(Resolver, Object)
            required methods and attributes of an RDFValue. Namely:
 
                dataType - the name this serialiser is known as.
-               parse(serialised_form) - parse itself from a serialised
+               parse(serialised_form, subject)
+                                      - parse itself from a serialised
                                         form
-               serialise()            - Return a serialised version.
+               serialise(subject)     - Return a serialised version.
 
-               encode()  - Returns a string encoding for storage in
-                           the DB
-               decode()  - Decode itself from the db.
+               encode(subject)        - Returns a string encoding for storage in
+                                        the DB
+               decode(data, subject)  - Decode itself from the db.
 
            Note 2- this function steals a reference to the RDFValue
            object provided - this means that it must not be a

@@ -28,7 +28,7 @@ class RDFSpecial:
     dataType = pyaff4.PREDICATE_NAMESPACE + "RDFSpecial"
     value = ''
 
-    def encode(self):
+    def encode(self, subject):
         """ This method will be called when we are required to encode
         ourselves to the database.
 
@@ -39,11 +39,11 @@ class RDFSpecial:
         """
         return self.value
 
-    def decode(self, data):
+    def decode(self, data, subject):
         """ This method is called when we decode ourselves from the database. """
         self.value = data
 
-    def serialise(self):
+    def serialise(self, subject):
         """ This method is called when we need to write ourselves to
         the RDF serialization.
 
@@ -53,7 +53,7 @@ class RDFSpecial:
         """
         return self.value.encode("hex")
 
-    def parse(self, serialised):
+    def parse(self, serialised, subject):
         """ This method is called when we need to parse ourselves from
         the rdf serialization.
 
@@ -103,10 +103,10 @@ oracle.add_value(urn, attr, value2)
 ## Print out all the attributes
 iter = oracle.get_iter(urn, attr)
 while 1:
-    obj = oracle.iter_next_alloc(iter)
+    obj = oracle.alloc_from_iter(iter)
     if not obj: break
 
-    print "%s - Resolved value: %r" % (obj, obj.encode())
+    print "%s - Resolved value: %r" % (obj, obj.encode(None))
 
 ## Now we want to write everything to an RDF serialization. This is
 ## done in a number of steps:

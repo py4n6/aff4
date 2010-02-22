@@ -317,7 +317,7 @@ extern "C" {
 */
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
   ( class->constructor(						\
-                       (void *)_talloc_memdup(context, ((Object)class)->__class__, ((Object)class)->__size,  __location__ "(" #class "." #constructor ")"), \
+                       (void *)_talloc_memdup(context, ((Object)class), ((Object)class)->__size,  __location__ "(" #class "." #constructor ")"), \
 		      ## __VA_ARGS__) )
 
 /** Finds the size of the class in x */
