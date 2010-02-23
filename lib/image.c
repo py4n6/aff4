@@ -446,7 +446,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
 
   compressed_length = min((uint32_t)index->array[chunk_index_in_segment+1] -
                           (uint32_t)index->array[chunk_index_in_segment],
-                          this->chunk_size->value);
+                          this->chunk_size->value * 2);
 
   chunk_offset_in_segment = index->array[chunk_index_in_segment];
 

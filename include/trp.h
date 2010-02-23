@@ -366,7 +366,7 @@ a_prefix##prev(a_trp_type *treap, a_type *node) {			\
 a_prefix##search(a_trp_type *treap, a_type *key) {			\
     a_type *ret;							\
     int cmp;								\
-    ret = treap->t_field.trp_root;						\
+    ret = treap->t_field.trp_root;                                      \
     while (ret != NULL							\
       && (cmp = (a_cmp)(key, ret)) != 0) {				\
 	if (cmp < 0) {							\

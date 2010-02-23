@@ -2,15 +2,8 @@
 
   /* The comparison function for the treap. */
 static int map_point_cmp(map_point_node_t *a, map_point_node_t *b) {
-  int rVal = (a->image_offset > b->image_offset) -  \
+  int rVal = (a->image_offset > b->image_offset) -      \
     (a->image_offset < b->image_offset);
-
-  if (rVal == 0) {
-    // Duplicates are not allowed in the tree, so force an arbitrary
-    // ordering for non-identical items with equal keys.
-    rVal = (((uintptr_t) a) > ((uintptr_t) b))
-      - (((uintptr_t) a) < ((uintptr_t) b));
-  };
 
   return rVal;
 };
@@ -181,11 +174,12 @@ static char *MapValue_serialise(RDFValue self, RDFURN subject) {
   return NULL;
 };
 
-static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
-                               char *target) {
+static uint64_t MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t target_offset,
+                                   char *target) {
   // Do we already have this target in the cache?
   XSDInteger target_index = (XSDInteger)CALL(self->cache, borrow, ZSTRING(target));
   map_point_node_t *node = talloc_zero(self, map_point_node_t);
+  uint64_t available_to_read=0;
 
   // Add another target to the array
   if(!target_index) {
@@ -208,37 +202,6 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
     talloc_unlink(NULL, target_index);
   };
 
-
-
-  // Now make sure that the current point is not already in the treap:
-  {
-    map_point_node_t q;
-
-    q.image_offset = node->image_offset;
-
-    if(tree_search(&self->tree, &q)) {
-      tree_remove(&self->tree, &q);
-      printf("Removed point %llu %s\n", node->image_offset, self->targets[node->target_idx]->value);
-      fflush(stdout);
-    };
-  };
-
-  // Now check if the new point is redundant. The new point will be
-  // redundant if the predicted target and target offset based on the
-  // existing map points are the same as what we are about to add.
-  {
-    uint64_t old_target_offset, old_available_to_read;
-    uint32_t existing_target_idx;
-    RDFURN existing_target = CALL(self, get_range, image_offset, &old_target_offset,
-                                  &old_available_to_read, &existing_target_idx);
-
-    if(existing_target && existing_target_idx == target_index->value &&
-       old_target_offset == target_offset) {
-      goto error;
-    };
-    ClearError();
-  };
-
   node->image_offset = image_offset;
   node->target_offset = target_offset;
   node->target_idx = target_index->value;
@@ -247,16 +210,51 @@ static void MapValue_add_point(MapValue self, uint64_t image_offset, uint64_t ta
       does not matter because all nodes are allocated from the same
       slab.
   */
+  // Now make sure that the current point is not already in the treap:
+  {
+    map_point_node_t q;
+    map_point_node_t *old_node;
+
+    memset(&q, 0, sizeof(q));
+    q.image_offset = node->image_offset;
+    old_node = tree_search(&self->tree, &q);
+    if(old_node && old_node->image_offset == node->image_offset) {
+      tree_remove(&self->tree, old_node);
+      talloc_free(old_node);
+      DEBUG_OBJECT("0x%X Removed point %llu %s while inserting %s\n", pthread_self(),
+                   node->image_offset, self->targets[old_node->target_idx]->value,
+                   self->targets[node->target_idx]->value);
+    };
+  };
+
+  // Now check if the new point is redundant. The new point will be
+  // redundant if the predicted target and target offset based on the
+  // existing map points are the same as what we are about to add.
+  {
+    uint64_t old_target_offset;
+    uint32_t existing_target_idx;
+    RDFURN existing_target = CALL(self, get_range, image_offset, &old_target_offset,
+                                  &available_to_read, &existing_target_idx);
+
+    if(existing_target && existing_target_idx == target_index->value &&
+       old_target_offset == target_offset) {
+      goto error;
+    };
+    ClearError();
+  };
 
   // Now add the new point:
+  DEBUG_OBJECT("0x%X Adding point %llu %s\n", pthread_self(),
+               node->image_offset, self->targets[node->target_idx]->value);
+
   tree_insert(&self->tree, node);
   self->number_of_points++;
 
-  return;
+  return available_to_read;
 
  error:
   talloc_free(node);
-  return;
+  return available_to_read;
 };
 
 static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
@@ -276,6 +274,8 @@ static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
   node.image_offset = readptr;
 
   pnode = tree_psearch(&self->tree, &node);
+
+  node.image_offset += 1;
   nnode = tree_nsearch(&self->tree, &node);
 
   // Now we have a range for our point:

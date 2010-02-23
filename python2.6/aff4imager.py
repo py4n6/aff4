@@ -164,13 +164,32 @@ parser.add_option("-p", "--password", default='',
 (options, args) = parser.parse_args()
 
 ## Make a new oracle
-oracle = pyaff4.Resolver(pyaff4.RESOLVER_MODE_DEBUG_MEMORY)
-#oracle = pyaff4.Resolver()
+#oracle = pyaff4.Resolver(pyaff4.RESOLVER_MODE_DEBUG_MEMORY)
+oracle = pyaff4.Resolver()
 
 ## Now register the renderer as an output module
 oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
 
-if options.image:
+if options.dump:
+   output = options.output
+   if not output:
+      out_fd = sys.stdout
+
+   urn = pyaff4.RDFURN()
+   urn.set(options.dump)
+   fd = oracle.open(urn, 'r')
+   try:
+      while 1:
+         data = fd.read(1024* 1024)
+         if not data: break
+
+         out_fd.write(data)
+
+   finally:
+      fd.cache_return()
+
+
+elif options.image:
     ## Imaging mode
     output = options.output
     if not output:

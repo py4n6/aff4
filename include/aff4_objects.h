@@ -183,8 +183,8 @@ CLASS(MapValue, RDFValue)
   // The blocksize is a constant multiple for each map offset.
   XSDInteger blocksize;
 
-  void METHOD(MapValue, add_point, uint64_t image_offset, uint64_t target_offset,\
-              char *target);
+  uint64_t METHOD(MapValue, add_point, uint64_t image_offset, uint64_t target_offset, \
+                  char *target);
 
   /* This function returns information about the current file pointer
      and its view of the target slice.
