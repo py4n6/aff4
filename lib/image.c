@@ -136,8 +136,9 @@ static int dump_bevy_thread(ImageWorker this) {
       memcpy(cbuffer, this->bevy->data + bevy_index, length);
       clength = length;
     } else {
-      if(compress2((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength, 
-		   (unsigned char *)this->bevy->data + bevy_index, (unsigned long int)length, 1) != Z_OK) {
+      if(compress2((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength,
+		   (unsigned char *)this->bevy->data + bevy_index,
+                   (unsigned long int)length, Z_DEFAULT_COMPRESSION) != Z_OK) {
 	RaiseError(ERuntimeError, "Compression error");
 	return -1;
       };
@@ -177,8 +178,11 @@ static int dump_bevy_thread(ImageWorker this) {
   CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index);
 
   // Reset everything to the start
-  CALL(this->segment_buffer, truncate, 0);
-  CALL(this->bevy, truncate, 0);
+  talloc_free(this->segment_buffer);
+  talloc_free(this->bevy);
+
+  this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, this);
+  this->bevy = CONSTRUCT(StringIO, StringIO, Con, this);
 
   // Make a new index
   talloc_free(this->index);
@@ -216,7 +220,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     // Some defaults
     this->chunk_size->value = 32*1024;
     this->compression->value = ZIP_DEFLATE;
-    this->chunks_in_segment->value = 2048;
+    this->chunks_in_segment->value = 500;
 
     if(!CALL(oracle, resolve_value, uri, AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "Image not stored anywhere?");

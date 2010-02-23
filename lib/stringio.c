@@ -21,10 +21,10 @@ static int StringIO_write(StringIO self,char *data, unsigned int len) {
   if(self->readptr+len > self->size) {
     self->size = self->readptr + len;
   };
-  
+
   memcpy(self->data+self->readptr,data,len);
   self->readptr+=len;
-  
+
   return len;
 };
 

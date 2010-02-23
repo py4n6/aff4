@@ -20,8 +20,8 @@ out_urn = pyaff4.RDFURN()
 out_urn.set("/tmp/test3.aff4")
 
 IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
-#IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
-IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
+IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
+#IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
 in_urn = pyaff4.RDFURN()
 in_urn.set(IN_FILENAME)
 
@@ -71,7 +71,8 @@ class HashWorker(threading.Thread):
             fd.cache_return()
 
         data = ''.join(data_blocks)
-        m = hashlib.md5()
+        #m = hashlib.md5()
+        m = hashlib.sha1()
         m.update(data)
 
         hashed_urn = pyaff4.RDFURN()
@@ -121,9 +122,11 @@ class HashWorker(threading.Thread):
 
                 last_image_block = img_block
 
-                ## Now check the end of the range. We check what the
-                ## map thinks is going to happen 1 byte after the end
-                ## of this block:
+                ## Now check the end of the range. If there is more
+                ## that a block available after the start of the
+                ## block, obviously its us. If the next img_block is
+                ## not consecutive, we need to terminate it off with a
+                ## zero urn.
                 if available > self.blocksize and img_block +1 != blocks[file_block+1]:
                     ## Add a zero urn to stop off this block
                     image_stream.map.add_point(image_offset + self.blocksize,
@@ -141,8 +144,16 @@ class HashImager:
 
     in_urn can be a file containing the volume, or an existing stream.
     """
+    ## The maximum number of blocks in a single run
     MAX_SIZE = 10000
-    MAX_THREADS = 5
+
+    ## The minimum number of blocks in a single run. If files are less
+    ## than this they will not be compressed in their own segments. If
+    ## unallocated blocks are smaller than this they will all be
+    ## merged into the miscelaneous stream.
+    MIN_SIZE = 64
+
+    MAX_THREADS = 2
     workers = []
 
     ## A condition variable for threads to sync on
@@ -176,7 +187,7 @@ class HashImager:
 
             ## We create a new output map to hold the image:
             image = oracle.create(pyaff4.AFF4_MAP)
-            image.set_data_type(pyaff4.AFF4_MAP_TEXT)
+            #image.set_data_type(pyaff4.AFF4_MAP_TEXT)
             image.urn.set(self.volume_urn.value)
             image.urn.add(os.path.basename(IN_FILENAME))
             image.set(pyaff4.AFF4_STORED, self.volume_urn)
@@ -287,7 +298,7 @@ class HashImager:
                 self.condition.wait(0.5)
                 self.condition.release()
 
-    def dump_blocks(self, blocks, filename):
+    def dump_blocks(self, blocks, filename=None):
         i = 0
         while 1:
             ## Split the file into smaller runs
@@ -314,23 +325,10 @@ class HashImager:
                 skfs = fs.open(inode = f)
                 blocks = skfs.blocks()
 
-                ## Resident files (without a block allocation are not
-                ## useful for this. Their data will be obtained when the
-                ## MFT is stored anyway.
-                if not blocks: continue
-
-                stat = fs.fstat(skfs)
-                ## Dont do very small files
-                if stat.st_size < self.blocksize: continue
-
-                ## If the file is compressed we dont bother doing it -
-                ## reading ntfs compressed files is too slow.
-                if stat.st_size > (len(blocks)+1)*self.blocksize: continue
-
-                log("Dumping %s %s (%s bytes)" % (f, filename,
-                                                        stat.st_size))
-                size = stat.st_size
-                self.dump_blocks(blocks, filename)
+                if len(blocks) > self.MIN_SIZE:
+                    log("Dumping %s %s (%s bytes)" % (f, filename,
+                                                      len(blocks) * self.blocksize))
+                    self.dump_blocks(blocks, filename)
 
     def dump_file_name(self):
         ## Now we also add a map for the file from the image
@@ -362,6 +360,8 @@ class HashImager:
 
     def dump_unallocated(self):
         offset = 0
+        blocks = []
+
         while 1:
             image_stream = oracle.open(self.image_urn, 'w')
             try:
@@ -380,13 +380,17 @@ class HashImager:
                     pdb.set_trace()
                     print "????"
 
-                log( "Dumping unallocated from %s to %s" % (offset, offset+available))
-                blocks = [ x for x in range(offset / self.blocksize,
-                                            (offset + available) / self.blocksize) ]
-                self.dump_blocks(blocks, "unallocated@%s" % offset)
+                log( "Dumping unallocated from %s to %s (%s bytes)" % (
+                        offset, offset+available, available))
+                blocks += [ x for x in range(offset / self.blocksize,
+                                             (offset + available) / self.blocksize) ]
+                if len(blocks) >= self.MAX_SIZE:
+                    self.dump_blocks(blocks[:self.MAX_SIZE])
+                    blocks = blocks[self.MAX_SIZE:]
 
             offset += available
 
+        self.dump_blocks(blocks)
 ## Shut up messages
 class Renderer:
     def message(self, level, message):

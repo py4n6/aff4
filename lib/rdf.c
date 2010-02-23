@@ -728,7 +728,7 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
 static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
   IntegerArrayBinary this = (IntegerArrayBinary)self;
   int available = this->size * 10;
-  char *buffer = talloc_zero_size(self, available);
+  char *buffer = talloc_zero_size(self, available + 1);
   int i,buffer_ptr=0;
 
   for(i=0; i < this->size && buffer_ptr < available; i++) {

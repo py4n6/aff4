@@ -1281,11 +1281,6 @@ static inline void trim_cache(Cache cache) {
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   LOCK_RESOLVER;
 
-  // We unlink it from NULL here - the object is owned by NULL after
-  // the open call. This should not actually free it because the
-  // object is in the cache now.
-  talloc_unlink(NULL, obj);
-
   // We are done with the object now
   obj->thread_id = 0;
   pthread_mutex_unlock(&obj->mutex);
@@ -1297,6 +1292,11 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   // Make sure read caches are not too big. Write caches are emptied
   // by the close() method.
   trim_cache(self->read_cache);
+
+  // We unlink it from NULL here - the object is owned by NULL after
+  // the open call. This should not actually free it because the
+  // object is in the cache now.
+  talloc_unlink(NULL, obj);
 
   UNLOCK_RESOLVER;
 
