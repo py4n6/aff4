@@ -62,15 +62,19 @@ def image(output_URI, options, fds):
     else:
         zip_fd = out_fd
 
+
+    zip_urn = zip_fd.urn
+    zip_fd.cache_return()
+
     for fd in fds:
         image_fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
 
         warn("New image %s%s" % (colors['cyan'], fd.urn.value))
         ## We want to make the image URI the same as the volume URI
         ## with the query stem of the source appended to it:
-        image_fd.urn.set(zip_fd.urn.value)
+        image_fd.urn.set(zip_urn.value)
         image_fd.urn.add(fd.urn.parser.query)
-        oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_fd.urn)
+        oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_urn)
 
         image_fd = image_fd.finish()
 
@@ -83,6 +87,7 @@ def image(output_URI, options, fds):
 
         image_fd.close()
 
+    zip_fd = oracle.open(zip_fd, 'w')
     zip_fd.close()
 
 import optparse

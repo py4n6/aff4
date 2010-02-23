@@ -107,7 +107,6 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
     pthread_create( &this->thread, NULL,
                     (void *(*) (void *))dump_bevy_thread, (void *)this);
 
-
     // Get another worker from the queue:
     this->image->current = CALL(this->image->workers, get, this->image);
   } else {
@@ -121,9 +120,6 @@ static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
   int result;
   FileLikeObject bevy;
-
-  AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s (%d bytes)\n",
-           URNOF(this)->value, this->bevy->size);
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -166,6 +162,10 @@ static int dump_bevy_thread(ImageWorker this) {
        this->segment_buffer->readptr);
 
   CALL(bevy, close);
+
+  AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s ( %dkbytes %d%%)\n",
+           URNOF(this)->value, this->segment_buffer->size/1024,
+           this->segment_buffer->size * 100 /this->bevy->size);
 
   // If the index is small enough, make it inline
   if(this->index->size < MAX_SIZE_OF_INLINE_ARRAY) {
