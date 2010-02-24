@@ -389,11 +389,6 @@ VIRTUAL(Cache, Object) {
 #define VOLATILE_NS "aff4volatile:"
 
 /** Some constants */
-static TDB_DATA INHERIT = {
-  .dptr = (unsigned char *)"aff4:inherit",
-  .dsize = 12
-};
-
 static TDB_DATA WLOCK = {
   .dptr = (unsigned char *)VOLATILE_NS "WLOCK",
   .dsize = 18
@@ -410,7 +405,7 @@ static TDB_DATA LOCK = {
 };
 
 /* Given an int serialise into the buffer */
-static int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
+static inline int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
   if(buff_len < 8) return 0;
 
   *(uint64_t *)buff = i;
@@ -419,7 +414,7 @@ static int tdb_serialise_int(uint64_t i, char *buff, int buff_len) {
 };
 
 /** Given a buffer unserialise an int from it */
-static uint64_t tdb_to_int(TDB_DATA string) {
+static inline uint64_t tdb_to_int(TDB_DATA string) {
   if(string.dsize != 8) return 0;
 
   return *(uint64_t *)(string.dptr);
@@ -429,7 +424,7 @@ static uint64_t tdb_to_int(TDB_DATA string) {
     create_new is set and there is no id present, we create a new id
     and return id.
 */
-static uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
+static inline uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_new) {
   char buff[BUFF_SIZE];
   TDB_DATA urn_id;
   uint32_t max_id=0;
@@ -1704,3 +1699,63 @@ VIRTUAL(Logger, Object) {
   VMETHOD(Con) = Logger_Con;
   VMETHOD(message) = Logger_message;
 } END_VIRTUAL
+
+
+  /** A wrapper around TDB */
+static int TDB_destructor(void *ptr) {
+  TDB self = (TDB)ptr;
+
+  if(self->file) {
+    tdb_close(self->file);
+    self->file = 0;
+  };
+
+  return 1;
+};
+
+static TDB TDB_Con(TDB self, char *filename, int mode) {
+  if(mode & RESOLVER_MODE_NONPERSISTANT)
+    AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+
+  if(mode & RESOLVER_MODE_DEBUG_MEMORY)
+    talloc_enable_leak_report_full();
+
+  self->file = tdb_open(filename, TDB_HASH_SIZE,
+                        AFF4_TDB_FLAGS,
+                        O_RDWR | O_CREAT, 0644);
+
+  if (self->file) {
+    talloc_set_destructor((void*)self, TDB_destructor);
+    return self;
+  };
+
+  RaiseError(ERuntimeError, "Unable to open tdb file on %s", filename);
+  talloc_free(self);
+  return NULL;
+};
+
+static void TDB_store(TDB self, char *key,int key_len, char *data, int len) {
+  TDB_DATA tdb_key, value;
+
+  tdb_key.dptr = (unsigned char *)key;
+  tdb_key.dsize = key_len;
+  value.dptr = (unsigned char *)data;
+  value.dsize = len;
+
+  tdb_store(self->file, tdb_key, value, TDB_REPLACE);
+};
+
+static TDB_DATA TDB_fetch(TDB self, char *key, int len) {
+  TDB_DATA tdb_key;
+
+  tdb_key.dptr = (unsigned char *)key;
+  tdb_key.dsize = len;
+
+  return tdb_fetch(self->file, tdb_key);
+};
+
+VIRTUAL(TDB, Object) {
+  VMETHOD(Con) = TDB_Con;
+  VMETHOD(store) = TDB_store;
+  VMETHOD(fetch) = TDB_fetch;
+}  END_VIRTUAL;

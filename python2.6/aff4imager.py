@@ -79,7 +79,7 @@ def image(output_URI, options, fds):
         image_fd = image_fd.finish()
 
         while 1:
-            data = fd.read(100000)
+            data = fd.read(10 * 1024 * 1024)
 
             if not data: break
 
@@ -87,7 +87,7 @@ def image(output_URI, options, fds):
 
         image_fd.close()
 
-    zip_fd = oracle.open(zip_fd, 'w')
+    zip_fd = oracle.open(zip_urn, 'w')
     zip_fd.close()
 
 import optparse

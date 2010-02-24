@@ -269,6 +269,20 @@ CLASS(Resolver, Object)
        void METHOD(Resolver, flush);
 END_CLASS
 
+       /* This is just a wrapper around tdb so it can easily be used
+          from python etc. */
+CLASS(TDB, Object)
+     struct tdb_context *file;
+
+     /** This is the constructor for a new TDB database.
+
+         DEFAULT(mode) = 0;
+     */
+     TDB METHOD(TDB, Con, char *filename, int mode);
+     void METHOD(TDB, store, char *key,int key_len, char *data, int len);
+     TDB_DATA METHOD(TDB, fetch, char *key, int len);
+END_CLASS
+
        /** The following are private functions */
 RESOLVER_ITER *_Resolver_get_iter(Resolver self,
                                   void *ctx,

@@ -2,6 +2,8 @@
 #include "exports.h"
 #include "encode.h"
 
+#define MAX_IMAGER_THREADS 3
+
 /*************************************************************
   The Image stream works by collecting chunks into segments. Chunks
   are compressed seperately using zlib's compress function.
@@ -134,7 +136,7 @@ static int dump_bevy_thread(ImageWorker this) {
     } else {
       if(compress2((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength,
 		   (unsigned char *)this->bevy->data + bevy_index,
-                   (unsigned long int)length, Z_DEFAULT_COMPRESSION) != Z_OK) {
+                   (unsigned long int)length, 1) != Z_OK) {
 	RaiseError(ERuntimeError, "Compression error");
 	return -1;
       };
@@ -256,7 +258,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
       this->workers = CONSTRUCT(Queue, Queue, Con, self);
       this->busy = CONSTRUCT(Queue, Queue, Con, self);
       // Make this many workers
-      for(i=0;i<3;i++) {
+      for(i=0;i < MAX_IMAGER_THREADS;i++) {
 	ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, self, this);
 	CALL(this->workers, put, (void *)w);
       };
