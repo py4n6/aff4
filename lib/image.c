@@ -165,9 +165,11 @@ static int dump_bevy_thread(ImageWorker this) {
 
   CALL(bevy, close);
 
-  AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s ( %dkbytes %d%%)\n",
-           URNOF(this)->value, this->segment_buffer->size/1024,
-           this->segment_buffer->size * 100 /this->bevy->size);
+  if(this->bevy->size > 0) {
+    AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s ( %dkbytes %d%%)\n",
+             URNOF(this)->value, this->segment_buffer->size/1024,
+             this->segment_buffer->size * 100 /this->bevy->size);
+  };
 
   // If the index is small enough, make it inline
   if(this->index->size < MAX_SIZE_OF_INLINE_ARRAY) {
