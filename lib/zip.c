@@ -947,7 +947,6 @@ static int dump_volume_properties(ZipFile this) {
 			   ZIP_DEFLATE);
   RDFSerializer serializer;
   RDFURN urn = new_RDFURN(NULL);
-  XSDString type = new_XSDString(urn);
   XSDInteger dirty = new_XSDInteger(urn);
 
   if(!fd) goto exit;

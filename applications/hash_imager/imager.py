@@ -19,9 +19,12 @@ oracle = pyaff4.Resolver()
 out_urn = pyaff4.RDFURN()
 out_urn.set("/tmp/test3.aff4")
 
+OFFSET = 0
+
 IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
 IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
 #IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
+#IN_FILENAME = "/tmp/image.dd"
 in_urn = pyaff4.RDFURN()
 in_urn.set(IN_FILENAME)
 
@@ -32,10 +35,12 @@ def log(x):
     print "0x%lX: %s" % (threading.current_thread().ident & 0xFFFFFFFF, x)
 
 class HashWorker(threading.Thread):
-    def __init__(self, in_urn, volume_urn, slack_urn,
+    def __init__(self, in_urn, volume_urn,
                  image_stream_urn,
                  blocks, blocksize,
-                 condition, *args, **kwargs):
+                 condition,
+                 compression = pyaff4.ZIP_DEFLATE,
+                 *args, **kwargs):
         threading.Thread.__init__(self, *args, **kwargs)
 
         self.in_urn = in_urn
@@ -45,8 +50,8 @@ class HashWorker(threading.Thread):
         self.image_stream_urn = image_stream_urn
         ## We signal this when we are done
         self.condition = condition
-        self.slack_urn = slack_urn
         self.inode = None
+        self.compression = compression
 
     def run(self):
         try:
@@ -71,7 +76,6 @@ class HashWorker(threading.Thread):
             fd.cache_return()
 
         data = ''.join(data_blocks)
-        #m = hashlib.md5()
         m = hashlib.sha1()
         m.update(data)
 
@@ -82,10 +86,14 @@ class HashWorker(threading.Thread):
         if oracle.get_id_by_urn(hashed_urn, 0):
             log("Skipping.... %s" % hashed_urn.value)
         else:
+            compression = pyaff4.XSDInteger()
+            compression.set(self.compression)
+
             ## Save a copy of the data
             out_fd = oracle.create(pyaff4.AFF4_IMAGE)
             out_fd.urn.set(hashed_urn.value)
             out_fd.set(pyaff4.AFF4_STORED, self.volume_urn)
+            out_fd.set(pyaff4.AFF4_COMPRESSION, compression)
             out_fd = out_fd.finish()
             out_fd.write(data)
             out_fd.close()
@@ -144,8 +152,8 @@ class HashImager:
 
     in_urn can be a file containing the volume, or an existing stream.
     """
-    ## The maximum number of blocks in a single run
-    MAX_SIZE = 10000
+    ## The total number of 512 byte sectors in each run
+    MAX_SECTORS = 10000
 
     ## The minimum number of blocks in a single run. If files are less
     ## than this they will not be compressed in their own segments. If
@@ -153,7 +161,7 @@ class HashImager:
     ## merged into the miscelaneous stream.
     MIN_SIZE = 64
 
-    MAX_THREADS = 2
+    MAX_THREADS = 4
     workers = []
 
     ## A condition variable for threads to sync on
@@ -200,15 +208,6 @@ class HashImager:
             image_stream.size.set(fd.size.value)
             image_stream.cache_return()
 
-            ## Create a stream for slack:
-            slack = oracle.create(pyaff4.AFF4_IMAGE)
-            slack.urn.set(self.image_urn.value)
-            slack.urn.add("slack")
-            slack.set(pyaff4.AFF4_STORED, self.volume_urn)
-            slack = slack.finish()
-
-            self.slack_urn = slack.urn
-            slack.cache_return()
         finally:
             fd.cache_return()
 
@@ -229,9 +228,6 @@ class HashImager:
             image_stream = oracle.open(self.image_urn, 'w')
             image_stream.close()
 
-            slack = oracle.open(self.slack_urn, 'w')
-            slack.close()
-
             volume = oracle.open(self.volume_urn, 'w')
             volume.close()
 
@@ -246,11 +242,11 @@ class HashImager:
             self.condition.wait(0.5)
             self.condition.release()
 
-    def image(self):
+    def image(self, imgoff=0):
         self.fd = oracle.open(self.in_urn, 'r')
         try:
             ## Create the image. First the filesystem
-            self.dump_filesystem()
+            self.dump_filesystem(imgoff)
 
             ## Wait for all the files to be written
             self.join_workers()
@@ -265,16 +261,18 @@ class HashImager:
             image_stream = oracle.open(self.image_urn, 'w')
             image_stream.close()
 
-            slack = oracle.open(self.slack_urn, 'w')
-            slack.close()
-
             volume = oracle.open(self.volume_urn, 'w')
             volume.close()
         finally:
             self.fd.cache_return()
 
-    def dump_block_run(self, blocks, inode=None):
+    def dump_block_run(self, blocks, inode=None,
+                       compression = pyaff4.ZIP_DEFLATE):
         """ Dump the block run given as a reverse map """
+
+        ## This should never occur
+        if len(blocks) > self.MAX_SIZE:
+            pdb.set_trace()
 
         while 1:
             self.workers = [ x for x in self.workers if x.isAlive() ]
@@ -282,10 +280,10 @@ class HashImager:
             if len(self.workers) < self.MAX_THREADS:
                 ## Start a new worker
                 worker = HashWorker(self.in_urn, self.volume_urn,
-                                    self.slack_urn,
                                     self.image_urn, blocks,
                                     self.blocksize,
-                                    self.condition)
+                                    self.condition,
+                                    compression = compression)
                 worker.inode = inode
 
                 worker.start()
@@ -298,37 +296,57 @@ class HashImager:
                 self.condition.wait(0.5)
                 self.condition.release()
 
-    def dump_blocks(self, blocks, filename=None):
+    def dump_blocks(self, blocks, filename=None, compression = pyaff4.ZIP_DEFLATE):
         i = 0
         while 1:
             ## Split the file into smaller runs
             if len(blocks) - i > self.MAX_SIZE:
                 run = blocks[i:i+self.MAX_SIZE]
-                self.dump_block_run(run, inode = filename)
+                self.dump_block_run(run, inode = filename,
+                                    compression = compression)
                 i += self.MAX_SIZE
             else:
                 run = blocks[i:]
-                self.dump_block_run(run, inode = filename)
+                self.dump_block_run(run, inode = filename,
+                                    compression = compression)
                 break
 
-    def dump_filesystem(self):
+    DO_NOT_COMPRESS = set("zip cab jpg avi mpg jar tgz msi swf mp3 mp4".split())
+
+    def dump_filesystem(self, imgoff):
         """ This method analyses the filesystem and dumps all the
         files in it based on hashes.
         """
-        ## FIXME - handle partitions here
         self.fd.seek(0)
-        fs = sk.skfs(self.fd)
+        fs = sk.skfs(self.fd, imgoff=imgoff * 512)
         self.blocksize = fs.block_size
+        self.MAX_SIZE = self.MAX_SECTORS * 512 / self.blocksize
 
         for root, dirs, files in fs.walk('/', unalloc=False, inodes=True):
             for f, filename in files:
-                skfs = fs.open(inode = f)
+                try:
+                    skfs = fs.open(inode = f)
+                except: continue
+
+                compression = True
+                try:
+                    fileext = filename.split(".")[-1].lower()
+                    if fileext in self.DO_NOT_COMPRESS:
+                        compression = False
+                except: pass
+
                 blocks = skfs.blocks()
 
                 if len(blocks) > self.MIN_SIZE:
-                    log("Dumping %s %s (%s bytes)" % (f, filename,
-                                                      len(blocks) * self.blocksize))
-                    self.dump_blocks(blocks, filename)
+                    if compression: x = "Compr"
+                    else: x = "Uncompr"
+
+                    log("Dumping %s %s (%s bytes) %s" % (f, filename,
+                                                         len(blocks) * self.blocksize,
+                                                         x))
+                    ## Lose the last block which contains the slack
+                    blocks = [ blocks[x] + imgoff for x in range(len(blocks)-1) ]
+                    self.dump_blocks(blocks, filename, compression=compression)
 
     def dump_file_name(self):
         ## Now we also add a map for the file from the image
@@ -384,13 +402,15 @@ class HashImager:
                         offset, offset+available, available))
                 blocks += [ x for x in range(offset / self.blocksize,
                                              (offset + available) / self.blocksize) ]
-                if len(blocks) >= self.MAX_SIZE:
-                    self.dump_blocks(blocks[:self.MAX_SIZE])
+
+                while len(blocks) >= self.MAX_SIZE:
+                    self.dump_block_run(blocks[:self.MAX_SIZE])
                     blocks = blocks[self.MAX_SIZE:]
 
             offset += available
 
-        self.dump_blocks(blocks)
+        self.dump_block_run(blocks)
+
 ## Shut up messages
 class Renderer:
     def message(self, level, message):
@@ -399,7 +419,7 @@ class Renderer:
 oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
 
 imager = HashImager(in_urn, out_urn)
-imager.image()
+imager.image(OFFSET)
 #imager.test()
 
 sys.exit(0)

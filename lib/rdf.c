@@ -739,7 +739,6 @@ static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
 };
 
 static int IntegerArrayInline_decode(RDFValue self, char *data, int length, RDFURN subject) {
-  IntegerArrayInline this = (IntegerArrayInline)self;
   uint32_t number;
   char *x, *y=data;
 
@@ -781,19 +780,6 @@ VIRTUAL(IntegerArrayInline, IntegerArrayBinary) {
    parse it.
  */
 Cache RDF_Registry = NULL;
-
-/** FIXME - make this faster by using a tree */
-static RDFValue find_rdfvalue_by_id(int id) {
-  Cache i;
-
-  list_for_each_entry(i, &RDF_Registry->cache_list, cache_list) {
-    RDFValue tmp = i->data;
-
-    if(id == tmp->id) return tmp;
-  };
-
-  return NULL;
-};
 
 void register_rdf_value_class(RDFValue classref) {
   if(!RDF_Registry) {

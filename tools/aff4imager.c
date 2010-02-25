@@ -295,6 +295,8 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
     CALL(URNOF(image), add, stream_name);
   };
 
+  CALL(image, set_workers, 2);
+
   // Tell the image that it should be stored in the volume
   CALL((AFFObject)image, set, AFF4_STORED, (RDFValue)URNOF(*zipfile));
   if(chunks_in_segment > 0) {

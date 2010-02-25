@@ -89,6 +89,13 @@ CLASS(Image, FileLikeObject)
      int segment_count;
 
      EVP_MD_CTX digest;
+
+  /** This sets the number of working threads.
+
+      The default number of threads is zero (no threads). Set to a
+      higher number to utilize multiple threads here.
+  */
+  void METHOD(Image, set_workers, int workers);
 END_CLASS
 
 /** The map stream driver maps an existing stream using a

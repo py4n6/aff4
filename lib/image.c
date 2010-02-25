@@ -101,7 +101,8 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
   CALL(oracle, set_value, URNOF(this),
        AFF4_VOLATILE_STORED, (RDFValue)this->image->stored);
 
-  if(backgroud) {
+  /* We are running in multi-threaded mode */
+  if(this->image->busy && backgroud) {
     // put the worker in the busy queue
     CALL(this->image->busy, put, this);
 
@@ -122,6 +123,7 @@ static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
   int result;
   FileLikeObject bevy;
+  int bevy_size = this->bevy->size;
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -165,6 +167,7 @@ static int dump_bevy_thread(ImageWorker this) {
 
   CALL(bevy, close);
 
+  // Stupid divide by zero ....
   if(this->bevy->size > 0) {
     AFF4_LOG(AFF4_LOG_MESSAGE, "Dumping bevy %s ( %dkbytes %d%%)\n",
              URNOF(this)->value, this->segment_buffer->size/1024,
@@ -181,12 +184,18 @@ static int dump_bevy_thread(ImageWorker this) {
   // Set the index on the bevy
   CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index);
 
+#if 1
   // Reset everything to the start
   talloc_free(this->segment_buffer);
   talloc_free(this->bevy);
 
   this->segment_buffer = CONSTRUCT(StringIO, StringIO, Con, this);
   this->bevy = CONSTRUCT(StringIO, StringIO, Con, this);
+#else
+  CALL(this->bevy, truncate, 0);
+  CALL(this->segment_buffer, truncate, 0);
+#endif
+
 
   // Make a new index
   talloc_free(this->index);
@@ -198,8 +207,11 @@ static int dump_bevy_thread(ImageWorker this) {
  error:
   // Return ourselves to the queue of workers so we can be called
   // again:
-  CALL(this->image->busy, remove, this->image, (void *)this);
-  CALL(this->image->workers, put, (void *)this);
+  if(this->image->busy) {
+    CALL(this->image->busy, remove, this->image, (void *)this);
+    CALL(this->image->workers, put, (void *)this);
+  };
+
   return result;
 };
 
@@ -255,17 +267,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
 
     // Build writer workers
     if(mode=='w') {
-      int i;
-
-      this->workers = CONSTRUCT(Queue, Queue, Con, self);
-      this->busy = CONSTRUCT(Queue, Queue, Con, self);
-      // Make this many workers
-      for(i=0;i < MAX_IMAGER_THREADS;i++) {
-	ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, self, this);
-	CALL(this->workers, put, (void *)w);
-      };
-
-      this->current = CALL(this->workers, get, this);
+      this->current = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
     };
 
     // Initialise the chunk cache:
@@ -284,6 +286,19 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   return NULL;
 };
 
+
+static void Image_set_workers(Image this, int workers) {
+  int i;
+
+  this->workers = CONSTRUCT(Queue, Queue, Con, this);
+  this->busy = CONSTRUCT(Queue, Queue, Con, this);
+  // Make this many workers
+  for(i=0;i < workers; i++) {
+    ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
+    CALL(this->workers, put, (void *)w);
+  };
+};
+
 static int Image_write(FileLikeObject self, char *buffer, unsigned long int length) {
   Image this = (Image)self;
   int available_to_read;
@@ -295,7 +310,7 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
     int result;
 
     available_to_read = min(length - buffer_readptr, this->bevy_size - \
-			    this->current->bevy->size);
+			    this->current->bevy->readptr);
     if(available_to_read==0) {
       // This bevy is complete - we send it on its way - The worker
       // will be returned to the workers queue when its done. Note
@@ -303,6 +318,15 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
 
       // Invoke a thread to do the work
       dump_bevy(this->current, this->segment_count, 1);
+
+      /*
+      //Preallocate the memory in the worker's buffer to save on memcpys
+      CALL(this->current->bevy, seek, this->bevy_size, SEEK_SET);
+      CALL(this->current->bevy, truncate, 0);
+      CALL(this->current->segment_buffer, seek, this->bevy_size, SEEK_SET);
+      CALL(this->current->segment_buffer, truncate, 0);
+      */
+
       this->segment_count++;
       continue;
     };
@@ -331,7 +355,7 @@ static void Image_close(FileLikeObject self) {
   // item off and join it. Its not a race since the worker is never
   // freed and just moves to the workers queue - even if it happens
   // from under us we should be able to join immediately.
-  while(1) {
+  while(this->busy) {
     Queue item;
     ImageWorker worker;
 
@@ -553,6 +577,8 @@ VIRTUAL(Image, FileLikeObject) {
      VMETHOD_BASE(FileLikeObject, read) = Image_read;
      VMETHOD_BASE(FileLikeObject, write) = Image_write;
      VMETHOD_BASE(FileLikeObject,close) = Image_close;
+
+     VMETHOD(set_workers) = Image_set_workers;
 } END_VIRTUAL
 
 void image_init() {

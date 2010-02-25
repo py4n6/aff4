@@ -7,7 +7,7 @@ so it must be python syntax.
 TDB_LOCATION = "/tmp/"
 
 ## Debug level. V=0 means no debugging and full optimization enabled.
-V = True
+V = False
 
 ## Optional build modules
 disable_ewf = False
@@ -22,7 +22,7 @@ DEBUG = []
 ## corruption.
 PROCESS_LOCKS = False
 
-## This is where the installation leaves
+## This is where the installation lives
 PREFIX = "/usr/local/"
 
 ## Location of the libxml2 headers - If this is None we call xml2-config

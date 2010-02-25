@@ -1,6 +1,7 @@
 #include "stringio.h"
 #include "misc.h"
 #include "aff4.h"
+#include <strings.h>
 
 static StringIO StringIO_constructor(StringIO self) {
   //Create a valid buffer to hold the data:
@@ -130,7 +131,6 @@ static void StringIO_get_buffer(StringIO self,char **data, int *len) {
 };
 
 static void StringIO_truncate(StringIO self,int len) {
-  if(self->readptr>len) self->readptr=len;
   self->size=len;
   if(self->readptr > self->size) 
     self->readptr=self->size;

@@ -85,7 +85,7 @@ char *escape_filename(void *ctx, const char *filename, unsigned int length) {
 TDB_DATA escape_filename_data(void *ctx, TDB_DATA name) {
   TDB_DATA result;
 
-  result.dptr = escape_filename(ctx, (char *)name.dptr, name.dsize-1);
+  result.dptr = (unsigned char *)escape_filename(ctx, (char *)name.dptr, name.dsize-1);
   result.dsize = strlen((char *)result.dptr);
 
   return result;

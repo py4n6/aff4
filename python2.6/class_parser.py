@@ -1033,7 +1033,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
             try:
                 m = self.typedefed_re.match(type)
                 type = m.group(1)
-                print "Trying %s for %s" % (type, m.group(0))
+                log( "Trying %s for %s" % (type, m.group(0)))
                 t = type_dispatcher[type](name, type)
             except (KeyError, AttributeError):
                 log( "Unable to handle type %s.%s %s" % (self.class_name, self.name, type))
