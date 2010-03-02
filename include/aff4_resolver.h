@@ -25,6 +25,9 @@ extern int AFF4_TDB_FLAGS;
 typedef struct TDB_DATA_LIST {
   uint64_t next_offset;
   uint16_t length;
+  // This is the urn_id of the object which asserted this
+  // statement. Can be 0 to indicate unknown.
+  int32_t asserter_id;
 
   // This type refers to the full name type as stored in types.tdb
   uint8_t encoding_type;
@@ -288,6 +291,13 @@ RESOLVER_ITER *_Resolver_get_iter(Resolver self,
                                   void *ctx,
                                   TDB_DATA tdb_urn,
                                   TDB_DATA attribute);
+
+     /* Special variants which also take the graph name.
+
+        These should not be called externally.
+      */
+PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
+                            RDFValue value);
 
 // This is a global instance of the oracle. All AFFObjects must
 // communicate with the oracle rather than instantiate their own.

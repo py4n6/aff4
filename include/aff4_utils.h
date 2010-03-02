@@ -144,7 +144,12 @@ END_CLASS
      */
 CLASS(Logger, Object)
      Logger METHOD(Logger, Con);
-     void METHOD(Logger, message, int level, char *message);
+     /* The message sent to the logger is sent from a service (The
+     source of the message), at a particular level (how critical it
+     is). It talks about a subject (usually the URN of the subject),
+     and a message about it.
+     */
+     void METHOD(Logger, message, int level, char *service, Object subject, char *message);
 END_CLASS
 
 PROXY_CLASS(Logger)

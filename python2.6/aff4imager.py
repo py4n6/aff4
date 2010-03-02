@@ -34,16 +34,9 @@ def warn(msg):
 
 
 class Renderer:
-    urn_re = re.compile("(aff4|http|ftp|file)://[^ ]+")
-    def message(self, level, message):
-        last = 0
-        ## highlight URNs especially
-        for m in self.urn_re.finditer(message):
-            sys.stdout.write(message[last:m.start()])
-            last = m.end()
-            sys.stdout.write(colors['blue'] + m.group(0) + colors['end'])
-
-        print message[last:]
+    def message(self, level, service, subject, message):
+       sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.urn.value,
+                                          colors['end'], message))
 
 def image(output_URI, options, fds):
     """ Copy the file like objects specified in the fds list into an
@@ -74,6 +67,7 @@ def image(output_URI, options, fds):
         ## with the query stem of the source appended to it:
         image_fd.urn.set(zip_urn.value)
         image_fd.urn.add(fd.urn.parser.query)
+        image_fd.set_workers(options.threads)
         oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_urn)
 
         image_fd = image_fd.finish()
@@ -153,7 +147,7 @@ parser.add_option("-k", "--key", default=None,
 parser.add_option("-c", "--cert", default=None,
                   help="Certificate file to use (in PEM format)")
 
-parser.add_option("-t", "--threads", default=2,
+parser.add_option("-t", "--threads", default=0, type='int',
                   help="Number of threads to use")
 
 parser.add_option('-v', '--verbosity', default=5,

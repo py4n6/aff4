@@ -20,6 +20,17 @@ extern "C" {
   // Treap implementation
 #include "trp.h"
 
+/** A Graph is a named collection of RDF statements about various
+    objects.
+
+    When the graph is stored it will serialise into a segment all the
+    statements contained with it using the appropriate RDF
+    serialization.
+*/
+CLASS(Graph, FileLikeObject)
+      void METHOD(Graph, set_triple, RDFURN subject, char *attribute, RDFValue value);
+END_CLASS
+
 #include "queue.h"
 /** This class is used by the image worker thread to dump the segments
     out. It is only created by the Image class internally.

@@ -30,6 +30,8 @@ CLASS(URLParse, Object)
       char *METHOD(URLParse, string, void *ctx);
 END_CLASS
 
+
+
 /***** The RDF resolver stores objects inherited from this one.
 
        You can define other objects and register them using the

@@ -28,7 +28,7 @@ int AFF1Volume_destructor(void *self) {
   return 0;
 };
 
-/*** 
+/***
   This is a handler for legacy AFF1 volumes.
 
   strategy: We basically open the AFF1 volume with afflib. If this

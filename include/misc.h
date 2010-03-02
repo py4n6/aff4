@@ -75,13 +75,13 @@ extern int AFF4_DEBUG_LEVEL;
 #define TDB_DATA_STRING(x)                      \
   (char *)x.dptr, x.dsize
 
-#define AFF4_LOG(level, msg, ...)                   \
-  if(oracle && oracle->logger) {                                     \
-  char log_buffer[BUFF_SIZE];                                 \
-  snprintf(log_buffer, BUFF_SIZE, msg, ## __VA_ARGS__);   \
-  CALL(oracle->logger, message, level, log_buffer);                   \
-  } else {                                                            \
-    printf(msg, ## __VA_ARGS__); fflush(stdout);                      \
+#define AFF4_LOG(level, service, subject, msg, ...)                     \
+  if(oracle && oracle->logger) {                                        \
+    char log_buffer[BUFF_SIZE];                                         \
+    snprintf(log_buffer, BUFF_SIZE-1, msg, ## __VA_ARGS__);             \
+    CALL(oracle->logger, message, level, service, subject, log_buffer); \
+  } else {                                                              \
+    printf(msg, ## __VA_ARGS__); fflush(stdout);                        \
   };
 
 #define True 1

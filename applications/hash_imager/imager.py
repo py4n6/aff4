@@ -34,6 +34,20 @@ ZERO_URN.set("aff4://zero")
 def log(x):
     print "0x%lX: %s" % (threading.current_thread().ident & 0xFFFFFFFF, x)
 
+class ByteRange:
+    """ A class representing the current byte range """
+    def __init__(self):
+        self.ranges = []
+        self.len = 0
+
+    def add(self, start, end):
+        if end==start: return
+
+        assert(end > start)
+        self.ranges.append((start, end))
+        self.len += end - start
+
+
 class HashWorker(threading.Thread):
     def __init__(self, in_urn, volume_urn,
                  image_stream_urn,
@@ -311,7 +325,9 @@ class HashImager:
                                     compression = compression)
                 break
 
-    DO_NOT_COMPRESS = set("zip cab jpg avi mpg jar tgz msi swf mp3 mp4".split())
+    ## This is a list of files we should not bother compressing
+    ## because it wont be very compressible
+    DO_NOT_COMPRESS = set("zip cab jpg avi mpg jar tgz msi swf mp3 mp4 wma".split())
 
     def dump_filesystem(self, imgoff):
         """ This method analyses the filesystem and dumps all the

@@ -182,10 +182,6 @@
 #define RESOLVER_MODE_NONPERSISTANT 1
 #define RESOLVER_MODE_DEBUG_MEMORY 2
 
-
-#define AFF4_LOG_MESSAGE 1
-#define AFF4_LOG_WARNING 2
-
 /** Objects can be marked as dirty in a number of cases: */
 #define DIRTY_STATE_UNKNOWN 0
 #define DIRTY_STATE_NEED_TO_CLOSE 1
@@ -195,3 +191,19 @@
    arrays get their own segments.
 */
 #define MAX_SIZE_OF_INLINE_ARRAY 100
+
+
+/** The following belong to the error and reporting subsystem */
+/* Levels */
+#define AFF4_LOG_MESSAGE 1
+#define AFF4_LOG_WARNING 2
+#define AFF4_LOG_NONFATAL_ERROR 3
+#define AFF4_LOG_FATAL_ERROR 4
+
+/* Services */
+#define AFF4_SERVICE_RESOLVER "Resolver"
+#define AFF4_SERVICE_IMAGE_STREAM   "Image Stream"
+#define AFF4_SERVICE_ENCRYPTED_STREAM   "Encrypted Stream"
+#define AFF4_SERVICE_MAP_STREAM   "Map Stream"
+#define AFF4_SERVICE_ZIP_VOLUME   "Zip Volume"
+#define AFF4_SERVICE_RDF_SUBSYSYEM "RDF Subsystem"

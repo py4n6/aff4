@@ -85,16 +85,20 @@ table.
 Gen_wrapper *new_class_wrapper(Object item) {
    int i;
    Gen_wrapper *result;
+   Object cls;
 
-   for(i=0; i<TOTAL_CLASSES; i++) {
-     if(python_wrappers[i].class_ref == item->__class__) {
-       PyErr_Clear();
+   // Search for subclasses
+   for(cls=(Object)item->__class__; cls != cls->__super__; cls=cls->__super__) {
+     for(i=0; i<TOTAL_CLASSES; i++) {
+       if(python_wrappers[i].class_ref == cls) {
+         PyErr_Clear();
 
-       result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
-       result->ctx = talloc_asprintf(NULL, "new_class_wrapper %%s@%%p", NAMEOF(item), item);
-       result->base = (void *)item;
+         result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
+         result->ctx = talloc_asprintf(NULL, "new_class_wrapper %%s@%%p", NAMEOF(item), item);
+         result->base = (void *)item;
 
-       return result;
+         return result;
+       };
      };
    };
 
@@ -296,8 +300,10 @@ class String(Type):
     def to_python_object(self, name=None, result='py_result',**kw):
         name = name or self.name
 
-        result = "PyErr_Clear();\n%s = PyString_FromStringAndSize((char *)%s, %s);\nif(!%s) goto error;\n" % (
-            result, name, self.length, name)
+        result = """PyErr_Clear();
+   if(!%s) goto error;
+   %s = PyString_FromStringAndSize((char *)%s, %s);\nif(!%s) goto error;
+""" % (name, result, name, self.length, result)
         if "BORROWED" not in self.attributes and 'BORROWED' not in kw:
             result += "talloc_free(%s);\n" % name
 
@@ -643,11 +649,15 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
 """
         return result
 
-    def to_python_object(self, name=None, result = 'py_result', **kw):
+    def to_python_object(self, name=None, result = 'py_result', sense='in', **kw):
         name = name or self.name
-        return "%(result)s = (PyObject *)%(name)s;\n" % dict(
-            result=result,
-            name = name)
+        args = dict(result=result,
+                    name = name)
+
+        if sense=='proxied':
+            return "%(result)s = (PyObject *)new_class_wrapper((Object)%(name)s);\n" % args
+
+        return "%(result)s = (PyObject *)%(name)s;\n" % args
 
 class PointerWrapper(Wrapper):
     """ A pointer to a wrapped class """
@@ -1334,11 +1344,12 @@ static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
         out.write(self.return_type.definition())
 
         for arg in self.args:
-            out.write("PyObject *py_%s;\n" % arg.name)
+            out.write("PyObject *py_%s=NULL;\n" % arg.name)
 
         out.write("\n//Obtain python objects for all the args:\n")
         for arg in self.args:
-            out.write(arg.to_python_object(result = "py_%s" % arg.name, BORROWED=True))
+            out.write(arg.to_python_object(result = "py_%s" % arg.name,
+                                           sense='proxied', BORROWED=True))
 
         out.write('if(!((%s)self)->proxied) {\n RaiseError(ERuntimeError, "No proxied object in %s"); goto error;\n};\n' % (self.myclass.class_name, self.myclass.class_name))
 
@@ -1365,10 +1376,20 @@ if(!py_result) {
 
         out.write("Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
         out.write("PyGILState_Release(gstate);\n")
+
+        ## Decref all our python objects:
+        for arg in self.args:
+            out.write("if(py_%s) Py_DECREF(py_%s);\n" %( arg.name, arg.name))
+
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:
-            out.write("\nerror:\n PyGILState_Release(gstate);\n %s;\n" % self.error_condition())
+            out.write("\nerror:\n")
+            ## Decref all our python objects:
+            for arg in self.args:
+                out.write("if(py_%s) Py_DECREF(py_%s);\n" % (arg.name, arg.name))
 
+            out.write("PyGILState_Release(gstate);\n %s;\n" % self.error_condition())
+        
         out.write("   };\n};\n")
 
     def error_condition(self):

@@ -7,7 +7,7 @@ so it must be python syntax.
 TDB_LOCATION = "/tmp/"
 
 ## Debug level. V=0 means no debugging and full optimization enabled.
-V = False
+V = True
 
 ## Optional build modules
 disable_ewf = False

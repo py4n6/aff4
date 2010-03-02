@@ -765,6 +765,7 @@ static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, cha
 
 static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
 			 TDB_DATA value, int type_id, uint8_t flags,
+                         uint32_t source_id,
                          uint64_t previous_offset) {
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
@@ -852,7 +853,7 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
       set_new_value(self, tdb_data_from_string(urn->value),
-		    attribute, *encoded_value, value->id, value->flags, 0);
+		    attribute, *encoded_value, value->id, 0, value->flags, 0);
     };
 
     tdb_unlockall(self->data_db);
@@ -896,7 +897,7 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
 	   tdb_data_from_string(urn->value), attribute, &tmp);
 
     set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, *encoded_value, value->id, value->flags,
+		  attribute, *encoded_value, value->id, 0, value->flags,
                   previous_offset);
 
     tdb_unlockall(self->data_db);
@@ -908,6 +909,49 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   UNLOCK_RESOLVER;
   return 1;
 };
+
+int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
+                    RDFValue value) {
+  TDB_DATA *encoded_value;
+  int32_t graph_id = CALL(oracle, get_id_by_urn, graph, 1);
+  Resolver self= oracle;
+
+  LOCK_RESOLVER;
+
+  encoded_value = CALL(value, encode, urn);
+
+  if(encoded_value) {
+    TDB_DATA attribute;
+    uint64_t previous_offset;
+    TDB_DATA_LIST tmp;
+
+    DEBUG_RESOLVER("Adding %s, %s\n", urn->value, attribute_str);
+    attribute = tdb_data_from_string(attribute_str);
+
+    // Grab the lock
+    tdb_lockall(self->data_db);
+
+    /** If the value is already in the list, we just ignore this
+	request.
+    */
+    previous_offset = get_data_head(self,
+	   tdb_data_from_string(urn->value), attribute, &tmp);
+
+    set_new_value(self, tdb_data_from_string(urn->value),
+		  attribute, *encoded_value, value->id,
+                  graph_id, value->flags,
+                  previous_offset);
+
+    tdb_unlockall(self->data_db);
+
+    // Done with the encoded value
+    talloc_free(encoded_value);
+  };
+
+  UNLOCK_RESOLVER;
+  return 1;
+};
+
 
 RESOLVER_ITER *_Resolver_get_iter(Resolver self,
                                   void *ctx,
@@ -1402,7 +1446,7 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   if(!offset){
     // The attribute is not set - make it now:
     set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, LOCK, -1, 0, 0);
+		  attribute, LOCK, -1, 0, 0, 0);
 
     offset = get_data_head(self, tdb_data_from_string(urn->value),
 			   attribute, &data_list);
@@ -1691,8 +1735,8 @@ static Logger Logger_Con(Logger self) {
   return self;
 };
 
-static void Logger_message(Logger self, int level, char *message) {
-  printf("%s\n", message);
+static void Logger_message(Logger self, int level, char *service, Object subject, char *message) {
+  printf("%d: %s %s %s\n", level, service, message);
 };
 
 VIRTUAL(Logger, Object) {

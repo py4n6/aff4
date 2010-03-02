@@ -1121,7 +1121,10 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
         // New reference here:
         triple.object = CALL(value, serialise, urn);
         if(!triple.object) {
-          AFF4_LOG(AFF4_LOG_MESSAGE, "Unable to serialise %s:%s\n", urn->value, attribute->value);
+          AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
+                   urn,
+                   "Unable to serialise attribute %s\n",
+                   urn->value, attribute->value);
           continue;
         };
       };
