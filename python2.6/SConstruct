@@ -25,8 +25,7 @@ def build_python_bindings(target, source, env):
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
     p = class_parser.parser(class_parser.Module(module_name), verbosity=env['V'])
-    for s in source:
-        p.parse(s.get_abspath())
+    p.parse_filenames([s.get_abspath() for s in source])
 
     fd = open(target[0].get_abspath(), 'w')
     p.write(fd)

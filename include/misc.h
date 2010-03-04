@@ -80,7 +80,7 @@ extern int AFF4_DEBUG_LEVEL;
   if(oracle && oracle->logger) {                                        \
     char log_buffer[BUFF_SIZE];                                         \
     snprintf(log_buffer, BUFF_SIZE-1, msg, ## __VA_ARGS__);             \
-    CALL(oracle->logger, message, level, service, (Object)subject, log_buffer); \
+    CALL(oracle->logger, message, level, service, subject, log_buffer); \
   } else {                                                              \
     printf(msg, ## __VA_ARGS__); fflush(stdout);                        \
   };

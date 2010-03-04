@@ -1898,17 +1898,22 @@ END_CLASS
         self.current_class.modifier = modifier
         self.module.add_class(self.current_class, handler)
 
-    def parse(self, filename):
-        self.module.headers += '#include "%s"\n' % filename
-        self.module.files.append(filename)
+    def parse_filenames(self, filenames):
+        for f in filenames:
+            self._parse(f)
+
+        log("Second pass: Consolidating definitions")
+        for f in filenames:
+            self._parse(f)
+
+    def _parse(self, filename):
+        if filename not in self.module.files:
+              self.module.headers += '#include "%s"\n' % filename
+              self.module.files.append(filename)
+
         fd = open(filename)
         self.parse_fd(fd)
-
-        ## We parse stuff twice to allow for forward declerations -
-        ## now its possible to use classes that will be declared later
-        ## (via struct CLASS_t *)
-        fd.seek(0)
-        self.parse_fd(fd)
+        fd.close()
 
     def parse_fd(self, fd):
         while 1:
@@ -2061,6 +2066,8 @@ END_CLASS
 if __name__ == '__main__':
     p = parser(Module("pyaff4"))
     for arg in sys.argv[1:]:
+        p.parse(arg)
+        log("second parse")
         p.parse(arg)
 
     p.write(sys.stdout)

@@ -53,7 +53,7 @@ static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
   KeyCache key = (KeyCache)CALL(key_cache, get,
                                 (char *)self->pub.iv, sizeof(self->pub.iv));
 
-  // Now cached - make it:
+  // Not cached - make it:
   if(!key) {
     uint32_t round_number;
 
@@ -75,8 +75,7 @@ static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
 };
 
 /* When we serialise the keys we need to encrypt them with the
-   passphrase. We do this by creating a new URN and attaching
-   attributes to it.
+   passphrase.
 */
 static char *AES256Password_serialise(RDFValue self) {
   AES256Password this = (AES256Password)self;
@@ -95,7 +94,7 @@ static char *AES256Password_serialise(RDFValue self) {
 };
 
 // We store the most important part of this object
-static TDB_DATA *AES256Password_encode(RDFValue self) {
+static TDB_DATA *AES256Password_encode(RDFValue self, RDFURN subject) {
   AES256Password this = (AES256Password)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
 
@@ -116,7 +115,8 @@ static TDB_DATA *AES256Password_encode(RDFValue self) {
     retrieve the cipher from the resolver that often. Just in case we
     also cache it locally in the key_cache;
 */
-static int AES256Password_decode(RDFValue self, char *data, int length) {
+static int AES256Password_decode(RDFValue self, char *data, int length,
+                                 RDFURN subject) {
   AES256Password this = (AES256Password)self;
   unsigned char *key;
 
@@ -128,7 +128,7 @@ static int AES256Password_decode(RDFValue self, char *data, int length) {
   if(key) {
     memcpy(this->key, key, sizeof(this->key));
   } else {
-    if(!CALL(this, fetch_password_cb))
+    if(!CALL(this, fetch_password_cb, subject))
       goto error;
 
     key = CALL(key_cache, borrow, (void *)&this->pub.iv,
@@ -143,20 +143,24 @@ static int AES256Password_decode(RDFValue self, char *data, int length) {
   return 0;
 };
 
-static int AES256Password_parse(RDFValue self, char *serialised) {
+static int AES256Password_parse(RDFValue self, char *serialised,
+                                RDFURN subject) {
   AES256Password this = (AES256Password)self;
   decode64((unsigned char *)ZSTRING_NO_NULL(serialised), (unsigned char *)&this->pub, sizeof(this->pub));
 
   return 1;
 };
 
-int AES256Password_fetch_password_cb(AES256Password self) {
+int AES256Password_fetch_password_cb(AES256Password self, RDFURN subject) {
   // Try to use the password from the environment to decrypt it
   char *password = getenv(AFF4_VOLATILE_PASSPHRASE);
   unsigned char buff[sizeof(self->pub.nonce)];
 
   if(password) AES256Password_set(self, password);
   else {
+    AFF4_LOG(AFF4_LOG_NONFATAL_ERROR, AFF4_SERVICE_ENCRYPTED_STREAM,
+             subject, "No password set in environment variable "\
+             AFF4_VOLATILE_PASSPHRASE);
     RaiseError(ERuntimeError, "No password set?");
     goto error;
   };

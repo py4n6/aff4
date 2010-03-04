@@ -1738,7 +1738,7 @@ static Logger Logger_Con(Logger self) {
 };
 
 static void Logger_message(Logger self, int level, char *service, Object subject, char *message) {
-  printf("%d: %s %s %s\n", level, service, URNOF(subject)->value, message);
+  printf("(%d)%s: %s %s\n", level, service, URNOF(subject)->value, message);
 };
 
 VIRTUAL(Logger, Object) {

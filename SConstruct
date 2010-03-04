@@ -43,10 +43,6 @@ elif 'resolver' in config.DEBUG:
 elif 'object' in config.DEBUG:
    args['CFLAGS'] += ' -DAFF4_DEBUG_OBJECT '
 
-if not config.PROCESS_LOCKS:
-   utils.warn("Turning off locks")
-   args['CFLAGS'] += ' -DNO_LOCKS '
-
 add_option(args, 'prefix',
            type='string',
            nargs=1,

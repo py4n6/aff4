@@ -85,7 +85,6 @@ CLASS(AES256Password, AFF4Cipher)
   struct aff4_cipher_data_t pub;
 
   unsigned char key[AES256_KEY_SIZE];
-  char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
 
   // Set the password for this object. Should only be called once
   // before using.
@@ -94,7 +93,7 @@ CLASS(AES256Password, AFF4Cipher)
   // This callback can be overridden to fetch password to decode the
   // IV from. By default, we look in the AFF4_VOLATILE_PASSPHRASE
   // environment variable.
-  int METHOD(AES256Password, fetch_password_cb);
+  int METHOD(AES256Password, fetch_password_cb, RDFURN subject);
 END_CLASS
 
 /**
