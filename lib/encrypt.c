@@ -80,6 +80,7 @@ static RDFValue AES256Password_set(AES256Password self, char *passphrase) {
 */
 static char *AES256Password_serialise(RDFValue self) {
   AES256Password this = (AES256Password)self;
+  char encoded_key[sizeof(struct aff4_cipher_data_t) * 2];
 
   // Update the nonce
   CALL((AFF4Cipher)this, encrypt, this->pub.iv,
@@ -87,9 +88,10 @@ static char *AES256Password_serialise(RDFValue self) {
        this->pub.nonce, sizeof(this->pub.nonce), 0);
 
   // Encode the key
-  encode64((unsigned char *)&this->pub, sizeof(this->pub), (unsigned char *)this->encoded_key, sizeof(this->encoded_key));
+  encode64((unsigned char *)&this->pub, sizeof(this->pub), (unsigned char *)encoded_key,
+           sizeof(encoded_key));
 
-  return this->encoded_key;
+  return talloc_strdup(self, encoded_key);
 };
 
 // We store the most important part of this object
@@ -210,9 +212,6 @@ int AES256Password_decrypt(AFF4Cipher self, unsigned char *inbuff,
 
 VIRTUAL(AES256Password, AFF4Cipher) {
      VMETHOD_BASE(RDFValue, dataType) = AFF4_AES256_PASSWORD;
-     VMETHOD_BASE(RDFValue, raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-     VMETHOD_BASE(RDFValue, raptor_literal_datatype) = raptor_new_uri(  \
-                        (const unsigned char*)AFF4_AES256_PASSWORD);
 
      VMETHOD_BASE(RDFValue, Con) = AES256Password_Con;
      VMETHOD_BASE(RDFValue, encode) = AES256Password_encode;
@@ -275,7 +274,7 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
   return self;
 
  error:
-  talloc_free(self);
+  talloc_unlink(NULL, self);
   return NULL;
 };
 
@@ -415,6 +414,7 @@ static void Encrypted_close(FileLikeObject self) {
 
 VIRTUAL(Encrypted, FileLikeObject) {
   VMETHOD_BASE(AFFObject, Con) = Encrypted_Con;
+  VMETHOD_BASE(AFFObject, dataType) = AFF4_ENCRYTED;
 
   VMETHOD_BASE(FileLikeObject, write) = Encrypted_write;
   VMETHOD_BASE(FileLikeObject, read) = Encrypted_read;
@@ -426,6 +426,7 @@ void encrypt_init() {
   SSL_load_error_strings();
   SSL_library_init();
 
+  INIT_CLASS(AFF4Cipher);
   INIT_CLASS(AES256Password);
   INIT_CLASS(Encrypted);
 

@@ -26,6 +26,7 @@ typedef  unsigned long int in_addr_t;
 #endif
 
 #include "encode.h"
+#include "aff4_constants.h"
 
 #define BUFF_SIZE 40960
 
@@ -79,7 +80,7 @@ extern int AFF4_DEBUG_LEVEL;
   if(oracle && oracle->logger) {                                        \
     char log_buffer[BUFF_SIZE];                                         \
     snprintf(log_buffer, BUFF_SIZE-1, msg, ## __VA_ARGS__);             \
-    CALL(oracle->logger, message, level, service, subject, log_buffer); \
+    CALL(oracle->logger, message, level, service, (Object)subject, log_buffer); \
   } else {                                                              \
     printf(msg, ## __VA_ARGS__); fflush(stdout);                        \
   };
@@ -92,7 +93,9 @@ uint64_t htonll(uint64_t n);
 #define ntohll(x) htonll(x)
 #endif
 
-#define AFF4_ABORT(fmt, ...) AFF4_LOG(10, "FATAL (%s:%u): " fmt "\n\n", \
+#define AFF4_ABORT(fmt, ...) AFF4_LOG(AFF4_LOG_FATAL_ERROR, AFF4_SERVICE_GENERIC, \
+                                      NULL,                             \
+                                      "FATAL (%s:%u): " fmt "\n\n",     \
                                       __FUNCTION__, __LINE__, ##__VA_ARGS__); abort();
 
 #endif

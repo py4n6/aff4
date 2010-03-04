@@ -201,6 +201,7 @@
 #define AFF4_LOG_FATAL_ERROR 4
 
 /* Services */
+#define AFF4_SERVICE_GENERIC  "AFF4"
 #define AFF4_SERVICE_RESOLVER "Resolver"
 #define AFF4_SERVICE_IMAGE_STREAM   "Image Stream"
 #define AFF4_SERVICE_ENCRYPTED_STREAM   "Encrypted Stream"

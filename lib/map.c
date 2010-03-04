@@ -822,8 +822,9 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
 
-     // Cant directly write to maps
+     // FIXME pass through to the current target to implement sparse streams
      UNIMPLEMENTED(FileLikeObject, write);
+     UNIMPLEMENTED(FileLikeObject, seek);
 } END_VIRTUAL
 
 void mapdriver_init() {

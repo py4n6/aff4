@@ -5,6 +5,9 @@
 // not threadsafe
 pthread_mutex_t LIBEWF_LOCK;
 
+// Global error handler for libewf
+static __thread libewf_error_t *ewf_error;
+
 #if 0
 #define LOCK_EWF pthread_mutex_lock(&LIBEWF_LOCK)
 #define UNLOCK_EWF pthread_mutex_unlock(&LIBEWF_LOCK)
@@ -18,7 +21,7 @@ static int EWFVolume_destructor(void *this) {
 
   if(self->handle) {
     LOCK_EWF;
-    libewf_close(self->handle);
+    libewf_handle_close(&self->handle, &ewf_error);
     UNLOCK_EWF;
   };
 
@@ -57,7 +60,7 @@ static AFFObject EWFVolume_AFFObject_Con(AFFObject self, RDFURN urn, char mode) 
 
 int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   char **filenames=NULL;
-  int amount_of_filenames;
+  int amount_of_filenames=0;
   EWFVolume this = (EWFVolume)self;
   RDFURN stream;
   uint64_t media_size;
@@ -72,20 +75,28 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   };
 
   LOCK_EWF;
-  amount_of_filenames = libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
-                                    LIBEWF_FORMAT_UNKNOWN,
-                                    &filenames);
+  if(libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
+                 LIBEWF_FORMAT_UNKNOWN,
+                 &filenames,
+                 &amount_of_filenames, &ewf_error) < 1) {
+    goto libewf_error;
+  };
 
-  this->handle = libewf_open(filenames, amount_of_filenames, LIBEWF_OPEN_READ);
+  if(libewf_handle_open(&this->handle, filenames,
+                        amount_of_filenames, LIBEWF_OPEN_READ,
+                        &ewf_error)==0) {
+    goto libewf_error;
+  };
   UNLOCK_EWF;
+
   if(!this->handle) {
     RaiseError(ERuntimeError, "Unable to open EWF volume %s", urn->value);
     goto error;
   };
 
   LOCK_EWF;
-  if(-1==libewf_get_media_size(this->handle, &media_size)) {
-    goto error;
+  if(-1==libewf_handle_get_media_size(&this->handle, &media_size, &ewf_error)) {
+    goto libewf_error;
   };
   UNLOCK_EWF;
 
@@ -143,6 +154,10 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
 
   talloc_free(size);
   return 1;
+
+ libewf_error:
+  RaiseError(ERuntimeError, "libewf error: %s", ewf_error);
+
  error:
   // We were unable to load this volume - invalidate anything we know
   // about it (remove streams etc).
@@ -210,7 +225,8 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   };
 
   LOCK_EWF;
-  res = libewf_read_random(volume->handle, buffer, length, self->readptr);
+  res = libewf_handle_read_random(&volume->handle, buffer, length,
+                                  self->readptr, &ewf_error);
   UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");
@@ -230,8 +246,10 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   return -1;
 };
 
-static void EWFStream_close(FileLikeObject self) {
+static int EWFStream_close(FileLikeObject self) {
   talloc_free(self);
+
+  return 0;
 };
 
 VIRTUAL(EWFStream, FileLikeObject) {

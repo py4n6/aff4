@@ -6,6 +6,7 @@
 #include <raptor.h>
 #include <errno.h>
 #include <pthread.h>
+#include "config.h"
 
 //int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
@@ -788,6 +789,7 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   i.next_offset = previous_offset;
   i.length = value.dsize;
   i.encoding_type = type_id;
+  i.asserter_id = -1;
   i.flags = flags;
 
   write(self->data_store_fd, &i, sizeof(i));
@@ -1736,7 +1738,7 @@ static Logger Logger_Con(Logger self) {
 };
 
 static void Logger_message(Logger self, int level, char *service, Object subject, char *message) {
-  printf("%d: %s %s %s\n", level, service, message);
+  printf("%d: %s %s %s\n", level, service, URNOF(subject)->value, message);
 };
 
 VIRTUAL(Logger, Object) {

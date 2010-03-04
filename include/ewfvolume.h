@@ -26,7 +26,7 @@
     "ewf" method.
 **/
 CLASS(EWFVolume, AFF4Volume)
-   libewf_handle_t *handle;
+   libewf_handle_t handle;
    RDFURN stored;
 END_CLASS
 

@@ -1124,7 +1124,7 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
           AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
                    urn,
                    "Unable to serialise attribute %s\n",
-                   urn->value, attribute->value);
+                   attribute->value);
           continue;
         };
       };

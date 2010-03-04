@@ -12,12 +12,15 @@ source_files = """
 #lib/misc.c #lib/zip.c #lib/stringio.c #lib/resolver.c
 #lib/rdf.c  #lib/image.c #lib/map.c
 #lib/encode.c #lib/queue.c
-#lib/encrypt.c #lib/graph.c
+#lib/graph.c
 """
 
 ## Optional support for EWF and AFF1 volumes
 if utils.HEADERS.get("HAVE_EWF"):
     source_files += "  #lib/ewfvolume.c "
+
+if utils.HEADERS.get("HAVE_OPENSSL"):
+    source_files += "  #lib/encrypt.c "
 
 uuid_files = """
 #uuid/clear.c    #uuid/copy.c      #uuid/gen_uuid_nt.c  #uuid/pack.c

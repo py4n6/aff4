@@ -134,10 +134,6 @@ crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h
       if not conf.CheckFunc(func):
          error("Openssl installation seems to be missing function %s" % func)
 
-#   if not conf.CheckLibWithHeader('raptor', 'raptor.h','c') or \
-#          not conf.CheckFunc('raptor_init'):
-#      error("You must have libraptor-dev installed")
-
    ## Optional stuff:
    ## Functions
    SconsUtils.utils.check("func", conf, Split("""
@@ -152,7 +148,7 @@ ntohll
 
    ## Libraries
    SconsUtils.utils.check("lib", conf, Split("""
-ewf curl afflib pthread
+ewf curl afflib pthread HAVE_OPENSSL:ssl
 """))
 
    ## Types

@@ -345,7 +345,7 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
   return length;
 };
 
-static void Image_close(FileLikeObject self) {
+static int Image_close(FileLikeObject self) {
   Image this = (Image)self;
 
   // Write the last chunk
@@ -411,7 +411,7 @@ static void Image_close(FileLikeObject self) {
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
        (RDFValue)self->size);
 
-  SUPER(FileLikeObject, FileLikeObject, close);
+  return SUPER(FileLikeObject, FileLikeObject, close);
 };
 
 /** Reads at most a single chunk and write to result. Return how much
