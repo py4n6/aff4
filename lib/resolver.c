@@ -1611,6 +1611,15 @@ static void Resolver_close(Resolver self) {
   oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, mode) ;
 };
 
+#if HAVE_OPENSSL
+extern struct SecurityProvider_t *provider;
+
+static void Resolver_register_security_provider(Resolver self, struct SecurityProvider_t *sec_provider) {
+  provider = sec_provider;
+  talloc_reference(self, sec_provider);
+};
+#endif
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
@@ -1633,6 +1642,10 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;
      VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
+
+#if HAVE_OPENSSL
+     VMETHOD(register_security_provider) = Resolver_register_security_provider;
+#endif
 
      VMETHOD(load) = Resolver_load;
      VMETHOD(set_logger) = Resolver_set_logger;

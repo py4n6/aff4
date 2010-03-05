@@ -13,6 +13,8 @@
 
 #include "aff4_io.h"
 
+struct SecurityProvider_t;
+
 extern int AFF4_TDB_FLAGS;
 
 /* The TDB_DATA_LIST flags */
@@ -245,6 +247,14 @@ CLASS(Resolver, Object)
            objects.
        **/
        void METHOD(Resolver, register_rdf_value_class, RDFValue class_ref);
+
+#if HAVE_OPENSSL
+       void METHOD(Resolver, register_security_provider, struct SecurityProvider_t *class_ref);
+#endif
+
+       /** A Utility method to create a new instance of a registered
+           RDF dataType.
+       */
        RDFValue METHOD(Resolver, new_rdfvalue, void *ctx, char *type);
 
        /* This function attempts to load the volume stored within the

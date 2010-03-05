@@ -5,6 +5,18 @@ time.sleep(1)
 
 oracle = pyaff4.Resolver()
 
+class SecurityProvider:
+    """ This is a demonstration security provider object which will be
+    called by the AFF4 library to get keying material for different
+    streams.
+    """
+    def passphrase(self, cipher, subject):
+        print "Setting passphrase for subject %s" % subject.value
+        return "Hello"
+
+## This registers the security provider
+oracle.register_security_provider(pyaff4.ProxiedSecurityProvider(SecurityProvider()))
+
 url = pyaff4.RDFURN()
 url.set("/tmp/test.zip")
 

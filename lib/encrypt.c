@@ -7,7 +7,7 @@
 VIRTUAL(AFF4Cipher, RDFValue) {
 } END_VIRTUAL
 
-static SecurityProvider provider=NULL;
+SecurityProvider provider=NULL;
 
 /* When we serialise the keys we need to encrypt them with the
    passphrase.
