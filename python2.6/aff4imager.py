@@ -35,7 +35,7 @@ def warn(msg):
 
 class Renderer:
     def message(self, level, service, subject, message):
-       sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.urn.value,
+       sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.value,
                                           colors['end'], message))
 
 def image(output_URI, options, fds):

@@ -31,12 +31,14 @@ encrypted = oracle.create(pyaff4.AFF4_ENCRYTED)
 encrypted.set(pyaff4.AFF4_STORED, volume_urn)
 encrypted.set(pyaff4.AFF4_TARGET, image_urn)
 
-## Set the password
+## Set the password - this will invoke the security manager to key the
+## cipher.
 cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
-cipher.set("Hello")
 encrypted.set(pyaff4.AFF4_CIPHER, cipher)
 
 encrypted = encrypted.finish()
+
+print "Encrypted URN: %s" % encrypted.urn.value
 
 infd = open("/bin/ls")
 while 1:

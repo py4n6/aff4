@@ -726,8 +726,11 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
       goto not_found;
 
     if(!CALL(result, decode, buff, i.length, urn_str)) {
-      RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
-		 urn_str, attribute_str);
+      // Make sure we propagate the original error:
+      if(!_global_error) {
+        RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
+                   urn_str, attribute_str);
+      };
       goto not_found;
     };
 
@@ -1737,8 +1740,8 @@ static Logger Logger_Con(Logger self) {
   return self;
 };
 
-static void Logger_message(Logger self, int level, char *service, Object subject, char *message) {
-  printf("(%d)%s: %s %s\n", level, service, URNOF(subject)->value, message);
+static void Logger_message(Logger self, int level, char *service, RDFURN subject, char *message) {
+  printf("(%d)%s: %s %s\n", level, service, subject->value, message);
 };
 
 VIRTUAL(Logger, Object) {

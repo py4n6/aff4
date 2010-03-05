@@ -39,6 +39,33 @@ PRIVATE CLASS(Identity, AFFObject)
        void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
 END_CLASS
 
+       /** This class implements a security provider. This is used by
+           AFF4 ciphers to request passwords or certificates. Users of
+           the library should implement their own security provider
+           and install it using the
+           Resolver.install_security_provider() function. When a
+           cipher needs to obtain a passphrase or certificate they
+           call here to obtain it - the user code can choose how to
+           manage their own password (e.g. bring up an interactive
+           GUI, use the OS secure storage facility etc).
+
+           There is currently only a single global security provider.
+       */
+CLASS(SecurityProvider, Object)
+     SecurityProvider METHOD(SecurityProvider, Con);
+
+/* This is called when we need to obtain a passphrase for a subject
+     stream. Returns 0 on error, and the length of the passphrase in
+     len (which must initially contain the length of the passphrase
+     buffer).
+*/
+     char *METHOD(SecurityProvider, passphrase,              \
+                  char *cipher_type, struct RDFURN_t *subject);
+END_CLASS
+
+     /** Allow the user to make their own class */
+PROXY_CLASS(SecurityProvider);
+
 /************************************************************
   An implementation of the encrypted Stream.
 
@@ -55,12 +82,17 @@ END_CLASS
 CLASS(AFF4Cipher, RDFValue)
        int blocksize;
 
-       int METHOD(AFF4Cipher, encrypt, unsigned char *inbuff, \
-                  int inlen,\
-                  OUT unsigned char *outbuf, int outlen, int chunk_number);
-       int METHOD(AFF4Cipher, decrypt, unsigned char *inbuff, \
-                  int inlen,\
-                  OUT unsigned char *outbuf, int outlen, int chunk_number);
+       int METHOD(AFF4Cipher, encrypt, int chunk_number,         \
+                  unsigned char *inbuff,                         \
+                  unsigned long int inlen,                       \
+                  OUT unsigned char *outbuff,                     \
+                  unsigned long int length);
+
+       int METHOD(AFF4Cipher, decrypt, int chunk_number,         \
+                  unsigned char *inbuff,                         \
+                  unsigned long int inlen,                       \
+                  OUT unsigned char *outbuff,                    \
+                  unsigned long int length);
 END_CLASS
 
 #define AES256_KEY_SIZE 32
@@ -77,23 +109,15 @@ struct aff4_cipher_data_t {
 /** The following are some default ciphers */
 
 /** This cipher uses AES256. The session key is derived from a
-    password using the PBKDF2 algorithm.
+    password using the PBKDF2 algorithm. The round number is derived
+    from the iv: round_number = (unsigned char)iv[0] << 24
+
+    Password is obtained from the security manager.
 */
 CLASS(AES256Password, AFF4Cipher)
   AES_KEY ekey;
   AES_KEY dkey;
-  struct aff4_cipher_data_t pub;
-
-  unsigned char key[AES256_KEY_SIZE];
-
-  // Set the password for this object. Should only be called once
-  // before using.
-  BORROWED RDFValue METHOD(AES256Password, set, char *passphrase);
-
-  // This callback can be overridden to fetch password to decode the
-  // IV from. By default, we look in the AFF4_VOLATILE_PASSPHRASE
-  // environment variable.
-  int METHOD(AES256Password, fetch_password_cb, RDFURN subject);
+  struct aff4_cipher_data_t *pub;
 END_CLASS
 
 /**

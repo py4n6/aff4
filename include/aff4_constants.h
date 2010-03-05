@@ -108,6 +108,7 @@
 // Encrypted stream attributes
 // Thats the passphrase that will be used to encrypt the session key
 #define AFF4_VOLATILE_PASSPHRASE VOLATILE_NS "passphrase"
+#define AFF4_ENV_PASSPHRASE "AFF4_PASSPHRASE"
 
 // This is the master key for encryption (Never written down)
 #define AFF4_VOLATILE_KEY               VOLATILE_NS "key"
@@ -205,6 +206,7 @@
 #define AFF4_SERVICE_RESOLVER "Resolver"
 #define AFF4_SERVICE_IMAGE_STREAM   "Image Stream"
 #define AFF4_SERVICE_ENCRYPTED_STREAM   "Encrypted Stream"
+#define AFF4_SERVICE_CRYPTO_SUBSYS   "Crypto Subsystem"
 #define AFF4_SERVICE_MAP_STREAM   "Map Stream"
 #define AFF4_SERVICE_ZIP_VOLUME   "Zip Volume"
 #define AFF4_SERVICE_RDF_SUBSYSYEM "RDF Subsystem"
