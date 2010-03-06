@@ -336,6 +336,9 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
     URNOF(self) = CALL(urn, copy, self);
 
     previous_volume = ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+    // The volume we expect to find does not appear to be there
+    if(mode == 'r' && !previous_volume)
+      goto error;
     ClearError();
 
     // Check to see that we can open the storage_urn for writing
@@ -501,6 +504,20 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     goto error;
   };
 
+  // Is there a directory_offset and does it make sense?
+  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+          (RDFValue)self->directory_offset) &&          \
+     self->directory_offset->value > fd->size->value) {
+    // Everything we know about the storage urn is incorrect... we
+    // need to delete anything we know about it here:
+    ((AFFObject)fd)->delete(URNOF(fd));
+
+    RaiseError(EIOError, "File %s is %llu bytes long, but it should be %llu",
+               STRING_URNOF(fd), fd->size->value, self->directory_offset->value);
+
+    goto error;
+  };
+
   // This check makes sure the volume does not already exist. We first
   // see if there is a ZipFile stored on the fd_urn, and then if that
   // ZipFile is dirty. If we do not know the volume's dirty state we
@@ -525,17 +542,6 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       // Any other state we can keep going
       break;
     };
-  };
-
-  // Is there a directory_offset and does it make sense?
-  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-          (RDFValue)self->directory_offset) &&                  \
-     self->directory_offset->value >= fd->size->value) {
-    // Everything we know about the storage urn is incorrect... we
-    // need to delete anything we know about it here:
-    ((AFFObject)fd)->delete(URNOF(fd));
-
-    goto error;
   };
 
   // Find the End of Central Directory Record - We read about 4k of
@@ -1471,6 +1477,10 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
   if(this->compression->value == ZIP_STORED) {
     /** Position our write pointer */
     fd = (FileLikeObject)CALL(oracle, open, this->file_urn, 'r');
+    if(!fd) {
+      RaiseError(ERuntimeError, "Unable to open zip file %s", this->file_urn->value);
+      goto error;
+    };
     CALL(fd, seek, this->file_offset->value + self->readptr, SEEK_SET);
     length = CALL(fd, read, buffer, length);
     self->readptr += length;
@@ -1489,6 +1499,8 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
   };
 
   return length;
+ error:
+  return -1;
 };
 
 static int ZipFileStream_close(FileLikeObject self) {

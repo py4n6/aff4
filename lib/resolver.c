@@ -8,6 +8,25 @@
 #include <pthread.h>
 #include "config.h"
 
+__thread char __error_str[BUFF_SIZE];
+__thread enum _error_type aff4_error;
+
+void *raise_errors(enum _error_type t, char *reason, ...) {
+  if(reason) {
+    va_list ap;
+
+    va_start(ap, reason);
+
+    vsnprintf(__error_str, BUFF_SIZE-1, reason,ap);
+    __error_str[BUFF_SIZE-1]=0;
+    va_end(ap);
+  };
+
+  aff4_error = t;
+
+  return NULL;
+};
+
 //int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
@@ -727,7 +746,7 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
 
     if(!CALL(result, decode, buff, i.length, urn_str)) {
       // Make sure we propagate the original error:
-      if(!_global_error) {
+      if(!aff4_error) {
         RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
                    urn_str, attribute_str);
       };
@@ -858,7 +877,7 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
       set_new_value(self, tdb_data_from_string(urn->value),
-		    attribute, *encoded_value, value->id, 0, value->flags, 0);
+		    attribute, *encoded_value, value->id, value->flags, -1, 0);
     };
 
     tdb_unlockall(self->data_db);
@@ -1612,10 +1631,10 @@ static void Resolver_close(Resolver self) {
 };
 
 #if HAVE_OPENSSL
-extern struct SecurityProvider_t *provider;
+extern struct SecurityProvider_t *AFF4_SECURITY_PROVIDER;
 
 static void Resolver_register_security_provider(Resolver self, struct SecurityProvider_t *sec_provider) {
-  provider = sec_provider;
+  AFF4_SECURITY_PROVIDER = sec_provider;
   talloc_reference(self, sec_provider);
 };
 #endif

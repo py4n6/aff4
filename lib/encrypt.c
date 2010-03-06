@@ -7,7 +7,7 @@
 VIRTUAL(AFF4Cipher, RDFValue) {
 } END_VIRTUAL
 
-SecurityProvider provider=NULL;
+SecurityProvider AFF4_SECURITY_PROVIDER=NULL;
 
 /* When we serialise the keys we need to encrypt them with the
    passphrase.
@@ -30,9 +30,9 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
       goto error;
     };
 
-    passphrase = CALL(provider, passphrase, self->dataType, subject);
+    passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
     if(!passphrase) {
-      if(!_global_error) RaiseError(ERuntimeError, "No password provided");
+      if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
       goto error;
     };
 
@@ -95,9 +95,9 @@ static int AES256Password_decode(RDFValue self, char *data, int length,
   if(decode64(data, length, (unsigned char *)this->pub,
               sizeof(*this->pub)) != sizeof(*this->pub)) goto error;
 
-  passphrase = CALL(provider, passphrase, self->dataType, subject);
+  passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
   if(!passphrase) {
-    if(!_global_error) RaiseError(ERuntimeError, "No password provided");
+    if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
     goto error;
   };
 
@@ -207,6 +207,11 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
     if(!CALL(oracle, resolve_value, uri, AFF4_TARGET, (RDFValue)this->backing_store)) {
       RaiseError(ERuntimeError, "Encrypted stream must have a backing store?");
       goto error;
+    } else {
+      //Make sure we can open it
+      FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->backing_store, mode);
+      if(!fd) goto error;
+      CALL((AFFObject)fd, cache_return);
     };
 
     if(!CALL(oracle, resolve_value, uri, AFF4_STORED, (RDFValue)this->stored)) {
@@ -288,16 +293,20 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
   unsigned char cbuff[chunk_size];
   unsigned char dbuff[chunk_size];
   FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->backing_store, 'r');
+  int res;
 
   if(!target) {
-    RaiseError(ERuntimeError, "Unable to open the backing stream %s", this->backing_store->value);
     goto error;
   };
 
   CALL(target, seek, chunk_id * chunk_size, SEEK_SET);
-  if(CALL(target, read, (char *)cbuff, chunk_size) < chunk_size) 
+  res = CALL(target, read, (char *)cbuff, chunk_size);
+  if(res < 0 || res < chunk_size){
+    PUSH_ERROR_STATE;
+    CALL((AFFObject)target, cache_return);
+    POP_ERROR_STATE;
     goto error;
-
+  };
   CALL(oracle, cache_return, (AFFObject)target);
 
   // Now decrypt the buffer in place
@@ -305,7 +314,7 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
     goto error;
 
   // Return the available data
-  memcpy(buff, cbuff + chunk_offset, available_to_read);
+  memcpy(buff, dbuff + chunk_offset, available_to_read);
 
   self->readptr += available_to_read;
 
@@ -328,7 +337,8 @@ static int Encrypted_read(FileLikeObject self, char *buff, unsigned long int len
   // length requested
   while(offset < length ) {
     read_length = Encrypted_partialread(self, buff + offset, length - offset);
-    if(read_length <=0) break;
+    if(read_length <0) return -1;
+    if(read_length ==0) break;
     offset += read_length;
   };
 
@@ -420,5 +430,5 @@ void encrypt_init() {
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
 
   // Initialise the provider with the default:
-  provider = CONSTRUCT(SecurityProvider, SecurityProvider, Con, NULL);
+  AFF4_SECURITY_PROVIDER = CONSTRUCT(SecurityProvider, SecurityProvider, Con, NULL);
 };

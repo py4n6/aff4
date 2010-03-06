@@ -26,6 +26,7 @@ This file describes the high level interface.
 #endif
 
 #include "aff4_constants.h"
+#include "aff4_errors.h"
 
 // This file defines the rdf side of the AFF4 specification
 #include "aff4_rdf.h"

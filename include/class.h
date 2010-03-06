@@ -371,52 +371,13 @@ extern struct Object_t __Object;
 
 int issubclass(Object obj, Object class);
 
-/** This is used for error reporting. This is similar to the way
-    python does it, i.e. we set the error flag and return NULL.
-*/
-enum _error_type {
-  EZero,EGeneric,EOverflow,EWarning,
-  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError
-};
-
-extern __thread char _error_str[];
-extern __thread enum _error_type _global_error;
-extern __thread char *_traceback;
-
-void *raise_errors(enum _error_type t, char *string,  ...);
-
 extern void unimplemented(Object self);
 
 #define UNIMPLEMENTED(class, method)             \
   ((class)self)->method = (void *)unimplemented;
 
-// Some helpful little things
-#define ERROR_BUFFER_SIZE 1024
-
 #define ZSTRING_NO_NULL(str) str , (strlen(str))
 #define ZSTRING(str) str , (strlen(str)+1)
-#define RaiseError(t, message, ...)                                     \
-  do {									\
-    _traceback = (char *)talloc_asprintf_append(_traceback, "%s:%d - %s: ", __FILE__, \
-						__LINE__, __FUNCTION__); \
-    raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__); \
-    _traceback = (char *)talloc_asprintf_append(_traceback, "\n");	\
-  } while(0);
-
-#define LogWarnings(format, ...)		\
-  do {						\
-    RaiseError(EWarning, format, ## __VA_ARGS__);	\
-    PrintError();				\
-  } while(0);
-  
-#define ClearError()				\
-  do {_global_error = EZero; if(_traceback) {talloc_free(_traceback); _traceback=NULL;}; } while(0);
-
-#define PrintError()				\
-  do {if(_global_error) fprintf(stdout, "%s",_traceback); fflush(stdout); ClearError(); }while(0);
-
-#define CheckError(error)			\
-  (_global_error == error)
 
   // These dont do anything but are useful to indicate when a function
   // parameter is used purely to return a value. They are now used to
@@ -474,8 +435,8 @@ python method calls on the proxied object.
 
   // These macros are used when we need to do something which might
   // change the error state on the error path of a function.
-#define PUSH_ERROR_STATE { enum _error_type tmp = _global_error;
-#define POP_ERROR_STATE _global_error = tmp;};
+#define PUSH_ERROR_STATE { enum _error_type tmp = aff4_error;
+#define POP_ERROR_STATE aff4_error = tmp;};
 
 #endif
 #ifdef __cplusplus

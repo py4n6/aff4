@@ -243,6 +243,11 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     if(!CALL(oracle, resolve_value, uri, AFF4_STORED, (RDFValue)this->stored)) {
       RaiseError(ERuntimeError, "Image not stored anywhere?");
       goto error;
+    } else {
+      // Make sure we can actually open the containing volume
+      AFF4Volume volume = CALL(oracle, open, this->stored, mode);
+      if(!volume) goto error;
+      CALL((AFFObject)volume, cache_return);
     };
 
     // Add ourselves to our volume
@@ -284,7 +289,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   return self;
 
  error:
-  talloc_free(self);
+  talloc_unlink(NULL, self);
   return NULL;
 };
 
@@ -495,7 +500,8 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
     /* Temporary storage for the compressed chunk */
     char compressed_chunk[compressed_length];
 
-    CALL(fd, read, compressed_chunk, compressed_length);
+    if(CALL(fd, read, compressed_chunk, compressed_length)<0)
+      goto error;
 
     // Try to decompress it:
     if(uncompress((unsigned char *)chunk_cache->data,
@@ -543,15 +549,10 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
 
   return available_to_read;
 
-  // Pad the buffer on error:
-  error: {
-    memset(buffer,0, length);
-
-    self->readptr += available_to_read;
-    if(chunk_cache)
-      talloc_unlink(NULL, chunk_cache);
-    return length;
-  };
+ error:
+  if(chunk_cache)
+    talloc_unlink(NULL, chunk_cache);
+  return -1;
 };
 
 // Reads from the image stream
@@ -564,7 +565,8 @@ static int Image_read(FileLikeObject self, char *buffer, unsigned long int lengt
   while(read_length < available_to_read ) {
     int res = partial_read(self, buffer + read_length, available_to_read - read_length);
 
-    if(res <=0) break;
+    if(res < 0) return -1;
+    if(res==0) break;
 
     read_length += res;
   };

@@ -23,7 +23,7 @@ class Module:
 
     def initialization(self):
         result = """
-talloc_set_log_fn(printf);
+talloc_set_log_fn((void *)printf);
 AFF4_Init();
 
 """
@@ -107,7 +107,7 @@ Gen_wrapper *new_class_wrapper(Object item) {
 };
 
 static PyObject *resolve_exception() {
-  switch(_global_error) {
+  switch(aff4_error) {
 case EKeyError:
     return PyExc_KeyError;
 case ERuntimeError:
@@ -625,7 +625,7 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
        returned_object = (Object)%(call)s;
        Py_END_ALLOW_THREADS
 
-       if(_global_error != EZero) {
+       if(aff4_error != EZero) {
          PyErr_Format(resolve_exception(),
                     "%%s", __error_str);
          ClearError();
@@ -991,7 +991,7 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
 
         self.error_set = True
         out.write("""//Check for errors
-         if(_global_error != EZero) {
+         if(aff4_error != EZero) {
              PyErr_Format(resolve_exception(),
                       "%s.%s: %%s", __error_str);
              ClearError();

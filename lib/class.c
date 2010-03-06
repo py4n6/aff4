@@ -27,31 +27,7 @@
 # ******************************************************/
 #include "class.h"
 
-/** This is used for error reporting.
- */
 #define BUFF_SIZE 1024
-
-__thread char __error_str[BUFF_SIZE];
-__thread enum _error_type _global_error;
-__thread char *_traceback=NULL;
-
-void *raise_errors(enum _error_type t, char *reason, ...) {
-  if(reason) {
-    va_list ap;
-
-    va_start(ap, reason);
-
-    vsnprintf(__error_str, BUFF_SIZE-1, reason,ap);
-    __error_str[BUFF_SIZE-1]=0;
-
-    _traceback = talloc_asprintf_append(_traceback, "%s", __error_str);
-    va_end(ap);
-  };
-
-  _global_error = t;
-
-  return NULL;
-};
 
 // Noone should instantiate Object directly. this should be already
 // allocated therefore:

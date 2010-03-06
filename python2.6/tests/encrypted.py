@@ -1,5 +1,5 @@
 import pyaff4
-import os, time
+import os, time, sys
 
 time.sleep(1)
 
@@ -19,6 +19,20 @@ oracle.register_security_provider(pyaff4.ProxiedSecurityProvider(SecurityProvide
 
 url = pyaff4.RDFURN()
 url.set("/tmp/test.zip")
+
+
+try:
+    url.set(sys.argv[1])
+    fd = oracle.open(url, 'r')
+    while 1:
+        data = fd.read(1024*1024)
+        if not data: break
+
+        sys.stdout.write(data)
+
+    sys.exit(0)
+except IndexError:
+    pass
 
 try:
     os.unlink(url.parser.query)

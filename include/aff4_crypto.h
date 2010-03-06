@@ -66,6 +66,8 @@ END_CLASS
      /** Allow the user to make their own class */
 PROXY_CLASS(SecurityProvider);
 
+extern SecurityProvider AFF4_SECURITY_PROVIDER;
+
 /************************************************************
   An implementation of the encrypted Stream.
 
