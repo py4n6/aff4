@@ -1639,6 +1639,10 @@ static void Resolver_register_security_provider(Resolver self, struct SecurityPr
 };
 #endif
 
+void Resolver_log(Resolver self, int level, char *service, RDFURN subject, char *message) {
+  CALL(self->logger, message, level, service, subject, message);
+};
+
 /** Here we implement the resolver */
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
@@ -1668,6 +1672,7 @@ VIRTUAL(Resolver, Object) {
 
      VMETHOD(load) = Resolver_load;
      VMETHOD(set_logger) = Resolver_set_logger;
+     VMETHOD(log) = Resolver_log;
      VMETHOD(flush) = Resolver_flush;
      VMETHOD(close) = Resolver_close;
 } END_VIRTUAL

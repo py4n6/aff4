@@ -87,6 +87,12 @@ Gen_wrapper *new_class_wrapper(Object item) {
    Gen_wrapper *result;
    Object cls;
 
+   // Return None for a NULL pointer
+   if(!item) {
+     Py_INCREF(Py_None);
+     return (Gen_wrapper *)Py_None;
+   };
+
    // Search for subclasses
    for(cls=(Object)item->__class__; cls != cls->__super__; cls=cls->__super__) {
      for(i=0; i<TOTAL_CLASSES; i++) {
@@ -993,10 +999,10 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
         out.write("""//Check for errors
          if(aff4_error != EZero) {
              PyErr_Format(resolve_exception(),
-                      "%s.%s: %%s", __error_str);
+                      "%s", __error_str);
              ClearError();
              goto error;
-         }""" % (self.myclass.class_name, self.name))
+         }""")
 
         out.write("\n// Postcall preparations\n")
         ## Postcall preparations
@@ -1363,13 +1369,28 @@ py_result = PyObject_CallMethodObjArgs(((%s)self)->proxied,method_name,""" % sel
         self.error_set = True
         out.write("""NULL);
 
-if(!py_result) {
-//   Raise(ERuntimeError, "Unable to call proxied method");
-   PyErr_WriteUnraisable(((%s)self)->proxied);
+/** Check for python errors */
+if(PyErr_Occurred()) {
+   PyObject *exception_t, *exception, *tb;
+   PyObject *str;
+   char *str_c;
+
+   // Fetch the exception state and convert it to a string:
+   PyErr_Fetch(&exception_t, &exception, &tb);
+
+   str = PyObject_Repr(exception);
+   str_c = PyString_AsString(str);
+
+   if(str_c) {
+      strncpy(__error_str, str_c, BUFF_SIZE-1);
+      __error_str[BUFF_SIZE-1]=0;
+      aff4_error = ERuntimeError;
+   };
+   Py_DECREF(str);
    goto error;
 };
 
-""" % self.myclass.class_name);
+""");
 
         ## Now convert the python value back to a value
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
@@ -1496,9 +1517,24 @@ if(!py_result && PyCallable_Check(this->proxied)) {
    py_result = PyObject_CallFunctionObjArgs(((%(name)s)self)->proxied, %(call)s);
 };
 
-if(!py_result) {
-//   Raise(ERuntimeError, "Unable to call proxied method");
-   PyErr_WriteUnraisable(((%(name)s)self)->proxied);
+/** Check for python errors */
+if(PyErr_Occurred()) {
+   PyObject *exception_t, *exception, *tb;
+   PyObject *str;
+   char *str_c;
+
+   // Fetch the exception state and convert it to a string:
+   PyErr_Fetch(&exception_t, &exception, &tb);
+
+   str = PyObject_Repr(exception);
+   str_c = PyString_AsString(str);
+
+   if(str_c) {
+      strncpy(__error_str, str_c, BUFF_SIZE-1);
+      __error_str[BUFF_SIZE-1]=0;
+      aff4_error = ERuntimeError;
+   };
+   Py_DECREF(str);
    goto error;
 };
 

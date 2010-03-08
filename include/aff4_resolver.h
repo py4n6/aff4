@@ -271,6 +271,11 @@ CLASS(Resolver, Object)
        */
        void METHOD(Resolver, set_logger, Logger logger);
 
+       /** A generic interface to the logger allows any code to send
+           messages to the provided logger.
+       */
+       void METHOD(Resolver, log, int level, char *service, RDFURN subject, char *messages);
+
        /** This closes and frees all memory used by the resolver.
 
            This is generally needed after forking as two resolvers can

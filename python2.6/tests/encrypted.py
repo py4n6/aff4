@@ -5,32 +5,24 @@ time.sleep(1)
 
 oracle = pyaff4.Resolver()
 
+CERT_LOCATION = os.getcwd() + "/tests/sign.key"
+
+## For this test make sure there are certs:
+try:
+    data = open(CERT_LOCATION).read()
+except IOError:
+    print "Creating certs on %s" % CERT_LOCATION
+    os.system("openssl req -x509 -newkey rsa:1024 -keyout %s -out %s -nodes" %(
+            CERT_LOCATION, CERT_LOCATION))
+
 class SecurityProvider:
     """ This is a demonstration security provider object which will be
     called by the AFF4 library to get keying material for different
     streams.
     """
-    CERT_LOCATION = "/tmp/sign.key"
-
-    def make_cert(self):
-        try:
-            data = open(self.CERT_LOCATION).read()
-        except IOError:
-            os.system("openssl req -x509 -newkey rsa:1024 -keyout %s -out %s -nodes" %(
-                    self.CERT_LOCATION, self.CERT_LOCATION))
-            data = open(self.CERT_LOCATION).read()
-
-        return data
-
     def passphrase(self, cipher, subject):
         print "Setting passphrase for subject %s" % subject.value
         return "Hello"
-
-    def x509_cert(self, cipher, subject):
-        """ Returns the location of the x509 certificate to use with the subject """
-        self.make_cert()
-        ## This is a test - we just use a self signed pair
-        return "file://%s" % self.CERT_LOCATION
 
     def x509_private_key(self, cert_name):
         """ Returns the private key (in pem format) for the certificate name provided. """
@@ -78,10 +70,13 @@ encrypted = oracle.create(pyaff4.AFF4_ENCRYTED)
 encrypted.set(pyaff4.AFF4_STORED, volume_urn)
 encrypted.set(pyaff4.AFF4_TARGET, image_urn)
 
-## Set the password - this will invoke the security manager to key the
-## cipher.
-#cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_X509)
-cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
+## Set the certificate:
+cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_X509)
+cert_urn = pyaff4.RDFURN()
+cert_urn.set(CERT_LOCATION)
+cipher.set_authority(cert_urn)
+
+#cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
 encrypted.set(pyaff4.AFF4_CIPHER, cipher)
 
 encrypted = encrypted.finish()

@@ -156,6 +156,15 @@ END_CLASS
    manager is used to get both the certificate and the private keys.
 **/
 CLASS(AES256X509, AES256Password)
+/**
+    This method is used to set the authority (X509 certificate) of
+    this object. The location is a URL for the X509 certificate.
+
+    return 1 on success, 0 on failure.
+**/
+     X509 *authority;
+     RDFURN location;
+     int METHOD(AES256X509, set_authority, RDFURN location);
 END_CLASS
 
 /**

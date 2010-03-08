@@ -148,7 +148,7 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
   // Start fresh
   memset(&encoding, 0, sizeof(encoding));
 
-// We just reuse the same IV as the master key
+  // We just reuse the same IV as the master key
   memcpy(encoding.iv, pthis->master_key->iv.dptr, sizeof(encoding.iv));
 
   passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
@@ -380,64 +380,138 @@ static int check_keys(EVP_PKEY *privkey, EVP_PKEY *pubkey) {
   return 1;
 };
 
+/* Utility function to seal a key (encrypt it using the public key) */
+static int seal_buffer(AES256X509 self, EVP_PKEY *pubkey, char *iv,
+                       char *inbuff, int in_size,
+                       char *outbuff, int *outbuff_size) {
+  EVP_CIPHER_CTX cipher_ctx;
+  AFF4Cipher this = (AFF4Cipher)self;
+  unsigned char *ek_array[2];
+  int ek_size = 1;
+  int i=0, written = 0;
+
+  ek_array[0] = inbuff;
+  if(!EVP_SealInit(&cipher_ctx, EVP_aes_256_cbc(),ek_array,&ek_size,
+                   iv, &pubkey,1)) {
+    RaiseError(ERuntimeError, "EVP_SealInit failed");
+    goto error;
+  };
+
+  // Now encrypt the master key
+  if(!EVP_SealUpdate(&cipher_ctx,
+                     outbuff, &i,
+                     inbuff, in_size)) {
+    RaiseError(ERuntimeError, "EVP_SealUpdate failed");
+    goto error;
+  };
+
+  written += i;
+
+  // Finish up
+  if(!EVP_SealFinal(&cipher_ctx, outbuff + i, &written)) {
+    RaiseError(ERuntimeError, "EVP_SealFinal failed");
+    goto error;
+  };
+
+  written += i;
+  *outbuff_size = written;
+
+  return 1;
+
+ error:
+  return 0;
+};
+
+/* Utility function to open a key (decrypt it using the public key) */
+static int open_key(AES256X509 self, EVP_PKEY *privkey, char *iv,
+                       char *inbuff, int in_size,
+                       char *outbuff, int *outbuff_size) {
+  EVP_CIPHER_CTX cipher_ctx;
+  AFF4Cipher this = (AFF4Cipher)self;
+  unsigned char *ek_array[2];
+  int ek_size = 1;
+
+  ek_array[0] = inbuff;
+  if(!EVP_OpenInit(&cipher_ctx, EVP_aes_256_cbc(),ek_array, 1,
+                   iv, privkey)) {
+    RaiseError(ERuntimeError, "EVP_SealInit failed");
+    goto error;
+  };
+
+  // Now encrypt the master key
+  if(!EVP_SealUpdate(&cipher_ctx,
+                     outbuff, &outbuff_size,
+                     inbuff, in_size)) {
+    RaiseError(ERuntimeError, "EVP_SealUpdate failed");
+    goto error;
+  };
+
+  // Finish up
+  if(!EVP_SealFinal(&cipher_ctx, outbuff, &outbuff_size)) {
+    RaiseError(ERuntimeError, "EVP_SealFinal failed");
+    goto error;
+  };
+
+  return 1;
+
+ error:
+  return 0;
+};
+
+
 static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
   AES256Password this = (AES256Password)self;
-  AFF4Cipher pthis = (AFF4Cipher)pthis;
-  char *result;
-  X509 *cert;
-  // Make a large enough buffer here
-  int length = 10 *BUFF_SIZE;
-  char buff[length];
-  BIO *bio;
-  EVP_PKEY *pubkey;
-  char *cert_path;
-  RDFURN cert_URN;
+  AES256X509 xthis = (AES256X509)self;
+  AFF4Cipher pthis = (AFF4Cipher)self;
   FileLikeObject fd;
   struct aff4_cipher_data_t encoding;
+  EVP_PKEY *pubkey;
+  char buff[BUFF_SIZE];
+  int buff_size = BUFF_SIZE;
+  int i=0;
 
+  if(!xthis->authority) {
+    RaiseError(ERuntimeError, "No certificate set - you must call set_authority() before setting this RDFValue");
+    goto error;
+  };
+
+  // Get the key for encrypting this stream
   if(!pthis->master_key)
     pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
                                   ((AFF4Cipher)self)->type, subject, 1);
 
+  /** We serialise like this:
+      unsigned char master_iv[]
+      unsigned char sealing_iv[]
+      unsigned char sealed_buffer[]
+  */
+  memset(buff, 0, sizeof(buff));
+  memcpy(buff, pthis->master_key->iv.dptr, pthis->master_key->iv.dsize);
+  i = pthis->master_key->iv.dsize;
+  buff_size -= i;
 
-  cert_path = CALL(AFF4_SECURITY_PROVIDER, x509_cert, self->dataType, subject);
-  if(!cert_path)
-    goto error;
-
-  cert_URN = new_RDFURN(self);
-  CALL(cert_URN, set, cert_path);
-
-  // Make up some random keys and IVs
-  if(RAND_bytes(encoding.iv, sizeof(encoding.iv)) !=1 &&
-     RAND_pseudo_bytes(encoding.iv, sizeof(encoding.iv)) != 1) {
-    RaiseError(ERuntimeError, "Unable to make random key");
-    goto error;
-  };
-
-  fd = (FileLikeObject)CALL(oracle, open, cert_URN, 'r');
-  if(!fd) goto error;
-
-  length = CALL(fd, read, buff, length);
-  if(length <0) goto error;
-  buff[length]=0;
-
-  CALL((AFFObject)fd, cache_return);
-
-  // Now try to parse it as an X509 cert
-  bio = BIO_new_mem_buf(buff, length);
-  if(!bio) goto error;
-  //PEM_read_bio_X509(bio,&cert,0,0);
-  BIO_free(bio);
-
-  if(!cert) {
-    RaiseError(ERuntimeError, "Unable to parse %s as a pem encoded x509 certificate",
-               cert_URN->value);
+  pubkey = X509_get_pubkey(xthis->authority);
+  if(!pubkey) {
+    RaiseError(ERuntimeError, "Unable to get public key from cert %s", xthis->authority->name);
     goto error;
   };
 
-  pubkey = X509_get_pubkey(cert);
+  if(!seal_buffer(xthis, pubkey, buff + i,
+                  TDB_DATA_STRING(pthis->master_key->data),
+                  buff + i + EVP_MAX_IV_LENGTH, &buff_size))
+    goto error;
 
-  return CALL(cert_URN->parser, string, NULL);
+  // Serialise into the location
+  {
+    char out_buff[BUFF_SIZE];
+    int out_buff_size = BUFF_SIZE;
+
+    encode64(buff, i + EVP_MAX_IV_LENGTH + buff_size, out_buff, out_buff_size);
+
+    xthis->location->parser->fragment = talloc_strdup(xthis->location->parser, out_buff);
+  };
+
+  return CALL(xthis->location->parser, string, NULL);
 
  error:
   return NULL;
@@ -446,10 +520,16 @@ static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
 static int AES256X509_decode(RDFValue self, char *data, int length,
                                  RDFURN subject) {
   AES256Password this = (AES256Password)self;
+  AFF4Cipher pthis = (AFF4Cipher)self;
   unsigned char key[AES256_KEY_SIZE];
   char *passphrase;
   uint32_t round_number;
   RDFURN cert_URN = new_RDFURN(self);
+
+  // Get the key for encrypting this stream
+  if(!pthis->master_key)
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
+                                  ((AFF4Cipher)self)->type, subject, 0);
 
   CALL(cert_URN, set, data);
 
@@ -460,6 +540,37 @@ static int AES256X509_decode(RDFValue self, char *data, int length,
 };
 
 
+static int AES256X509_set_authority(AES256X509 self, RDFURN location) {
+  FileLikeObject fd = CALL(oracle, open, location, 'r');
+  BIO *bio;
+  char *buff;
+
+  // Make sure the file is a reasonable size
+  if(!fd) goto error;
+  if(fd->size->value > 1024*1024) goto msg_error;
+
+  buff = CALL(fd, get_data);
+  if(!buff) goto error;
+
+  // Now try to parse it as an X509 cert
+  bio = BIO_new_mem_buf(buff, fd->size->value);
+  if(!bio) goto error;
+  self->authority = PEM_read_bio_X509(bio,NULL,0,0);
+  BIO_free(bio);
+
+  if(!self->authority) goto msg_error;
+
+  self->location = CALL(location, copy, self);
+
+  return 1;
+
+  msg_error:
+    RaiseError(ERuntimeError, "Location %s does not appear to contain a PEM encoded X509 certificate", location->value);
+
+ error:
+  return 0;
+};
+
   /** X509 base certs */
 VIRTUAL(AES256X509, AES256Password) {
   VMETHOD_BASE(RDFValue, dataType) = AFF4_AES256_X509;
@@ -468,6 +579,8 @@ VIRTUAL(AES256X509, AES256Password) {
 
   VMETHOD_BASE(RDFValue, serialise) = AES256X509_serialise;
   VMETHOD_BASE(RDFValue, decode) = AES256X509_decode;
+
+  VMETHOD_BASE(AES256X509, set_authority) = AES256X509_set_authority;
 } END_VIRTUAL
 
   /** Following is the implementation of the Encrypted stream */
@@ -722,6 +835,7 @@ void encrypt_init() {
   INIT_CLASS(AES256Password);
   INIT_CLASS(AES256X509);
   INIT_CLASS(Encrypted);
+  INIT_CLASS(Key);
 
   register_type_dispatcher(AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
