@@ -61,6 +61,12 @@ CLASS(SecurityProvider, Object)
 */
      char *METHOD(SecurityProvider, passphrase,              \
                   char *cipher_type, struct RDFURN_t *subject);
+
+     /* This method should return the location (URL) of the
+        certificate that will be used to encrypt the data. */
+     char *METHOD(SecurityProvider, x509_cert,  \
+                  char *cipher_type, struct RDFURN_t *subject);
+
 END_CLASS
 
      /** Allow the user to make their own class */
@@ -78,11 +84,30 @@ extern SecurityProvider AFF4_SECURITY_PROVIDER;
 *************************************************************/
 #include <openssl/aes.h>
 
+CLASS(Key, Object)
+    char *type;
+    TDB_DATA data;
+    TDB_DATA iv;
+    /** Create a new key for the subject specified of the type
+        specified.
+
+        If create is specified we create a new key if it is not found
+        in the cache.
+    */
+    Key METHOD(Key, Con, char *type, RDFURN subject, int create);
+END_CLASS
+
 /** This is the abstract cipher class - all ciphers must implement
     these methods.
 */
 CLASS(AFF4Cipher, RDFValue)
        int blocksize;
+
+       // A type string which identifies the cipher
+       char *type;
+
+       // This contains the key for this cipher
+       Key master_key;
 
        int METHOD(AFF4Cipher, encrypt, int chunk_number,         \
                   unsigned char *inbuff,                         \
@@ -99,27 +124,38 @@ END_CLASS
 
 #define AES256_KEY_SIZE 32
 
-/** The following is information which should be serialised - its
-    public and not secret at all */
-struct aff4_cipher_data_t {
-  unsigned char iv[AES_BLOCK_SIZE];
-
-  // The nonce is the IV encrypted using the key
-  unsigned char nonce[AES_BLOCK_SIZE];
-};
+struct aff4_cipher_data_t;
 
 /** The following are some default ciphers */
 
-/** This cipher uses AES256. The session key is derived from a
-    password using the PBKDF2 algorithm. The round number is derived
-    from the iv: round_number = (unsigned char)iv[0] << 24
+/**
+   This cipher uses AES256. The session key is derived from a
+   password using the PBKDF2 algorithm. The round number is derived
+   from the iv: round_number = (unsigned char)iv[0] << 8
 
-    Password is obtained from the security manager.
-*/
+   The key is obtained from PKCS5_PBKDF2_HMAC_SHA1(password, iv, round_number).
+
+   Password is obtained from the security manager.
+
+   The serialised form is a base64 encoded version struct
+   aff4_cipher_data_t (above). Where the nonce is the iv encrypted
+   using the key.
+**/
 CLASS(AES256Password, AFF4Cipher)
   AES_KEY ekey;
   AES_KEY dkey;
-  struct aff4_cipher_data_t *pub;
+END_CLASS
+
+/**
+   This cipher uses AES256.
+
+
+   The serialised form is the url of the x509 certificate that was
+   used to encrypt the key, with the base64 encoded struct
+   aff4_cipher_data_t being encoded as the query string. The security
+   manager is used to get both the certificate and the private keys.
+**/
+CLASS(AES256X509, AES256Password)
 END_CLASS
 
 /**

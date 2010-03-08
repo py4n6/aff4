@@ -166,8 +166,11 @@
 
 /** Cryptography related names */
 #define AFF4_CIPHER PREDICATE_NAMESPACE "cipher"
-#define AFF4_AES256_PASSWORD PREDICATE_NAMESPACE "aes256-password"
 
+/** A cipher that uses a password */
+#define AFF4_AES256_PASSWORD PREDICATE_NAMESPACE "aes256-password"
+/* A cipher that uses x509 certs */
+#define AFF4_AES256_X509     PREDICATE_NAMESPACE "aes256-x509"
 
 /** The following are endoresed vocabulary for storing common forensic
     properties.

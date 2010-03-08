@@ -10,16 +10,37 @@ class SecurityProvider:
     called by the AFF4 library to get keying material for different
     streams.
     """
+    CERT_LOCATION = "/tmp/sign.key"
+
+    def make_cert(self):
+        try:
+            data = open(self.CERT_LOCATION).read()
+        except IOError:
+            os.system("openssl req -x509 -newkey rsa:1024 -keyout %s -out %s -nodes" %(
+                    self.CERT_LOCATION, self.CERT_LOCATION))
+            data = open(self.CERT_LOCATION).read()
+
+        return data
+
     def passphrase(self, cipher, subject):
         print "Setting passphrase for subject %s" % subject.value
         return "Hello"
+
+    def x509_cert(self, cipher, subject):
+        """ Returns the location of the x509 certificate to use with the subject """
+        self.make_cert()
+        ## This is a test - we just use a self signed pair
+        return "file://%s" % self.CERT_LOCATION
+
+    def x509_private_key(self, cert_name):
+        """ Returns the private key (in pem format) for the certificate name provided. """
+        return self.make_cert()
 
 ## This registers the security provider
 oracle.register_security_provider(pyaff4.ProxiedSecurityProvider(SecurityProvider()))
 
 url = pyaff4.RDFURN()
 url.set("/tmp/test.zip")
-
 
 try:
     url.set(sys.argv[1])
@@ -59,10 +80,12 @@ encrypted.set(pyaff4.AFF4_TARGET, image_urn)
 
 ## Set the password - this will invoke the security manager to key the
 ## cipher.
+#cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_X509)
 cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
 encrypted.set(pyaff4.AFF4_CIPHER, cipher)
 
 encrypted = encrypted.finish()
+encrypted_urn = encrypted.urn
 
 print "Encrypted URN: %s" % encrypted.urn.value
 
@@ -80,3 +103,8 @@ image.close()
 
 volume = oracle.open(volume_urn, 'w')
 volume.close()
+
+## Check the data
+fd = oracle.open(encrypted_urn, 'r')
+print fd.read(10)
+fd.cache_return()

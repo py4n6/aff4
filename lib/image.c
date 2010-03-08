@@ -123,7 +123,6 @@ static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
   int result;
   FileLikeObject bevy;
-  int bevy_size = this->bevy->size;
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -245,7 +244,7 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
       goto error;
     } else {
       // Make sure we can actually open the containing volume
-      AFF4Volume volume = CALL(oracle, open, this->stored, mode);
+      AFF4Volume volume = (AFF4Volume)CALL(oracle, open, this->stored, mode);
       if(!volume) goto error;
       CALL((AFFObject)volume, cache_return);
     };

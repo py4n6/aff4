@@ -46,3 +46,4 @@ pyaff4.c
 .sconsign*
 paper/
 talloc_test
+python2.6/tests/sign.key

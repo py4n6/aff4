@@ -9,63 +9,194 @@ VIRTUAL(AFF4Cipher, RDFValue) {
 
 SecurityProvider AFF4_SECURITY_PROVIDER=NULL;
 
+/* The key cache is a store of keys for each encrypted stream. We need
+   this because some cipher encoders have no way to decode the key
+   (e.g. when encrypting we only need to the x509 pub key and may not
+   have the private key.
+
+   When decoding or encoding the key, all Ciphers will look in the key
+   cache first for the required key. If it is found they will not
+   make a new key but reuse the old one.
+
+   This technique allows two different ciphers to encode the same key
+   in different ways. For example suppose a new Encrypted stream is
+   created:
+
+   cipher = oracle.new_rdfvalue(AFF4_AES256_PASSWORD)
+   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher)
+
+   Since there is no key set at this point, the cipher will make a new
+   key and serialise the key using the password protocol. If we wish
+   to encode the same key using x509 now:
+
+   cipher = oracle.new_rdfvalue(AFF4_AES256_X509)
+   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher)
+
+   This will now ensure that the very same key is encoded using the
+   cert scheme because the key is already in cache. A new key will not
+   be generated and the same key is reused.
+
+   Similarly, suppose an Encrypted stream is encoded using
+   AFF4_AES256_PASSWORD scheme already. We have a public x509 cert and
+   we wish to encode using that:
+
+   encrypted = oracle.open(urn, 'r')
+
+   This will open the encrypted stream, and unlock the key (using the
+   passphrase interface for SecurityProvider. Now we just do:
+
+   cipher = oracle.new_rdfvalue(AFF4_AES256_X509)
+   encrypted.add(AFF4_CIPHER, cipher)
+
+   Since the key is already unlocked and in the cache above, the new
+   cipher will just get it from the cache and encode it using the cert
+   scheme.
+*/
+static Cache KeyCache = NULL;
+
+static Key Key_Con(Key self, char *type, RDFURN subject, int create) {
+  Object iter = CALL(KeyCache, iter, ZSTRING(subject->value));
+
+  while(iter) {
+    Key key = (Key)CALL(KeyCache, next, &iter);
+    if(key && !strcmp(type, key->type)) {
+      return key;
+    };
+  };
+
+  if(!create) goto error;
+
+  // If we get here there is no key in the cache:
+  // Make a new key which should be big enough for everything
+  self->data.dsize = EVP_MAX_KEY_LENGTH;
+  self->data.dptr = talloc_size(self, self->data.dsize);
+  self->iv.dsize = EVP_MAX_KEY_LENGTH;
+  self->iv.dptr = talloc_size(self, self->iv.dsize);
+  self->type = talloc_strdup(self, type);
+
+  if(RAND_bytes(self->data.dptr, self->data.dsize) !=1 &&
+     RAND_pseudo_bytes(self->data.dptr, self->data.dsize) != 1) {
+    RaiseError(ERuntimeError, "Unable to make random key");
+    goto error;
+  };
+
+  if(RAND_bytes(self->iv.dptr, self->iv.dsize) !=1 &&
+     RAND_pseudo_bytes(self->iv.dptr, self->iv.dsize) != 1) {
+    RaiseError(ERuntimeError, "Unable to make random key");
+    goto error;
+  };
+
+  // Now add ourselves to the key cache
+  CALL(KeyCache, put, ZSTRING(subject->value), (Object)self);
+
+  return self;
+
+ error:
+  talloc_free(self);
+  return NULL;
+};
+
+VIRTUAL(Key, Object) {
+  VMETHOD(Con) = Key_Con;
+} END_VIRTUAL
+
+
+/** The following is information which should be serialised - its
+    public and not secret at all */
+struct aff4_cipher_data_t {
+  unsigned char iv[AES_BLOCK_SIZE];
+  unsigned char nonce[AES_BLOCK_SIZE];
+
+  /* The nonce is the master key encrypted using the
+     PKCS5_PBKDF2_HMAC_SHA1 generated key
+  */
+  unsigned char key[AES256_KEY_SIZE];
+};
+
 /* When we serialise the keys we need to encrypt them with the
    passphrase.
+
+   We first come up with a random IV, then derive a round number. A
+   new password key is derived using PKCS5_PBKDF2_HMAC_SHA1. Finally
+   the password key is used to encrypt the master key and a nonce of
+   zeros.
+
+   We serialize the struct:
+   unsigned char iv[16]
+   unsigned char nonce[16]
+   unsigned char key[32]
+
 */
 static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
   AES256Password this = (AES256Password)self;
+  AFF4Cipher pthis = (AFF4Cipher)self;
   char *result;
-  unsigned char key[AES256_KEY_SIZE];
+  char *passphrase;
+  uint32_t round_number;
+  struct aff4_cipher_data_t encoding;
+  unsigned char tmp_key[AES256_KEY_SIZE];
+  AES_KEY password_key;
 
-  if(!this->pub) {
-    char *passphrase;
-    uint32_t round_number;
+  if(!pthis->master_key)
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
+                                  ((AFF4Cipher)self)->type, subject, 1);
 
-    this->pub = talloc(self, struct aff4_cipher_data_t);
+  // Set out encryption keys from the master key:
+  AES_set_encrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->ekey);
+  AES_set_decrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->dkey);
 
-    // Make up some random keys and IVs
-    if(RAND_bytes(this->pub->iv, sizeof(this->pub->iv)) !=1 &&
-       RAND_pseudo_bytes(this->pub->iv, sizeof(this->pub->iv)) != 1) {
-      RaiseError(ERuntimeError, "Unable to make random key");
-      goto error;
-    };
+  // Start fresh
+  memset(&encoding, 0, sizeof(encoding));
 
-    passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
-    if(!passphrase) {
-      if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
-      goto error;
-    };
+// We just reuse the same IV as the master key
+  memcpy(encoding.iv, pthis->master_key->iv.dptr, sizeof(encoding.iv));
 
-    // Now make the key
-    round_number = ((uint32_t)this->pub->iv[0]) << 8;
-    PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
-                           this->pub->iv, sizeof(this->pub->iv),
-                           round_number,
-                           sizeof(key), key);
-
-    AES_set_encrypt_key(key, sizeof(key) * 8, &this->ekey);
-    AES_set_decrypt_key(key, sizeof(key) * 8, &this->dkey);
-
-    // The nonce is the iv encrypted using the key from the password
-    CALL((AFF4Cipher)self, encrypt, 0,
-         this->pub->iv, sizeof(this->pub->iv),
-         this->pub->nonce, sizeof(this->pub->nonce));
+  passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
+  if(!passphrase) {
+    if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
+    goto error;
   };
 
-  // Make enough room for encoding the iv and nonce:
-  result = talloc_zero_size(self, sizeof(*this->pub) * 2);
-  encode64((unsigned char *)this->pub, sizeof(*this->pub),
+  // Now make the key
+  round_number = ((uint32_t)encoding.iv[0]) << 8;
+  PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
+                         encoding.iv, sizeof(encoding.iv),
+                         round_number,
+                         sizeof(tmp_key), tmp_key);
+
+  AES_set_encrypt_key(tmp_key, AES256_KEY_SIZE * 8, &password_key);
+
+  // Encrypt the master key with the password key
+  AES_cbc_encrypt(pthis->master_key->data.dptr, encoding.key,
+                  AES256_KEY_SIZE, &password_key,
+                  encoding.iv, AES_ENCRYPT);
+
+  // Recopy the iv back (the iv is updated in CBC mode)
+  memcpy(encoding.iv, pthis->master_key->iv.dptr, sizeof(encoding.iv));
+
+  // The nonce is just a bunch of zeros encrypted using the master key
+  {
+    unsigned char buff[AES256_KEY_SIZE];
+    memset(buff, 0, AES256_KEY_SIZE);
+
+    AES_cbc_encrypt(buff, encoding.nonce,
+                    sizeof(encoding.nonce), &password_key,
+                    encoding.iv, AES_ENCRYPT);
+
+    memcpy(encoding.iv, pthis->master_key->iv.dptr, sizeof(encoding.iv));
+  };
+
+  // We just serialise a base64 encoded version of the encoding struct:
+  result = talloc_zero_size(self, sizeof(encoding) * 2);
+  encode64((unsigned char *)&encoding, sizeof(encoding),
            (unsigned char *)result,
-           sizeof(*this->pub) * 2);
+           sizeof(encoding) * 2);
 
   return result;
 
  error:
-  talloc_free(this->pub);
-  this->pub = NULL;
   return NULL;
 };
-
 
 /** We do not consider the universal TDB resolver a secure
     storage. This is because the TDB files just live in the user's
@@ -80,48 +211,86 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
 static int AES256Password_decode(RDFValue self, char *data, int length,
                                  RDFURN subject) {
   AES256Password this = (AES256Password)self;
-  unsigned char key[AES256_KEY_SIZE];
+  AFF4Cipher pthis = (AFF4Cipher)self;
   char *passphrase;
   uint32_t round_number;
-  unsigned char buff[sizeof(this->pub->nonce)];
+  struct aff4_cipher_data_t encoding;
+  unsigned char tmp_key[AES256_KEY_SIZE];
+  AES_KEY password_key;
+  unsigned char iv[AES256_KEY_SIZE];
 
-  if(this->pub) {
-    talloc_free(this->pub);
+  // First try to pull the master key from the key cache - Note we do
+  // not create it here if it does not exist.
+  if(!pthis->master_key)
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
+                                  ((AFF4Cipher)self)->type, subject, 0);
+
+  // If we dont have a cached copy:
+  if(!pthis->master_key) {
+    // Now decode the encoding struct
+    length = decode64(data, length,
+                      (unsigned char *)&encoding, sizeof(encoding));
+    if(length != sizeof(struct aff4_cipher_data_t)) {
+      RaiseError(ERuntimeError, "Invalid data to decode");
+      goto error;
+    };
+
+    // Make a copy of the iv
+    memcpy(iv, encoding.iv, sizeof(encoding.iv));
+
+    passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
+    if(!passphrase) {
+      if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
+      goto error;
+    };
+
+    // Now make the password key
+    round_number = ((uint32_t)encoding.iv[0]) << 8;
+    PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
+                           encoding.iv, sizeof(encoding.iv),
+                           round_number,
+                           sizeof(tmp_key), tmp_key);
+
+    AES_set_decrypt_key(tmp_key, AES256_KEY_SIZE * 8, &password_key);
+
+    //Check the nonce now:
+    {
+      unsigned char buff[sizeof(encoding.nonce)];
+      int i;
+
+      AES_cbc_encrypt(encoding.nonce, buff, sizeof(buff), &password_key,
+                      encoding.iv, AES_DECRYPT);
+
+      for(i=0; i<sizeof(encoding.nonce); i++) {
+        if(buff[i] != 0) {
+        RaiseError(ERuntimeError,"Nonce does not decrypt");
+        goto error;
+        };
+      };
+    };
+
+    // If we get here - it all checks ok. We create a new master_key
+    // in the key cache and update its key. Note that the Key
+    // constructor will put this very object in the cache for us so we
+    // can modify this very object to update the cache.
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,
+                                  ((AFF4Cipher)self)->type, subject, 1);
+
+    // Copy the IV from the encoding
+    memcpy(pthis->master_key->iv.dptr, iv, pthis->master_key->iv.dsize);
+
+    // Decrypt the master key using the password_key - note this
+    // updates the iv due to the cbc mode:
+    AES_cbc_encrypt(encoding.key, pthis->master_key->data.dptr, AES256_KEY_SIZE,
+                    &password_key, iv, AES_DECRYPT);
   };
 
-  this->pub = talloc(self, struct aff4_cipher_data_t);
+  // Set our master key from the cached copy
+  AES_set_encrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->ekey);
+  AES_set_decrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->dkey);
 
-  // Decode the data into the pub:
-  if(decode64(data, length, (unsigned char *)this->pub,
-              sizeof(*this->pub)) != sizeof(*this->pub)) goto error;
+  return AES256_KEY_SIZE;
 
-  passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
-  if(!passphrase) {
-    if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
-    goto error;
-  };
-
-  // Now make the key
-  round_number = ((uint32_t)this->pub->iv[0]) << 8;
-  PKCS5_PBKDF2_HMAC_SHA1(ZSTRING_NO_NULL(passphrase),
-                         this->pub->iv, sizeof(this->pub->iv),
-                         round_number,
-                         sizeof(key), key);
-
-  // Set up keys before we can encrypt anything
-  AES_set_encrypt_key(key, sizeof(key) * 8, &this->ekey);
-  AES_set_decrypt_key(key, sizeof(key) * 8, &this->dkey);
-
-  // Now check that the key is right:
-  CALL((AFF4Cipher)self, encrypt, 0,
-       this->pub->iv, sizeof(this->pub->iv),
-       buff, sizeof(this->pub->nonce));
-  if(memcmp(buff, this->pub->nonce, sizeof(buff))) {
-    RaiseError(ERuntimeError, "Password does not match");
-    goto error;
-  };
-
-  return 1;
  error:
   return 0;
 };
@@ -131,17 +300,16 @@ int AES256Password_encrypt(AFF4Cipher self, int chunk_number,
                            unsigned long int inlen,
                            unsigned char *outbuff,
                            unsigned long int length) {
-  AES256Password this = (AES256Password)self;
-  unsigned char iv[sizeof(this->pub->iv)];
+  AFF4Cipher this = (AFF4Cipher)self;
+  AES256Password pthis = (AES256Password)self;
+  unsigned char iv[AES_BLOCK_SIZE];
 
-  if(!this->pub) goto error;
-
-  memcpy(iv, this->pub->iv, sizeof(this->pub->iv));
+  memcpy(iv, this->master_key->iv.dptr, sizeof(iv));
 
   // The block IV is made by xoring the iv with the chunk number
   *(uint32_t *)iv ^= chunk_number;
 
-  AES_cbc_encrypt(inbuff, outbuff, length, &this->ekey, iv, AES_ENCRYPT);
+  AES_cbc_encrypt(inbuff, outbuff, length, &pthis->ekey, iv, AES_ENCRYPT);
 
   return length;
  error:
@@ -154,17 +322,16 @@ int AES256Password_decrypt(AFF4Cipher self, int chunk_number,
                            unsigned long int inlen,
                            unsigned char *outbuf,
                            unsigned long int length) {
-  AES256Password this = (AES256Password)self;
-  unsigned char iv[sizeof(this->pub->iv)];
+  AFF4Cipher this = (AFF4Cipher)self;
+  AES256Password pthis = (AES256Password)self;
+  unsigned char iv[AES_BLOCK_SIZE];
 
-  if(!this->pub) goto error;
-
-  memcpy(iv, this->pub->iv, sizeof(this->pub->iv));
+  memcpy(iv, this->master_key->iv.dptr, sizeof(iv));
 
   // The block IV is made by xoring the iv with the chunk number
   *(uint32_t *)iv ^= chunk_number;
 
-  AES_cbc_encrypt(inbuff, outbuf, length, &this->dkey, iv, AES_DECRYPT);
+  AES_cbc_encrypt(inbuff, outbuf, length, &pthis->dkey, iv, AES_DECRYPT);
 
   return length;
 
@@ -176,13 +343,131 @@ int AES256Password_decrypt(AFF4Cipher self, int chunk_number,
 VIRTUAL(AES256Password, AFF4Cipher) {
      VMETHOD_BASE(RDFValue, dataType) = AFF4_AES256_PASSWORD;
      VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
+     VMETHOD_BASE(RDFValue, id) = 0;
 
      VMETHOD_BASE(RDFValue, serialise) = AES256Password_serialise;
      VMETHOD_BASE(RDFValue, decode) = AES256Password_decode;
 
+     VMETHOD_BASE(AFF4Cipher, type) = "aes256";
      VMETHOD_BASE(AFF4Cipher, blocksize) = AES_BLOCK_SIZE;
      VMETHOD_BASE(AFF4Cipher, encrypt) = AES256Password_encrypt;
      VMETHOD_BASE(AFF4Cipher, decrypt) = AES256Password_decrypt;
+} END_VIRTUAL
+
+
+static int check_keys(EVP_PKEY *privkey, EVP_PKEY *pubkey) {
+  char ptext[16];                     /* plaintext of a 128-bit
+                                         message */
+  unsigned char sig[1024];            /* signature; bigger than needed
+                                         */
+  unsigned int siglen = sizeof(sig);  /* length of signature */
+  EVP_MD_CTX md;                      /* EVP message digest */
+
+  /* make the plaintext message */
+  memset(ptext,0,sizeof(ptext));
+  strcpy(ptext,"Test Message");
+  EVP_SignInit(&md,EVP_sha256());
+  EVP_SignUpdate(&md,ptext,sizeof(ptext));
+  EVP_SignFinal(&md,sig,&siglen,privkey);
+
+  /* Verify the message */
+  EVP_VerifyInit(&md,EVP_sha256());
+  EVP_VerifyUpdate(&md,ptext,sizeof(ptext));
+  if(EVP_VerifyFinal(&md,sig,siglen,pubkey)!=1){
+    return 0;
+  }
+
+  return 1;
+};
+
+static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
+  AES256Password this = (AES256Password)self;
+  AFF4Cipher pthis = (AFF4Cipher)pthis;
+  char *result;
+  X509 *cert;
+  // Make a large enough buffer here
+  int length = 10 *BUFF_SIZE;
+  char buff[length];
+  BIO *bio;
+  EVP_PKEY *pubkey;
+  char *cert_path;
+  RDFURN cert_URN;
+  FileLikeObject fd;
+  struct aff4_cipher_data_t encoding;
+
+  if(!pthis->master_key)
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
+                                  ((AFF4Cipher)self)->type, subject, 1);
+
+
+  cert_path = CALL(AFF4_SECURITY_PROVIDER, x509_cert, self->dataType, subject);
+  if(!cert_path)
+    goto error;
+
+  cert_URN = new_RDFURN(self);
+  CALL(cert_URN, set, cert_path);
+
+  // Make up some random keys and IVs
+  if(RAND_bytes(encoding.iv, sizeof(encoding.iv)) !=1 &&
+     RAND_pseudo_bytes(encoding.iv, sizeof(encoding.iv)) != 1) {
+    RaiseError(ERuntimeError, "Unable to make random key");
+    goto error;
+  };
+
+  fd = (FileLikeObject)CALL(oracle, open, cert_URN, 'r');
+  if(!fd) goto error;
+
+  length = CALL(fd, read, buff, length);
+  if(length <0) goto error;
+  buff[length]=0;
+
+  CALL((AFFObject)fd, cache_return);
+
+  // Now try to parse it as an X509 cert
+  bio = BIO_new_mem_buf(buff, length);
+  if(!bio) goto error;
+  //PEM_read_bio_X509(bio,&cert,0,0);
+  BIO_free(bio);
+
+  if(!cert) {
+    RaiseError(ERuntimeError, "Unable to parse %s as a pem encoded x509 certificate",
+               cert_URN->value);
+    goto error;
+  };
+
+  pubkey = X509_get_pubkey(cert);
+
+  return CALL(cert_URN->parser, string, NULL);
+
+ error:
+  return NULL;
+};
+
+static int AES256X509_decode(RDFValue self, char *data, int length,
+                                 RDFURN subject) {
+  AES256Password this = (AES256Password)self;
+  unsigned char key[AES256_KEY_SIZE];
+  char *passphrase;
+  uint32_t round_number;
+  RDFURN cert_URN = new_RDFURN(self);
+
+  CALL(cert_URN, set, data);
+
+  return length;
+
+ error:
+  return 0;
+};
+
+
+  /** X509 base certs */
+VIRTUAL(AES256X509, AES256Password) {
+  VMETHOD_BASE(RDFValue, dataType) = AFF4_AES256_X509;
+  VMETHOD_BASE(RDFValue, id) = 0;
+  VMETHOD_BASE(RDFValue, raptor_literal_datatype) = NULL;
+
+  VMETHOD_BASE(RDFValue, serialise) = AES256X509_serialise;
+  VMETHOD_BASE(RDFValue, decode) = AES256X509_decode;
 } END_VIRTUAL
 
   /** Following is the implementation of the Encrypted stream */
@@ -199,7 +484,6 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
     this->stored = new_RDFURN(self);
     this->backing_store = new_RDFURN(self);
     this->block_buffer = CONSTRUCT(StringIO, StringIO, Con, self);
-    this->cipher = (AFF4Cipher)new_rdfvalue(self, AFF4_AES256_PASSWORD);
 
     // Some defaults
     this->chunk_size->value = 4*1024;
@@ -219,7 +503,11 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
       goto error;
     };
 
-    if(!CALL(oracle, resolve_value, uri, AFF4_CIPHER, (RDFValue)this->cipher)) {
+    this->cipher = (AFF4Cipher)CALL(oracle, resolve_alloc, self, uri, AFF4_CIPHER);
+    if(!this->cipher) {
+      if(aff4_error == EZero) {
+        RaiseError(ERuntimeError, "Unable to resolve a cipher for Encrypted stream");
+      };
       goto error;
     };
 
@@ -373,6 +661,13 @@ static int Encrypted_close(FileLikeObject self) {
 	 (RDFValue)time);
   };
 
+  // Finally we flush the key from the Key_Cache. If we reopen it for
+  // reading we will need to re-decode it now.
+  {
+    Key key = CALL(KeyCache, get, ZSTRING(URNOF(this)->value));
+    if(key) talloc_unlink(NULL, key);
+  };
+
   return SUPER(FileLikeObject, FileLikeObject, close);
 };
 
@@ -397,10 +692,11 @@ char *SecurityProvider_passphrase(SecurityProvider self, char *cipher_type,
   char *pass = getenv(AFF4_ENV_PASSPHRASE);
 
   if(pass) {
+    /*
     AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_CRYPTO_SUBSYS,
              subject,
              "Reading passphrase from enviornment");
-
+    */
     return talloc_strdup(NULL, pass);
   } else {
     AFF4_LOG(AFF4_LOG_NONFATAL_ERROR, AFF4_SERVICE_ENCRYPTED_STREAM,
@@ -424,11 +720,15 @@ void encrypt_init() {
 
   INIT_CLASS(AFF4Cipher);
   INIT_CLASS(AES256Password);
+  INIT_CLASS(AES256X509);
   INIT_CLASS(Encrypted);
 
   register_type_dispatcher(AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
+  register_rdf_value_class((RDFValue)GETCLASS(AES256X509));
 
   // Initialise the provider with the default:
   AFF4_SECURITY_PROVIDER = CONSTRUCT(SecurityProvider, SecurityProvider, Con, NULL);
+
+  KeyCache = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
 };
