@@ -1,7 +1,11 @@
 #include <openssl/ssl.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
+#include <openssl/err.h>
 #include "aff4.h"
+
+#define OpenSSL_error                           \
+  RaiseError(ERuntimeError, "%s", ERR_error_string(ERR_get_error(), NULL))
 
 // Abstract type which is a base type for all ciphers.
 VIRTUAL(AFF4Cipher, RDFValue) {
@@ -189,8 +193,7 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
   // We just serialise a base64 encoded version of the encoding struct:
   result = talloc_zero_size(self, sizeof(encoding) * 2);
   encode64((unsigned char *)&encoding, sizeof(encoding),
-           (unsigned char *)result,
-           sizeof(encoding) * 2);
+           result, sizeof(encoding) * 2);
 
   return result;
 
@@ -312,9 +315,6 @@ int AES256Password_encrypt(AFF4Cipher self, int chunk_number,
   AES_cbc_encrypt(inbuff, outbuff, length, &pthis->ekey, iv, AES_ENCRYPT);
 
   return length;
- error:
-  RaiseError(ERuntimeError, "No key initialised??");
-  return 0;
 };
 
 int AES256Password_decrypt(AFF4Cipher self, int chunk_number,
@@ -334,10 +334,6 @@ int AES256Password_decrypt(AFF4Cipher self, int chunk_number,
   AES_cbc_encrypt(inbuff, outbuf, length, &pthis->dkey, iv, AES_DECRYPT);
 
   return length;
-
- error:
-  RaiseError(ERuntimeError, "No key initialised??");
-  return 0;
 };
 
 VIRTUAL(AES256Password, AFF4Cipher) {
@@ -380,95 +376,140 @@ static int check_keys(EVP_PKEY *privkey, EVP_PKEY *pubkey) {
   return 1;
 };
 
+static int open_buffer(AES256X509 self, unsigned char *buff, int in_size, unsigned char *key) {
+  char *pkey_pem;
+  EVP_PKEY *privkey = NULL;
+  BIO *bio;
+
+  // Obtain the private key
+  {
+    // Now ask the SecurityProvider for the private key for this
+    pkey_pem = CALL(AFF4_SECURITY_PROVIDER, x509_private_key, self->authority->name,
+                    NULL);
+
+    if(!pkey_pem) {
+      if(aff4_error == EZero)
+        RaiseError(ERuntimeError, "Unable to get private key for cert %s",
+                   self->authority->name);
+      goto error;
+    };
+
+    // Now try to parse it as an X509 private key
+    bio = BIO_new_mem_buf(ZSTRING(pkey_pem));
+    if(!bio) goto error;
+    privkey = PEM_read_bio_PrivateKey(bio,NULL,0,0);
+    BIO_free(bio);
+
+    if(!privkey) {
+      RaiseError(ERuntimeError, "SecurityProvider did not provide a valid private key");
+      goto error;
+    };
+  };
+
+  // Try to decode the sealed master key
+  if(privkey) {
+    unsigned char *iv = buff;
+    unsigned char *i = buff + EVP_MAX_IV_LENGTH;
+    EVP_CIPHER_CTX cipher_ctx;
+    int size = in_size - EVP_MAX_IV_LENGTH;
+
+    size = EVP_PKEY_size(privkey);
+    if(!EVP_OpenInit(&cipher_ctx, EVP_aes_256_cbc(),i,
+                     size, iv, privkey)) {
+      OpenSSL_error;
+      goto error;
+    };
+
+    i += size;
+    size = in_size - (i-buff);
+    if(!EVP_OpenUpdate(&cipher_ctx, key,
+                       &size,i , size)) {
+      OpenSSL_error;
+      goto error;
+    };
+
+    i+=size;
+    size = in_size - (i-buff);
+    if(!EVP_OpenFinal(&cipher_ctx, i, &size)) {
+      OpenSSL_error;
+      goto error;
+    };
+  };
+
+  return 1;
+
+ error:
+  return 0;
+};
+
 /* Utility function to seal a key (encrypt it using the public key) */
-static int seal_buffer(AES256X509 self, EVP_PKEY *pubkey, char *iv,
-                       char *inbuff, int in_size,
-                       char *outbuff, int *outbuff_size) {
+static int seal_buffer(AES256X509 self, EVP_PKEY *pubkey,
+                       unsigned char *inbuff, int in_size,
+                       unsigned char *outbuff, int *outbuff_size) {
   EVP_CIPHER_CTX cipher_ctx;
-  AFF4Cipher this = (AFF4Cipher)self;
   unsigned char *ek_array[2];
-  int ek_size = 1;
-  int i=0, written = 0;
+  int ek_size = *outbuff_size;
+  unsigned char *wrt_ptr = outbuff + EVP_MAX_IV_LENGTH;
+  unsigned char *iv_array = outbuff;
 
-  ek_array[0] = inbuff;
+  ek_array[0] = wrt_ptr;
   if(!EVP_SealInit(&cipher_ctx, EVP_aes_256_cbc(),ek_array,&ek_size,
-                   iv, &pubkey,1)) {
-    RaiseError(ERuntimeError, "EVP_SealInit failed");
+                   iv_array, &pubkey,1)) {
+    OpenSSL_error;
     goto error;
   };
+
+  wrt_ptr += ek_size;
+  ek_size = in_size;
 
   // Now encrypt the master key
   if(!EVP_SealUpdate(&cipher_ctx,
-                     outbuff, &i,
+                     wrt_ptr, &ek_size,
                      inbuff, in_size)) {
-    RaiseError(ERuntimeError, "EVP_SealUpdate failed");
+    OpenSSL_error;
     goto error;
   };
 
-  written += i;
+  wrt_ptr += ek_size;
+  ek_size = *outbuff_size - (wrt_ptr - outbuff);
 
   // Finish up
-  if(!EVP_SealFinal(&cipher_ctx, outbuff + i, &written)) {
-    RaiseError(ERuntimeError, "EVP_SealFinal failed");
+  if(!EVP_SealFinal(&cipher_ctx, wrt_ptr, &ek_size)) {
+    OpenSSL_error;
     goto error;
   };
 
-  written += i;
-  *outbuff_size = written;
+  wrt_ptr += ek_size;
+  *outbuff_size = wrt_ptr - outbuff;
 
-  return 1;
+  return *outbuff_size;
 
  error:
   return 0;
 };
 
-/* Utility function to open a key (decrypt it using the public key) */
-static int open_key(AES256X509 self, EVP_PKEY *privkey, char *iv,
-                       char *inbuff, int in_size,
-                       char *outbuff, int *outbuff_size) {
-  EVP_CIPHER_CTX cipher_ctx;
-  AFF4Cipher this = (AFF4Cipher)self;
-  unsigned char *ek_array[2];
-  int ek_size = 1;
+/**
+   This uses X509 sealing to seal the private key.  Sealing is
+   performed with openssl EVP_Seal* API. The data structure we produce
+   is:
 
-  ek_array[0] = inbuff;
-  if(!EVP_OpenInit(&cipher_ctx, EVP_aes_256_cbc(),ek_array, 1,
-                   iv, privkey)) {
-    RaiseError(ERuntimeError, "EVP_SealInit failed");
-    goto error;
-  };
+   unsigned char *IV;
+   unsigned char *sealing_iv;
+   unsigned char *sealed_buffer;
 
-  // Now encrypt the master key
-  if(!EVP_SealUpdate(&cipher_ctx,
-                     outbuff, &outbuff_size,
-                     inbuff, in_size)) {
-    RaiseError(ERuntimeError, "EVP_SealUpdate failed");
-    goto error;
-  };
+   The IV is a constant IV which is the basis of the block encryption
+   (and is the same for all cipher objects and encodings). The act of
+   sealing creates a sealing IV and stores the envelope in a sealed
+   buffer.
 
-  // Finish up
-  if(!EVP_SealFinal(&cipher_ctx, outbuff, &outbuff_size)) {
-    RaiseError(ERuntimeError, "EVP_SealFinal failed");
-    goto error;
-  };
-
-  return 1;
-
- error:
-  return 0;
-};
-
-
+   The encoded result is "cert_url#base_64_encoded_data"
+*/
 static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
-  AES256Password this = (AES256Password)self;
   AES256X509 xthis = (AES256X509)self;
   AFF4Cipher pthis = (AFF4Cipher)self;
-  FileLikeObject fd;
-  struct aff4_cipher_data_t encoding;
   EVP_PKEY *pubkey;
-  char buff[BUFF_SIZE];
+  unsigned char buff[BUFF_SIZE];
   int buff_size = BUFF_SIZE;
-  int i=0;
 
   if(!xthis->authority) {
     RaiseError(ERuntimeError, "No certificate set - you must call set_authority() before setting this RDFValue");
@@ -487,8 +528,6 @@ static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
   */
   memset(buff, 0, sizeof(buff));
   memcpy(buff, pthis->master_key->iv.dptr, pthis->master_key->iv.dsize);
-  i = pthis->master_key->iv.dsize;
-  buff_size -= i;
 
   pubkey = X509_get_pubkey(xthis->authority);
   if(!pubkey) {
@@ -496,9 +535,10 @@ static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
     goto error;
   };
 
-  if(!seal_buffer(xthis, pubkey, buff + i,
-                  TDB_DATA_STRING(pthis->master_key->data),
-                  buff + i + EVP_MAX_IV_LENGTH, &buff_size))
+  if(!seal_buffer(xthis, pubkey,
+                  pthis->master_key->data.dptr,
+                  pthis->master_key->data.dsize,
+                  buff + EVP_MAX_IV_LENGTH, &buff_size))
     goto error;
 
   // Serialise into the location
@@ -506,7 +546,7 @@ static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
     char out_buff[BUFF_SIZE];
     int out_buff_size = BUFF_SIZE;
 
-    encode64(buff, i + EVP_MAX_IV_LENGTH + buff_size, out_buff, out_buff_size);
+    encode64(buff, EVP_MAX_IV_LENGTH + buff_size, out_buff, out_buff_size);
 
     xthis->location->parser->fragment = talloc_strdup(xthis->location->parser, out_buff);
   };
@@ -519,29 +559,84 @@ static char *AES256X509_serialise(RDFValue self, RDFURN subject) {
 
 static int AES256X509_decode(RDFValue self, char *data, int length,
                                  RDFURN subject) {
-  AES256Password this = (AES256Password)self;
+  AES256X509 xthis = (AES256X509)self;
   AFF4Cipher pthis = (AFF4Cipher)self;
-  unsigned char key[AES256_KEY_SIZE];
-  char *passphrase;
-  uint32_t round_number;
   RDFURN cert_URN = new_RDFURN(self);
+  unsigned char buff[BUFF_SIZE];
+  int buff_length;
+  char *pkey_pem;
+  EVP_PKEY *privkey;
+  BIO *bio;
 
-  // Get the key for encrypting this stream
+  // Get the key for encrypting this stream from cache
   if(!pthis->master_key)
     pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
                                   ((AFF4Cipher)self)->type, subject, 0);
 
+  if(pthis->master_key) return length;
+
+  memset(buff, 0, sizeof(buff));
   CALL(cert_URN, set, data);
 
+  // Decode the fragment into the buffer:
+  buff_length = decode64(ZSTRING_NO_NULL(cert_URN->parser->fragment), buff, sizeof(buff)-1);
+
+  // Now remove the fragment and set our public key from this URL
+  cert_URN->parser->fragment = "";
+  {
+    char *new_location = CALL(cert_URN->parser, string, cert_URN);
+    int res;
+    RDFURN new_urn = new_RDFURN(new_location);
+
+    CALL(new_urn, set, new_location);
+    res = CALL(xthis, set_authority, new_urn);
+
+    if(!res) goto error;
+  };
+
+  // Now ask the SecurityProvider for the private key for this
+  pkey_pem = CALL(AFF4_SECURITY_PROVIDER, x509_private_key, xthis->authority->name,
+                  subject);
+
+  if(!pkey_pem) {
+    if(aff4_error == EZero)
+      RaiseError(ERuntimeError, "Unable to get private key for cert %s",
+                 xthis->authority->name);
+    goto error;
+  };
+
+  // Now try to parse it as an X509 private key
+  bio = BIO_new_mem_buf(ZSTRING(pkey_pem));
+  if(!bio) goto error;
+  privkey = PEM_read_bio_PrivateKey(bio,NULL,0,0);
+  BIO_free(bio);
+
+  if(!privkey) {
+    RaiseError(ERuntimeError, "SecurityProvider did not provide a valid private key");
+    goto error;
+  };
+
+  // Create a new Key:
+  pthis->master_key = CONSTRUCT(Key, Key, Con, self,    \
+                                ((AFF4Cipher)self)->type, subject, 1);
+
+  // Set the master key
+  memcpy(pthis->master_key->iv.dptr, buff, pthis->master_key->iv.dsize);
+  if(!open_buffer(xthis, buff + EVP_MAX_IV_LENGTH, buff_length - EVP_MAX_IV_LENGTH,
+                  pthis->master_key->data.dptr))
+    goto error;
+
+  talloc_free(cert_URN);
   return length;
 
  error:
+  talloc_free(cert_URN);
   return 0;
 };
 
 
 static int AES256X509_set_authority(AES256X509 self, RDFURN location) {
-  FileLikeObject fd = CALL(oracle, open, location, 'r');
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, location, 'r');
   BIO *bio;
   char *buff;
 
@@ -777,7 +872,7 @@ static int Encrypted_close(FileLikeObject self) {
   // Finally we flush the key from the Key_Cache. If we reopen it for
   // reading we will need to re-decode it now.
   {
-    Key key = CALL(KeyCache, get, ZSTRING(URNOF(this)->value));
+    Key key = (Key)CALL(KeyCache, get, ZSTRING(URNOF(this)->value));
     if(key) talloc_unlink(NULL, key);
   };
 
@@ -796,12 +891,12 @@ VIRTUAL(Encrypted, FileLikeObject) {
 
 
 /* This is the default security provider - Try to be somewhat useful */
-SecurityProvider SecurityProvider_Con(SecurityProvider self) {
+static SecurityProvider SecurityProvider_Con(SecurityProvider self) {
   return self;
 };
 
-char *SecurityProvider_passphrase(SecurityProvider self, char *cipher_type,
-                                RDFURN subject) {
+static char *SecurityProvider_passphrase(SecurityProvider self, char *cipher_type,
+                                         RDFURN subject) {
   char *pass = getenv(AFF4_ENV_PASSPHRASE);
 
   if(pass) {
@@ -821,9 +916,15 @@ char *SecurityProvider_passphrase(SecurityProvider self, char *cipher_type,
   return NULL;
 };
 
+static char *SecurityProvider_x509_private_key(SecurityProvider self,
+                                               char *cert_name, RDFURN subject) {
+  return "";
+};
+
 VIRTUAL(SecurityProvider, Object) {
   VMETHOD(Con) = SecurityProvider_Con;
   VMETHOD(passphrase) = SecurityProvider_passphrase;
+  VMETHOD(x509_private_key) = SecurityProvider_x509_private_key;
 } END_VIRTUAL
 
 void encrypt_init() {

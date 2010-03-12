@@ -83,13 +83,13 @@ void decodeblock( unsigned char *lut, unsigned char in[4], unsigned char out[3],
   };
 }
 
-int encode64(unsigned char *inbuf,int len, unsigned char *outbuf, int outlen) {
+int encode64(unsigned char *inbuf,int len, char *outbuf, int outlen) {
   //i is index into inbuf, o index into outbuf
   int i=0,o=0;
   unsigned char *inptr, *outptr;
 
   memset(outbuf, 0, len * 2);
-  
+
   inptr = inbuf;
   outptr = outbuf;
   while(i<len && o<outlen) {
@@ -99,7 +99,7 @@ int encode64(unsigned char *inbuf,int len, unsigned char *outbuf, int outlen) {
     i+=3;
     o+=4;
   };
-  
+
   //Encode the remainder
   switch(i-len) {
   case 2:
@@ -107,7 +107,7 @@ int encode64(unsigned char *inbuf,int len, unsigned char *outbuf, int outlen) {
   case 1:
     outbuf[o-1]='=';
   };
-  
+
   // Null terminate the string
   outbuf[o] = 0;
   return o;
@@ -116,7 +116,7 @@ int encode64(unsigned char *inbuf,int len, unsigned char *outbuf, int outlen) {
 /* Decodes inbuf into outbuf (which must be as big) 
    return the length of outbuf.
 */
-int decode64(unsigned char *inbuf,int len, unsigned char *outbuf, int outlen) {
+int decode64(char *inbuf,int len, unsigned char *outbuf, int outlen) {
   int i=0,o=0;
   unsigned char *inptr, *outptr;
   

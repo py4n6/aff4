@@ -24,9 +24,10 @@ class SecurityProvider:
         print "Setting passphrase for subject %s" % subject.value
         return "Hello"
 
-    def x509_private_key(self, cert_name):
+    def x509_private_key(self, cert_name, subject):
         """ Returns the private key (in pem format) for the certificate name provided. """
-        return self.make_cert()
+        print "Certificate for %s" % cert_name
+        return open(CERT_LOCATION).read()
 
 ## This registers the security provider
 oracle.register_security_provider(pyaff4.ProxiedSecurityProvider(SecurityProvider()))

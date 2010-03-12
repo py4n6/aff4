@@ -64,8 +64,8 @@ CLASS(SecurityProvider, Object)
 
      /* This method should return the location (URL) of the
         certificate that will be used to encrypt the data. */
-     char *METHOD(SecurityProvider, x509_cert,  \
-                  char *cipher_type, struct RDFURN_t *subject);
+     char *METHOD(SecurityProvider, x509_private_key,           \
+                  char *cert_name, struct RDFURN_t *subject);
 
 END_CLASS
 
