@@ -6,6 +6,7 @@ time.sleep(1)
 oracle = pyaff4.Resolver()
 
 CERT_LOCATION = os.getcwd() + "/tests/sign.key"
+SOURCE = "/bin/ls"
 
 ## For this test make sure there are certs:
 try:
@@ -68,6 +69,9 @@ image.cache_return()
 
 # Make the encrypted stream
 encrypted = oracle.create(pyaff4.AFF4_ENCRYTED)
+encrypted.urn.set(volume_urn.value)
+encrypted.urn.add(SOURCE)
+
 encrypted.set(pyaff4.AFF4_STORED, volume_urn)
 encrypted.set(pyaff4.AFF4_TARGET, image_urn)
 
@@ -76,16 +80,17 @@ cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_X509)
 cert_urn = pyaff4.RDFURN()
 cert_urn.set(CERT_LOCATION)
 cipher.set_authority(cert_urn)
+encrypted.add(pyaff4.AFF4_CIPHER, cipher)
 
-#cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
-encrypted.set(pyaff4.AFF4_CIPHER, cipher)
+cipher = oracle.new_rdfvalue(pyaff4.AFF4_AES256_PASSWORD)
+encrypted.add(pyaff4.AFF4_CIPHER, cipher)
 
 encrypted = encrypted.finish()
 encrypted_urn = encrypted.urn
 
 print "Encrypted URN: %s" % encrypted.urn.value
 
-infd = open("/bin/ls")
+infd = open(SOURCE)
 while 1:
     data = infd.read(2**24)
     if not data: break

@@ -145,7 +145,7 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
     pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
                                   ((AFF4Cipher)self)->type, subject, 1);
 
-  // Set out encryption keys from the master key:
+  // Set our encryption keys from the master key:
   AES_set_encrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->ekey);
   AES_set_decrypt_key(pthis->master_key->data.dptr, AES256_KEY_SIZE * 8, &this->dkey);
 
@@ -568,13 +568,6 @@ static int AES256X509_decode(RDFValue self, char *data, int length,
   EVP_PKEY *privkey;
   BIO *bio;
 
-  // Get the key for encrypting this stream from cache
-  if(!pthis->master_key)
-    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
-                                  ((AFF4Cipher)self)->type, subject, 0);
-
-  if(pthis->master_key) return length;
-
   memset(buff, 0, sizeof(buff));
   CALL(cert_URN, set, data);
 
@@ -593,6 +586,13 @@ static int AES256X509_decode(RDFValue self, char *data, int length,
 
     if(!res) goto error;
   };
+
+  // Get the key for encrypting this stream from cache
+  if(!pthis->master_key)
+    pthis->master_key = CONSTRUCT(Key, Key, Con, self,                  \
+                                  ((AFF4Cipher)self)->type, subject, 0);
+
+  if(pthis->master_key) return length;
 
   // Now ask the SecurityProvider for the private key for this
   pkey_pem = CALL(AFF4_SECURITY_PROVIDER, x509_private_key, xthis->authority->name,

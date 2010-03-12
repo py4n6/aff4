@@ -837,6 +837,9 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
   LOCK_RESOLVER;
 
+  if(!strcmp(attribute_str, AFF4_CIPHER))
+    printf("Got it\n");
+
   encoded_value = CALL(value, encode, urn);
 
   if(encoded_value) {

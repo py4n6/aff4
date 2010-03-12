@@ -20,8 +20,8 @@ def dissect_packet(stream_fd, stream_pkt_fd):
     stream_pkt_fd.seek(offset)
 
     urn = pyaff4.RDFURN()
-    (target_offset_at_point,
-     available_to_read) =  stream_pkt_fd.map.get_range(offset, urn)
+    (urn, target_offset_at_point,
+     available_to_read, urn_id) =  stream_pkt_fd.map.get_range(offset)
 
     ## Get the file from cache
     try:

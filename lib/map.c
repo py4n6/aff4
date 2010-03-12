@@ -621,7 +621,7 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
       // Make a new map object
       if(!this->map) {
-        this->map = (MapValue)CALL(oracle, new_rdfvalue, self, AFF4_MAP_TEXT);
+        this->map = (MapValue)CALL(oracle, new_rdfvalue, self, AFF4_MAP_INLINE);
       };
 
       // Make sure the map belongs to us
@@ -812,6 +812,16 @@ static void MapDriver_set_data_type(MapDriver self, char *type) {
   };
 };
 
+static uint64_t MapDriver_seek(FileLikeObject self, int64_t offset, int whence) {
+  // FIXME - implement sparse maps through seeking on write
+  if(((AFFObject)self)->mode == 'r') {
+    return SUPER(FileLikeObject, FileLikeObject, seek, offset, whence);
+  } else {
+    RaiseError(ERuntimeError, "Seeking maps opened for writing is not supported yet!!!");
+    return -1;
+  };
+};
+
 VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD_BASE(AFFObject, Con) = MapDriver_Con;
      VMETHOD_BASE(AFFObject, dataType) = AFF4_MAP;
@@ -821,10 +831,10 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
      VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
+     VMETHOD_BASE(FileLikeObject, seek) = MapDriver_seek;
 
      // FIXME pass through to the current target to implement sparse streams
      UNIMPLEMENTED(FileLikeObject, write);
-     UNIMPLEMENTED(FileLikeObject, seek);
 } END_VIRTUAL
 
 void mapdriver_init() {
