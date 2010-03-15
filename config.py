@@ -37,3 +37,6 @@ LIBXSLT_LINK = None
 RAPTOR_TURTLE = True
 RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
+
+## Darwin specific options (Only used when running on OSX)
+DARWIN_ARCHITECTURE = "i386"

@@ -13,5 +13,6 @@ for prog in Split(programs):
     prog = nenv.Program([prog] + common_files,
                        LIBS='aff4', LIBPATH="#lib/")
 
-nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
-nenv.Install("$prefix/bin/", Split("aff4fuse aff4imager raid_reconstructor"))
+if utils.HEADERS.get("HAVE_FUSE"):
+    nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
+    nenv.Install("$prefix/bin/", Split("aff4fuse aff4imager raid_reconstructor"))

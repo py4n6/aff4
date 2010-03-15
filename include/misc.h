@@ -45,7 +45,7 @@ char *normalise_url(char *url);
 extern int AFF4_DEBUG_LEVEL;
 
 #define _DEBUG(x, ...) {                                                \
-    printf("%s:%d 0x%X: " x,                                              \
+    printf("%s:%d 0x%X: " x,						\
            __FUNCTION__, __LINE__, (unsigned int)pthread_self(), ## __VA_ARGS__); \
   };
 

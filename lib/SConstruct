@@ -13,6 +13,7 @@ source_files = """
 #lib/rdf.c  #lib/image.c #lib/map.c
 #lib/encode.c #lib/queue.c
 #lib/graph.c #lib/error.c
+#libreplace/replace.c
 """
 
 ## Optional support for EWF and AFF1 volumes
@@ -39,14 +40,14 @@ tdb_files = """
 #libtdb/traverse.c
 """
 
-nenv.Append(CPPFLAGS = ['-DHAVE_VA_COPY ', '-Ilibreplace/'], CFLAGS=" -DNO_CONFIG_H")
+nenv.Append(CPPFLAGS = ['-Ilibreplace/'], CFLAGS=" -DNO_CONFIG_H")
 env.libaff4_sources = Split(source_files +
                             uuid_files +
                             tdb_files) + env.libraptor_objs
 
-library = nenv.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
+env.libaff4_so = library = nenv.VersionedSharedLibrary("aff4", '0', env.libaff4_sources)
 
-nenv.InstallVersionedSharedLibrary("${prefix}/lib/", library)
-nenv.Alias('install', '${prefix}')
+env.installed_libaff4_so = nenv.InstallVersionedSharedLibrary("${prefix}/lib/", library)
+utils.install_target = nenv.Alias('install', '${prefix}')
 
 utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)

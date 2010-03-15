@@ -104,6 +104,10 @@
 # define PRIu64		__PRI64_PREFIX "u"
 #endif
 
+#ifndef HAVE_SSIZE_T
+typedef int ssize_t ;
+#endif
+
 #ifdef HAVE_STRING_H
 #include <string.h>
 #endif
@@ -355,7 +359,7 @@ int rep_dlclose(void *handle);
 int rep_vasprintf(char **ptr, const char *format, va_list ap) PRINTF_ATTRIBUTE(2,0);
 #endif
 
-#if !defined(HAVE_SNPRINTF) || !defined(HAVE_C99_VSNPRINTF)
+#if !defined(HAVE_SNPRINTF)
 #define snprintf rep_snprintf
 int rep_snprintf(char *,size_t ,const char *, ...) PRINTF_ATTRIBUTE(3,4);
 #endif
@@ -387,7 +391,7 @@ void rep_vsyslog (int facility_priority, const char *format, va_list arglist) PR
 #ifdef HAVE___VA_COPY
 #define va_copy(dest, src) __va_copy(dest, src)
 #else
-#define va_copy(dest, src) (dest) = (src)
+#define va_copy(ap1, ap2) memcpy((&ap1), (&ap2), sizeof(va_list))
 #endif
 #endif
 

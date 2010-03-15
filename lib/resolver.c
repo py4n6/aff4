@@ -550,7 +550,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   // resolver at once. Once the thread holds the resolver its free to
   // continue calling functions from it.
   pthread_mutexattr_init(&mutex_attr);
-  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE_NP);
+  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
   //pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
   pthread_mutex_init(&self->mutex, &mutex_attr);
   pthread_mutexattr_destroy(&mutex_attr);
@@ -1681,7 +1681,7 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
       pthread_mutexattr_t mutex_attr;
 
       pthread_mutexattr_init(&mutex_attr);
-      pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK_NP);
+      pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
       pthread_mutex_init(&self->mutex, &mutex_attr);
       pthread_mutexattr_destroy(&mutex_attr);
     };

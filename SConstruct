@@ -2,6 +2,7 @@ import sys, pdb
 import os
 import SconsUtils.utils as utils
 import distutils.sysconfig
+import platform
 
 ## Users should alter the configuration in this file
 import config
@@ -29,6 +30,12 @@ vars.AddVariables(
 args['variables'] = vars
 
 args['CFLAGS']=''
+args['LINKFLAGS']=''
+## Make sure we only build for one architecture on darwin
+if platform.system().lower() == 'darwin':
+   args['CFLAGS'] += " -arch %s " % config.DARWIN_ARCHITECTURE
+   args['LINKFLAGS'] += " -arch %s " % config.DARWIN_ARCHITECTURE
+
 if config.V:
    args['CFLAGS'] += ' -Wall -g -O0 -D__DEBUG__ '
 else:
@@ -111,7 +118,7 @@ if not env.GetOption('clean') and not env.GetOption('help'):
    ## Headers
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
-crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h
+crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
 """))
 
    ## Mandatory dependencies
@@ -119,16 +126,12 @@ crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h
       error( 'You must install zlib-dev to build libaff4!')
 
    ## Make sure the openssl installation is ok
-   if not conf.CheckLib('ssl'):
+   if not conf.CheckLib('ssl') or not conf.CheckLib('crypto'):
       error('You must have openssl header libraries. This is often packaged as libssl-dev')
 
    for header in Split('openssl/aes.h openssl/bio.h openssl/evp.h openssl/hmac.h openssl/md5.h openssl/rand.h openssl/rsa.h openssl/sha.h openssl/pem.h'):
       if not conf.CheckHeader(header):
          error("Openssl installation seems to be missing header %s" % header)
-
-   for func in Split('MD5 SHA1 AES_encrypt RAND_pseudo_bytes EVP_read_pw_string'):
-      if not conf.CheckFunc(func):
-         error("Openssl installation seems to be missing function %s" % func)
 
    ## Optional stuff:
    ## Functions
@@ -137,7 +140,7 @@ strerror strdup memmove mktime timegm utime utimes strlcpy strlcat setenv
 unsetenv seteuid setegid setresuid setresgid chown chroot link readlink symlink
 realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgroups
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
-asprintf vsyslog va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
+asprintf vsyslog __va_copy va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
 inet_aton connect gethostbyname getifaddrs freeifaddrs crypt vsnprintf strnlen
 ntohll
 """))
@@ -149,7 +152,7 @@ ewf curl afflib pthread HAVE_OPENSSL:ssl
 
    ## Types
    SconsUtils.utils.check_type(conf, Split("""
-intptr_t:stdint.h uintptr_t:stdint.h ptrdiff_t:stddef.h
+intptr_t:stdint.h uintptr_t:stdint.h ptrdiff_t:stddef.h ssize_t:unistd.h
 """))
 
 env = conf.Finish()

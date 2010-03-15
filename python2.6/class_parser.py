@@ -1409,14 +1409,14 @@ if(PyErr_Occurred()) {
 
         ## Decref all our python objects:
         for arg in self.args:
-            out.write("if(py_%s) Py_DECREF(py_%s);\n" %( arg.name, arg.name))
+            out.write("if(py_%s) { Py_DECREF(py_%s);};\n" %( arg.name, arg.name))
 
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:
             out.write("\nerror:\n")
             ## Decref all our python objects:
             for arg in self.args:
-                out.write("if(py_%s) Py_DECREF(py_%s);\n" % (arg.name, arg.name))
+                out.write("if(py_%s) { Py_DECREF(py_%s);};\n" % (arg.name, arg.name))
 
             out.write("PyGILState_Release(gstate);\n %s;\n" % self.error_condition())
         

@@ -271,7 +271,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         shlib_post_action = None
         cppflags = distutils.util.split_quoted(
             "-I"+sysconfig.get_python_inc())
-        shlink_flags = ['-laff4']
+        shlink_flags = self['LINKFLAGS'].split()
         install_dest = distutils.util.split_quoted(
             os.path.join(
                 sysconfig.get_config_var('BINLIBDEST'),os.path.dirname(libname)))

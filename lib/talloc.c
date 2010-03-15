@@ -30,6 +30,7 @@
   inspired by http://swapped.cc/halloc/
 */
 
+#include "misc.h"
 #include "replace.h"
 #include "talloc.h"
 
@@ -1686,14 +1687,6 @@ char *talloc_strndup_append_buffer(char *s, const char *a, size_t n)
 
 	return __talloc_strlendup_append(s, slen, a, strnlen(a, n));
 }
-
-#ifndef HAVE_VA_COPY
-#ifdef HAVE___VA_COPY
-#define va_copy(dest, src) __va_copy(dest, src)
-#else
-#define va_copy(dest, src) (dest) = (src)
-#endif
-#endif
 
 char *talloc_vasprintf(const void *t, const char *fmt, va_list ap)
 {

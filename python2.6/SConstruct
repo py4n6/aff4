@@ -11,11 +11,13 @@ BOUND_FILES = Split("""
               #include/aff4_rdf.h
               #include/aff4_io.h
               #include/aff4_resolver.h
-              #include/ewfvolume.h
               #include/aff4_rdf_serialise.h
               #include/aff4_objects.h
               #include/aff4_crypto.h
 """)
+
+if utils.HEADERS.get("HAVE_EWF"):
+    BOUND_FILES.append("#include/ewfvolume.h")
 
 import class_parser
 
@@ -31,7 +33,7 @@ def build_python_bindings(target, source, env):
     p.write(fd)
     fd.close()
 
-nenv.Append(CFLAGS = " -include lib/config.h ")
+nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 
 if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
@@ -39,4 +41,4 @@ if not nenv.get("disable_curl"):
 nenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
 nenv.Depends('pyaff4.c', 'class_parser.py')
 
-nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS="aff4")
+nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=utils.libaff4_static_lib)

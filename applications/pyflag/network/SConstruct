@@ -5,6 +5,6 @@ Import("env")
 SOURCES = Split("""pcap.c network.c tcp.c packet.c struct.c""")
 objs = [ env.SharedObject(s, CPPFLAGS=env.python_cppflags) for s in SOURCES ]
 
-env.PythonModule("pyreassembler/pypcap", ["pypcap.c" ] + objs, LIBS="aff4")
-env.PythonModule("pyreassembler/pypacket", ["pypacket.c" ] + objs, LIBS="aff4")
-env.PythonModule("pyreassembler/reassembler", ["reassembler.c" ] + objs, LIBS="aff4")
+m = env.PythonModule("pyreassembler/pypcap", ["pypcap.c" ] + objs, LIBS=env.libaff4_so)
+m = env.PythonModule("pyreassembler/pypacket", ["pypacket.c" ] + objs, LIBS=env.libaff4_so)
+m = env.PythonModule("pyreassembler/reassembler", ["reassembler.c" ] + objs, LIBS=env.libaff4_so)
