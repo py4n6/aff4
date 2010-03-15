@@ -29,7 +29,7 @@ vars.AddVariables(
 
 args['variables'] = vars
 
-args['CFLAGS']=''
+args['CFLAGS']=' -Ilibraptor '
 args['LINKFLAGS']=''
 ## Make sure we only build for one architecture on darwin
 if platform.system().lower() == 'darwin':

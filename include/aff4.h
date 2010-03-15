@@ -11,6 +11,7 @@ This file describes the high level interface.
 #ifndef __AFF4_H
 #define __AFF4_H
 
+#include <sys/types.h>
 #include <stdint.h>
 
 #ifdef HAVE_STRING_H

@@ -11,7 +11,7 @@ programs = """aff4imager.c raid_reconstructor.c"""
 
 for prog in Split(programs):
     prog = nenv.Program([prog] + common_files,
-                       LIBS='aff4', LIBPATH="#lib/")
+                       LIBS=env.libaff4_so, LIBPATH="#lib/")
 
 if utils.HEADERS.get("HAVE_FUSE"):
     nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
