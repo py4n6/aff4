@@ -811,7 +811,7 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   i.next_offset = previous_offset;
   i.length = value.dsize;
   i.encoding_type = type_id;
-  i.asserter_id = -1;
+  i.asserter_id = source_id;
   i.flags = flags;
 
   write(self->data_store_fd, &i, sizeof(i));
@@ -836,9 +836,6 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
   TDB_DATA *encoded_value;
 
   LOCK_RESOLVER;
-
-  if(!strcmp(attribute_str, AFF4_CIPHER))
-    printf("Got it\n");
 
   encoded_value = CALL(value, encode, urn);
 
@@ -917,8 +914,10 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
     // Grab the lock
     tdb_lockall(self->data_db);
 
-    /** If the value is already in the list, we just ignore this
-	request.
+    /** For efficiency we do not check that the value is not already
+	in the list. When we iterate over all the items in the list,
+	we check then for unique values so it doesnt matter if we
+	store duplicates.
     */
     previous_offset = get_data_head(self,
 	   tdb_data_from_string(urn->value), attribute, &tmp);

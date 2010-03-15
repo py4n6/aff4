@@ -498,8 +498,12 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
      it still as we expect. This needs to occur even before we look at
      the volume specifically because we depend on the storage URN to
      be sane.
+
+     NOTE - we open the file for writing here because we want to
+     ensure we get a lock on it (we cant have the file growing file we
+     do this check).
   */
-  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'w');
   if(!fd) {
     goto error;
   };

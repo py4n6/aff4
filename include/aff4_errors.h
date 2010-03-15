@@ -24,10 +24,11 @@ enum _error_type {
 
 void *raise_errors(enum _error_type t, char *string,  ...);
 
+/** We only set the error state if its not already set */
 #define RaiseError(t, message, ...)                                     \
-  do {									\
+  if(aff4_error == EZero) {                                             \
     raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__); \
-  } while(0);
+  };
 
 #define LogWarnings(format, ...)		\
   do {						\

@@ -3,6 +3,7 @@ fit anywhere else.
 """
 import pyflag.Registry as Registry
 import pyaff4
+import pyflag.Store as Store
 
 class EventHandler:
     """ An event handler object allows plugins to register their
@@ -24,14 +25,45 @@ def post_event(event, *args, **kwargs):
         method = getattr(e, event)
         method(*args, **kwargs)
 
-
 oracle = pyaff4.Resolver()
+
+class PATH_MANAGER(Store.FastStore):
+    def __init__(self, *args, **kwargs):
+        self.URL = pyaff4.RDFURN()
+        self.STR = pyaff4.XSDString()
+        Store.FastStore.__init__(self, *args, **kwargs)
+
+    def add_path_relations(self, path):
+        """ Adds navigation relations for path which is a list of components """
+        for i in range(len(path)-1):
+            so_far = "/".join(path[:i])
+            if so_far == '': so_far='/'
+            try:
+                children = self.get(so_far)
+                if path[i+1] in children:
+                    continue
+            except KeyError:
+                children = set()
+                self.add(so_far, children)
+
+            children.add(path[i+1])
+
+            self.URL.set(pyaff4.AFF4_NAVIGATION_ROOT)
+            self.URL.add(so_far[1:])
+
+            self.STR.set(path[i+1])
+
+            oracle.set_value(self.URL, pyaff4.AFF4_NAVIGATION_CHILD, self.STR)
+
+PATH_CACHE = PATH_MANAGER()
 
 def VFSCreate(fd, name, volume_urn, type=pyaff4.AFF4_MAP):
     """ Creates a new map object based on fd with a name specified """
     obj = oracle.create(type)
     obj.urn.set(fd.urn.value)
     obj.urn.add(name)
+
+    PATH_CACHE.add_path_relations(obj.urn.parser.query.split("/"))
 
     obj.set(pyaff4.AFF4_STORED, volume_urn)
     return obj.finish()

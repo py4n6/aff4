@@ -163,6 +163,11 @@
 #define AFF4_SPECIAL_URN_ZERO FQN "zero" /* This is used to represent long
 					    runs of zero */
 
+#define AFF4_NAVIGATION       FQN "navigation"
+
+/* A well known URL which is used to anchor navigation directives. */
+#define AFF4_NAVIGATION_ROOT  AFF4_NAVIGATION "/root"
+#define AFF4_NAVIGATION_CHILD  AFF4_NAVIGATION "/child"
 
 /** Cryptography related names */
 #define AFF4_CIPHER PREDICATE_NAMESPACE "cipher"
