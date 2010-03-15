@@ -194,7 +194,6 @@ raptor_finish(void)
 char*
 raptor_vsnprintf(const char *message, va_list arguments) 
 {
-  char empty_buffer[1];
   int len;
   char *buffer=NULL;
   va_list args_copy;

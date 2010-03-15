@@ -656,6 +656,7 @@ void raptor_identifier_print(FILE *stream, raptor_identifier* identifier);
   
 /* raptor_locator.c */
 
+#include <strings.h>
 
 #ifdef HAVE_STRCASECMP
 #define raptor_strcasecmp strcasecmp

@@ -31,6 +31,10 @@
 #include "system/wait.h"
 #include "tdb.h"
 
+#ifdef HAVE_UTIME_H
+#include <utime.h>
+#endif
+
 #ifndef HAVE_GETPAGESIZE
 #define getpagesize() 0x2000
 #endif

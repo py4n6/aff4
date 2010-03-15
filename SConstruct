@@ -119,6 +119,7 @@ if not env.GetOption('clean') and not env.GetOption('help'):
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
 crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
+utime.h arpa/inet.h
 """))
 
    ## Mandatory dependencies
@@ -138,7 +139,7 @@ crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
    SconsUtils.utils.check("func", conf, Split("""
 strerror strdup memmove mktime timegm utime utimes strlcpy strlcat setenv
 unsetenv seteuid setegid setresuid setresgid chown chroot link readlink symlink
-realpath lchown setlinebuf strcasestr strtok strtoll strtoull ftruncate initgroups
+realpath lchown setlinebuf strcasestr strcasecmp strtok strtoll strtoull ftruncate initgroups
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
 asprintf vsyslog __va_copy va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
 inet_aton connect gethostbyname getifaddrs freeifaddrs crypt vsnprintf strnlen

@@ -12,7 +12,8 @@ programs = """aff4imager.c raid_reconstructor.c"""
 for prog in Split(programs):
     prog = nenv.Program([prog] + common_files,
                        LIBS=env.libaff4_so, LIBPATH="#lib/")
+    nenv.Install("$prefix/bin/", prog)
 
 if utils.HEADERS.get("HAVE_FUSE"):
     nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
-    nenv.Install("$prefix/bin/", Split("aff4fuse aff4imager raid_reconstructor"))
+    nenv.Install("$prefix/bin/", Split("aff4fuse"))

@@ -1568,7 +1568,7 @@ static void Resolver_flush(Resolver self) {
 
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
-  NAMEOF(self->write_cache) = talloc_get_name(self->write_cache);
+  NAMEOF(self->write_cache) = "Resolver Write Cache";
 };
 
 static void Resolver_expire(Resolver self, RDFURN uri) {

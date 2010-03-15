@@ -22,7 +22,7 @@ CLASS(AFFObject, Object)
 
      // An object may be owned by a single thread at a time
      pthread_mutex_t mutex;
-     unsigned int thread_id;
+     pthread_t thread_id;
 
      // Is this object a reader or a writer?
      char mode;

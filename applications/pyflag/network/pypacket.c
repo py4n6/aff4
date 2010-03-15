@@ -7,6 +7,10 @@ efficiently. Only the required data is converted into python types.
 #include "packet.h"
 #include "pypacket.h"
 
+#ifdef HAVE_INET_H
+#include <arpa/inet.h>
+#endif
+
 static char *g_talloc_reference;
 static PyObject *g_module_reference;
 

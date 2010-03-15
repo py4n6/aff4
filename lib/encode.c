@@ -91,7 +91,7 @@ int encode64(unsigned char *inbuf,int len, char *outbuf, int outlen) {
   memset(outbuf, 0, len * 2);
 
   inptr = inbuf;
-  outptr = outbuf;
+  outptr = (unsigned char *)outbuf;
   while(i<len && o<outlen) {
     encodeblock(encode64_lut, inptr, outptr);
     inptr += 3;
@@ -120,7 +120,7 @@ int decode64(char *inbuf,int len, unsigned char *outbuf, int outlen) {
   int i=0,o=0;
   unsigned char *inptr, *outptr;
   
-  inptr = inbuf;
+  inptr = (unsigned char *)inbuf;
   outptr = outbuf;
   while(i<len && o<outlen) {
     decodeblock(decode64_lut, inptr, outptr, outlen-o);
