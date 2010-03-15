@@ -1,0 +1,71 @@
+/* Name of package */
+#define PACKAGE "raptor"
+
+/* Define to the address where bug reports for this package should be sent. */
+#define PACKAGE_BUGREPORT "http://bugs.librdf.org/"
+
+/* Define to the full name of this package. */
+#define PACKAGE_NAME "Raptor RDF Parser"
+
+/* Define to the full name and version of this package. */
+#define PACKAGE_STRING "Raptor RDF Parser 1.4.18"
+
+/* Define to the one symbol short name of this package. */
+#define PACKAGE_TARNAME "raptor"
+
+/* Define to the version of this package. */
+#define PACKAGE_VERSION "1.4.18"
+
+/* does libxml struct xmlEntity have a field etype */
+#define RAPTOR_LIBXML_ENTITY_ETYPE 1
+
+/* does libxml struct xmlEntity have a field name_length */
+/* #undef RAPTOR_LIBXML_ENTITY_NAME_LENGTH */
+
+/* does libxml have HTML_PARSE_NONET */
+#define RAPTOR_LIBXML_HTML_PARSE_NONET 1
+
+/* does libxml xmlSAXHandler have externalSubset field */
+#define RAPTOR_LIBXML_XMLSAXHANDLER_EXTERNALSUBSET 1
+
+/* does libxml xmlSAXHandler have initialized field */
+#define RAPTOR_LIBXML_XMLSAXHANDLER_INITIALIZED 1
+
+/* does libxml have XML_PARSE_NONET */
+#define RAPTOR_LIBXML_XML_PARSE_NONET 1
+
+/* Provide a Unicode NFC check */
+#define RAPTOR_NFC_CHECK 1
+
+/* Release version as a decimal */
+#define RAPTOR_VERSION_DECIMAL 10418
+
+/* Major version number */
+#define RAPTOR_VERSION_MAJOR 1
+
+/* Minor version number */
+#define RAPTOR_VERSION_MINOR 4
+
+/* Release version number */
+#define RAPTOR_VERSION_RELEASE 18
+
+/* Have libfetch WWW library */
+/* #undef RAPTOR_WWW_LIBFETCH */
+
+/* Have libxml available as a WWW library */
+/* #undef RAPTOR_WWW_LIBXML */
+
+/* No WWW library */
+/* #undef RAPTOR_WWW_NONE */
+
+/* Check XML 1.1 Names */
+/* #undef RAPTOR_XML_1_1 */
+
+/* Use expat XML parser */
+/* #undef RAPTOR_XML_EXPAT */
+
+/* Use libxml XML parser */
+#define RAPTOR_XML_LIBXML 1
+
+/* Version number of package */
+#define VERSION "1.4.18"
