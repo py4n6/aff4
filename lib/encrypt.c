@@ -157,7 +157,7 @@ static char *AES256Password_serialise(RDFValue self, RDFURN subject) {
 
   passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
   if(!passphrase) {
-    if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
+    RaiseError(ERuntimeError, "No password provided");
     goto error;
   };
 
@@ -243,7 +243,7 @@ static int AES256Password_decode(RDFValue self, char *data, int length,
 
     passphrase = CALL(AFF4_SECURITY_PROVIDER, passphrase, self->dataType, subject);
     if(!passphrase) {
-      if(!aff4_error) RaiseError(ERuntimeError, "No password provided");
+      RaiseError(ERuntimeError, "No password provided");
       goto error;
     };
 
@@ -388,9 +388,8 @@ static int open_buffer(AES256X509 self, unsigned char *buff, int in_size, unsign
                     NULL);
 
     if(!pkey_pem) {
-      if(aff4_error == EZero)
-        RaiseError(ERuntimeError, "Unable to get private key for cert %s",
-                   self->authority->name);
+      RaiseError(ERuntimeError, "Unable to get private key for cert %s",
+                 self->authority->name);
       goto error;
     };
 
@@ -599,9 +598,8 @@ static int AES256X509_decode(RDFValue self, char *data, int length,
                   subject);
 
   if(!pkey_pem) {
-    if(aff4_error == EZero)
-      RaiseError(ERuntimeError, "Unable to get private key for cert %s",
-                 xthis->authority->name);
+    RaiseError(ERuntimeError, "Unable to get private key for cert %s",
+               xthis->authority->name);
     goto error;
   };
 
@@ -713,9 +711,7 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
 
     this->cipher = (AFF4Cipher)CALL(oracle, resolve_alloc, self, uri, AFF4_CIPHER);
     if(!this->cipher) {
-      if(aff4_error == EZero) {
-        RaiseError(ERuntimeError, "Unable to resolve a cipher for Encrypted stream");
-      };
+      RaiseError(ERuntimeError, "Unable to resolve a cipher for Encrypted stream");
       goto error;
     };
 

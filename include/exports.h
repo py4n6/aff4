@@ -14,8 +14,11 @@
 #pragma GCC visibility push(default)
 extern Resolver oracle;
 extern void aff4_free(void *ptr);
+
+/*
 extern __thread char __error_str[];
 extern __thread enum _error_type aff4_error;
+*/
 
 extern void AFF4_Init(void);
 

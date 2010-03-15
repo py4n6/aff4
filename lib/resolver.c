@@ -8,25 +8,6 @@
 #include <pthread.h>
 #include "config.h"
 
-__thread char __error_str[BUFF_SIZE];
-__thread enum _error_type aff4_error;
-
-void *raise_errors(enum _error_type t, char *reason, ...) {
-  if(reason) {
-    va_list ap;
-
-    va_start(ap, reason);
-
-    vsnprintf(__error_str, BUFF_SIZE-1, reason,ap);
-    __error_str[BUFF_SIZE-1]=0;
-    va_end(ap);
-  };
-
-  aff4_error = t;
-
-  return NULL;
-};
-
 //int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
@@ -81,6 +62,7 @@ void AFF4_Init(void) {
   INIT_CLASS(AFFObject);
   INIT_CLASS(Logger);
 
+  error_init();
   image_init();
   mapdriver_init();
   zip_init();
@@ -746,10 +728,8 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
 
     if(!CALL(result, decode, buff, i.length, urn_str)) {
       // Make sure we propagate the original error:
-      if(!aff4_error) {
-        RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
-                   urn_str, attribute_str);
-      };
+      RaiseError(ERuntimeError, "%s is unable to decode %s:%s from TDB store", NAMEOF(result),
+                 urn_str, attribute_str);
       goto not_found;
     };
 

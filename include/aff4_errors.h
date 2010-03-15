@@ -26,7 +26,7 @@ void *raise_errors(enum _error_type t, char *string,  ...);
 
 /** We only set the error state if its not already set */
 #define RaiseError(t, message, ...)                                     \
-  if(aff4_error == EZero) {                                             \
+  if(*aff4_get_current_error(NULL) == EZero) {                          \
     raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__); \
   };
 
@@ -37,12 +37,27 @@ void *raise_errors(enum _error_type t, char *string,  ...);
   } while(0);
   
 #define ClearError()				\
-  do {aff4_error = EZero;} while(0);
+  do {*aff4_get_current_error(NULL) = EZero;} while(0);
 
 #define PrintError()				\
-  do {if(aff4_error) fprintf(stdout, "%s",__error_str); fflush(stdout); ClearError(); }while(0);
+  do {char *error_str; if(*aff4_get_current_error(&error_str)) fprintf(stdout, "%s", error_str); fflush(stdout); ClearError(); }while(0);
 
 #define CheckError(error)			\
-  (aff4_error == error)
+  (*aff4_get_current_error(NULL) == error)
+
+/** The current error state is returned by this function.
+
+    This is done in a thread safe manner.
+ */
+enum _error_type *aff4_get_current_error(char **error_str);
+
+
+// These macros are used when we need to do something which might
+// change the error state on the error path of a function.
+#define PUSH_ERROR_STATE { enum _error_type *tmp_p = aff4_get_current_error(NULL); enum _error_type tmp = *tmp_p;
+#define POP_ERROR_STATE *tmp_p = tmp;};
+
+
+void error_init();
 
 #endif 	    /* !AFF4_ERRORS_H_ */

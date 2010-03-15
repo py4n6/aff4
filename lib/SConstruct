@@ -12,7 +12,7 @@ source_files = """
 #lib/misc.c #lib/zip.c #lib/stringio.c #lib/resolver.c
 #lib/rdf.c  #lib/image.c #lib/map.c
 #lib/encode.c #lib/queue.c
-#lib/graph.c
+#lib/graph.c #lib/error.c
 """
 
 ## Optional support for EWF and AFF1 volumes

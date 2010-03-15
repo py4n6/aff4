@@ -112,8 +112,9 @@ Gen_wrapper *new_class_wrapper(Object item) {
   return NULL;
 };
 
-static PyObject *resolve_exception() {
-  switch(aff4_error) {
+static PyObject *resolve_exception(char **error_buff) {
+  enum _error_type *type = aff4_get_current_error(error_buff);
+  switch(*type) {
 case EKeyError:
     return PyExc_KeyError;
 case ERuntimeError:
@@ -631,9 +632,12 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
        returned_object = (Object)%(call)s;
        Py_END_ALLOW_THREADS
 
-       if(aff4_error != EZero) {
-         PyErr_Format(resolve_exception(),
-                    "%%s", __error_str);
+       if(!CheckError(EZero)) {
+         char *buffer;
+         PyObject *exception = resolve_exception(&buffer);
+
+         PyErr_Format(exception,
+                    "%%s", buffer);
          ClearError();
          goto error;
 
@@ -997,11 +1001,14 @@ if(!self->base) return PyErr_Format(PyExc_RuntimeError, "%(class_name)s object n
 
         self.error_set = True
         out.write("""//Check for errors
-         if(aff4_error != EZero) {
-             PyErr_Format(resolve_exception(),
-                      "%s", __error_str);
-             ClearError();
-             goto error;
+         if(!CheckError(EZero)) {
+                char *buffer;
+                PyObject *exception = resolve_exception(&buffer);
+
+                PyErr_Format(exception,
+                            "%s", buffer);
+                ClearError();
+                goto error;
          }""")
 
         out.write("\n// Postcall preparations\n")
@@ -1374,6 +1381,8 @@ if(PyErr_Occurred()) {
    PyObject *exception_t, *exception, *tb;
    PyObject *str;
    char *str_c;
+   char *error_str;
+   enum _error_type *error_type = aff4_get_current_error(&error_str);
 
    // Fetch the exception state and convert it to a string:
    PyErr_Fetch(&exception_t, &exception, &tb);
@@ -1382,9 +1391,9 @@ if(PyErr_Occurred()) {
    str_c = PyString_AsString(str);
 
    if(str_c) {
-      strncpy(__error_str, str_c, BUFF_SIZE-1);
-      __error_str[BUFF_SIZE-1]=0;
-      aff4_error = ERuntimeError;
+      strncpy(error_str, str_c, BUFF_SIZE-1);
+      error_str[BUFF_SIZE-1]=0;
+      *error_type = ERuntimeError;
    };
    Py_DECREF(str);
    goto error;
@@ -1522,6 +1531,8 @@ if(PyErr_Occurred()) {
    PyObject *exception_t, *exception, *tb;
    PyObject *str;
    char *str_c;
+   char *error_str;
+   enum _error_type *error_type = aff4_get_current_error(&error_str);
 
    // Fetch the exception state and convert it to a string:
    PyErr_Fetch(&exception_t, &exception, &tb);
@@ -1530,9 +1541,9 @@ if(PyErr_Occurred()) {
    str_c = PyString_AsString(str);
 
    if(str_c) {
-      strncpy(__error_str, str_c, BUFF_SIZE-1);
-      __error_str[BUFF_SIZE-1]=0;
-      aff4_error = ERuntimeError;
+      strncpy(error_str, str_c, BUFF_SIZE-1);
+      error_str[BUFF_SIZE-1]=0;
+      *error_type = ERuntimeError;
    };
    Py_DECREF(str);
    goto error;

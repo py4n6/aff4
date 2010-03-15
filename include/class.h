@@ -433,11 +433,6 @@ python method calls on the proxied object.
 #define PROXY_CLASS(name)
 
 
-  // These macros are used when we need to do something which might
-  // change the error state on the error path of a function.
-#define PUSH_ERROR_STATE { enum _error_type tmp = aff4_error;
-#define POP_ERROR_STATE aff4_error = tmp;};
-
 #endif
 #ifdef __cplusplus
 } /* closing brace for extern "C" */
