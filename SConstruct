@@ -33,8 +33,8 @@ args['CFLAGS']=' -Ilibraptor '
 args['LINKFLAGS']=''
 ## Make sure we only build for one architecture on darwin
 if platform.system().lower() == 'darwin':
-   args['CFLAGS'] += " -arch %s " % config.DARWIN_ARCHITECTURE
-   args['LINKFLAGS'] += " -arch %s " % config.DARWIN_ARCHITECTURE
+   args['CFLAGS'] += config.DARWIN_ARCHITECTURE
+   args['LINKFLAGS'] += config.DARWIN_ARCHITECTURE
 
 if config.V:
    args['CFLAGS'] += ' -Wall -g -O0 -D__DEBUG__ '
@@ -119,7 +119,7 @@ if not env.GetOption('clean') and not env.GetOption('help'):
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
 crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
-utime.h arpa/inet.h
+utime.h arpa/inet.h stdargs.h
 """))
 
    ## Mandatory dependencies
@@ -141,10 +141,21 @@ strerror strdup memmove mktime timegm utime utimes strlcpy strlcat setenv
 unsetenv seteuid setegid setresuid setresgid chown chroot link readlink symlink
 realpath lchown setlinebuf strcasestr strcasecmp strtok strtoll strtoull ftruncate initgroups
 bzero memset dlerror dlopen dlsym dlclose socketpair vasprintf snprintf vsnprintf
-asprintf vsyslog __va_copy va_copy dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
+asprintf vsyslog dup2 mkdtemp pread pwrite inet_ntoa inet_pton inet_ntop
 inet_aton connect gethostbyname getifaddrs freeifaddrs crypt vsnprintf strnlen
 ntohll
 """))
+
+   ## va_copy is a macro on some platforms so we need to check it better
+   SconsUtils.utils.check_build(conf, "va_copy", "HAVE_VA_COPY", """
+#include <stdarg.h>
+int main() {
+  va_list ap1,ap2;
+  va_copy(ap1,ap2);
+
+  return 0;
+}
+""")
 
    ## Libraries
    SconsUtils.utils.check("lib", conf, Split("""

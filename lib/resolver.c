@@ -86,16 +86,11 @@ void AFF4_Init(void) {
   // EWFStream_init();
 #endif
 
-  //  Encrypted_init();
-  //  DirVolume_init();
-  // Identity_init();
-
   init_luts();
 
   // Make a global oracle
   if(!oracle) {
-    // Create the oracle - it has a special add method which distributes
-    // all the adds to the other identities
+    // Create the global oracle
     oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
   };
 };
@@ -1568,7 +1563,7 @@ static void Resolver_flush(Resolver self) {
 
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
-  NAMEOF(self->write_cache) = "Resolver Write Cache";
+  //  NAMEOF(self->write_cache) = "Resolver Write Cache";
 };
 
 static void Resolver_expire(Resolver self, RDFURN uri) {

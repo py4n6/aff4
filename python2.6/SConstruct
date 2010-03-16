@@ -41,4 +41,4 @@ if not nenv.get("disable_curl"):
 nenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
 nenv.Depends('pyaff4.c', 'class_parser.py')
 
-nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=utils.libaff4_static_lib)
+nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=env.libaff4_so)

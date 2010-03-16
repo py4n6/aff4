@@ -7,7 +7,7 @@ so it must be python syntax.
 TDB_LOCATION = "/tmp/"
 
 ## Debug level. V=0 means no debugging and full optimization enabled.
-V = False
+V = True
 
 ## Optional build modules
 disable_ewf = False
@@ -39,4 +39,4 @@ RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
 
 ## Darwin specific options (Only used when running on OSX)
-DARWIN_ARCHITECTURE = "i386"
+DARWIN_ARCHITECTURE = "-arch i386 -arch x86_64"

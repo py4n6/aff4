@@ -2,6 +2,7 @@ import os, sys, re, pdb
 import distutils.sysconfig as sysconfig
 import distutils.util
 import platform
+import SCons.SConf as SConf
 
 # taken from scons wiki
 def CheckPKGConfig(context, version):
@@ -201,7 +202,17 @@ def check_type(conf, types):
 
         HEADERS[define] = result
 
-def check(type, conf, headers):
+def check_build(conf, message, define, prog):
+    """ Build and links prog and adds define if that succeeds """
+    context = SConf.CheckContext(conf)
+    context.Message("Checking for %s ..." % message)
+    if context.TryLink(prog, ".c"):
+        HEADERS[define] = 1
+        context.Message("yes\n")
+    else:
+        context.Message("no\n")
+
+def check(type, conf, headers, extra_include =''):
     for header in headers:
         if ":" in header:
             define, header = header.split(':')
@@ -216,10 +227,11 @@ def check(type, conf, headers):
         global HEADERS
         result = 0
         if type == 'header':
+            #pdb.set_trace()
             if conf.CheckCHeader(header): result = 1
             HEADERS[define] = result
         elif type == 'func':
-            if conf.CheckFunc(header): result = 1
+            if conf.CheckFunc(header, header=extra_include): result = 1
             HEADERS[define] = result
         elif type == 'lib':
             if conf.CheckLib(header): result =1
