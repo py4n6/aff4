@@ -6,7 +6,7 @@
 pthread_mutex_t LIBEWF_LOCK;
 
 // Global error handler for libewf
-static __thread libewf_error_t *ewf_error;
+static libewf_error_t *ewf_error;
 
 #if 0
 #define LOCK_EWF pthread_mutex_lock(&LIBEWF_LOCK)

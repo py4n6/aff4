@@ -39,4 +39,4 @@ RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
 
 ## Darwin specific options (Only used when running on OSX)
-DARWIN_ARCHITECTURE = "-arch i386 -arch x86_64"
+DARWIN_ARCHITECTURE = "-arch x86_64"
