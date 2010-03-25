@@ -97,10 +97,6 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
   CALL(URNOF(this), set, stream_urn->value);
   CALL(URNOF(this), add, buff);
 
-  // Make the bevy get stored in the same place the image is:
-  CALL(oracle, set_value, URNOF(this),
-       AFF4_VOLATILE_STORED, (RDFValue)this->image->stored);
-
   /* We are running in multi-threaded mode */
   if(this->image->busy && backgroud) {
     // put the worker in the busy queue
@@ -123,6 +119,7 @@ static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
   int result;
   FileLikeObject bevy;
+  AFF4Volume volume;
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -152,10 +149,18 @@ static int dump_bevy_thread(ImageWorker this) {
     bevy_index += length;
   };
 
-  bevy = (FileLikeObject)CALL(oracle, create, AFF4_SEGMENT, 'w');
-  CALL(URNOF(bevy), set, URNOF(this)->value);
+  // Get the latest word on where this image is stored - this allows
+  // the user to switch the image container at any time.
+  if(!CALL(oracle, resolve_value, URNOF(this->image),
+           AFF4_STORED, (RDFValue)this->image->stored)) {
+    RaiseError(ERuntimeError, "Image %s is not stored anywhere?", STRING_URNOF(this->image));
+    goto error;
+  };
 
-  bevy = (FileLikeObject)CALL((AFFObject)bevy, finish);
+  volume = (AFF4Volume)CALL(oracle, open, this->image->stored, 'w');
+  bevy = (FileLikeObject)CALL(volume, open_member, URNOF(this)->value,
+                              'w', ZIP_STORED);
+
   if(!bevy) {
     result = -1;
     goto error;
@@ -165,6 +170,7 @@ static int dump_bevy_thread(ImageWorker this) {
        this->segment_buffer->readptr);
 
   CALL(bevy, close);
+  CALL((AFFObject)volume, cache_return);
 
   // Stupid divide by zero ....
   if(this->bevy->size > 0) {
@@ -209,8 +215,8 @@ static int dump_bevy_thread(ImageWorker this) {
   // Return ourselves to the queue of workers so we can be called
   // again:
   if(this->image->busy) {
-    CALL(this->image->busy, remove, this->image, (void *)this);
-    CALL(this->image->workers, put, (void *)this);
+    CALL(this->image->busy, remove, this->image, (Object)this);
+    CALL(this->image->workers, put, (Object)this);
   };
 
   return result;
@@ -296,12 +302,14 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
 static void Image_set_workers(Image this, int workers) {
   int i;
 
-  this->workers = CONSTRUCT(Queue, Queue, Con, this);
-  this->busy = CONSTRUCT(Queue, Queue, Con, this);
-  // Make this many workers
-  for(i=0;i < workers; i++) {
-    ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
-    CALL(this->workers, put, (void *)w);
+  if(workers>0) {
+    this->workers = CONSTRUCT(Queue, Queue, Con, this);
+    this->busy = CONSTRUCT(Queue, Queue, Con, this);
+    // Make this many workers
+    for(i=0;i < workers; i++) {
+      ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
+      CALL(this->workers, put, (void *)w);
+    };
   };
 };
 

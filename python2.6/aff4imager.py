@@ -5,7 +5,7 @@ This file contains utility functions first, followed by an optparse
 front end. This allows users to import this file as a module, or run
 it directly.  """
 import sys, pdb
-import re
+import re, os.path
 
 import time
 time.sleep(1)
@@ -38,51 +38,91 @@ class Renderer:
        sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.value,
                                           colors['end'], message))
 
-def image(output_URI, options, fds):
+def image(output, options, fds):
     """ Copy the file like objects specified in the fds list into an
     output volume specified by its URI.
     """
+    #pdb.set_trace()
+    base, ext = os.path.splitext(output)
+    extra = ''
+    volume_count = 0
+
+    ## These are all the volumes we have created - we only close them
+    ## at the end in case some thread is still writing to them:
+    volume_urns = []
+
+    output_URI = pyaff4.RDFURN()
+    output_URI.set(output)
+
+    size = pyaff4.XSDInteger()
     out_fd = oracle.open(output_URI, 'w')
     ## A file urn was specified
     if isinstance(out_fd, pyaff4.FileLikeObject):
         out_fd.cache_return()
 
         ## Make a volume object
-        zip_fd = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
-        oracle.set_value(zip_fd.urn, pyaff4.AFF4_STORED, output_URI)
+        volume_fd = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+        oracle.set_value(volume_fd.urn, pyaff4.AFF4_STORED, output_URI)
 
-        zip_fd = zip_fd.finish()
+        volume_fd = volume_fd.finish()
     else:
-        zip_fd = out_fd
+        volume_fd = out_fd
 
-
-    zip_urn = zip_fd.urn
-    zip_fd.cache_return()
+    volume_urns.append(volume_fd.urn)
+    volume_fd.cache_return()
 
     for fd in fds:
         image_fd = oracle.create(pyaff4.AFF4_IMAGE, 'w')
 
-        warn("New image %s%s" % (colors['cyan'], fd.urn.value))
+        image_fd.urn.set(volume_urns[-1].value)
+        image_fd.urn.add(fd.urn.parser.query)
+        warn("New image %s%s%s stored on volume %s%s" % (
+              colors['cyan'], image_fd.urn.value,
+              colors['end'], colors['yellow'], output_URI.value))
         ## We want to make the image URI the same as the volume URI
         ## with the query stem of the source appended to it:
-        image_fd.urn.set(zip_urn.value)
-        image_fd.urn.add(fd.urn.parser.query)
         image_fd.set_workers(options.threads)
-        oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, zip_urn)
+        oracle.set_value(image_fd.urn, pyaff4.AFF4_STORED, volume_urns[-1])
 
         image_fd = image_fd.finish()
 
         while 1:
-            data = fd.read(10 * 1024 * 1024)
+            data = fd.read(1024 * 1024)
 
             if not data: break
 
             image_fd.write(data)
 
+            ## Check if we need to change volumes
+            if options.max_size > 0 and oracle.resolve_value(
+               volume_urns[-1], pyaff4.AFF4_DIRECTORY_OFFSET, size) and \
+               size.value > options.max_size:
+
+               ## Make a new volume:
+               volume_count += 1
+               new_filename = "%s.%02d%s" % (base, volume_count, ext)
+               output_URI.set(new_filename)
+
+               volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+               volume.set(pyaff4.AFF4_STORED, output_URI)
+               volume = volume.finish()
+               volume_urns.append(volume.urn)
+               volume.cache_return()
+
+               ## The image is now stored in the new volume
+               image_fd.set(pyaff4.AFF4_STORED, volume_urns[-1])
+
+               warn("New volume created on %s%s" % (
+                     colors['cyan'], output_URI.value))
+
+        ## This will block until all threads have finished.
         image_fd.close()
 
-    zip_fd = oracle.open(zip_urn, 'w')
-    zip_fd.close()
+    ## Now close all the volumes off
+    for volume_urn in volume_urns:
+       print "Closing %s" % volume_urn.value
+       volume_fd = oracle.open(volume_urn, 'w')
+       volume_fd.close()
 
 import optparse
 import pyaff4
@@ -92,7 +132,7 @@ parser.add_option("-i", "--image", default=None,
                   action='store_true',
                   help = "Imaging mode")
 
-parser.add_option("-m", "--max_size", default=0,
+parser.add_option("-m", "--max_size", default=0, type=int,
                   help = "Try to change volumes after the volume is bigger than this size")
 
 parser.add_option("-o", "--output", default=None,
@@ -179,7 +219,7 @@ if options.dump:
    fd = oracle.open(urn, 'r')
    try:
       while 1:
-         data = fd.read(1024* 1024)
+         data = fd.read(10 * 1024* 1024)
          if not data: break
 
          out_fd.write(data)
@@ -198,14 +238,15 @@ elif options.image:
     urn = pyaff4.RDFURN()
     try:
         for arg in args:
-            urn.set(arg)
-            fd = oracle.open(urn, 'r')
-            fds.append(fd)
-            if not isinstance(fd, pyaff4.FileLikeObject):
-                error("%s is not a file like object" % arg)
+           urn.set(arg)
+           fd = oracle.open(urn, 'r')
+           fds.append(fd)
+           if not isinstance(fd, pyaff4.FileLikeObject):
+              error("%s is not a file like object" % arg)
 
-        urn.set(output)
-        image(urn, options, fds)
+        if not output.startswith("/"): output = "%s/%s" % (os.getcwd(), output)
+
+        image(output, options, fds)
     finally:
         for fd in fds:
             fd.cache_return()
