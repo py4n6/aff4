@@ -124,7 +124,7 @@ CLASS(Cache, Object)
 
      // Store the key, data in a new Cache object. The key and data will be
      // stolen.
-     void METHOD(Cache, put, char *key, int len, Object data);
+     BORROWED Cache METHOD(Cache, put, char *key, int len, Object data);
 
      // Returns true if the object is in cache
      int METHOD(Cache, present, char *key, int len);

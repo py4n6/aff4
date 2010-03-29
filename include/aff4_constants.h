@@ -132,6 +132,8 @@
 #define AFF4_CRYPTO_ALGORITHM_AES_SHA254 "AES256/SHA256"
 
 /** These are standard aff4 types. */
+#define AFF4_GRAPH            PREDICATE_NAMESPACE "graph"
+
 /** Volume types **/
 #define AFF4_ZIP_VOLUME       PREDICATE_NAMESPACE "zip_volume"
 #define AFF4_DIRECTORY_VOLUME PREDICATE_NAMESPACE "directory"

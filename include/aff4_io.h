@@ -60,6 +60,12 @@ CLASS(AFFObject, Object)
      */
      DESTRUCTOR void METHOD(AFFObject, cache_return);
 
+     /* When the object is closed it will write itself to its volume.
+        This frees the object - do no use it after calling close.
+      */
+     DESTRUCTOR int METHOD(AFFObject, close);
+
+
      /*  This method is used to delete the object from the resolver.
          It should also call the delete method for all the objects
          contained within this one or that can be inferred to be
@@ -123,7 +129,7 @@ CLASS(FileLikeObject, AFFObject)
 
 // This closes the FileLikeObject and also frees it - it is not valid
 // to use the FileLikeObject after calling this (it gets free'd).
-     DESTRUCTOR int METHOD(FileLikeObject, close);
+//     DESTRUCTOR int METHOD(FileLikeObject, close);
 END_CLASS
 
 // This file like object is backed by a real disk file:
@@ -147,7 +153,7 @@ CLASS(AFF4Volume, AFFObject)
 
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
-     DESTRUCTOR int METHOD(AFF4Volume, close);
+//     DESTRUCTOR int METHOD(AFF4Volume, close);
 
 // A convenience function for storing a string as a new file (it
 // basically calls open_member, writes the string then closes it).

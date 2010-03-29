@@ -717,21 +717,22 @@ PyErr_Clear();
     def byref(self):
         return "&%s" % self.name
 
-    def pre_call(self, method):
+    def XXXXpre_call(self, method):
         if 'OUT' in self.attributes or self.sense == 'OUT':
             return ''
 
         return """
-if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
+if(%(name)s && !type_check((PyObject *)%(name)s,&%(type)s_Type)) {
      PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
      goto error;
 };\n""" % self.__dict__
 
-    def call_arg(self):
-        return "%s->base" % self.name
-
     def definition(self, default = 'NULL', sense='in', **kw):
-        return "Gen_wrapper *%s = %s;" % (self.name, default)
+        result = "Gen_wrapper *%s = %s;" % (self.name, default)
+        if sense == 'in' and not 'OUT' in self.attributes:
+            result += " %s *call_%s;\n" % (self.type, self.name)
+
+        return result;
 
 class PointerStructWrapper(StructWrapper):
     def __init__(self, name, type):
@@ -1157,7 +1158,15 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
 
         self.error_set = True
         out.write("""%s);\nPy_END_ALLOW_THREADS\n
-  if(!self->base) {
+       if(!CheckError(EZero)) {
+         char *buffer;
+         PyObject *exception = resolve_exception(&buffer);
+
+         PyErr_Format(exception,
+                    "%%s", buffer);
+         ClearError();
+         goto error;
+  } else if(!self->base) {
     PyErr_Format(PyExc_IOError, "Unable to construct class %s");
     goto error;
   };

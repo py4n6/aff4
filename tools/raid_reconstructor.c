@@ -108,7 +108,7 @@ void make_map_stream(char *driver, struct map_description *map, char *output, ch
   MapDriver map_fd = (MapDriver)CALL(oracle, create, AFF4_MAP, 'w');
   XSDInteger i = new_XSDInteger(output_urn);
 
-  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)output_urn);
+  CALL(oracle, set_value, URNOF(zip), AFF4_STORED, (RDFValue)output_urn,0);
   if(!CALL((AFFObject)zip, finish))
     goto exit;
 
@@ -116,7 +116,7 @@ void make_map_stream(char *driver, struct map_description *map, char *output, ch
   CALL(URNOF(map_fd), add, stream);
 
   CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, 
-       (RDFValue)URNOF(zip));
+       (RDFValue)URNOF(zip),0);
 
   CALL(oracle, cache_return, (AFFObject)zip);
 
@@ -124,10 +124,10 @@ void make_map_stream(char *driver, struct map_description *map, char *output, ch
     goto exit;
 
   CALL(i, set, map->image_period);
-  CALL(oracle, set_value, URNOF(map_fd), AFF4_IMAGE_PERIOD, (RDFValue)i);
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_IMAGE_PERIOD, (RDFValue)i,0);
 
   CALL(i, set, map->target_period);
-  CALL(oracle, set_value, URNOF(map_fd), AFF4_TARGET_PERIOD, (RDFValue)i);
+  CALL(oracle, set_value, URNOF(map_fd), AFF4_TARGET_PERIOD, (RDFValue)i,0);
 
   /*
   CALL(i, set, map->blocksize);
@@ -141,8 +141,8 @@ void make_map_stream(char *driver, struct map_description *map, char *output, ch
          URNOF(map->map[i->value].target)->value);
   };
 
-  CALL((FileLikeObject)map_fd, close);
-  CALL(zip, close);
+  CALL((AFFObject)map_fd, close);
+  CALL((AFFObject)zip, close);
 
  exit:
   if(output_urn)

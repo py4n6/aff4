@@ -316,7 +316,7 @@ extern "C" {
     (GETCLASS(Foo)) or &__Foo
 */
 #define CONSTRUCT_FROM_REFERENCE(class, constructor, context, ... )	\
-  ( class->constructor(						\
+  ( (class)->constructor(						\
                        (void *)_talloc_memdup(context, ((Object)class), ((Object)class)->__size,  __location__ "(" #class "." #constructor ")"), \
 		      ## __VA_ARGS__) )
 

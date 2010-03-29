@@ -99,7 +99,7 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
 
   // Make the bevy get stored in the same place the image is:
   CALL(oracle, set_value, URNOF(this),
-       AFF4_VOLATILE_STORED, (RDFValue)this->image->stored);
+       AFF4_VOLATILE_STORED, (RDFValue)this->image->stored,0);
 
   /* We are running in multi-threaded mode */
   if(this->image->busy && backgroud) {
@@ -123,6 +123,7 @@ static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
   int result;
   FileLikeObject bevy;
+  AFF4Volume volume;
 
   while(bevy_index < this->bevy->size) {
     int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -152,10 +153,18 @@ static int dump_bevy_thread(ImageWorker this) {
     bevy_index += length;
   };
 
-  bevy = (FileLikeObject)CALL(oracle, create, AFF4_SEGMENT, 'w');
-  CALL(URNOF(bevy), set, URNOF(this)->value);
+  // Get the latest word on where this image is stored - this allows
+  // the user to switch the image container at any time.
+  if(!CALL(oracle, resolve_value, URNOF(this->image),
+           AFF4_STORED, (RDFValue)this->image->stored)) {
+    RaiseError(ERuntimeError, "Image %s is not stored anywhere?", STRING_URNOF(this->image));
+    goto error;
+  };
 
-  bevy = (FileLikeObject)CALL((AFFObject)bevy, finish);
+  volume = (AFF4Volume)CALL(oracle, open, this->image->stored, 'w');
+  bevy = (FileLikeObject)CALL(volume, open_member, URNOF(this)->value,
+                              'w', ZIP_STORED);
+
   if(!bevy) {
     result = -1;
     goto error;
@@ -164,7 +173,8 @@ static int dump_bevy_thread(ImageWorker this) {
   CALL(bevy, write, this->segment_buffer->data,
        this->segment_buffer->readptr);
 
-  CALL(bevy, close);
+  CALL((AFFObject)bevy, close);
+  CALL((AFFObject)volume, cache_return);
 
   // Stupid divide by zero ....
   if(this->bevy->size > 0) {
@@ -183,7 +193,7 @@ static int dump_bevy_thread(ImageWorker this) {
   };
 
   // Set the index on the bevy
-  CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index);
+  CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index,0);
 
 #if 1
   // Reset everything to the start
@@ -209,8 +219,8 @@ static int dump_bevy_thread(ImageWorker this) {
   // Return ourselves to the queue of workers so we can be called
   // again:
   if(this->image->busy) {
-    CALL(this->image->busy, remove, this->image, (void *)this);
-    CALL(this->image->workers, put, (void *)this);
+    CALL(this->image->busy, remove, this->image, (Object)this);
+    CALL(this->image->workers, put, (Object)this);
   };
 
   return result;
@@ -250,7 +260,8 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     };
 
     // Add ourselves to our volume
-    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS,
+         (RDFValue)URNOF(self),0);
 
     // These are the essential properties:
     //CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
@@ -296,12 +307,14 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
 static void Image_set_workers(Image this, int workers) {
   int i;
 
-  this->workers = CONSTRUCT(Queue, Queue, Con, this);
-  this->busy = CONSTRUCT(Queue, Queue, Con, this);
-  // Make this many workers
-  for(i=0;i < workers; i++) {
-    ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
-    CALL(this->workers, put, (void *)w);
+  if(workers>0) {
+    this->workers = CONSTRUCT(Queue, Queue, Con, this);
+    this->busy = CONSTRUCT(Queue, Queue, Con, this);
+    // Make this many workers
+    for(i=0;i < workers; i++) {
+      ImageWorker w = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
+      CALL(this->workers, put, (void *)w);
+    };
   };
 };
 
@@ -344,12 +357,13 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
   self->readptr += length;
   self->size->value = max(self->size->value, self->readptr);
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
-       (RDFValue)((FileLikeObject)self)->size);
+       (RDFValue)((FileLikeObject)self)->size,0);
 
   return length;
 };
 
-static int Image_close(FileLikeObject self) {
+static int Image_close(AFFObject aself) {
+  FileLikeObject self = (FileLikeObject)aself;
   Image this = (Image)self;
 
   // Write the last chunk
@@ -380,23 +394,23 @@ static int Image_close(FileLikeObject self) {
 
   // Now store all our parameters in the resolver
   CALL(oracle, set_value, URNOF(this), AFF4_CHUNK_SIZE,
-       (RDFValue)this->chunk_size);
+       (RDFValue)this->chunk_size,0);
 
   CALL(oracle, set_value, URNOF(this), AFF4_COMPRESSION,
-       (RDFValue)this->compression);
+       (RDFValue)this->compression,0);
 
   CALL(oracle, set_value, URNOF(this), AFF4_CHUNKS_IN_SEGMENT,
-       (RDFValue)this->chunks_in_segment);
+       (RDFValue)this->chunks_in_segment,0);
 
   CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
-       rdfvalue_from_urn(this, AFF4_IMAGE));
+       rdfvalue_from_urn(this, AFF4_IMAGE),0);
 
   {
     XSDDatetime time = new_XSDDateTime(this);
 
     gettimeofday(&time->value,NULL);
     CALL(oracle, set_value, URNOF(this), AFF4_TIMESTAMP,
-	 (RDFValue)time);
+	 (RDFValue)time,0);
   };
 
   // FIXME - implement sha256 RDF dataType
@@ -407,15 +421,16 @@ static int Image_close(FileLikeObject self) {
     tmp.dptr = buff;
     EVP_DigestFinal(&this->digest, buff, &tmp.dsize);
 
-    CALL(oracle, set_value, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
+    CALL(oracle, set_value, URNOF(self), AFF4_SHA,
+         &tmp, RESOLVER_DATA_TDB_DATA,0);
   };
 #endif
 
   // Update the size
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
-       (RDFValue)self->size);
+       (RDFValue)self->size,0);
 
-  return SUPER(FileLikeObject, FileLikeObject, close);
+  return SUPER(AFFObject, FileLikeObject, close);
 };
 
 /** Reads at most a single chunk and write to result. Return how much
@@ -579,7 +594,7 @@ VIRTUAL(Image, FileLikeObject) {
 
      VMETHOD_BASE(FileLikeObject, read) = Image_read;
      VMETHOD_BASE(FileLikeObject, write) = Image_write;
-     VMETHOD_BASE(FileLikeObject,close) = Image_close;
+     VMETHOD_BASE(AFFObject, close) = Image_close;
 
      VMETHOD(set_workers) = Image_set_workers;
 } END_VIRTUAL

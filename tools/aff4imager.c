@@ -152,15 +152,15 @@ int aff2_encrypted_image(char *driver, char *output_file, char *stream_name,
     CALL((FileLikeObject)image, write, buffer, length);
   };
 
-  CALL((FileLikeObject)image, close);
+  CALL((AFFObject)image, close);
 
   // Close the zipfile and dispose of it
   volume = (AFF4Volume)CALL(oracle, open, volume_urn, 'w');
-  CALL((AFF4Volume)volume, close);
+  CALL((AFFObject)volume, close);
 
   // Close the zipfile and dispose of it
   container_volume = (AFF4Volume)CALL(oracle, open, container_volume_urn, 'w');
-  CALL((AFF4Volume)container_volume, close);
+  CALL((AFFObject)container_volume, close);
 
   return 0;
 
@@ -213,7 +213,7 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
 
 
   CALL(oracle, set_value, URNOF(map_fd), AFF4_STORED, 
-       (RDFValue)URNOF(zipfile));
+       (RDFValue)URNOF(zipfile), NULL);
 
   CALL(oracle, cache_return, (AFFObject)zipfile);
 
@@ -232,12 +232,12 @@ int aff4_make_map(char *driver, char *output_file, char *stream_name,
   };
 
   map_fd->super.size->value = image_offset->value;
-  CALL((FileLikeObject)map_fd, close);
+  CALL((AFFObject)map_fd, close);
 
   // Close the zip file - it is strictly needed to reopen the file in
   // case it was purged from the cache.
   zipfile = (AFF4Volume)CALL(oracle, open, URNOF(zipfile), 'w');
-  CALL(zipfile, close);
+  CALL((AFFObject)zipfile, close);
 
   talloc_free(output_urn);
   return 1;
@@ -329,9 +329,9 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
 
       // Leave a hint in this volume to load the next volume
       CALL(oracle, add_value, URNOF(*zipfile), AFF4_AUTOLOAD,
-           (RDFValue)output_urn);
+           (RDFValue)output_urn, NULL);
 
-      CALL(*zipfile, close);
+      CALL((AFFObject)*zipfile, close);
 
       // Create a new volume to hold the image:
       *zipfile = (AFF4Volume)CALL(oracle, create, driver, 'w');
@@ -346,10 +346,10 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
       // Tell the resolver that from now on the image will be stored
       // on the new volume:
       CALL(oracle, add_value, URNOF(image), AFF4_STORED,
-           (RDFValue)URNOF(*zipfile));
+           (RDFValue)URNOF(*zipfile), NULL);
 
       CALL(oracle, add_value, URNOF(*zipfile), AFF4_VOLATILE_CONTAINS,
-           (RDFValue)URNOF(image));
+           (RDFValue)URNOF(image), NULL);
 
 	CALL(oracle, cache_return, (AFFObject)*zipfile);
     };
@@ -360,15 +360,15 @@ int aff4_image(AFF4Volume *zipfile, char *driver,
     CALL((FileLikeObject)image, write, buffer, length);
   };
 
-  CALL((FileLikeObject)image, close);
+  CALL((AFFObject)image, close);
 
-  if(in_fd) CALL((FileLikeObject)in_fd, close);
+  if(in_fd) CALL((AFFObject)in_fd, close);
 
   talloc_free(directory_offset);
   return 0;
 
  error:
-  if(in_fd) CALL((FileLikeObject)in_fd, close);
+  if(in_fd) CALL((AFFObject)in_fd, close);
 
   talloc_free(directory_offset);
   PrintError();
@@ -411,7 +411,7 @@ void aff2_extract(char *stream, char *output_file) {
   };
 
   CALL(oracle, cache_return, (AFFObject)in_fd);
-  CALL(out_fd, close);
+  CALL((AFFObject)out_fd, close);
 };
 
 static uint64_t current_pos=0;
@@ -671,7 +671,7 @@ int main(int argc, char **argv)
           optind++;
         };
 
-        CALL(zipfile, close);
+        CALL((AFFObject)zipfile, close);
 
       } else if(mode == 'm') {
         aff4_make_map(driver, output_file, stream_name,

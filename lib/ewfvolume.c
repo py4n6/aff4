@@ -138,19 +138,19 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_STREAM));
 
   // Set the file we are stored in
-  CALL(oracle, set_value, urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
-  CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)urn);
+  CALL(oracle, set_value, urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self),0);
+  CALL(oracle, set_value, URNOF(self), AFF4_STORED, (RDFValue)urn,0);
 
   // To support the EWF file we add a single stream URI to the
   // resolver to emulate a full AFF4 volume
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CONTAINS, (RDFValue)stream);
-  CALL(oracle, set_value, stream, AFF4_STORED, (RDFValue)URNOF(self));
-  CALL(oracle, set_value, stream, AFF4_TYPE, (RDFValue)string);
-  CALL(oracle, set_value, stream, AFF4_SIZE, (RDFValue)size);
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CONTAINS, (RDFValue)stream,0);
+  CALL(oracle, set_value, stream, AFF4_STORED, (RDFValue)URNOF(self),0);
+  CALL(oracle, set_value, stream, AFF4_TYPE, (RDFValue)string,0);
+  CALL(oracle, set_value, stream, AFF4_SIZE, (RDFValue)size,0);
 
   // Set our own type so we can be reopened
   CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_VOLUME));
-  CALL(oracle, set_value, URNOF(self), AFF4_TYPE, (RDFValue)string);
+  CALL(oracle, set_value, URNOF(self), AFF4_TYPE, (RDFValue)string,0);
 
   talloc_free(size);
   return 1;
@@ -167,7 +167,7 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   return 0;
 };
 
-static int EWFVolume_close(AFF4Volume self) {
+static int EWFVolume_close(AFFObject self) {
   talloc_free(self);
 
   return 1;
@@ -177,7 +177,7 @@ VIRTUAL(EWFVolume, AFF4Volume) {
   VMETHOD_BASE(AFFObject, dataType) = AFF4_EWF_VOLUME;
   VMETHOD_BASE(AFFObject, Con) = EWFVolume_AFFObject_Con;
   VMETHOD_BASE(AFF4Volume, load_from) = EWFVolume_load_from;
-  VMETHOD_BASE(AFF4Volume, close) = EWFVolume_close;
+  VMETHOD_BASE(AFFObject, close) = EWFVolume_close;
 
   INIT_CLASS(FileLikeObject);
   VMETHOD_BASE(AFFObject, delete) = ((AFFObject)GETCLASS(FileLikeObject))->delete;
@@ -246,7 +246,7 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   return -1;
 };
 
-static int EWFStream_close(FileLikeObject self) {
+static int EWFStream_close(AFFObject self) {
   talloc_free(self);
 
   return 0;
@@ -257,7 +257,7 @@ VIRTUAL(EWFStream, FileLikeObject) {
 
   VMETHOD_BASE(AFFObject, Con) = EWFStream_AFFObject_Con;
   VMETHOD_BASE(FileLikeObject, read) = EWFStream_read;
-  VMETHOD_BASE(FileLikeObject, close) = EWFStream_close;
+  VMETHOD_BASE(AFFObject, close) = EWFStream_close;
 } END_VIRTUAL
 
 void EWF_init() {
