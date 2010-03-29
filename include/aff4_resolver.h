@@ -175,11 +175,15 @@ CLASS(Resolver, Object)
 	  allocated to the NULL context. Callers need to talloc_free
 	  the result. This advantage of this method is that we dont
 	  need to know in advance what type the value is.
+
+          Note - this function advances the iterator.
        */
        RDFValue METHOD(Resolver, alloc_from_iter, RESOLVER_ITER *iter);
 
        /* This is a shortcut method for retrieving the encoded version
           from the iterator.
+
+          Note - this function advances the iterator.
        */
        PRIVATE char *METHOD(Resolver, encoded_data_from_iter, RDFValue *rdf_value_class,
                     RESOLVER_ITER *iter);

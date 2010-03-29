@@ -14,7 +14,7 @@ class EventHandler:
     def startup(self):
         """ This method is called when we first start """
 
-    def finish(self, outurn):
+    def finish(self):
         """ This method is called when we are finished processing """
 
     def exit(self):
@@ -34,42 +34,91 @@ class PATH_MANAGER(Store.FastStore):
         self.STR = pyaff4.XSDString()
         Store.FastStore.__init__(self, *args, **kwargs)
 
-    def add_path_relations(self, path, volume_urn):
+    def add_path_relations(self, path):
         """ Adds navigation relations for path which is a list of components """
-        for i in range(len(path)-1):
-            so_far = "/".join(path[:i])
-            if so_far == '': so_far='/'
-            try:
-                children = self.get(so_far)
-                if path[i+1] in children:
-                    continue
-            except KeyError:
-                children = set()
-                self.add(so_far, children)
+        global OUTPUT_VOLUME_URN, OUTPUT_NATIVATION_GRAPH
 
-            children.add(path[i+1])
+        graph = oracle.open(OUTPUT_NATIVATION_GRAPH, 'w')
+        try:
+            for i in range(len(path)-1):
+                so_far = "/".join(path[:i])
+                try:
+                    children = self.get(so_far)
+                    if path[i] in children:
+                        continue
 
-            self.URL.set(pyaff4.AFF4_NAVIGATION_ROOT)
-            self.URL.add(so_far[1:])
+                except KeyError:
+                    children = set()
+                    self.add(so_far, children)
 
-            self.STR.set(path[i+1])
+                children.add(path[i])
 
-            oracle.set_value(self.URL, pyaff4.AFF4_NAVIGATION_CHILD, self.STR)
-            if not oracle.resolve_value(self.URL, pyaff4.AFF4_TYPE, self.STR):
-                self.STR.set(pyaff4.AFF4_GRAPH)
-                oracle.set_value(self.URL, pyaff4.AFF4_STORED, self.STR)
+                self.URL.set(pyaff4.AFF4_NAVIGATION_ROOT)
+                self.URL.add(so_far)
 
-                oracle.set_value(self.URL, pyaff4.AFF4_VOLATILE_STORED, volume_urn)
+                self.STR.set(path[i])
+
+                ## Add the navigation relation to the graph
+                graph.set_triple(self.URL, pyaff4.AFF4_NAVIGATION_CHILD, self.STR)
+        finally:
+            graph.cache_return()
 
 PATH_CACHE = PATH_MANAGER()
 
-def VFSCreate(fd, name, volume_urn, type=pyaff4.AFF4_MAP):
+## This is the output volume URN where new objects get appended
+OUTPUT_VOLUME_URN = None
+OUTPUT_NATIVATION_GRAPH = None
+
+def Init_output_volume(out_path):
+    """ Given an output volume URN or a path we create this for writing.
+    """
+    global OUTPUT_VOLUME_URN, OUTPUT_NATIVATION_GRAPH
+
+    OUTPUT_VOLUME_URN = pyaff4.RDFURN()
+    OUTPUT_VOLUME_URN.set(out_path)
+
+    ## Try to append to an existing volume
+    if not oracle.load(OUTPUT_VOLUME_URN):
+        ## Nope just make it then
+        volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME)
+        volume.set(pyaff4.AFF4_STORED, OUTPUT_VOLUME_URN)
+
+        volume = volume.finish()
+        OUTPUT_VOLUME_URN = volume.urn
+        volume.cache_return()
+
+        ## Now make the navigation graph
+        graph = oracle.create(pyaff4.AFF4_GRAPH)
+        graph.urn.set(OUTPUT_VOLUME_URN.value)
+        graph.urn.add("pyflag/navigation")
+
+        graph.set(pyaff4.AFF4_STORED, OUTPUT_VOLUME_URN)
+        graph = graph.finish()
+
+        OUTPUT_NATIVATION_GRAPH = graph.urn
+        graph.cache_return()
+    else:
+        OUTPUT_NATIVATION_GRAPH = pyaff4.RDFURN()
+        OUTPUT_NATIVATION_GRAPH.set(OUTPUT_VOLUME_URN.value)
+        OUTPUT_NATIVATION_GRAPH.add("pyflag/navigation")
+
+def Seal_output_volume():
+    global OUTPUT_VOLUME_URN, OUTPUT_NATIVATION_GRAPH
+
+    graph = oracle.open(OUTPUT_NATIVATION_GRAPH, 'w')
+    graph.close()
+
+    volume = oracle.open(OUTPUT_VOLUME_URN, 'w')
+    volume.close()
+
+def VFSCreate(fd, name, type=pyaff4.AFF4_MAP):
     """ Creates a new map object based on fd with a name specified """
     obj = oracle.create(type)
     obj.urn.set(fd.urn.value)
     obj.urn.add(name)
 
-    PATH_CACHE.add_path_relations(obj.urn.parser.query.split("/"), volume_urn)
+    path = [ x for x in obj.urn.parser.query.split("/") if x ]
+    PATH_CACHE.add_path_relations(path)
 
-    obj.set(pyaff4.AFF4_STORED, volume_urn)
+    obj.set(pyaff4.AFF4_STORED, OUTPUT_VOLUME_URN)
     return obj.finish()

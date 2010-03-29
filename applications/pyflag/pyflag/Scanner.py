@@ -25,7 +25,7 @@
 
 class BaseScanner:
     """ This is the base class for all scanners """
-    def scan(self, buffer, fd, outurn, scanners):
+    def scan(self, buffer, fd, scanners):
         """ When a scanner is called it is given a buffer which is the
         start of the fd, and the fd.
 
@@ -33,22 +33,19 @@ class BaseScanner:
         interested in scanning the file.  It is also provided with the
         list of all other scanners that are run in this run, and if
         new files are created, they can also be scanned recursively.
-
-        If we want to create new objects we put them on the volume
-        specified by outurn
         """
 
 import pyaff4
 
 oracle = pyaff4.Resolver()
 
-def scan_urn(inurn, outurn, scanners):
+def scan_urn(inurn, scanners):
     ## Run all scanners on the same fd
     fd = oracle.open(inurn, 'r')
     try:
         buffer = fd.read(1024)
         fd.seek(0)
         for s in scanners:
-            s.scan(buffer, fd, outurn, scanners)
+            s.scan(buffer, fd, scanners)
     finally:
         fd.cache_return()

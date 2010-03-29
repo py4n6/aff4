@@ -5,7 +5,7 @@ import pyreassembler.reassembler as reassembler
 import pyflag.Framework as Framework
 import pyaff4
 import pyflag.Scanner as Scanner
-import pdb
+import pdb, sys
 
 oracle = pyaff4.Resolver()
 
@@ -41,7 +41,8 @@ def dissect_packet(stream_fd, stream_pkt_fd):
         except: pass
 
 class Reassembler:
-    def make_stream(self, name, volume_urn, base):
+    def make_stream(self, name, base):
+        volume_urn = Framework.OUTPUT_VOLUME_URN
         forward_stream = oracle.create(pyaff4.AFF4_MAP)
         forward_stream.urn.set(volume_urn.value)
         forward_stream.urn.add(base + name)
@@ -49,8 +50,14 @@ class Reassembler:
         forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
         return forward_stream.finish()
 
-    def Callback(self, mode, packet, connection):
-        volume_urn = self.volume_urn
+    def Callback(self, mode, packet,connection):
+        try:
+            self._Callback(mode, packet, connection)
+        except:
+            pdb.post_mortem()
+            raise
+
+    def _Callback(self, mode, packet, connection):
         if packet:
             try:
                 ip = packet.find_type("IP")
@@ -74,15 +81,15 @@ class Reassembler:
 
                 ## Note that we hold the map locked while its in the
                 ## reassembler - this prevents it from getting freed
-                connection['map'] = forward_stream = self.make_stream("forward", volume_urn, base)
-                connection['map.pkt'] = self.make_stream("forward.pkt", volume_urn, base)
+                connection['map'] = forward_stream = self.make_stream("forward", base)
+                connection['map.pkt'] = self.make_stream("forward.pkt", base)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 forward_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)
 
                 ## Make the reverse map
-                connection['reverse']['map'] = reverse_stream = self.make_stream("reverse", volume_urn, base)
-                connection['reverse']['map.pkt'] = self.make_stream("reverse.pkt", volume_urn, base)
+                connection['reverse']['map'] = reverse_stream = self.make_stream("reverse", base)
+                connection['reverse']['map.pkt'] = self.make_stream("reverse.pkt", base)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 reverse_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)
@@ -108,8 +115,8 @@ class Reassembler:
                 connection['reverse']['map.pkt'].close()
 
                 ## Now scan the resulting with the active scanners
-                Scanner.scan_urn(map_stream_urn, self.volume_urn, self.scanners)
-                Scanner.scan_urn(r_map_stream_urn, self.volume_urn, self.scanners)
+                Scanner.scan_urn(map_stream_urn, self.scanners)
+                Scanner.scan_urn(r_map_stream_urn, self.scanners)
 
     def __init__(self):
         self.flush()
@@ -124,8 +131,7 @@ class Reassembler:
 
         self.processor = reassembler.Reassembler(packet_callback = self.Callback)
 
-    def process(self, fd, volume_urn, scanners):
-        self.volume_urn = volume_urn
+    def process(self, fd, scanners):
         self.scanners = scanners
 
         pcap_file = pypcap.PyPCAP(fd, file_id = oracle.get_id_by_urn(fd.urn))
@@ -142,7 +148,7 @@ class Reassembler:
 PROCESSOR = Reassembler()
 
 class PCAPEvents(Framework.EventHandler):
-    def finish(self, outfd):
+    def finish(self):
         ## This flushes the resolver which ensures all the streams are
         ## closed
         global PROCESSOR
@@ -150,10 +156,10 @@ class PCAPEvents(Framework.EventHandler):
 
 class PCAPScanner(Scanner.BaseScanner):
     """ Reassemble packets in a pcap file """
-    def scan(self, buffer, fd, outurn, scanners):
+    def scan(self, buffer, fd, scanners):
         if buffer.startswith("\xd4\xc3\xb2\xa1") or buffer.startswith('\xa1\xb2\xc3\xd4'):
-            self.process(fd, outurn, scanners)
+            self.process(fd, scanners)
 
-    def process(self, fd, outurn, scanners):
+    def process(self, fd, scanners):
         print "Opening %s as a PCAP file" % fd.urn.parser.query
-        PROCESSOR.process(fd, outurn, scanners)
+        PROCESSOR.process(fd, scanners)

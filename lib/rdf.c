@@ -752,7 +752,7 @@ static RDFValue IntegerArrayBinary_clone(RDFValue self, void *ctx) {
 
   result->array = talloc_memdup(result, this->array, this->size);
 
-  return result;
+  return (RDFValue)result;
 };
 
 VIRTUAL(IntegerArrayBinary, RDFValue) {
@@ -1071,9 +1071,9 @@ static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key,
     goto exit;
 
   {
-    XSDString s = new_XSDString(self->attributes);
+    RDFURN s = new_RDFURN(self->attributes);
 
-    CALL(s, set, (char *)key.dptr, key.dsize);
+    CALL(s, set, (char *)key.dptr);
     CALL(self->attributes, put, (char *)key.dptr, key.dsize, (Object)s);
   };
 
@@ -1133,7 +1133,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
 static int RDFSerializer_serialize_statement(RDFSerializer self,
                                              RESOLVER_ITER *iter,
                                              RDFURN urn,
-                                             XSDString attribute) {
+                                             RDFURN attribute) {
   raptor_statement triple;
   void *raptor_urn;
   RDFValue value;
@@ -1146,7 +1146,6 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
   // just copy it into the serialiser directly from the iterator.
   if(iter->head.flags & RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED) {
     triple.object = CALL(oracle, encoded_data_from_iter, &value, iter);
-
     if(!triple.object)
       goto error;
   } else {
@@ -1208,7 +1207,7 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
   // Iterate over all attributes
   list_for_each_entry(i, &self->attributes->cache_list, cache_list) {
     RESOLVER_ITER *iter;
-    XSDString attribute = (XSDString)i->data;
+    RDFURN attribute = (RDFURN)i->data;
 
     iter = CALL(oracle, get_iter, NULL, urn, attribute->value);
 

@@ -14,6 +14,15 @@ This is an implementation of the RDF Graph object
 #include "aff4.h"
 #include "aff4_rdf_serialise.h"
 
+// We store these in the resolver as the statements stored within this graph
+struct statement_t {
+  RESOLVER_ITER iter;
+  uint64_t urn_id;
+  uint64_t attribute_id;
+};
+
+#define AFF4_VOLATILE_GRAPH_STATEMENT VOLATILE_NS "graph_statement"
+
 static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
   Graph this = (Graph)self;
 
@@ -22,8 +31,8 @@ static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
     URNOF(self) = CALL(url, copy, self);
 
     this->stored = new_RDFURN(self);
-    this->cache = CONSTRUCT(GraphStatement, Cache, Con, self, HASH_TABLE_SIZE, 0);
-    this->attribute = new_XSDString(self);
+    this->statement = new_XSDString(self);
+    this->attribute_urn = new_RDFURN(self);
 
     // Check that we have a stored property
     if(!CALL(oracle, resolve_value, URNOF(self), AFF4_STORED,
@@ -51,31 +60,44 @@ static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
 
 /** We prepare a statement and store within ourselves */
 void Graph_set_triple(Graph self, RDFURN subject, char *attribute, RDFValue value) {
-  RESOLVER_ITER *iter = talloc(self, RESOLVER_ITER);
-  GraphStatement statement;
+  struct statement_t statement;
 
   // This should fill in the iterator for later.
-  CALL(oracle, set_value, subject, attribute, value, iter);
+  CALL(oracle, add_value, subject, attribute, value, &statement.iter);
 
-  // Make a new statement and remember it for later.
-  statement = CALL((Cache)self->cache, put, ZSTRING(attribute), (Object)subject);
+  statement.urn_id = CALL(oracle, get_id_by_urn, subject, 1);
+  CALL(self->attribute_urn, set, attribute);
+  statement.attribute_id = CALL(oracle, get_id_by_urn, self->attribute_urn, 1);
 
-  statement->iter = iter;
-  talloc_steal(statement, iter);
+  CALL(self->statement, set, (char *)&statement, sizeof(statement));
+
+  CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_GRAPH_STATEMENT,
+       (RDFValue)self->statement, NULL);
 };
 
 static int Graph_close(AFFObject self) {
   Graph this = (Graph)self;
-  RDFURN urn = CALL(URNOF(self), copy, self);
-  AFF4Volume volume = (AFF4Volume)CALL(oracle, open, this->stored, 'w');
+  RDFURN urn;
+  AFF4Volume volume;
   FileLikeObject segment;
   RDFSerializer serializer;
   Cache i;
+  RESOLVER_ITER *iter;
 
+  // Now we iterate over all our stored statements and serialise them
+  iter = CALL(oracle, get_iter, self, URNOF(self), AFF4_VOLATILE_GRAPH_STATEMENT);
+  // No statements were stored - thats ok but we just dont create a
+  // segment at all then
+  if(!iter) {
+    return 0;
+  };
+
+  volume = (AFF4Volume)CALL(oracle, open, this->stored, 'w');
   if(!volume) {
     goto error;
   };
 
+  urn = CALL(URNOF(self), copy, self);
   CALL(urn, add, AFF4_INFORMATION "turtle");
   segment = CALL(volume, open_member, urn->value, 'w', ZIP_STORED);
   if(!segment) {
@@ -87,14 +109,18 @@ static int Graph_close(AFFObject self) {
                          segment);
   if(!serializer) goto error;
 
-  list_for_each_entry(i, &((Cache)this->cache)->cache_list, cache_list) {
-    GraphStatement statement = (GraphStatement)i;
-    char *attribute = i->key;
-    RDFURN urn = (RDFURN)i->data;
-    RESOLVER_ITER *iter = statement->iter;
+  while(CALL(oracle, iter_next, iter, (RDFValue)this->statement)) {
+    struct statement_t *statement;
 
-    CALL(this->attribute, set, i->key, i->key_len);
-    CALL(serializer, serialize_statement, iter, urn, this->attribute);
+    statement = (struct statement_t *)(this->statement->value);
+    statement->iter.cache = NULL;
+    statement->iter.urn = NULL;
+
+    if(CALL(oracle, get_urn_by_id, statement->urn_id, urn) &&
+       CALL(oracle, get_urn_by_id, statement->attribute_id, this->attribute_urn)) {
+      CALL(serializer, serialize_statement, &statement->iter, urn,
+           this->attribute_urn);
+    };
   };
 
   CALL(serializer, close);

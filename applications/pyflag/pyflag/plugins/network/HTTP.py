@@ -31,9 +31,8 @@ class HTTPScanner(Scanner.BaseScanner):
                                      re.IGNORECASE)
     response_re = re.compile("HTTP/1\.. (\\d+) +", re.IGNORECASE)
 
-    def scan(self, buffer, fd, volume, scanners):
+    def scan(self, buffer, fd, scanners):
         if self.request_re.search(buffer):
-            self.volume_urn = volume
             self.forward_fd = fd
             ## Find the reverse fd
             base = os.path.dirname(fd.urn.value)
@@ -109,7 +108,6 @@ class HTTPScanner(Scanner.BaseScanner):
             try:
                 gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
                 http_object = Framework.VFSCreate(fd, "decompressed",
-                                                  self.volume_urn,
                                                   type = pyaff4.AFF4_IMAGE)
                 try:
                     while 1:
@@ -129,7 +127,7 @@ class HTTPScanner(Scanner.BaseScanner):
 
     def handle_encoding(self, headers, fd):
         http_object = Framework.VFSCreate(fd, "HTTP/%s" % fd.readptr,
-                                          self.volume_urn, type=pyaff4.AFF4_MAP)
+                                          type=pyaff4.AFF4_MAP)
         try:
             try:
                 skip = int(headers['content-length'])

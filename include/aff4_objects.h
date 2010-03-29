@@ -36,8 +36,8 @@ END_CLASS
 
 CLASS(Graph, AFFObject)
   RDFURN stored;
-  GraphStatement cache;
-  XSDString attribute;
+  RDFURN attribute_urn;
+  XSDString statement;
 
   void METHOD(Graph, set_triple, RDFURN subject, char *attribute, RDFValue value);
 END_CLASS

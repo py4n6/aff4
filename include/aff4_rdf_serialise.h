@@ -29,7 +29,7 @@ CLASS(RDFSerializer, Object)
      RDFSerializer METHOD(RDFSerializer, Con, char *base_urn, FileLikeObject fd);
      int METHOD(RDFSerializer, serialize_urn, RDFURN urn);
      int METHOD(RDFSerializer, serialize_statement, RESOLVER_ITER *iter, RDFURN urn,\
-                XSDString attribute);
+                RDFURN attribute);
      DESTRUCTOR void METHOD(RDFSerializer, close);
 END_CLASS
 

@@ -29,6 +29,14 @@ data = pyaff4.XSDString()
 data.set("world")
 graph.set_triple(volume_urn, "hello", data)
 
+data.set("world2")
+graph.set_triple(volume_urn, "hello", data)
+
+data.set("world3")
+graph.set_triple(volume_urn, "hello", data)
+
+
+
 ## Close everything.
 graph.close()
 

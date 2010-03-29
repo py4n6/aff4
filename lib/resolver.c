@@ -853,6 +853,8 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
       result->head.next_offset = 0;
       result->head.encoding_type = value->id;
       result->head.flags = value->flags;
+      result->offset = data_offset;
+
       write(self->data_store_fd, (char *)&result->head, sizeof(result->head));
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
@@ -890,8 +892,6 @@ static int Resolver_add_value(Resolver self,
   if(encoded_value) {
     TDB_DATA attribute;
     uint64_t previous_offset;
-
-    result = talloc(NULL, RESOLVER_ITER);
 
     DEBUG_RESOLVER("Adding %s, %s\n", urn->value, attribute_str);
     attribute = tdb_data_from_string(attribute_str);
@@ -988,14 +988,15 @@ static int Resolver_iter_next(Resolver self,
       memcpy(key + iter->head.length, &id, sizeof(id));
 
       // Check if the value was already seen:
-      if(!CALL(iter->cache, present, key, key_len)) {
-        // No did not see it before - store it in the Cache. NOTE this
-        // doesnt actually store anything, but simply ensure the key
-        // is stored.
-        CALL(iter->cache, put, key, key_len, NULL);
-
-        res_code = CALL(result, decode, key, iter->head.length, iter->urn);
+      if(iter->cache) {
+        if(!CALL(iter->cache, present, key, key_len)) {
+          // No did not see it before - store it in the Cache. NOTE this
+          // doesnt actually store anything, but simply ensure the key
+          // is stored.
+          CALL(iter->cache, put, key, key_len, NULL);
+        };
       };
+      res_code = CALL(result, decode, key, iter->head.length, iter->urn);
 
       talloc_free(key);
     };

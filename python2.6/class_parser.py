@@ -717,16 +717,6 @@ PyErr_Clear();
     def byref(self):
         return "&%s" % self.name
 
-    def XXXXpre_call(self, method):
-        if 'OUT' in self.attributes or self.sense == 'OUT':
-            return ''
-
-        return """
-if(%(name)s && !type_check((PyObject *)%(name)s,&%(type)s_Type)) {
-     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
-     goto error;
-};\n""" % self.__dict__
-
     def definition(self, default = 'NULL', sense='in', **kw):
         result = "Gen_wrapper *%s = %s;" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
