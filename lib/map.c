@@ -151,18 +151,18 @@ static char *MapValue_serialise(RDFValue self, RDFURN subject) {
   tree_iter(&this->tree, NULL, text_map_iterate_cb, (void *)fd);
 
   // Done writing
-  CALL(fd, close);
+  CALL((AFFObject)fd, close);
 
   // Done with our volume now
   CALL((AFFObject)volume, cache_return);
 
   // Now store various map parameters
   if(this->image_period->value != -1) {
-    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period);
-    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
+    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period,0);
+    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period,0);
   };
 
-  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
+  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size,0);
 
  exit:
   return talloc_strdup(self, "");
@@ -470,7 +470,7 @@ static char *MapValueBinary_serialise(RDFValue self, RDFURN subject) {
   for(i=0; i < this->number_of_urns; i++) {
     CALL(fd, write, ZSTRING(this->targets[i]->value));
   };
-  CALL(fd, close);
+  CALL((AFFObject)fd, close);
 
   // Now the data segment
   fd = CALL(volume, open_member, segment->value, 'w', ZIP_DEFLATE);
@@ -479,18 +479,18 @@ static char *MapValueBinary_serialise(RDFValue self, RDFURN subject) {
   };
 
   tree_iter(&this->tree, NULL, binary_map_iterate_cb, (void *)fd);
-  CALL(fd, close);
+  CALL((AFFObject)fd, close);
 
   // Done with our volume now
   CALL((AFFObject)volume, cache_return);
 
   // Now store various map parameters
   if(this->image_period->value != -1) {
-    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period);
-    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period);
+    CALL(oracle, set_value, this->urn, AFF4_IMAGE_PERIOD, (RDFValue)this->image_period,0);
+    CALL(oracle, set_value, this->urn, AFF4_TARGET_PERIOD, (RDFValue)this->target_period,0);
   };
 
-  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size);
+  CALL(oracle, set_value, this->urn, AFF4_SIZE, (RDFValue)this->size,0);
 
  exit:
   return talloc_strdup(self, "/map");
@@ -604,20 +604,20 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
       goto error;
     };
 
-    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_urn(self, AFF4_MAP));
-    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri);
+    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_urn(self, AFF4_MAP),0);
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri,0);
 
     // Only update the timestamp if we created a new map
     if(mode=='w') {
       XSDDatetime time = new_XSDDateTime(this);
 
       this->dirty->value = DIRTY_STATE_NEED_TO_CLOSE;
-      CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time);
-      CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+      CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time,0);
+      CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty,0);
       // Make sure that our containing volume becomes dirty so we get
       // written to disk - note that we may not write any segments for
       // a map at all, so we need to explicitely make our volume dirty.
-      CALL(oracle, set_value, this->stored, AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty);
+      CALL(oracle, set_value, this->stored, AFF4_VOLATILE_DIRTY, (RDFValue)this->dirty,0);
 
       // Make a new map object
       if(!this->map) {
@@ -714,21 +714,21 @@ static int MapDriver_close(FileLikeObject self) {
   };
 
   // Write the map to the stream:
-  CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map);
+  CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map,0);
 
   // We are not dirty any more:
   this->dirty->value = DIRTY_STATE_ALREADY_LOADED;
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-       (RDFValue)this->dirty);
+       (RDFValue)this->dirty,0);
 
   // Done
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size);
-  SUPER(FileLikeObject, FileLikeObject, close);
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size,0);
+  SUPER(AFFObject, FileLikeObject, close);
   return 1;
 
  error:
   PUSH_ERROR_STATE;
-  SUPER(FileLikeObject, FileLikeObject, close);
+  SUPER(AFFObject, FileLikeObject, close);
   POP_ERROR_STATE;
 
   return 0;
@@ -830,7 +830,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
      VMETHOD(add_point) = MapDriver_add;
      VMETHOD(write_from) = MapDriver_write_from;
      VMETHOD_BASE(FileLikeObject, read) = MapDriver_read;
-     VMETHOD_BASE(FileLikeObject, close) = MapDriver_close;
+     VMETHOD_BASE(AFFObject, close) = MapDriver_close;
      VMETHOD_BASE(FileLikeObject, seek) = MapDriver_seek;
 
      // FIXME pass through to the current target to implement sparse streams

@@ -3,6 +3,7 @@ fit anywhere else.
 """
 import pyflag.Registry as Registry
 import pyaff4
+import pdb
 import pyflag.Store as Store
 
 class EventHandler:
@@ -33,7 +34,7 @@ class PATH_MANAGER(Store.FastStore):
         self.STR = pyaff4.XSDString()
         Store.FastStore.__init__(self, *args, **kwargs)
 
-    def add_path_relations(self, path):
+    def add_path_relations(self, path, volume_urn):
         """ Adds navigation relations for path which is a list of components """
         for i in range(len(path)-1):
             so_far = "/".join(path[:i])
@@ -54,6 +55,11 @@ class PATH_MANAGER(Store.FastStore):
             self.STR.set(path[i+1])
 
             oracle.set_value(self.URL, pyaff4.AFF4_NAVIGATION_CHILD, self.STR)
+            if not oracle.resolve_value(self.URL, pyaff4.AFF4_TYPE, self.STR):
+                self.STR.set(pyaff4.AFF4_GRAPH)
+                oracle.set_value(self.URL, pyaff4.AFF4_STORED, self.STR)
+
+                oracle.set_value(self.URL, pyaff4.AFF4_VOLATILE_STORED, volume_urn)
 
 PATH_CACHE = PATH_MANAGER()
 
@@ -63,7 +69,7 @@ def VFSCreate(fd, name, volume_urn, type=pyaff4.AFF4_MAP):
     obj.urn.set(fd.urn.value)
     obj.urn.add(name)
 
-    PATH_CACHE.add_path_relations(obj.urn.parser.query.split("/"))
+    PATH_CACHE.add_path_relations(obj.urn.parser.query.split("/"), volume_urn)
 
     obj.set(pyaff4.AFF4_STORED, volume_urn)
     return obj.finish()

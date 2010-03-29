@@ -198,13 +198,27 @@ CLASS(Resolver, Object)
         */
        void METHOD(Resolver, expire, RDFURN uri);
 
-     // Sets a new value for an attribute. Note that this function
-     // clears any previously set values, if you want to create a list
-     // of values you need to call add_value.
-     int METHOD(Resolver, set_value, RDFURN uri, char *attribute, RDFValue value);
+       /* Sets a new value for an attribute. Note that this function
+          clears any previously set values, if you want to create a list
+          of values you need to call add_value.
 
-     // Adds a new value to the value list for this attribute.
-     int METHOD(Resolver, add_value, RDFURN uri, char *attribute, RDFValue value);
+          If iter is given the iterator will be filled into it. The
+          iterator can subsequently be used with iter_alloc() to
+          reobtain the value.
+
+          DEFAULT(iter) = NULL;
+       */
+       int METHOD(Resolver, set_value, \
+                  RDFURN uri, char *attribute, RDFValue value, \
+                  RESOLVER_ITER *iter);
+
+       /* Adds a new value to the value list for this attribute.
+
+          DEFAULT(iter) = NULL;
+       */
+       int METHOD(Resolver, add_value, \
+                  RDFURN uri, char *attribute, RDFValue value,  \
+                  RESOLVER_ITER *iter);
 
 
        /** This returns a unique ID for the given URN. The ID is only

@@ -77,6 +77,11 @@ CLASS(RDFValue, Object)
 	  allocated to the NULL context and should be unlinked by the caller.
       */
       char *METHOD(RDFValue, serialise, struct RDFURN_t *subject);
+
+      /** Makes a copy of this value - the copy should be made as
+          efficiently as possible.
+      */
+      RDFValue METHOD(RDFValue, clone, void *ctx);
 END_CLASS
 
       /** The following is a direction for the autogenerator to create

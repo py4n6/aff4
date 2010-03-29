@@ -240,6 +240,10 @@ VIRTUAL(RDFValue, Object) {
     VMETHOD(Con) = RDFValue_Con;
     VMETHOD(encode) = RDFValue_encode;
     VMETHOD(parse) = RDFValue_parse;
+
+    UNIMPLEMENTED(RDFValue, clone);
+    UNIMPLEMENTED(RDFValue, decode);
+    UNIMPLEMENTED(RDFValue, serialise);
 } END_VIRTUAL
 
 // Encode integers for storage
@@ -355,6 +359,17 @@ static int XSDString_parse(RDFValue self, char *serialise, RDFURN subject) {
   return 1;
 };
 
+static RDFValue XSDString_clone(RDFValue self, void *ctx) {
+  XSDString this = (XSDString)self;
+  // Make a copy of this object
+  XSDString result = talloc_memdup(ctx, self, SIZEOF(self));
+
+  // Now make a copy of the value strings
+  result->value = talloc_memdup(result, this->value, this->length);
+
+  return (RDFValue)result;
+};
+
 VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    VATTR(super.dataType) = XSD_NAMESPACE "string";
@@ -362,10 +377,11 @@ VIRTUAL(XSDString, RDFValue) {
    // Our serialised form is the same as encoded form
    VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
 
-   VMETHOD(super.encode) = XSDString_encode;
-   VMETHOD(super.decode) = XSDString_decode;
-   VMETHOD(super.serialise) = XSDString_serialise;
-   VMETHOD(super.parse) = XSDString_parse;
+   VMETHOD_BASE(RDFValue, encode) = XSDString_encode;
+   VMETHOD_BASE(RDFValue, decode) = XSDString_decode;
+   VMETHOD_BASE(RDFValue, serialise) = XSDString_serialise;
+   VMETHOD_BASE(RDFValue, parse) = XSDString_parse;
+   VMETHOD_BASE(RDFValue, clone) = XSDString_clone;
 
    VMETHOD(set) = XSDString_set;
 } END_VIRTUAL 
@@ -401,6 +417,15 @@ static void RDFURN_set(RDFURN self, char *string) {
   self->value = CALL(self->parser, string, self);
 
   return;
+};
+
+static RDFValue RDFURN_clone(RDFValue self, void *ctx) {
+  RDFURN result = talloc_memdup(ctx, self, SIZEOF(self));
+  RDFURN this = (RDFURN)self;
+
+  result->value = talloc_strdup(result, this->value);
+
+  return (RDFValue)result;
 };
 
 static int RDFURN_decode(RDFValue this, char *data, int length, RDFURN subject) {
@@ -503,11 +528,12 @@ VIRTUAL(RDFURN, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
    VATTR(super.dataType) = "rdf:urn";
 
-   VMETHOD(super.Con) = RDFURN_Con;
-   VMETHOD(super.encode) = RDFURN_encode;
-   VMETHOD(super.decode) = RDFURN_decode;
-   VMETHOD(super.serialise) = RDFURN_serialise;
-   VMETHOD(super.parse) = RDFURN_parse;
+   VMETHOD_BASE(RDFValue, Con) = RDFURN_Con;
+   VMETHOD_BASE(RDFValue, encode) = RDFURN_encode;
+   VMETHOD_BASE(RDFValue, decode) = RDFURN_decode;
+   VMETHOD_BASE(RDFValue, serialise) = RDFURN_serialise;
+   VMETHOD_BASE(RDFValue, parse) = RDFURN_parse;
+   VMETHOD_BASE(RDFValue, clone) = RDFURN_clone;
 
    VMETHOD(set) = RDFURN_set;
    VMETHOD(add) = RDFURN_add;
@@ -537,6 +563,15 @@ static void XSDDatetime_set(XSDDatetime self, struct timeval time) {
   self->value = time;
 
   return;
+};
+
+static RDFValue XSDDatetime_clone(RDFValue self, void *ctx) {
+  XSDDatetime result = talloc_memdup(ctx, self, SIZEOF(self));
+  XSDDatetime this = (XSDDatetime)self;
+
+  result->value = this->value;
+
+  return (RDFValue)result;
 };
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
@@ -591,6 +626,7 @@ VIRTUAL(XSDDatetime, RDFValue) {
   VMETHOD_BASE(RDFValue, serialise) = XSDDatetime_serialise;
   VMETHOD_BASE(RDFValue, parse) = XSDDatetime_parse;
   VMETHOD_BASE(RDFValue, Con) = XSDDatetime_Con;
+  VMETHOD_BASE(RDFValue, clone) = XSDDatetime_clone;
 
    VMETHOD(set) = XSDDatetime_set;
 } END_VIRTUAL
@@ -710,6 +746,15 @@ static void IntegerArrayBinary_add(IntegerArrayBinary self, unsigned int item) {
   self->size = max(self->current, self->size);
 };
 
+static RDFValue IntegerArrayBinary_clone(RDFValue self, void *ctx) {
+  IntegerArrayBinary result = talloc_memdup(ctx, self, SIZEOF(self));
+  IntegerArrayBinary this = (IntegerArrayBinary)self;
+
+  result->array = talloc_memdup(result, this->array, this->size);
+
+  return result;
+};
+
 VIRTUAL(IntegerArrayBinary, RDFValue) {
   VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
   VATTR(super.dataType) = AFF4_INTEGER_ARRAY_BINARY;
@@ -722,6 +767,8 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
   VMETHOD_BASE(RDFValue, Con) = IntegerArrayBinary_Con;
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayBinary_decode;
   VMETHOD_BASE(RDFValue, serialise) = IntegerArrayBinary_serialise;
+  VMETHOD_BASE(RDFValue, clone) = IntegerArrayBinary_clone;
+
   VMETHOD_BASE(IntegerArrayBinary, add) = IntegerArrayBinary_add;
 } END_VIRTUAL
 
@@ -848,7 +895,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
       printf("!!! %s contains %s\n", self->volume_urn->value, urn_str);
 
       CALL(oracle, add_value, self->volume_urn, AFF4_VOLATILE_CONTAINS,
-           (RDFValue)self->urn);
+           (RDFValue)self->urn,0);
 
       CALL(self->member_cache, put, ZSTRING(urn_str), NULL);
     };
@@ -864,7 +911,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
   if(result) {
     CALL(result, parse, value_str, self->urn);
-    CALL(oracle, add_value, self->urn, attribute, (RDFValue)result);
+    CALL(oracle, add_value, self->urn, attribute, (RDFValue)result,0);
     talloc_free(result);
   };
 }
@@ -1083,16 +1130,80 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   return NULL;
 };
 
+static int RDFSerializer_serialize_statement(RDFSerializer self,
+                                             RESOLVER_ITER *iter,
+                                             RDFURN urn,
+                                             XSDString attribute) {
+  raptor_statement triple;
+  void *raptor_urn;
+  RDFValue value;
+
+  raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
+
+  memset(&triple, 0, sizeof(triple));
+
+  // If the encoding is the same as serialised version we can
+  // just copy it into the serialiser directly from the iterator.
+  if(iter->head.flags & RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED) {
+    triple.object = CALL(oracle, encoded_data_from_iter, &value, iter);
+
+    if(!triple.object)
+      goto error;
+  } else {
+    value = CALL(oracle, alloc_from_iter, iter);
+
+    if(!value) goto error;
+
+    // New reference here:
+    triple.object = CALL(value, serialise, urn);
+        if(!triple.object) {
+          AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
+                   urn,
+                   "Unable to serialise attribute %s\n",
+                   attribute->value);
+          goto error;
+        };
+  };
+
+  triple.subject = raptor_urn;
+  triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+
+  triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute->value);
+  triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+  triple.object_type = value->raptor_type;
+
+  // Default to something sensible
+  if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
+    triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+
+  triple.object_literal_datatype =                              \
+    raptor_new_uri((const unsigned char*)value->dataType);
+
+  raptor_serialize_statement(self->rdf_serializer, &triple);
+  raptor_free_uri((raptor_uri*)triple.predicate);
+  raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
+
+  // Special free function for URIs
+  if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
+    raptor_free_uri((raptor_uri*)triple.object);
+  else
+    talloc_unlink(NULL, (void *)triple.object);
+
+  raptor_free_uri((raptor_uri*)raptor_urn);
+  return 1;
+
+ error:
+  raptor_free_uri((raptor_uri*)raptor_urn);
+  return 0;
+};
+
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
-  raptor_statement triple;
   Cache i;
   void *raptor_urn;
 
   printf(".");
   fflush(stdout);
-
-  raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
 
   // Iterate over all attributes
   list_for_each_entry(i, &self->attributes->cache_list, cache_list) {
@@ -1102,62 +1213,12 @@ static int RDFSerializer_serialize_urn(RDFSerializer self,
     iter = CALL(oracle, get_iter, NULL, urn, attribute->value);
 
     // Now iterate over all the values for this
-    while(iter) {
-      RDFValue value;
-
-      memset(&triple, 0, sizeof(triple));
-
-      // If the encoding is the same as serialised version we can
-      // just copy it into the serialiser directly from the iterator.
-      if(iter->head.flags & RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED) {
-        triple.object = CALL(oracle, encoded_data_from_iter, &value, iter);
-
-        if(!triple.object) break;
-      } else {
-        value = CALL(oracle, alloc_from_iter, iter);
-
-        if(!value) break;
-
-        // New reference here:
-        triple.object = CALL(value, serialise, urn);
-        if(!triple.object) {
-          AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
-                   urn,
-                   "Unable to serialise attribute %s\n",
-                   attribute->value);
-          continue;
-        };
-      };
-
-      triple.subject = raptor_urn;
-      triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-
-      triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute->value);
-      triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-      triple.object_type = value->raptor_type;
-
-      // Default to something sensible
-      if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
-        triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-
-      triple.object_literal_datatype = \
-        raptor_new_uri((const unsigned char*)value->dataType);
-
-      raptor_serialize_statement(self->rdf_serializer, &triple);
-      raptor_free_uri((raptor_uri*)triple.predicate);
-      raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
-
-      // Special free function for URIs
-      if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
-        raptor_free_uri((raptor_uri*)triple.object);
-      else
-        talloc_unlink(NULL, (void *)triple.object);
-
+    while(iter && iter->offset > 0) {
+      RDFSerializer_serialize_statement(self, iter, urn, attribute);
     };
 
     talloc_free(iter);
   };
-  raptor_free_uri((raptor_uri*)raptor_urn);
 
   self->count ++;
   if(self->count > 100) {
@@ -1182,6 +1243,7 @@ static void RDFSerializer_close(RDFSerializer self) {
 VIRTUAL(RDFSerializer, Object) {
      VMETHOD(Con) = RDFSerializer_Con;
      VMETHOD(serialize_urn) = RDFSerializer_serialize_urn;
+     VMETHOD(serialize_statement) = RDFSerializer_serialize_statement;
      VMETHOD(close) = RDFSerializer_close;
 } END_VIRTUAL
 

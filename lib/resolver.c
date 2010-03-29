@@ -67,6 +67,7 @@ void AFF4_Init(void) {
   mapdriver_init();
   zip_init();
   rdf_init();
+  graph_init();
 
 #ifdef HAVE_OPENSSL
   encrypt_init();
@@ -158,7 +159,7 @@ static int print_cache(Cache self) {
   return 0;
 };
 
-static void Cache_put(Cache self, char *key, int len, Object data) {
+static Cache Cache_put(Cache self, char *key, int len, Object data) {
   unsigned int hash;
   Cache hash_list_head;
   Cache new_cache;
@@ -180,9 +181,11 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
   hash = CALL(self, hash, key, len);
   assert(hash <= self->hash_table_width);
 
-  // FIXME - should we just make a smaller memcpy since this object
-  // will never have its methods called?
-  new_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
+  /** Note - this form allows us to extend Cache without worrying
+  about updating this method. We replicate the size of the object we
+  are automatically.
+  */
+  new_cache = CONSTRUCT_FROM_REFERENCE((Cache)CLASSOF(self), Con, self, HASH_TABLE_SIZE, 0);
   // Make sure the new cache member knows where the list head is. We
   // only keep stats about the cache here.
   new_cache->cache_head = self;
@@ -208,7 +211,7 @@ static void Cache_put(Cache self, char *key, int len, Object data) {
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
 
-  return;
+  return new_cache;
 };
 
 static Object Cache_get(Cache self, char *key, int len) {
@@ -626,7 +629,8 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   tdb_close(self->urn_db);
   self->urn_db = NULL;
  error:
-  RaiseError(ERuntimeError, "Unable to open tdb files in '%s'", path);
+  RaiseError(ERuntimeError, "Unable to open tdb files in '%s' (%s)", path,\
+             strerror(errno));
 
   return NULL;
 };
@@ -761,15 +765,15 @@ static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, cha
   return NULL;
 };
 
-static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
-			 TDB_DATA value, int type_id, uint8_t flags,
-                         uint32_t source_id,
-                         uint64_t previous_offset) {
+static void set_new_value(Resolver self, RESOLVER_ITER *iter,
+                                    TDB_DATA urn, TDB_DATA attribute,
+                                    TDB_DATA value, int type_id, uint8_t flags,
+                                    uint32_t source_id,
+                                    uint64_t previous_offset) {
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
   uint32_t new_offset;
-  TDB_DATA_LIST i;
 
   if(type_id == 0) abort();
 
@@ -781,34 +785,36 @@ static int set_new_value(Resolver self, TDB_DATA urn, TDB_DATA attribute,
   tdb_lockall(self->data_db);
 
   // Go to the end and write the new record
-  new_offset = lseek(self->data_store_fd, 0, SEEK_END);
+  iter->offset = lseek(self->data_store_fd, 0, SEEK_END);
   // The offset to the next item in the list
-  i.next_offset = previous_offset;
-  i.length = value.dsize;
-  i.encoding_type = type_id;
-  i.asserter_id = source_id;
-  i.flags = flags;
+  iter->head.next_offset = previous_offset;
+  iter->head.length = value.dsize;
+  iter->head.encoding_type = type_id;
+  iter->head.asserter_id = source_id;
+  iter->head.flags = flags;
 
-  write(self->data_store_fd, &i, sizeof(i));
+  write(self->data_store_fd, &iter->head, sizeof(iter->head));
   write(self->data_store_fd, value.dptr, value.dsize);
 
   offset.dptr = (unsigned char *)buff2;
-  offset.dsize = tdb_serialise_int(new_offset, buff2, BUFF_SIZE);
+  offset.dsize = tdb_serialise_int(iter->offset, buff2, BUFF_SIZE);
 
   tdb_store(self->data_db, key, offset, TDB_REPLACE);
 
   //Done
   tdb_unlockall(self->data_db);
 
-  return 1;
+  return;
 };
 
 /** This sets a single triple into the resolver replacing previous
     values set for this attribute
 */
 static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
-			       RDFValue value) {
+                              RDFValue value, RESOLVER_ITER *iter) {
   TDB_DATA *encoded_value;
+  RESOLVER_ITER temp;
+  RESOLVER_ITER *result = iter ? iter : &temp;
 
   LOCK_RESOLVER;
 
@@ -816,7 +822,6 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
 
   if(encoded_value) {
     uint64_t data_offset;
-    TDB_DATA_LIST iter;
     TDB_DATA attribute = tdb_data_from_string(attribute_str);
 
 #ifdef AFF4_DEBUG_RESOLVER
@@ -840,19 +845,20 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
     data_offset = get_data_head(self,
                                 tdb_data_from_string(urn->value),
                                 attribute,
-                                &iter);
+                                &result->head);
 
-    if(data_offset > 0 && iter.length == encoded_value->dsize) {
+    if(data_offset > 0 && result->head.length == encoded_value->dsize) {
       // Ensure that previous values are removed too
       lseek(self->data_store_fd, data_offset, SEEK_SET);
-      iter.next_offset = 0;
-      iter.encoding_type = value->id;
-      iter.flags = value->flags;
-      write(self->data_store_fd, (char *)&iter, sizeof(iter));
+      result->head.next_offset = 0;
+      result->head.encoding_type = value->id;
+      result->head.flags = value->flags;
+      write(self->data_store_fd, (char *)&result->head, sizeof(result->head));
       write(self->data_store_fd, encoded_value->dptr, encoded_value->dsize);
     } else {
-      set_new_value(self, tdb_data_from_string(urn->value),
-		    attribute, *encoded_value, value->id, value->flags, -1, 0);
+      set_new_value(self, result, tdb_data_from_string(urn->value),
+                    attribute, *encoded_value, value->id,
+                    value->flags, -1, 0);
     };
 
     tdb_unlockall(self->data_db);
@@ -870,9 +876,12 @@ static int Resolver_set_value(Resolver self, RDFURN urn, char *attribute_str,
   };
 };
 
-static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
-			       RDFValue value) {
+static int Resolver_add_value(Resolver self,
+                              RDFURN urn, char *attribute_str,
+                              RDFValue value, RESOLVER_ITER *iter) {
   TDB_DATA *encoded_value;
+  RESOLVER_ITER temp;
+  RESOLVER_ITER *result = iter ? iter : &temp;
 
   LOCK_RESOLVER;
 
@@ -881,7 +890,8 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   if(encoded_value) {
     TDB_DATA attribute;
     uint64_t previous_offset;
-    TDB_DATA_LIST tmp;
+
+    result = talloc(NULL, RESOLVER_ITER);
 
     DEBUG_RESOLVER("Adding %s, %s\n", urn->value, attribute_str);
     attribute = tdb_data_from_string(attribute_str);
@@ -895,9 +905,9 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
 	store duplicates.
     */
     previous_offset = get_data_head(self,
-	   tdb_data_from_string(urn->value), attribute, &tmp);
+	   tdb_data_from_string(urn->value), attribute, &result->head);
 
-    set_new_value(self, tdb_data_from_string(urn->value),
+    set_new_value(self, result, tdb_data_from_string(urn->value),
 		  attribute, *encoded_value, value->id, 0, value->flags,
                   previous_offset);
 
@@ -910,49 +920,6 @@ static int Resolver_add_value(Resolver self, RDFURN urn, char *attribute_str,
   UNLOCK_RESOLVER;
   return 1;
 };
-
-int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
-                    RDFValue value) {
-  TDB_DATA *encoded_value;
-  int32_t graph_id = CALL(oracle, get_id_by_urn, graph, 1);
-  Resolver self= oracle;
-
-  LOCK_RESOLVER;
-
-  encoded_value = CALL(value, encode, urn);
-
-  if(encoded_value) {
-    TDB_DATA attribute;
-    uint64_t previous_offset;
-    TDB_DATA_LIST tmp;
-
-    DEBUG_RESOLVER("Adding %s, %s\n", urn->value, attribute_str);
-    attribute = tdb_data_from_string(attribute_str);
-
-    // Grab the lock
-    tdb_lockall(self->data_db);
-
-    /** If the value is already in the list, we just ignore this
-	request.
-    */
-    previous_offset = get_data_head(self,
-	   tdb_data_from_string(urn->value), attribute, &tmp);
-
-    set_new_value(self, tdb_data_from_string(urn->value),
-		  attribute, *encoded_value, value->id,
-                  graph_id, value->flags,
-                  previous_offset);
-
-    tdb_unlockall(self->data_db);
-
-    // Done with the encoded value
-    talloc_free(encoded_value);
-  };
-
-  UNLOCK_RESOLVER;
-  return 1;
-};
-
 
 RESOLVER_ITER *_Resolver_get_iter(Resolver self,
                                   void *ctx,
@@ -1446,7 +1413,7 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
 			 attribute, &data_list);
   if(!offset){
     // The attribute is not set - make it now:
-    set_new_value(self, tdb_data_from_string(urn->value),
+    set_new_value(self, NULL, tdb_data_from_string(urn->value),
 		  attribute, LOCK, -1, 0, 0, 0);
 
     offset = get_data_head(self, tdb_data_from_string(urn->value),
@@ -1694,13 +1661,13 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
 static void AFFObject_set_property(AFFObject self, char *attribute, RDFValue value) {
   CALL(oracle, set_value,
        self->urn,
-       attribute, value);
+       attribute, value,0);
 };
 
 static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
   CALL(oracle, add_value,
        self->urn,
-       attribute, value);
+       attribute, value,0);
 };
 
 // Prepares an object to be used at this point we add the object to

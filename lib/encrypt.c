@@ -27,14 +27,14 @@ SecurityProvider AFF4_SECURITY_PROVIDER=NULL;
    created:
 
    cipher = oracle.new_rdfvalue(AFF4_AES256_PASSWORD)
-   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher)
+   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher,0)
 
    Since there is no key set at this point, the cipher will make a new
    key and serialise the key using the password protocol. If we wish
    to encode the same key using x509 now:
 
    cipher = oracle.new_rdfvalue(AFF4_AES256_X509)
-   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher)
+   oracle.set_value(encoded_urn, AFF4_CIPHER, cipher,0)
 
    This will now ensure that the very same key is encoded using the
    cert scheme because the key is already in cache. A new key will not
@@ -716,7 +716,7 @@ static AFFObject Encrypted_Con(AFFObject self, RDFURN uri, char mode) {
     };
 
     // Add ourselves to our volume
-    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self),0);
 
     CALL(oracle, resolve_value, URNOF(self), AFF4_CHUNK_SIZE,
 	 (RDFValue)this->chunk_size);
@@ -781,7 +781,7 @@ static int Encrypted_partialread(FileLikeObject self, char *buff, unsigned long 
   uint64_t chunk_size = this->chunk_size->value;
   uint32_t chunk_id = self->readptr / chunk_size;
   int chunk_offset = self->readptr % chunk_size;
-  int available_to_read = chunk_size - chunk_offset;
+  int available_to_read = min(len, chunk_size - chunk_offset);
   unsigned char cbuff[chunk_size];
   unsigned char dbuff[chunk_size];
   FileLikeObject target = (FileLikeObject)CALL(oracle, open, this->backing_store, 'r');
@@ -820,24 +820,25 @@ static int Encrypted_read(FileLikeObject self, char *buff, unsigned long int len
   int read_length;
   int offset=0;
 
-  // Clip the read to the stream size
-  if(self->readptr > self->size->value) return 0;
-
-  length = min(length, self->size->value - self->readptr);
-
   // Just execute as many partial reads as are needed to satisfy the
   // length requested
   while(offset < length ) {
-    read_length = Encrypted_partialread(self, buff + offset, length - offset);
+    int available_to_read = min(length, self->size->value - self->readptr);
+
+    if(available_to_read == 0) break;
+
+    read_length = Encrypted_partialread(self, buff + offset, available_to_read);
     if(read_length <0) return -1;
     if(read_length ==0) break;
     offset += read_length;
+    self->readptr += read_length;
   };
 
-  return length;
+  return offset;
 };
 
-static int Encrypted_close(FileLikeObject self) {
+static int Encrypted_close(AFFObject aself) {
+  FileLikeObject self = (FileLikeObject)aself;
   Encrypted this = (Encrypted)self;
   int chunk_size = this->chunk_size->value;
   char buff[chunk_size];
@@ -852,17 +853,17 @@ static int Encrypted_close(FileLikeObject self) {
   };
 
   CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
-       rdfvalue_from_urn(this, AFF4_ENCRYTED));
+       rdfvalue_from_urn(this, AFF4_ENCRYTED),0);
 
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
-       (RDFValue)((FileLikeObject)self)->size);
+       (RDFValue)((FileLikeObject)self)->size,0);
 
   {
     XSDDatetime time = new_XSDDateTime(this);
 
     gettimeofday(&time->value,NULL);
     CALL(oracle, set_value, URNOF(this), AFF4_TIMESTAMP,
-	 (RDFValue)time);
+	 (RDFValue)time,0);
   };
 
   // Finally we flush the key from the Key_Cache. If we reopen it for
@@ -872,7 +873,7 @@ static int Encrypted_close(FileLikeObject self) {
     if(key) talloc_unlink(NULL, key);
   };
 
-  return SUPER(FileLikeObject, FileLikeObject, close);
+  return SUPER(AFFObject, FileLikeObject, close);
 };
 
 
@@ -882,7 +883,7 @@ VIRTUAL(Encrypted, FileLikeObject) {
 
   VMETHOD_BASE(FileLikeObject, write) = Encrypted_write;
   VMETHOD_BASE(FileLikeObject, read) = Encrypted_read;
-  VMETHOD_BASE(FileLikeObject, close) = Encrypted_close;
+  VMETHOD_BASE(AFFObject, close) = Encrypted_close;
 } END_VIRTUAL;
 
 
