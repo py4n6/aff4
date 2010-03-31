@@ -385,10 +385,14 @@ VIRTUAL(Cache, Object) {
 /**********************************************************
    The following are utilities that will be needed later
 ***********************************************************/
-#define MAX_KEY "__MAX"
 #define VOLATILE_NS "aff4volatile:"
 
 /** Some constants */
+static TDB_DATA MAX_KEY = {
+  .dptr = (unsigned char *)"__MAX",
+  .dsize = 6
+};
+
 static TDB_DATA WLOCK = {
   .dptr = (unsigned char *)VOLATILE_NS "WLOCK",
   .dsize = 18
@@ -441,11 +445,7 @@ static inline uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_
     tdb_unlockall(tdb);
     return result;
   } else if(create_new) {
-    TDB_DATA max_key;
-
-    max_key = tdb_data_from_string(MAX_KEY);
-
-    urn_id = tdb_fetch(tdb, max_key);
+    urn_id = tdb_fetch(tdb, MAX_KEY);
     if(urn_id.dptr) {
       max_id = tdb_to_int(urn_id);
       free(urn_id.dptr);
@@ -457,7 +457,7 @@ static inline uint32_t get_id(struct tdb_context *tdb, TDB_DATA key, int create_
     urn_id.dptr = (unsigned char *)buff;
     urn_id.dsize = tdb_serialise_int(max_id, buff, BUFF_SIZE);
     tdb_store(tdb, key, urn_id, TDB_REPLACE);
-    tdb_store(tdb, max_key, urn_id, TDB_REPLACE);
+    tdb_store(tdb, MAX_KEY, urn_id, TDB_REPLACE);
     tdb_store(tdb, urn_id, key, TDB_REPLACE);
 
     tdb_unlockall(tdb);
@@ -635,6 +635,16 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   return NULL;
 };
 
+static inline int calculate_key_from_ids(int urn_id, int attribute_id, char *buff, int buff_len) {
+  // urn or attribute not found
+  if(urn_id == 0 || attribute_id == 0 || buff_len < sizeof(urn_id)*2) return 0;
+
+  *(uint32_t *)buff = urn_id;
+  *(uint32_t *)(buff + sizeof(urn_id)) = attribute_id;
+
+  return sizeof(urn_id) + sizeof(attribute_id);
+};
+
 /** Writes the data key onto the buffer - this is a combination of the
     uri_id and the attribute_id
 */
@@ -644,18 +654,33 @@ static int calculate_key(Resolver self, TDB_DATA uri,
   uint32_t urn_id = get_id(self->urn_db, uri, create_new);
   uint32_t attribute_id = get_id(self->attribute_db, attribute, create_new);
 
-  // urn or attribute not found
-  if(urn_id == 0 || attribute_id == 0 || buff_len < sizeof(urn_id)*2) return 0;
+  return calculate_key_from_ids(urn_id, attribute_id, buff, buff_len);
+};
 
-  *(uint32_t *)buff = urn_id;
-  *(uint32_t *)(buff + sizeof(urn_id)) = attribute_id;
-  return sizeof(urn_id) + sizeof(attribute_id);
+static inline uint64_t get_data_head_by_key(Resolver self, TDB_DATA data_key,
+                                            TDB_DATA_LIST *result) {
+  // We found these attribute/urn
+  TDB_DATA offset_serialised = tdb_fetch(self->data_db, data_key);
+
+  if(offset_serialised.dptr) {
+    // We found the head - read the struct
+    uint64_t offset = tdb_to_int(offset_serialised);
+
+    lseek(self->data_store_fd, offset, SEEK_SET);
+    if(read(self->data_store_fd, result, sizeof(*result)) == sizeof(*result)) {
+      free(offset_serialised.dptr);
+      return offset;
+    };
+
+    free(offset_serialised.dptr);
+  };
+  return 0;
 };
 
 /** returns the list head in the data file for the uri and attribute
-    specified. Returns the offset in the data_store for the TDB_DATA_LIST 
+    specified. Returns the offset in the data_store for the TDB_DATA_LIST
 */
-static uint64_t get_data_head(Resolver self, TDB_DATA uri, TDB_DATA attribute, 
+static uint64_t get_data_head(Resolver self, TDB_DATA uri, TDB_DATA attribute,
 			      TDB_DATA_LIST *result) {
   char buff[BUFF_SIZE];
   TDB_DATA data_key;
@@ -664,21 +689,7 @@ static uint64_t get_data_head(Resolver self, TDB_DATA uri, TDB_DATA attribute,
   data_key.dsize = calculate_key(self, uri, attribute, buff, BUFF_SIZE, 0);
 
   if(data_key.dsize > 0) {
-    // We found these attribute/urn
-    TDB_DATA offset_serialised = tdb_fetch(self->data_db, data_key);
-
-    if(offset_serialised.dptr) {
-      // We found the head - read the struct
-      uint32_t offset = tdb_to_int(offset_serialised);
-
-      lseek(self->data_store_fd, offset, SEEK_SET);
-      if(read(self->data_store_fd, result, sizeof(*result)) == sizeof(*result)) {
-        free(offset_serialised.dptr);
-	return offset;
-      };
-
-      free(offset_serialised.dptr);
-    };
+    return get_data_head_by_key(self, data_key, result);
   };
 
   return 0;
@@ -949,6 +960,7 @@ static RESOLVER_ITER *Resolver_get_iter(Resolver self,
 
   result = _Resolver_get_iter(self, ctx, tdb_urn, attribute);
   result->urn = urn;
+
   talloc_reference(result, urn);
 
   UNLOCK_RESOLVER;
@@ -1370,9 +1382,8 @@ static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
     int max_id,i;
 
     DEBUG_RESOLVER("Removing all attributes from %s\n", urn->value);
-    max_key = tdb_data_from_string(MAX_KEY);
 
-    max_key = tdb_fetch(self->attribute_db, max_key);
+    max_key = tdb_fetch(self->attribute_db, MAX_KEY);
     if(max_key.dptr) {
       max_id = tdb_to_int(max_key);
       free(max_key.dptr);
@@ -1433,6 +1444,75 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
   };
 
   return 1;
+};
+
+static int Resolver_attributes_iter(Resolver self, RDFURN urn, XSDString attribute,
+                                    RESOLVER_ITER *iter) {
+  int max_id, attribute_id =0;
+  TDB_DATA tdb_urn_id, tdb_urn, tdb_attribute;
+  int urn_id;
+  unsigned char buff[BUFF_SIZE];
+
+  // Find the attribute_id
+  tdb_attribute = tdb_data_from_string(attribute->value);
+  attribute_id = get_id(self->attribute_db, tdb_attribute, 0);
+
+  // Find tha maximum attribute_id
+  max_id = get_id(self->attribute_db, MAX_KEY, 0);
+  if(attribute_id > max_id) {
+    RaiseError(EProgrammingError, "attribute_id > max_id");
+    goto error;
+  };
+
+  /** Find the urn_id */
+  tdb_urn = tdb_data_from_string(urn->value);
+  urn_id = get_id(self->urn_db, tdb_urn, 0);
+  if(!urn_id) {
+    RaiseError(ERuntimeError, "URN %s not known", urn->value);
+    goto error;
+  };
+
+  while(attribute_id < max_id) {
+    char buff[BUFF_SIZE];
+    TDB_DATA key, data;
+
+    attribute_id++;
+
+    key.dptr = (unsigned char *)buff;
+    key.dsize = calculate_key_from_ids(urn_id, attribute_id, buff, BUFF_SIZE);
+
+    iter->offset = get_data_head_by_key(self, key, &iter->head);
+    if(iter->offset > 0) {
+      // Update the attribute_name:
+      tdb_serialise_int(attribute_id, (char *)key.dptr, BUFF_SIZE);
+
+      data = tdb_fetch(self->attribute_db, key);
+      if(!data.dptr){
+        RaiseError(EProgrammingError, "attribute_id does not correspond to any attribute?");
+        goto error;
+      };
+
+      // Set the attribute to the string
+      CALL(attribute, set, (char *) data.dptr, data.dsize);
+      free(data.dptr);
+
+      // And update the URN
+      if(iter->urn) {
+        talloc_unlink(iter, urn);
+      };
+      iter->urn = urn;
+      talloc_reference(iter, urn);
+
+      // Reset the iterators key cache
+      if(iter->cache) talloc_free(iter->cache);
+      iter->cache = CONSTRUCT(Cache, Cache, Con, iter, HASH_TABLE_SIZE, 0);
+
+      return 1;
+    };
+  };
+
+  error:
+    return 0;
 };
 
 static int Resolver_get_id_by_urn(Resolver self, RDFURN uri, int create) {
@@ -1599,6 +1679,8 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(iter_next) = Resolver_iter_next;
      VMETHOD(encoded_data_from_iter) = Resolver_encoded_data_from_iter;
      VMETHOD(alloc_from_iter) = Resolver_alloc_from_iter;
+     VMETHOD(attributes_iter) = Resolver_attributes_iter;
+
      VMETHOD(open) = Resolver_open;
      VMETHOD(cache_return) = Resolver_cache_return;
      VMETHOD(set_value) = Resolver_set_value;

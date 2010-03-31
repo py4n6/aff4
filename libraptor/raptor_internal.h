@@ -43,6 +43,9 @@ extern "C" {
 #include <dmalloc.h>
 #endif
 
+#if defined(HAVE_TALLOC)
+#include "talloc.h"
+#endif
 
 /* Can be over-ridden or undefined in a config.h file or -Ddefine */
 #ifndef RAPTOR_INLINE
@@ -64,6 +67,13 @@ void raptor_sign_free(void *ptr);
 #define RAPTOR_CALLOC(type, nmemb, size) raptor_sign_calloc(nmemb, size)
 #define RAPTOR_REALLOC(type, ptr, size) raptor_sign_realloc(ptr, size)
 #define RAPTOR_FREE(type, ptr)   raptor_sign_free(ptr)
+
+#elif defined(HAVE_TALLOC)
+
+#define RAPTOR_MALLOC(type, size)   talloc_size(NULL, size)
+#define RAPTOR_CALLOC(type, nmemb, size) talloc_size(NULL, (nmemb) * (size))
+#define RAPTOR_REALLOC(type, ptr, size) talloc_realloc_size(NULL, ptr, size)
+#define RAPTOR_FREE(type, ptr)   talloc_free((void*)ptr)
 
 #else
 #define RAPTOR_MALLOC(type, size) malloc(size)

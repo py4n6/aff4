@@ -76,6 +76,7 @@ class Inspector(cmd.Cmd):
         return True
 
     def do_cd(self, line):
+        """ Change directory """
         args = shlex.split(line)
         if not args[0].startswith("/"):
             args[0] = self.CWD + args[0]
@@ -176,7 +177,6 @@ class Inspector(cmd.Cmd):
 
     def do_cp(self, line):
         """ Copy a stream from a source to a destination. """
-        pdb.set_trace()
         globs = shlex.split(line)
         src = globs[0]
         dest = globs[1]
@@ -210,6 +210,33 @@ class Inspector(cmd.Cmd):
 
     def complete_less(self, *args):
         return self.complete_stream(*args)
+
+    def _display_attribute(self, iter):
+       while 1:
+          obj = oracle.alloc_from_iter(iter)
+          if not obj: break
+
+          print "    -> type (%s) " % (obj.dataType)
+          print "    -> data (%s) " % (obj.serialise(iter.urn))
+
+
+    def do_resolve(self, line):
+       globs = shlex.split(line)
+       attribute = pyaff4.XSDString()
+       subject = pyaff4.RDFURN()
+       iter = pyaff4.RESOLVER_ITER()
+
+       subject.set(globs[0])
+       try:
+          attribute.set(globs[1])
+          print attribute.value
+          self._display_attribute(iter)
+
+       except IndexError:
+          ## Just display all the attributes
+          while oracle.attributes_iter(subject, attribute, iter):
+             print attribute.value
+             self._display_attribute(iter)
 
     def complete_stream(self, text, line, begidx, endidx):
         if not text.startswith("/"):

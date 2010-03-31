@@ -19,7 +19,10 @@
 */
 enum _error_type {
   EZero,EGeneric,EOverflow,EWarning,
-  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError
+  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError,
+
+  // Reserved for impossible conditions
+  EProgrammingError
 };
 
 void *raise_errors(enum _error_type t, char *string,  ...);

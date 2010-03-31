@@ -44,7 +44,7 @@ BOUND typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
   // This is used to ensure we do not iterate over multiple values
-  // which are the same
+  // which are the same.
   Cache cache;
   RDFURN urn;
 } RESOLVER_ITER;
@@ -224,6 +224,17 @@ CLASS(Resolver, Object)
                   RDFURN uri, char *attribute, RDFValue value,  \
                   RESOLVER_ITER *iter);
 
+       /** This function can be used to iterate over all the
+           attributes set for a subject. For each attribute, the
+           RESOLVER_ITER is set to point to the start of its attribute
+           run.
+
+           attribute is set to the value of the attribute which was returned.
+
+           We return 0 if no further attributes are available.
+       */
+       int METHOD(Resolver, attributes_iter, RDFURN urn, XSDString attribute,\
+                  RESOLVER_ITER *iter);
 
        /** This returns a unique ID for the given URN. The ID is only
            unique within this resolver.

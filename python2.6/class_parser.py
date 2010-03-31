@@ -115,6 +115,8 @@ Gen_wrapper *new_class_wrapper(Object item) {
 static PyObject *resolve_exception(char **error_buff) {
   enum _error_type *type = aff4_get_current_error(error_buff);
   switch(*type) {
+case EProgrammingError:
+    return PyExc_SystemError;
 case EKeyError:
     return PyExc_KeyError;
 case ERuntimeError:
@@ -312,7 +314,7 @@ class String(Type):
    %s = PyString_FromStringAndSize((char *)%s, %s);\nif(!%s) goto error;
 """ % (name, result, name, self.length, result)
         if "BORROWED" not in self.attributes and 'BORROWED' not in kw:
-            result += "talloc_free(%s);\n" % name
+            result += "talloc_unlink(NULL, %s);\n" % name
 
         return result
 
@@ -1431,7 +1433,7 @@ class StructConstructor(ConstructorMethod):
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
         out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
-        out.write("\nself->base = NULL;\n")
+        out.write("\nself->base = talloc(self->ctx, %s);\n" % self.class_name)
         out.write("  return 0;\n};\n\n")
 
     def write_destructor(self, out):

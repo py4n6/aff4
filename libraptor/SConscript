@@ -5,7 +5,7 @@ from SconsUtils.utils import config_h_build, error, pkg_config
 
 raptor_env = env.Clone()
 
-raptor_env.Append(CFLAGS=" -DRAPTOR_INTERNAL -DHAVE_CONFIG_H -Ilibraptor/ ")
+raptor_env.Append(CFLAGS=" -DRAPTOR_INTERNAL -DHAVE_CONFIG_H -DHAVE_TALLOC -Ilibraptor/ ")
 
 if not env.config.LIBXML2_INCLUDES:
     env.config.LIBXML2_INCLUDES = utils.pkg_config("xml2", "cflags")
@@ -58,6 +58,5 @@ if env.config.RAPTOR_RDFXML:
     env.Append(SHLINKFLAGS = utils.pkg_config("xml2","libs"))
 
 env.libraptor_objs = raptor_env.SharedObject( [ "#libraptor/%s" % x for x in f] )
-
 
 config_h_build([File('raptor_config.h')], [File('sc_config.h.in')], env)
