@@ -15,7 +15,7 @@ the store at any one time.
 """
 
 import thread,time,re
-import pyflag.pyflaglog as pyflaglog
+import pyflaglog
 
 class Store:
     """ Stores objects for a length of time.

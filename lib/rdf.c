@@ -372,7 +372,9 @@ static RDFValue XSDString_clone(RDFValue self, void *ctx) {
 
 VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-   VATTR(super.dataType) = XSD_NAMESPACE "string";
+   //VATTR(super.dataType) = XSD_NAMESPACE "string";
+   // Strings by default dont need a dataType at all
+   VATTR(super.dataType) = "";
 
    // Our serialised form is the same as encoded form
    VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
@@ -1130,6 +1132,12 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   return NULL;
 };
 
+static void RDFSerializer_set_namespace(RDFSerializer self, char *prefix, char *namespace) {
+  raptor_uri uri = (void*)raptor_new_uri((const unsigned char*)prefix);
+  raptor_serialize_set_namespace(self->rdf_serializer, uri, (unsigned char *)namespace);
+  raptor_free_uri(uri);
+};
+
 static int RDFSerializer_serialize_statement(RDFSerializer self,
                                              RESOLVER_ITER *iter,
                                              RDFURN urn,
@@ -1175,12 +1183,15 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
   if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
     triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
 
-  triple.object_literal_datatype =                              \
-    raptor_new_uri((const unsigned char*)value->dataType);
+  // If the dataType is emptry just have a NULL
+  // object_literal_datatype:
+  triple.object_literal_datatype = value->dataType[0] ?                             \
+    raptor_new_uri((const unsigned char*)value->dataType) : 0;
 
   raptor_serialize_statement(self->rdf_serializer, &triple);
   raptor_free_uri((raptor_uri*)triple.predicate);
-  raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
+  if(triple.object_literal_datatype)
+    raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
 
   // Special free function for URIs
   if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
@@ -1243,6 +1254,7 @@ VIRTUAL(RDFSerializer, Object) {
      VMETHOD(Con) = RDFSerializer_Con;
      VMETHOD(serialize_urn) = RDFSerializer_serialize_urn;
      VMETHOD(serialize_statement) = RDFSerializer_serialize_statement;
+     VMETHOD(set_namespace) = RDFSerializer_set_namespace;
      VMETHOD(close) = RDFSerializer_close;
 } END_VIRTUAL
 

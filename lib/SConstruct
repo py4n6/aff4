@@ -50,4 +50,4 @@ env.libaff4_so = library = nenv.VersionedSharedLibrary("aff4", '0', env.libaff4_
 env.installed_libaff4_so = nenv.InstallVersionedSharedLibrary("${prefix}/lib/", library)
 utils.install_target = nenv.Alias('install', '${prefix}')
 
-utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)
+#utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)

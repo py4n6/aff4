@@ -31,11 +31,11 @@ This mechanism allows us to reorgenise the code according to
 functionality. For example we may include a Scanner, Report and File
 classes in the same plugin and have them all automatically loaded.
 """
-import pyflag.conf
-config=pyflag.conf.ConfObject()
+import conf
+config=conf.ConfObject()
 
 import os,sys, imp, pdb
-import pyflag.pyflaglog as pyflaglog
+import pyflaglog
 
 ## Define the parameters we need. The default plugins directory is
 ## taken from the path of the current module because the installer
@@ -56,16 +56,16 @@ class Registry:
 
     ## Excluded dirs are not descended into
     excluded_dirs = []
-    
+
     def __init__(self,ParentClass):
         """ Search the plugins directory for all classes extending ParentClass.
-        
+
         These will be considered as implementations and added to our internal registry.
         """
         ## Create instance variables
         self.classes = []
         self.order = []
-        
+
         ## Recurse over all the plugin directories recursively
         for path in config.PLUGINS.split(':'):
             for dirpath, dirnames, filenames in os.walk(path):
@@ -77,7 +77,7 @@ class Registry:
                         break
 
                 if excluded: continue
-                
+
                 for filename in filenames:
                     #Lose the extension for the module name
                     module_name = filename[:-3]
@@ -92,7 +92,7 @@ class Registry:
                         try:
                             if path not in self.loaded_modules:
                                 self.loaded_modules.append(path)
-                                
+
                                 pyflaglog.log(pyflaglog.VERBOSE_DEBUG,"Will attempt to load plugin '%s/%s'"
                                             % (dirpath,filename))
                                 try:
@@ -277,15 +277,12 @@ class ReportRegistry(Registry):
             raise ValueError("Can not find report %s/%s" % (family,report))
         
         return result[0]
-    
+
     def check_class(self,Class):
         ## If the report is missing any of those an exception will be raised...
         Class.display
-        Class.analyse
-        Class.progress
-        Class.form
         Class.name
-        Class.parameters
+        Class.family
 
 class OrderedRegistry(Registry):
     """ A class to register Scanners. """
@@ -467,7 +464,7 @@ class PreCanned:
     name = None
 
     def display(self, query, result):
-        import pyflag.FlagFramework
+        import Framework
 
         ## Present the heading and description
         try:
@@ -479,7 +476,7 @@ class PreCanned:
         if self.__class__.__doc__:
             result.para(self.__class__.__doc__)
 
-        new_query = pyflag.FlagFramework.query_type(
+        new_query = Framework.query_type(
             case = query['case'],
             _precanned = 1,
             report = self.report,
@@ -516,6 +513,7 @@ def print_info():
 LOCK = 0
 REPORTS = None
 SCANNERS = None
+THEMES = None
 
 ## This is required for late initialisation to avoid dependency nightmare.
 def Init():
@@ -526,14 +524,24 @@ def Init():
     LOCK=1
 
     ## Now do the scanners
-    import pyflag.Scanner as Scanner
+    import Scanner
     global SCANNERS
     SCANNERS = ScannerRegistry(Scanner.BaseScanner)
 
-    import pyflag.Framework as Framework
+    import Framework
     global EVENT_HANDLERS
 
     EVENT_HANDLERS = ScannerRegistry(Framework.EventHandler)
+
+    import Theme
+    global THEMES
+
+    THEMES = ScannerRegistry(Theme.BasicTheme)
+
+    import Reports
+    global REPORTS
+
+    REPORTS = ReportRegistry(Reports.Report)
 
     if config.info:
         print print_info()

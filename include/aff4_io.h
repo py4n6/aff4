@@ -30,7 +30,16 @@ CLASS(AFFObject, Object)
      // This is the rdf:type property of this object
      char *dataType;
 
-     /** Any object may be asked to be constructed from its URI */
+     // This is set to 1 when the object is complete (i.e. we called
+     // finish on it). Methods should check that the object is
+     // completed properly before using it.
+     int complete;
+
+     /** Any object may be asked to be constructed from its URI.
+
+         DEFAULT(urn) = NULL;
+         DEFAULT(mode) = "w";
+      */
      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
 
      /** This is called to set properties on the object */
@@ -92,6 +101,9 @@ CLASS(AFFObject, Object)
 */
 
 END_CLASS
+
+PROXY_CLASS(AFFObject);
+
 
 // Base class for file like objects
 #define MAX_CACHED_FILESIZE 1e6

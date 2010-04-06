@@ -1,11 +1,14 @@
-import pyflag.conf as conf
+import sys, os
+sys.path.append("%s/pyflag" % os.getcwd())
+
+import conf
 config = conf.ConfObject()
 
 import pdb
-import pyflag.Registry as Registry
+import Registry
 import pyaff4
-import pyflag.Framework as Framework
-import pyflag.Scanner as Scanner
+import Framework
+import Scanner
 
 config.add_option("OUTPUT", default="%s/Output.aff4" % config.RESULTDIR,
                   help = "AFF4 volume to write results on")
@@ -21,8 +24,6 @@ Registry.Init()
 Framework.post_event("startup")
 
 oracle = pyaff4.Resolver()
-
-Framework.Init_output_volume(config.OUTPUT)
 
 ## Now make up a list of scanners to use
 scanners = [ s() for s in Registry.SCANNERS.classes ]
@@ -43,7 +44,7 @@ Framework.post_event("finish")
 
 ## Now seal the volume - this is optional
 if config.SEAL:
-    Framework.Seal_output_volume()
+    Framework.RESULT_VOLUME.Seal_output_volume()
 
 ## Ok we are about to finish
 Framework.post_event("exit")

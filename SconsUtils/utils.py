@@ -3,6 +3,7 @@ import distutils.sysconfig as sysconfig
 import distutils.util
 import platform
 import SCons.SConf as SConf
+import config
 
 # taken from scons wiki
 def CheckPKGConfig(context, version):
@@ -276,14 +277,21 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         to guess the flags. In the native mode we can get the required
         flags directly from distutils.
         """
-        platform = self.subst('$PLATFORM')
-        shlib_pre_action = None
-        shlib_suffix = distutils.util.split_quoted(
-            sysconfig.get_config_var('SO'))
-        shlib_post_action = None
-        cppflags = distutils.util.split_quoted(
-            "-I"+sysconfig.get_python_inc())
-        shlink_flags = self['LINKFLAGS'].split()
+        if config.MINGW_XCOMPILE:
+            shlib_suffix = ".pyd"
+            cppflags = "-I%s" % config.XCOMPILE_PYTHON_PATH
+            shlink_flags = ['']
+
+        else:
+            platform = self.subst('$PLATFORM')
+            shlib_pre_action = None
+            shlib_suffix = distutils.util.split_quoted(
+                sysconfig.get_config_var('SO'))
+            shlib_post_action = None
+            cppflags = distutils.util.split_quoted(
+                "-I"+sysconfig.get_python_inc())
+            shlink_flags = self['LINKFLAGS'].split()
+
         install_dest = distutils.util.split_quoted(
             os.path.join(
                 sysconfig.get_config_var('BINLIBDEST'),os.path.dirname(libname)))

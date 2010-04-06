@@ -263,6 +263,9 @@ class Type:
     def python_name(self):
         return self.name
 
+    def returned_python_definition(self, *arg, **kw):
+        return self.definition(*arg, **kw)
+
     def definition(self, default=None, **kw):
         if default:
             return "%s %s=%s;\n" % (self.type, self.name, default)
@@ -424,14 +427,16 @@ class Char(Integer):
 
     def to_python_object(self, name = None, result = 'py_result', **kw):
         ## We really want to return a string here
-        return """str_%(name)s = &%(name)s;
+        return """{ char *str_%(name)s = &%(name)s;
     PyErr_Clear();
     %(result)s = PyString_FromStringAndSize(str_%(name)s, 1);
 if(!%(result)s) goto error;
+};
 """ % dict(result=result, name = name or self.name)
 
     def definition(self, default = '"\\x0"', **kw):
-        return "char %s=0; char *str_%s = %s;\n" % (
+        ## Shut up unused warnings
+        return "char %s __attribute__((unused))=0;\nchar *str_%s __attribute__((unused)) = %s;\n" % (
             self.name,self.name, default)
 
     def byref(self):
@@ -594,13 +599,27 @@ class Wrapper(Type):
     sense = 'IN'
     error_value = "return NULL;"
 
+    def from_python_object(self, source, destination, method, **kw):
+        return """
+/* First check that the returned value is in fact a Wrapper */
+if(!type_check(%(source)s, &%(type)s_Type)) {
+  PyErr_Format(PyExc_RuntimeError, "function must return an %(type)s instance");
+  goto error;
+};
+
+%(destination)s = ((Gen_wrapper *)%(source)s)->base;
+""" % dict(source = source, destination = destination, type = self.type)
+
     def to_python_object(self, **kw):
         return ''
 
+    def returned_python_definition(self, default = 'NULL', sense='in', **kw):
+        return "%s %s;\n" % (self.type, self.name)
+
     def definition(self, default = 'NULL', sense='in', **kw):
-        result = "Gen_wrapper *%s = %s;" % (self.name, default)
+        result = "Gen_wrapper *%s __attribute__((unused)) = %s;\n" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
-            result += " %s call_%s;\n" % (self.type, self.name)
+            result += " %s __attribute__((unused)) call_%s;\n" % (self.type, self.name)
 
         return result
 
@@ -1355,7 +1374,7 @@ static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
 
         out.write("{\nPyObject *py_result;\n")
         out.write('PyObject *method_name = PyString_FromString("%s");\n' % self.name)
-        out.write(self.return_type.definition())
+        out.write(self.return_type.returned_python_definition())
 
         for arg in self.args:
             out.write("PyObject *py_%s=NULL;\n" % arg.name)
@@ -1420,7 +1439,7 @@ if(PyErr_Occurred()) {
                 out.write("if(py_%s) { Py_DECREF(py_%s);};\n" % (arg.name, arg.name))
 
             out.write("PyGILState_Release(gstate);\n %s;\n" % self.error_condition())
-        
+
         out.write("   };\n};\n")
 
     def error_condition(self):
@@ -1468,21 +1487,22 @@ static int %(class_name)s_destructor(void *this) {
             out.write("""
 {
   // Converting from %(attribute_name)s
-  %(definition)s
   PyErr_Clear();
   PyObject *py_result = PyObject_GetAttrString(self->base->proxied, "%(name)s");
 
   if(py_result) {
-       %(from_python_object)s
-       ((%(definition_class_name)s)self->base)->%(name)s = %(name)s;
+       %(type)s tmp;
+       %(from_python_object)s;
+       ((%(definition_class_name)s)self->base)->%(name)s = tmp;
        Py_DECREF(py_result);
   };
   PyErr_Clear();
 };""" % dict(definition = attribute.definition(), name=attribute.name,
              attribute_name = attribute.__class__.__name__,
+             type = attribute.type,
              definition_class_name = definition_class_name,
              from_python_object = attribute.from_python_object(
-                        'py_result',attribute.name, method=self,
+                        'py_result',"tmp", method=self,
                         context = 'self->base')))
 
 
@@ -1561,7 +1581,6 @@ this->proxied = py_result;
 
     def write_definition(self, out):
         self.write_constructor_proxy(out)
-
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {
       PyGILState_STATE gstate = PyGILState_Ensure();
 """ % dict(method = self.name, class_name = self.class_name))
@@ -1577,7 +1596,7 @@ this->proxied = py_result;
 
         self.call += ",%s, NULL" % self.base_cons_method.name
         for arg in self.base_cons_method.args:
-            self.call += ", %s" % arg.name
+            self.call += ", %s" % arg.call_arg()
 
         self.call += ");\n"
 
@@ -1627,7 +1646,7 @@ this->proxied = py_result;
 
         out.write("\n};\n\n")
 
-class EmptryConstructor(ConstructorMethod):
+class EmptyConstructor(ConstructorMethod):
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
         out.write("""return 0;};\n\n""")
@@ -1637,7 +1656,7 @@ class ClassGenerator:
         self.class_name = class_name
         self.methods = []
         self.module = module
-        self.constructor = EmptryConstructor(class_name, base_class_name,
+        self.constructor = EmptyConstructor(class_name, base_class_name,
                                              "Con", [], '', myclass = self)
 
         self.base_class_name = base_class_name
@@ -2050,6 +2069,7 @@ END_CLASS
                     raise RuntimeError("Need to create a proxy for %s but it has not been defined (yet). You must place the PROXIED_CLASS() instruction after the class definition" % base_class_name)
                 self.current_class = ProxyClassGenerator(class_name,
                                                          base_class_name, self.module)
+                self.current_class.constructor.args += proxied_class.constructor.args
                 self.current_class.docstring = self.current_comment
 
                 ## Create proxies for all these methods
@@ -2084,7 +2104,8 @@ END_CLASS
                     offset += m.end()
                     args.append([m.group(1).strip(), m.group(2).strip()])
 
-                if return_type == self.current_class.class_name:
+                if return_type == self.current_class.class_name and \
+                        method_name.startswith("Con"):
                     self.current_class.add_constructor(method_name, args, return_type,
                                                        self.current_comment)
                 else:
@@ -2119,3 +2140,4 @@ if __name__ == '__main__':
         p.parse(arg)
 
     p.write(sys.stdout)
+

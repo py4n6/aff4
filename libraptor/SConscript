@@ -1,7 +1,7 @@
 Import("env")
 import SconsUtils.utils as utils
 import pdb
-from SconsUtils.utils import config_h_build, error, pkg_config
+from SconsUtils.utils import config_h_build, error, warn, pkg_config
 
 raptor_env = env.Clone()
 
@@ -49,11 +49,12 @@ if env.config.RAPTOR_NTRIPLES:
     f.extend(Split("ntriples_parse.c raptor_serialize_ntriples.c"))
 
 if env.config.RAPTOR_RDFXML:
-    h['RAPTOR_PARSER_RDFXML'] = 1
-    h['RAPTOR_SERIALIZER_RDFXML'] = 1
-    f.extend(Split("raptor_serialize_rdfxml.c raptor_serialize_simple.c raptor_libxml.c raptor_rdfxml.c raptor_sax2.c"))
-    if not conf.CheckLib("xml2"):
-        error("You must use libxml2 for RDFXML")
+    if conf.CheckLib("xml2"):
+        h['RAPTOR_PARSER_RDFXML'] = 1
+        h['RAPTOR_SERIALIZER_RDFXML'] = 1
+        f.extend(Split("raptor_serialize_rdfxml.c raptor_serialize_simple.c raptor_libxml.c raptor_rdfxml.c raptor_sax2.c"))
+    else:
+        warn("You must use libxml2 for RDFXML")
 
     env.Append(SHLINKFLAGS = utils.pkg_config("xml2","libs"))
 

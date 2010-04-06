@@ -3,6 +3,8 @@
 It will be imported by the build system. This is a regular python file
 so it must be python syntax.
 """
+import os
+
 ## This is a path to the location of persistent TDB files.
 TDB_LOCATION = "/tmp/"
 
@@ -40,3 +42,6 @@ RAPTOR_RDFXML = True
 
 ## Darwin specific options (Only used when running on OSX)
 DARWIN_ARCHITECTURE = "-arch x86_64"
+
+MINGW_XCOMPILE = False
+XCOMPILE_PYTHON_PATH = "%s/.wine/drive_c/Python26/include/" % os.environ['HOME']

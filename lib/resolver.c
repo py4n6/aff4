@@ -36,7 +36,8 @@ static Cache type_dispatcher = NULL;
 */
 Resolver oracle = NULL;
 
-void register_type_dispatcher(char *type, AFFObject *classref) {
+static void register_type_dispatcher(Resolver self, char *type, \
+                                     AFFObject *classref) {
   if(!(*classref)->dataType) {
     printf("%s has no dataType\n", NAMEOF(*classref));
   };
@@ -243,7 +244,7 @@ static Object Cache_get(Cache self, char *key, int len) {
 
       // Now free the container this will unlink it from the lists
       // through its destructor.
-      talloc_free(i);
+      talloc_unlink(self, i);
 
       return result;
     };
@@ -1692,6 +1693,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;
      VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
+     VMETHOD(register_type_dispatcher) = register_type_dispatcher;
 
 #if HAVE_OPENSSL
      VMETHOD(register_security_provider) = Resolver_register_security_provider;
@@ -1757,14 +1759,22 @@ static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
 // the relevant cache
 static AFFObject AFFObject_finish(AFFObject self) {
   Cache cache = oracle->read_cache;
+  AFFObject result =CALL(self, Con, URNOF(self), self->mode);
 
+  // Finishing failed
+  if(!result) return NULL;
+
+  // Ok we successfully created the object - add it to the required
+  // cached now:
   if(self->mode == 'w')
     cache = oracle->write_cache;
 
   // Put us in the right cache
-  CALL(cache, put, ZSTRING(STRING_URNOF(self)), (Object)self);
+  CALL(cache, put, ZSTRING(STRING_URNOF(result)), (Object)result);
 
-  return CALL(self, Con, URNOF(self), self->mode);
+  self->complete = 1;
+
+  return result;
 };
 
 static void AFFObject_delete(RDFURN urn) {

@@ -15,68 +15,90 @@ except ImportError:
 ROOT = "aff4://navigation/root"
 oracle = pyaff4.Resolver()
 
-def populate_tree(tree, node):
-    ## Make sure to clear previous children
-    try:
-        children = tree.get_children(node)
-        for child in children:
-            tree.delete(child)
-    except: pass
+class App:
+    def __init__(self):
+        self.root = Tkinter.Tk()
+        vsb = ttk.Scrollbar(orient="vertical")
+        hsb = ttk.Scrollbar(orient="horizontal")
 
-    child = pyaff4.XSDString()
-    urn = pyaff4.RDFURN()
-    urn.set(tree.set(node, 'url'))
+        self.tree = ttk.Treeview(
+            columns=("path", 'url', 'size'),
+            displaycolumns="size", yscrollcommand=lambda f, l: self.autoscroll(vsb, f, l),
+            xscrollcommand=lambda f, l: self.autoscroll(hsb, f, l))
 
-    path = tree.set(node, "path")
+        vsb['command'] = self.tree.yview
+        hsb['command'] = self.tree.xview
 
-    iter = oracle.get_iter(urn, pyaff4.AFF4_NAVIGATION_CHILD)
-    while oracle.iter_next(iter, child):
-        new_path = path + "/" + child.value
-        tree.insert(node, "end", text=child.value,
-                    values=[new_path, urn.value + "/" + child.value])
+        self.tree.heading("#0", text="Directory Structure", anchor='w')
+        self.tree.heading("size", text="File Size", anchor='w')
+        self.tree.column("size", stretch=0, width=100)
 
-def populate_roots(tree):
-    node = tree.insert('', 'end', text='/', values=['/', ROOT])
+        ## Populate the root
+        self.tree.insert('', 'end', text='/', values=['/', ROOT])
 
-def update_tree(event):
-    tree = event.widget
-    populate_tree(tree, tree.focus())
+        self.tree.bind('<<TreeviewOpen>>', self.update_tree)
 
-def autoscroll(sbar, first, last):
-    """Hide and show scrollbar as needed.
-    
-    Code from Joe English (JE) at http://wiki.tcl.tk/950"""
-    first, last = float(first), float(last)
-    if first <= 0 and last >= 1:
-        sbar.grid_remove()
-    else:
-        sbar.grid()
-    sbar.set(first, last)
+        # Arrange the tree and its scrollbars in the toplevel
+        self.tree.grid(column=0, row=0, sticky='nswe')
+        vsb.grid(column=1, row=0, sticky='ns')
+        hsb.grid(column=0, row=1, sticky='ew')
 
-root = Tkinter.Tk()
+        self.mainframe = ttk.Frame(self.root, padding="3 3 12 12", width=640, height=480)
+        self.mainframe.grid(column = 1, row=0, sticky='nwse')
+        self.mainframe.columnconfigure(0, weight=1)
+        self.mainframe.rowconfigure(0, weight=1)
 
-vsb = ttk.Scrollbar(orient="vertical")
-hsb = ttk.Scrollbar(orient="horizontal")
+        self.frame = ttk.Frame(self.mainframe, width=640, height=480)
+        self.frame.pack()
 
-tree = ttk.Treeview(columns=("path", 'url', 'size'),
-    displaycolumns="size", yscrollcommand=lambda f, l: autoscroll(vsb, f, l),
-    xscrollcommand=lambda f, l:autoscroll(hsb, f, l))
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
 
-vsb['command'] = tree.yview
-hsb['command'] = tree.xview
+        self.root.mainloop()
 
-tree.heading("#0", text="Directory Structure", anchor='w')
-tree.heading("size", text="File Size", anchor='w')
-tree.column("size", stretch=0, width=100)
+    def render_pane(self, node):
+        urn = self.tree.set(node, 'url')
 
-populate_roots(tree)
-tree.bind('<<TreeviewOpen>>', update_tree)
+        self.frame.forget()
+        self.frame = ttk.Frame(self.mainframe, width=640, height=480)
+        label = ttk.Label(self.frame, text=urn, justify = 'center')
+        label.pack()
+        self.frame.pack()
 
-# Arrange the tree and its scrollbars in the toplevel
-tree.grid(column=0, row=0, sticky='nswe')
-vsb.grid(column=1, row=0, sticky='ns')
-hsb.grid(column=0, row=1, sticky='ew')
-root.grid_columnconfigure(0, weight=1)
-root.grid_rowconfigure(0, weight=1)
+    def populate_tree(self, node):
+        ## Make sure to clear previous children
+        try:
+            children = self.tree.get_children(node)
+            for child in children:
+                self.tree.delete(child)
+        except: pass
 
-root.mainloop()
+        child = pyaff4.XSDString()
+        urn = pyaff4.RDFURN()
+        urn.set(self.tree.set(node, 'url'))
+
+        path = self.tree.set(node, "path")
+
+        iter = oracle.get_iter(urn, pyaff4.AFF4_NAVIGATION_CHILD)
+        while oracle.iter_next(iter, child):
+            new_path = path + "/" + child.value
+            self.tree.insert(node, "end", text=child.value,
+                             values=[new_path, urn.value + "/" + child.value])
+
+    def update_tree(self, event):
+        node = self.tree.focus()
+        self.populate_tree(node)
+        self.render_pane(node)
+
+    def autoscroll(self, sbar, first, last):
+        """Hide and show scrollbar as needed.
+
+        Code from Joe English (JE) at http://wiki.tcl.tk/950"""
+        first, last = float(first), float(last)
+        if first <= 0 and last >= 1:
+            sbar.grid_remove()
+        else:
+            sbar.grid()
+        sbar.set(first, last)
+
+App()

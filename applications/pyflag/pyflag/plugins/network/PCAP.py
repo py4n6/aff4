@@ -1,10 +1,10 @@
 """ This is a scanner which processes pcap files """
-import pyflag.Scanner as Scanner
+import Scanner
 import pyreassembler.pypcap as pypcap
 import pyreassembler.reassembler as reassembler
-import pyflag.Framework as Framework
+import Framework
 import pyaff4
-import pyflag.Scanner as Scanner
+import Scanner
 import pdb, sys
 
 oracle = pyaff4.Resolver()
@@ -42,6 +42,8 @@ def dissect_packet(stream_fd, stream_pkt_fd):
 
 class Reassembler:
     def make_stream(self, name, base):
+        return Framework.PyFlagMap(base + name)
+
         volume_urn = Framework.OUTPUT_VOLUME_URN
         forward_stream = oracle.create(pyaff4.AFF4_MAP)
         forward_stream.urn.set(volume_urn.value)

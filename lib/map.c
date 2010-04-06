@@ -679,6 +679,12 @@ static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_
 
 static int MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
+  AFFObject obj_self = (AFFObject)self;
+
+  if(obj_self->mode == 'w' && !obj_self->complete) {
+    RaiseError(EProgrammingError, "You must call finish() before the object can be used");
+    return 0;
+  };
 
   // We want the storage volume to be dirty while we write ourselves
   // into it - this is a sanity check which could happen if the user
@@ -843,7 +849,7 @@ void mapdriver_init() {
   INIT_CLASS(MapValueBinary);
   INIT_CLASS(MapValueInline);
 
-  register_type_dispatcher(AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
+  CALL(oracle, register_type_dispatcher, AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueInline));

@@ -1716,8 +1716,8 @@ void zip_init() {
   INIT_CLASS(ZipFileStream);
   INIT_CLASS(AFF4Volume);
 
-  register_type_dispatcher(AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
-  register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
-  register_type_dispatcher(AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
+  CALL(oracle, register_type_dispatcher, AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
+  CALL(oracle, register_type_dispatcher, AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
+  CALL(oracle, register_type_dispatcher, AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
 
 };

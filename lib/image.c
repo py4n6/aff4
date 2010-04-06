@@ -602,6 +602,6 @@ VIRTUAL(Image, FileLikeObject) {
 void image_init() {
   INIT_CLASS(Image);
 
-  register_type_dispatcher(AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
+  CALL(oracle, register_type_dispatcher, AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
 
 };

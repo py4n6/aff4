@@ -351,6 +351,9 @@ raptor_default_free_uri(void *context, raptor_uri *uri)
 void
 raptor_free_uri(raptor_uri *uri)
 {
+  if(!uri) {
+    printf("uri is NULL\n");
+  };
   RAPTOR_ASSERT_OBJECT_POINTER_RETURN(uri, raptor_uri);
 
   (*raptor_uri_current_uri_handler->free_uri)(raptor_uri_current_uri_context, uri);

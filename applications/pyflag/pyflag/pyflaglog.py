@@ -24,8 +24,8 @@
 
 logging verbosity is controlled through the configuration variable LOG_LEVEL
 """
-import pyflag.conf
-config = pyflag.conf.ConfObject()
+import conf
+config = conf.ConfObject()
 
 import sys,traceback,time,threading,os
 

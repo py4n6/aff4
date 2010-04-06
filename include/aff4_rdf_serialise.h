@@ -30,6 +30,7 @@ CLASS(RDFSerializer, Object)
      int METHOD(RDFSerializer, serialize_urn, RDFURN urn);
      int METHOD(RDFSerializer, serialize_statement, RESOLVER_ITER *iter, RDFURN urn,\
                 RDFURN attribute);
+     void METHOD(RDFSerializer, set_namespace, char *prefix, char *namespace);
      DESTRUCTOR void METHOD(RDFSerializer, close);
 END_CLASS
 

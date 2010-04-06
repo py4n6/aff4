@@ -1,10 +1,11 @@
-import pyflag.Scanner as Scanner
+import Scanner
 import re, os, os.path
 import pyaff4
 import PCAP
 import pdb
 import gzip
-import pyflag.Framework as Framework
+import Framework
+from PyFlagConstants import *
 
 oracle = pyaff4.Resolver()
 
@@ -80,14 +81,21 @@ class HTTPScanner(Scanner.BaseScanner):
         m=self.request_re.search(line)
         if not m: return False
 
-        request['url']=pyaff4.RDFURN()
-        request['url'].set(m.group(2))
         request['method']=m.group(1)
 
         self.read_headers(request, forward_fd)
 
-        ## of the URL too (e.g. if its a proxy connection)
-        request['host'] = request.get('host', request['url'].parser.netloc)
+        try:
+            host = request['host']
+        except KeyError:
+            dest_ip = forward_fd.get_metadata(DEST_IP)
+            host = dest_ip.serialise(None)
+
+        url = pyaff4.RDFURN()
+        url.set("http://%s/%s" % (host, m.group(2)))
+
+        request['url'] = url
+        request['host'] = host
 
         return True
 
@@ -107,8 +115,7 @@ class HTTPScanner(Scanner.BaseScanner):
             fd = oracle.open(http_object_urn, 'r')
             try:
                 gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
-                http_object = Framework.VFSCreate(fd, "decompressed",
-                                                  type = pyaff4.AFF4_IMAGE)
+                http_object = Framework.PyFlagStream("decompressed", base = fd.urn.value)
                 try:
                     while 1:
                         data = gzip_fd.read(1024*1024)
@@ -126,8 +133,8 @@ class HTTPScanner(Scanner.BaseScanner):
         return http_object_urn
 
     def handle_encoding(self, headers, fd):
-        http_object = Framework.VFSCreate(fd, "HTTP/%s" % fd.readptr,
-                                          type=pyaff4.AFF4_MAP)
+        http_object = Framework.PyFlagMap("HTTP/%s" % fd.readptr,
+                                          base = fd.urn.value)
         try:
             try:
                 skip = int(headers['content-length'])
@@ -216,7 +223,7 @@ class HTTPScanner(Scanner.BaseScanner):
                                     value = value))
         target.dirty = 1
 
-    def process_post_body(self, request, request_body, target):        
+    def process_post_body(self, request, request_body, target):
         try:
             base, query = request['url'].split('?',1)
         except ValueError:
@@ -294,6 +301,20 @@ class HTTPScanner(Scanner.BaseScanner):
                 parse = True
                 response_body_urn = self.skip_body(response, self.reverse_fd)
 
+
+            try: Framework.set_metadata(request_body_urn, HTTP_URL, request['url'])
+            except KeyError: pass
+
+            try: Framework.set_metadata(request_body_urn, HTTP_METHOD, request['method'])
+            except KeyError: pass
+
+            try: Framework.set_metadata(request_body_urn, HTTP_CODE, response['HTTP_code'])
+            except KeyError: pass
+
+            try: Framework.set_metadata(request_body_urn, HOST_TLD,
+                                        Framework.make_tld(request['host']))
+            except KeyError: pass
+
             return
             ## We hang all the parameters on the response object
             ## (i.e. file attachment, post parameters, cookies)
@@ -309,7 +330,7 @@ class HTTPScanner(Scanner.BaseScanner):
 
                 ## We try to store the url in a normalized form so we
                 ## can find it regardless of the various permutations
-                ## it can go though
+                ## it can go through
                 response_body.insert_to_table("http",
                                               dict(method = request.get('method'),
                                                    url = url,

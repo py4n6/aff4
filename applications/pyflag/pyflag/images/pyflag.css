@@ -1,0 +1,358 @@
+h1, table { 
+  cursor: default;
+}
+
+/** Stuff related to table implementation */
+table.PyFlagTable td.table-cell, thead th {
+  background:#94BEFF;
+  border-right:1px solid #999;
+  padding:2px;
+}
+
+table.PyFlagTable td, thead th {
+  font-weight:normal;
+  font-size:0.8em;
+}
+
+table.PyFlagTable {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+table.GeneralTable { 
+  width: 100%;
+ }
+
+table.GeneralTable tr td { 
+  background-color: #e3edfa;
+  padding: 2px;
+  font-weight:normal;
+  font-size:0.8em;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+table.GeneralTable tr.hilight td { 
+  background-color: pink;
+  font-weight: bold;
+  border-bottom: 3px ridge black;
+}
+
+table.PyFlagTable td.table-cell, table.PyFlagTable tr td.table-cell {
+  background: #FFF;
+  padding: 2px;
+}
+
+table.PyFlagTable tr.alternateRow td.table-cell {
+  background: #e3edfa;
+  padding: 2px;
+}
+
+table.PyFlagTable tr.selected td.table-cell {
+  background: yellow;
+  padding: 2px;
+}
+
+table.PyFlagTable tr:hover td.table-cell,table.PyFlagTable tr.alternateRow:hover td.sorted-column, table.PyFlagTable tr.hoverRow:hover,
+table.PyFlagTable tr:hover td.sorted-column {
+  background: #a6c2e7;
+}
+
+table.PyFlagTable td.sorted-column, table.PyFlagTable tr td.sorted-column {
+  background: pink;
+}
+
+thead th {
+ cursor: pointer;
+}
+
+/** General Page layout */
+div.PyFlagHeader { 
+  background-image: url(toolbar-bg.gif);
+  width: 100%;
+  height: 32px;
+}
+
+form.CaseSelector { 
+  float: right;
+  height: 0;
+}
+
+div.Toolbar { 
+  float: left;
+  padding-top: 3px;
+  height: 32px;
+}
+
+div.CaseSelector { 
+  height: 24px;
+}
+
+div.PyFlagPage { 
+  float: left;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: auto;
+  height: 80%;
+}
+
+/** Tables */
+table.PyFlagTable thead a, img { 
+  color: black;
+  font-size: large;
+  border: 1px;
+  text-decoration: none;
+ }
+
+table.PyFlagTable { 
+  width: 90%;
+  float: left;
+  border-style: groove;
+ }
+
+img.PopupIcon { 
+  cursor: pointer;
+ }
+
+iframe.TreeFrame { 
+  width: 99%;
+  height: 80%;
+}
+
+div.TreeLeft { 
+  float: left;
+  width: 45%;
+  border-style: ridge;
+  height: 80%;
+  overflow: auto;
+  display: block;
+}
+
+div.TreeRight { 
+  float: left;
+  display: block;
+  border-style: ridge;
+  height: 80%;
+  overflow: auto;
+  width: 50%;
+}
+
+span.PyFlagTreeRow { 
+  font-size: small;
+  display: block;
+}
+
+span.PyFlagTreeRow a { 
+  color: black;
+  text-decoration: none;
+}
+
+img.PyFlagTreeSpacer, img.PyFlagTreeVerticalLine, img.PyFlagTreeNode, img.PyFlagTreeNodeEnd { 
+  width: 18px; 
+  height: 2.0ex; 
+  vertical-align: middle; 
+  display: inline; 
+}
+
+img.PyFlagTreeVerticalLine { 
+  background-image: url(treenode_grid_v.gif);
+}
+
+img.PyFlagTreeNode { 
+  background-image: url(treenode_grid_t.gif);
+}
+
+img.PyFlagTreeNodeEnd { 
+  background-image: url(treenode_grid_l.gif);
+}
+
+span.PyFlagTreeSelected { 
+  background-color: #e3edfa;
+}
+
+/** Menu bar classes: */
+html, body { 
+  width: 100%;	/* make the body expand to fill the visible window */
+  height: 100%;
+  overflow: hidden;	/* erase window level scrollbars */
+  padding: 0 0 0 0;
+  margin: 0 0 0 0;
+}
+
+table.MenuBar, table.PopupMenu { 
+  cursor: pointer;
+  z-index: 2;
+  position: relative;
+  font-family: "Sans";
+  font-size: 13px;
+}
+
+table.MenuBar { 
+  background-color:	#A9CCFE;
+  background-image: url(soriaMenuBg.gif);
+  width: 100%;
+  height: 29px;
+  vertical-align: middle;
+}
+
+table.PopupMenu { 
+  visibility: hidden;
+  position: absolute;
+  background-color: #A9CCFE;
+  padding-bottom: 5px;
+  padding-top: 5px;
+  -moz-border-radius: 15px;
+}
+
+tr.MenuItem td { 
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+tr.MenuItem:hover { 
+  background-color: white;
+}
+
+td.MenuBarItem { 
+  display:	inline;
+  padding-left: 8px;
+  padding-right: 8px;
+ }
+
+/** Notebook implementation */
+div.Tablist { 
+  font-weight:        bold;
+  float: left;
+}
+
+div.TabContent { 
+  border-width: 2px;
+  border-style: solid;
+  clear: both;
+ }
+
+.Tab, .TabActive { 
+  float : left;
+  margin-bottom : 0px;
+  padding-left : 9px;
+  border-bottom : 1px solid #6290d2;
+  background : url(tab_left.gif) no-repeat left top;
+  white-space: nowrap;
+}
+
+.Tab { 
+  cursor: pointer;
+}
+
+.Tab span, .TabActive span {
+  top : 0px;
+  left : 0px;
+  overflow : visible;
+  margin-bottom : -1px;
+  z-index: 3;
+  display : block;
+  padding : 4px 15px 4px 6px;
+  background : url(tab_top_right.gif) no-repeat right top;
+  color : #333;
+  font-size : 90%;
+}
+
+.TabActive span { 
+  background-position: right -150px;
+ }
+
+.TabActive { 
+  background-position: left -150px;
+  cursor: default;
+ }
+
+/** This is related to the tree widget */
+iframe#left { 
+  border: 3px;
+  float: left;
+  width: 30%;
+  margin-right: -10px;
+  height: 95%;
+  border-style: none;
+  border-right-style: ridge;
+}
+
+iframe#right { 
+  border: 1px;
+  float: right;
+  width: 70%;
+  height: 95%;
+}
+
+/** General purpose highlighting */
+.hilight, .highlight { 
+  background-color: pink;
+}
+
+/** Some common color effects: */
+.blue { 
+  color: blue;
+}
+
+.red { 
+  color: red;
+}
+
+.black { 
+  color: black;
+ }
+
+/** Regular data highlighted here */
+.alloc { 
+  background-color: #f8f8f8;
+}
+
+/** Matches are highlighted here */
+.match { 
+  background-color: #f4ffa9;
+}
+
+/** Slack is highlighted here */
+.slack { 
+  background-color: #ffac5e;
+}
+
+/** Overread is highlighted here */
+.overread { 
+  background-color: red;
+}
+
+h1 { 
+  font-size: 1.5em;
+  font-weight: bold;
+ }
+
+/** Table alignment */
+td.Integer { 
+  text-align: right;
+ }
+
+table.PyFlagTable { 
+  width: 100%;
+  overflow: auto;
+ }
+
+.Row { 
+  clear: left;
+ }
+
+tr.explain td, tr.explain th { 
+  border-right: 2px solid #999;
+  border-bottom: 2px solid #999;
+  background: #eeeeee;
+  vertical-align: top;
+}
+
+tr.explain th { 
+  background: #ffeeee;
+}
+
+tr.explainrow td { 
+  padding: 4px;
+  vertical-align: top; 
+}

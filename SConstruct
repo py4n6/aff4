@@ -99,7 +99,7 @@ env['CCFLAGS'] = compileFlags
 env['CPPDEFINES'] = cppDefines
 
 ## Not working yet
-if env['mingw']:
+if config.MINGW_XCOMPILE:
    import SconsUtils.crossmingw as crossmingw
 
    crossmingw.generate(env)
@@ -126,9 +126,14 @@ utime.h arpa/inet.h stdargs.h
    if not conf.CheckLibWithHeader('z', 'zlib.h','c'):
       error( 'You must install zlib-dev to build libaff4!')
 
+   if config.MINGW_XCOMPILE:
+      if not conf.CheckLib('libeay32'):
+         error('You must have openssl header libraries. This is often packaged as libssl-dev')
+
+   else:
    ## Make sure the openssl installation is ok
-   if not conf.CheckLib('ssl') or not conf.CheckLib('crypto'):
-      error('You must have openssl header libraries. This is often packaged as libssl-dev')
+      if not conf.CheckLib('ssl') or not conf.CheckLib('crypto'):
+         error('You must have openssl header libraries. This is often packaged as libssl-dev')
 
    for header in Split('openssl/aes.h openssl/bio.h openssl/evp.h openssl/hmac.h openssl/md5.h openssl/rand.h openssl/rsa.h openssl/sha.h openssl/pem.h'):
       if not conf.CheckHeader(header):
