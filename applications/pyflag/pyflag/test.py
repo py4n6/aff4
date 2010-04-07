@@ -1,12 +1,12 @@
-import Framework
+import pyaff4
 
 import time
 time.sleep(1)
 
-m=Framework.PyFlagMap("/hello")
+import Framework
 
-m.foobar = "hi"
 
-print m.urn.value, m.foobar
+m=Framework.Column("columns/ip/src_addr")
 
+m.set_metadata('hello',"world")
 m.close()

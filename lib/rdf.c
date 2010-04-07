@@ -296,7 +296,7 @@ VIRTUAL(XSDInteger, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
 
    // This is our official data type - or at least what raptor gives us
-   VATTR(super.dataType) = "http://www.w3.org/2001/XMLSchema#integer";
+   VATTR(super.dataType) = DATATYPE_XSD_INTEGER;
 
    VMETHOD(super.encode) = XSDInteger_encode;
    VMETHOD(super.decode) = XSDInteger_decode;
@@ -528,7 +528,7 @@ TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
 
 VIRTUAL(RDFURN, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-   VATTR(super.dataType) = "rdf:urn";
+   VATTR(super.dataType) = DATATYPE_RDF_URN;
 
    VMETHOD_BASE(RDFValue, Con) = RDFURN_Con;
    VMETHOD_BASE(RDFValue, encode) = RDFURN_encode;
@@ -621,7 +621,7 @@ static RDFValue XSDDatetime_Con(RDFValue self) {
 
 VIRTUAL(XSDDatetime, RDFValue) {
   VMETHOD_BASE(RDFValue, raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-  VMETHOD_BASE(RDFValue, dataType) = XSD_NAMESPACE "dateTime";
+  VMETHOD_BASE(RDFValue, dataType) = DATATYPE_XSD_DATETIME;
 
   VMETHOD_BASE(RDFValue, encode) = XSDDatetime_encode;
   VMETHOD_BASE(RDFValue, decode) = XSDDatetime_decode;

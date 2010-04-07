@@ -6,6 +6,7 @@ import pyaff4
 import pdb
 import Store,re
 import conf
+from PyFlagConstants import *
 config=conf.ConfObject()
 
 STORE = Store.Store()
@@ -21,7 +22,7 @@ class EventHandler:
     def finish(self):
         """ This method is called when we are finished processing """
 
-    def create_volume(self, volume):
+    def create_volume(self):
         """ Run tasks on a newly created AFF4 volume """
 
     def exit(self):
@@ -35,6 +36,52 @@ def post_event(event, *args, **kwargs):
 
 oracle = pyaff4.Resolver()
 
+## The following are extensions of basic AFF4 types for doing pyflag
+## specific things
+class Proxy:
+    proxied = None
+
+    def __getattr__(self, attr):
+        """ This is only useful for proper methods (not ones that
+        start with __ )
+        """
+        # Don't do a __nonzero__ check on proxied or things like '' will fail
+        if self.proxied is None:
+            raise AttributeError
+
+        return getattr(self.proxied, attr)
+
+    def get_metadata(self, attribute):
+        return oracle.resolve_alloc(self.urn, attribute)
+
+    def set_metadata(self, attribute, value, rdftype=None):
+        RESULT_VOLUME.set_metadata(self.urn, attribute, value, rdftype)
+
+class PyFlagMap(Proxy):
+    pyaff4_class = pyaff4.MapDriver
+
+    def __init__(self, path, base = '', navigatable = True, *args, **kwargs):
+        self.proxied = self.pyaff4_class(*args, **kwargs)
+
+        self.urn.set(RESULT_VOLUME.volume_urn.value)
+        self.urn.add(base)
+        self.urn.add(path)
+
+        if navigatable:
+            path = [ x for x in path.split("/") if x ]
+            RESULT_VOLUME.path_cache.add_path_relations(path)
+
+        self.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
+        self.proxied = self.proxied.finish()
+
+class PyFlagStream(PyFlagMap):
+    pyaff4_class = pyaff4.Image
+
+class PyFlagGraph(PyFlagMap):
+    pyaff4_class = pyaff4.Graph
+
+## These classes are used to manage and create volume features (such
+## as navigation).
 class PathManager(Store.FastStore):
     def __init__(self, navigation_graph_urn, *args, **kwargs):
         self.URL = pyaff4.RDFURN()
@@ -69,59 +116,18 @@ class PathManager(Store.FastStore):
         finally:
             graph.cache_return()
 
-class Proxy:
-    proxied = None
-
-    def __getattr__(self, attr):
-        """ This is only useful for proper methods (not ones that
-        start with __ )
-        """
-        # Don't do a __nonzero__ check on proxied or things like '' will fail
-        if self.proxied is None:
-            raise AttributeError
-
-        return getattr(self.proxied, attr)
-
-    def get_metadata(self, attribute):
-        return oracle.resolve_alloc(self.urn, attribute)
-
-    def set_metadata(self, attribute, value):
-        RESULT_VOLUME.set_metadata(self.urn, attribute, value)
-
-class PyFlagMap(Proxy):
-    pyaff4_class = pyaff4.MapDriver
-
-    def __init__(self, path, base = '', navigatable = True, *args, **kwargs):
-        self.proxied = self.pyaff4_class(*args, **kwargs)
-
-        self.urn.set(RESULT_VOLUME.volume_urn.value)
-        self.urn.add(base)
-        self.urn.add(path)
-
-        if navigatable:
-            path = [ x for x in path.split("/") if x ]
-            RESULT_VOLUME.path_cache.add_path_relations(path)
-
-        self.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
-        self.proxied = self.proxied.finish()
-
-class PyFlagStream(PyFlagMap):
-    pyaff4_class = pyaff4.Image
-
-class PyFlagGraph(PyFlagMap):
-    pyaff4_class = pyaff4.Graph
-
-class Column(PyFlagMap):
-    """ A table column is specifically designed to build a table """
-    pyaff4_class = pyaff4.AFFObject
-
-
-
 class ResultVolume:
     ## This is the output volume URN where new objects get appended
     def __init__(self):
         """ Given an output volume URN or a path we create this for writing.
         """
+        ## A Cache of RDFValue types that aviods us having to recreate
+        ## them all the time
+        self.rdftypes = {}
+
+        ## A cache of all schema objects keyed by name
+        self.schema = {}
+
         self.volume_urn = pyaff4.RDFURN()
         self.volume_urn.set(config.RESULTDIR)
         self.volume_urn.add("Output.aff4")
@@ -148,14 +154,22 @@ class ResultVolume:
         graph.cache_return()
 
         ## Make the metadata graph
-        self.metadata_graph = pyaff4.Graph(mode = 'w')
-        self.metadata_graph.urn.set(self.volume_urn.value)
-        self.metadata_graph.urn.add("pyflag/metadata")
-        self.metadata_graph.set(pyaff4.AFF4_STORED, self.volume_urn)
-        self.metadata_graph = self.metadata_graph.finish()
+        self.make_graph("metadata")
+        self.make_graph("schema")
+
+    def make_graph(self, name):
+        graph = pyaff4.Graph(mode = 'w')
+        graph.urn.set(self.volume_urn.value)
+        graph.urn.add("pyflag/%s" % name)
+        graph.set(pyaff4.AFF4_STORED, self.volume_urn)
+        graph = graph.finish()
+
+        setattr(self, "%s_graph" % name, graph)
 
     def Seal_output_volume(self):
         self.metadata_graph.close()
+        self.schema_graph.close()
+
         graph = oracle.open(self.navigation_graph_urn, 'w')
         graph.close()
 
@@ -170,31 +184,65 @@ class ResultVolume:
 
         path = [ x for x in obj.urn.parser.query.split("/") if x ]
 
-    def set_metadata(self, urn, attribute, value):
+    def set_metadata(self, urn, attribute, value, graph = 'metadata',
+                     rdftype = None):
+        if isinstance(value, pyaff4.RDFValue):
+            t = value
         ## For convenience allow a string to be directly set
-        if type(value)==str:
+        else:
+            if not rdftype:
+                if type(value)==str:
+                    rdftype = pyaff4.XSDString
+                elif type(value)==long:
+                    rdftype = pyaff4.XSDInteger
+                else:
+                    pdb.set_trace()
+                    raise RuntimeError("Not sure what RDF type to use for %r" % value)
+
+            ## Maintain a cache of RDF dataTypes:
             try:
-                self.str_value.set(value)
-            except AttributeError:
-                self.str_value = pyaff4.XSDString()
-                self.str_value.set(value)
+                t = self.rdftypes[rdftype]
+            except KeyError:
+                t = self.rdftypes[rdftype] = rdftype()
 
-            value = self.str_value
+            t.set(value)
 
-        elif type(value)==long:
-            try:
-                self.int_value.set(value)
-            except AttributeError:
-                self.int_value = pyaff4.XSDInteger()
-                self.int_value.set(value)
+        graph = getattr(self, "%s_graph" % graph)
+        graph.set_triple(urn, attribute, t)
 
-            value = self.int_value
+    def add_column(self, class_ref, name):
+        try:
+            return self.schema[name]
+        except KeyError:
+            ## Add the column to the current volume
+            column = oracle.create(class_ref.dataType)
+            column.urn.set(self.volume_urn.value)
+            column.urn.add(name)
+            column = column.finish()
+            self.schema[name] = column.urn
+            column.close()
 
-        self.metadata_graph.set_triple(urn, attribute, value)
+            return self.schema[name]
 
-RESULT_VOLUME = ResultVolume()
-set_metadata = RESULT_VOLUME.set_metadata
+    def add_table(self, name, columns):
+        try:
+            return self.schema[name]
+        except KeyError:
+            table = oracle.create(PYFLAG_TABLE)
+            table.urn.set(self.volume_urn.value)
+            table.urn.add(name)
+            table = table.finish()
+            table.columns.extend(columns)
+            self.schema[name] = table.urn
+            table.close()
 
+            return self.schema[name]
+
+## A global pointer to the currently opened volume where results will
+## be stored in.
+RESULT_VOLUME = None
+
+## Classes to manage HTTP requests and various support functions.
 class Query:
     """ A generic wrapper for holding CGI parameters.
 

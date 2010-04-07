@@ -1247,7 +1247,15 @@ static PyObject *%(name)s(py%(class_name)s *self, PyObject *name);
         if not self.name: return
         out.write("""
 static PyObject *py%(class_name)s_getattr(py%(class_name)s *self, PyObject *pyname) {
-  char *name = PyString_AsString(pyname);
+  char *name;
+  // Try to hand it off to the python native handler first
+  PyObject *result = PyObject_GenericGetAttr((PyObject*)self, pyname);
+
+  if(result) return result;
+
+  PyErr_Clear();
+  // No - nothing interesting was found by python
+  name = PyString_AsString(pyname);
 
   if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Wrapped object no longer valid");
   if(!name) return NULL;
@@ -1276,7 +1284,6 @@ if(!strcmp(name, "%(name)s")) {
 
         out.write("""
 
-  // Hand it off to the python native handler
   return PyObject_GenericGetAttr((PyObject *)self, pyname);
 """ % self.__dict__)
 
@@ -1316,7 +1323,7 @@ class ProxiedGetattr(GetattrMethod):
     }; """ % self.class_name)
 
         out.write("""
-     return result; 
+     return result;
    }\n""")
 
         out.write(""" /** Just try to get the attribute from our proxied object */  {
@@ -1372,7 +1379,7 @@ static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
       gstate = PyGILState_Ensure();
       """)
 
-        out.write("{\nPyObject *py_result;\n")
+        out.write("{\nPyObject *py_result=NULL;\n")
         out.write('PyObject *method_name = PyString_FromString("%s");\n' % self.name)
         out.write(self.return_type.returned_python_definition())
 
@@ -1424,7 +1431,7 @@ if(PyErr_Occurred()) {
         ## Now convert the python value back to a value
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
 
-        out.write("Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
+        out.write("if(py_result) Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
         out.write("PyGILState_Release(gstate);\n")
 
         ## Decref all our python objects:
@@ -1434,6 +1441,7 @@ if(PyErr_Occurred()) {
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:
             out.write("\nerror:\n")
+            out.write("if(py_result) Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
             ## Decref all our python objects:
             for arg in self.args:
                 out.write("if(py_%s) { Py_DECREF(py_%s);};\n" % (arg.name, arg.name))
@@ -1599,6 +1607,8 @@ this->proxied = py_result;
             self.call += ", %s" % arg.call_arg()
 
         self.call += ");\n"
+
+        self.call = "talloc_memdup(NULL, &__%(class_name)s, sizeof(__%(class_name)s));\n" % self.__dict__
 
         ## Now call the wrapped function
         out.write("""
@@ -1890,14 +1900,18 @@ class StructGenerator(ClassGenerator):
         return ''
 
 class ProxyClassGenerator(ClassGenerator):
-    def __init__(self, *args, **kwargs):
-        ClassGenerator.__init__(self, *args, **kwargs)
+    def __init__(self, class_name, base_class_name, module, *args, **kwargs):
+        ClassGenerator.__init__(self, class_name, base_class_name, module, *args, **kwargs)
         self.constructor = ProxyConstructor(self.class_name,
                                             self.base_class_name, '__init__',
                                             [('PyObject *', 'proxied')],
                                             'void', myclass = self)
 
         self.attributes = ProxiedGetattr(self.class_name, self.base_class_name)
+        self.module = module
+
+    def initialise(self):
+        return "INIT_CLASS(%(class_name)s);\n" % self.__dict__ + ClassGenerator.initialise(self)
 
     def struct(self, out):
         out.write("""
@@ -2069,7 +2083,7 @@ END_CLASS
                     raise RuntimeError("Need to create a proxy for %s but it has not been defined (yet). You must place the PROXIED_CLASS() instruction after the class definition" % base_class_name)
                 self.current_class = ProxyClassGenerator(class_name,
                                                          base_class_name, self.module)
-                self.current_class.constructor.args += proxied_class.constructor.args
+                #self.current_class.constructor.args += proxied_class.constructor.args
                 self.current_class.docstring = self.current_comment
 
                 ## Create proxies for all these methods

@@ -278,7 +278,7 @@ CLASS(Resolver, Object)
        void METHOD(Resolver, register_rdf_value_class, RDFValue class_ref);
 
        /** This is a handler for new types - types get registered here */
-       void METHOD(Resolver, register_type_dispatcher, char *type, AFFObject *class_ref);
+       void METHOD(Resolver, register_type_dispatcher, char *type, AFFObject class_ref);
 
 #if HAVE_OPENSSL
        void METHOD(Resolver, register_security_provider, struct SecurityProvider_t *class_ref);
@@ -349,6 +349,8 @@ PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
 // This is a global instance of the oracle. All AFFObjects must
 // communicate with the oracle rather than instantiate their own.
 extern Resolver oracle;
+
+void register_type_dispatcher(Resolver self, char *type, AFFObject *class_ref);
 
        /** This following are help related function for
            introspection

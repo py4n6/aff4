@@ -147,5 +147,5 @@ void graph_init() {
   INIT_CLASS(Graph);
   INIT_CLASS(GraphStatement);
 
-  CALL(oracle, register_type_dispatcher, AFF4_GRAPH, (AFFObject *)GETCLASS(Graph));
+  register_type_dispatcher(oracle, AFF4_GRAPH, (AFFObject *)GETCLASS(Graph));
 };

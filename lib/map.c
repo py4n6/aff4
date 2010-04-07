@@ -849,7 +849,7 @@ void mapdriver_init() {
   INIT_CLASS(MapValueBinary);
   INIT_CLASS(MapValueInline);
 
-  CALL(oracle, register_type_dispatcher, AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
+  register_type_dispatcher(oracle, AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueInline));

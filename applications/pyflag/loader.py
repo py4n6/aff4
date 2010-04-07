@@ -22,6 +22,7 @@ Registry.Init()
 
 ## Let the application know we are about to start
 Framework.post_event("startup")
+Framework.post_event("create_volume")
 
 oracle = pyaff4.Resolver()
 

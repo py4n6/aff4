@@ -10,6 +10,12 @@
 #define RDF_NAMESPACE "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define XSD_NAMESPACE "http://www.w3.org/2001/XMLSchema#"
 
+// Standard RDFValue dataTypes:
+#define DATATYPE_XSD_STRING    ""
+#define DATATYPE_XSD_INTEGER   XSD_NAMESPACE "integer"
+#define DATATYPE_RDF_URN       RDF_NAMESPACE "urn"
+#define DATATYPE_XSD_DATETIME  XSD_NAMESPACE "dateTime"
+
 // RDFValues we use
 #define AFF4_MAP_TEXT PREDICATE_NAMESPACE "map_text"
 #define AFF4_MAP_BINARY PREDICATE_NAMESPACE "map_binary"

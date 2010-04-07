@@ -36,8 +36,8 @@ static Cache type_dispatcher = NULL;
 */
 Resolver oracle = NULL;
 
-static void register_type_dispatcher(Resolver self, char *type, \
-                                     AFFObject *classref) {
+void register_type_dispatcher(Resolver self, char *type,        \
+                              AFFObject *classref) {
   if(!(*classref)->dataType) {
     printf("%s has no dataType\n", NAMEOF(*classref));
   };
@@ -57,6 +57,25 @@ static void register_type_dispatcher(Resolver self, char *type, \
     talloc_unlink(NULL, tmp);
   };
 };
+
+static void Resolver_register_type_dispatcher(Resolver self, char *type, \
+                                              AFFObject classref) {
+  if(!(classref)->dataType) {
+    RaiseError(ERuntimeError,"%s has no dataType\n", NAMEOF(classref));
+    goto error;
+  };
+
+  if(!CALL(type_dispatcher, present, ZSTRING(type))) {
+    // Make a copy of the class for storage in the registry
+    talloc_set_name(classref, "handler %s for type '%s'", NAMEOF(classref), type);
+
+    CALL(type_dispatcher, put, ZSTRING(type), classref);
+  };
+
+ error:
+  return;
+};
+
 
 void AFF4_Init(void) {
   INIT_CLASS(Resolver);
@@ -1547,7 +1566,7 @@ static int Resolver_get_urn_by_id(Resolver self, int id, RDFURN uri) {
   return 0;
 };
 
-void Resolver_register_rdf_value_class(Resolver self, RDFValue class_ref) {
+static void Resolver_register_rdf_value_class(Resolver self, RDFValue class_ref) {
   register_rdf_value_class(class_ref);
   talloc_increase_ref_count(class_ref);
 
@@ -1693,7 +1712,7 @@ VIRTUAL(Resolver, Object) {
      VMETHOD(get_urn_by_id) = Resolver_get_urn_by_id;
      VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
-     VMETHOD(register_type_dispatcher) = register_type_dispatcher;
+     VMETHOD(register_type_dispatcher) = Resolver_register_type_dispatcher;
 
 #if HAVE_OPENSSL
      VMETHOD(register_security_provider) = Resolver_register_security_provider;

@@ -264,8 +264,8 @@ void EWF_init() {
   INIT_CLASS(EWFVolume);
   INIT_CLASS(EWFStream);
 
-  CALL(oracle, register_type_dispatcher, AFF4_EWF_VOLUME, (AFFObject *)GETCLASS(EWFVolume));
-  CALL(oracle, register_type_dispatcher, AFF4_EWF_STREAM, (AFFObject *)GETCLASS(EWFStream));
+  register_type_dispatcher(oracle, AFF4_EWF_VOLUME, (AFFObject *)GETCLASS(EWFVolume));
+  register_type_dispatcher(oracle, AFF4_EWF_STREAM, (AFFObject *)GETCLASS(EWFStream));
 
   pthread_mutex_init(&LIBEWF_LOCK, NULL);
 };

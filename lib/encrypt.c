@@ -935,7 +935,7 @@ void encrypt_init() {
   INIT_CLASS(Encrypted);
   INIT_CLASS(Key);
 
-  CALL(oracle, register_type_dispatcher, AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
+  register_type_dispatcher(oracle, AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
   register_rdf_value_class((RDFValue)GETCLASS(AES256X509));
 

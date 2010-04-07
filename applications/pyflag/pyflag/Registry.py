@@ -514,6 +514,7 @@ LOCK = 0
 REPORTS = None
 SCANNERS = None
 THEMES = None
+EVENT_HANDLERS = None
 
 ## This is required for late initialisation to avoid dependency nightmare.
 def Init():
