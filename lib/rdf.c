@@ -1144,7 +1144,7 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
                                              RDFURN attribute) {
   raptor_statement triple;
   void *raptor_urn;
-  RDFValue value;
+  RDFValue value = NULL;
 
   raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
 
@@ -1157,19 +1157,19 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
     if(!triple.object)
       goto error;
   } else {
-    value = CALL(oracle, alloc_from_iter, iter);
+    value = CALL(oracle, alloc_from_iter, raptor_urn, iter);
 
     if(!value) goto error;
+  };
 
-    // New reference here:
-    triple.object = CALL(value, serialise, urn);
-        if(!triple.object) {
-          AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
-                   urn,
-                   "Unable to serialise attribute %s\n",
-                   attribute->value);
-          goto error;
-        };
+  // New reference here:
+  triple.object = CALL(value, serialise, urn);
+  if(!triple.object) {
+    AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
+             urn,
+             "Unable to serialise attribute %s\n",
+             attribute->value);
+    goto error;
   };
 
   triple.subject = raptor_urn;
@@ -1199,11 +1199,11 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
   else
     talloc_unlink(NULL, (void *)triple.object);
 
-  raptor_free_uri((raptor_uri*)raptor_urn);
+  talloc_free(raptor_urn);
   return 1;
 
  error:
-  raptor_free_uri((raptor_uri*)raptor_urn);
+  talloc_free(raptor_urn);
   return 0;
 };
 

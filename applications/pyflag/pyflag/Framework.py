@@ -5,8 +5,9 @@ import Registry
 import pyaff4
 import pdb
 import Store,re
-import conf
 from PyFlagConstants import *
+
+import conf
 config=conf.ConfObject()
 
 STORE = Store.Store()
@@ -29,6 +30,7 @@ class EventHandler:
         """ This event happens before we exit """
 
 def post_event(event, *args, **kwargs):
+    """ A Utility function to post the event to all listeners. """
     for e in Registry.EVENT_HANDLERS.classes:
         e = e()
         method = getattr(e, event)
@@ -39,6 +41,7 @@ oracle = pyaff4.Resolver()
 ## The following are extensions of basic AFF4 types for doing pyflag
 ## specific things
 class Proxy:
+    """ A generic proxy class for proxying some other object """
     proxied = None
 
     def __getattr__(self, attr):
@@ -47,7 +50,7 @@ class Proxy:
         """
         # Don't do a __nonzero__ check on proxied or things like '' will fail
         if self.proxied is None:
-            raise AttributeError
+            raise AttributeError("No proxied object set")
 
         return getattr(self.proxied, attr)
 
@@ -73,6 +76,10 @@ class PyFlagMap(Proxy):
 
         self.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
         self.proxied = self.proxied.finish()
+
+    def close(self):
+        RESULT_VOLUME.update_tables(self.urn)
+        self.proxied.close()
 
 class PyFlagStream(PyFlagMap):
     pyaff4_class = pyaff4.Image
@@ -117,7 +124,10 @@ class PathManager(Store.FastStore):
             graph.cache_return()
 
 class ResultVolume:
-    ## This is the output volume URN where new objects get appended
+    """ This class manages the output volume URN where new objects get appended.
+
+    Most of the PyFlag functionality relies on this object.
+    """
     def __init__(self):
         """ Given an output volume URN or a path we create this for writing.
         """
@@ -127,6 +137,9 @@ class ResultVolume:
 
         ## A cache of all schema objects keyed by name
         self.schema = {}
+
+        ## A list of all active tables.
+        self.tables = []
 
         self.volume_urn = pyaff4.RDFURN()
         self.volume_urn.set(config.RESULTDIR)
@@ -234,9 +247,25 @@ class ResultVolume:
             table = table.finish()
             table.columns.extend(columns)
             self.schema[name] = table.urn
+            self.tables.append(table.urn)
+
             table.close()
 
             return self.schema[name]
+
+    def update_tables(self, urn):
+        """ This function is called whenever an AFF4 stream is closed.
+
+        We basically iterate over all the tables in the volume and
+        update them with attributes for the new object. This allows
+        the SQL tables to be synced up with the RDF data.
+        """
+        for table_urn in self.tables:
+            table = oracle.open(table_urn, 'r')
+            try:
+                table.add_object(urn)
+            finally: table.cache_return()
+        #print "%s is closing"% urn.value
 
 ## A global pointer to the currently opened volume where results will
 ## be stored in.

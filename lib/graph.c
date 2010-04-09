@@ -62,6 +62,8 @@ static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
 void Graph_set_triple(Graph self, RDFURN subject, char *attribute, RDFValue value) {
   struct statement_t statement;
 
+  memset(&statement, 0, sizeof(statement));
+
   // This should fill in the iterator for later.
   CALL(oracle, add_value, subject, attribute, value, &statement.iter);
 

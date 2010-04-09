@@ -178,7 +178,7 @@ CLASS(Resolver, Object)
 
           Note - this function advances the iterator.
        */
-       RDFValue METHOD(Resolver, alloc_from_iter, RESOLVER_ITER *iter);
+       RDFValue METHOD(Resolver, alloc_from_iter, void *ctx, RESOLVER_ITER *iter);
 
        /* This is a shortcut method for retrieving the encoded version
           from the iterator.

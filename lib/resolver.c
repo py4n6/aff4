@@ -69,7 +69,7 @@ static void Resolver_register_type_dispatcher(Resolver self, char *type, \
     // Make a copy of the class for storage in the registry
     talloc_set_name(classref, "handler %s for type '%s'", NAMEOF(classref), type);
 
-    CALL(type_dispatcher, put, ZSTRING(type), classref);
+    CALL(type_dispatcher, put, ZSTRING(type), (Object)classref);
   };
 
  error:
@@ -381,6 +381,9 @@ static Object Cache_next(Cache self, Object *opaque_iter) {
 
   // Now we return a reference to the original object
   result = iter->data;
+
+  // We refresh the current object in the cache:
+  list_move_tail(&iter->cache_list, &self->cache_list);
 
   return result;
 };
@@ -781,15 +784,17 @@ static RDFValue Resolver_resolve_alloc(Resolver self, void *ctx, RDFURN urn, cha
 
   iter = CALL(self, get_iter, ctx, urn, attribute);
 
+  // Only try to allocate the first object from the iterator. FIXME
+  // this should iterate through all the objects until one works.
   if(iter) {
-    RDFValue result = CALL(self, alloc_from_iter, iter);
+    RDFValue result = CALL(self, alloc_from_iter, ctx, iter);
+    talloc_free(iter);
 
     if(result) {
       UNLOCK_RESOLVER;
+
       return result;
     };
-
-    talloc_free(iter);
   };
 
   UNLOCK_RESOLVER;
@@ -1083,7 +1088,7 @@ static char *Resolver_encoded_data_from_iter(Resolver self, RDFValue *rdf_value_
 
 
 /* Given an iterator, allocate an RDFValue from it */
-static RDFValue Resolver_alloc_from_iter(Resolver self,
+static RDFValue Resolver_alloc_from_iter(Resolver self, void *ctx,
 					 RESOLVER_ITER *iter) {
   RDFValue rdf_value_class;
   RDFValue result = NULL;
@@ -1106,7 +1111,7 @@ static RDFValue Resolver_alloc_from_iter(Resolver self,
                                        dataType.dsize);
       if(rdf_value_class) {
         result = (RDFValue)CONSTRUCT_FROM_REFERENCE(rdf_value_class,
-                                                    Con, iter);
+                                                    Con, ctx);
       };
 
       if(result) {
@@ -1320,6 +1325,28 @@ static inline void trim_cache(Cache cache) {
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   LOCK_RESOLVER;
+
+  // Find the object in the cache which is owned by our thread (Note -
+  // only one thread may own the same object at the same time). Due to
+  // class proxying it may not actually be the same as obj but will
+  // have the same URN.
+  if(obj->mode == 'r') {
+    TDB_DATA tdb_urn = tdb_data_from_string(obj->urn->value);
+    Object iter = CALL(self->read_cache, iter, TDB_DATA_STRING(tdb_urn));
+    long unsigned int thread_id = pthread_self();
+
+    while(iter) {
+      AFFObject new_obj = (AFFObject)CALL(self->read_cache, next, &iter);
+
+      // Found it - reset its thread_id so others can use it now.
+      if(new_obj && new_obj->thread_id == thread_id) {
+        obj = new_obj;
+        talloc_reference(NULL, obj);
+
+        break;
+      };
+    };
+  };
 
   // We are done with the object now
   obj->thread_id = 0;

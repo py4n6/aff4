@@ -270,7 +270,7 @@ class Type:
         if default:
             return "%s %s=%s;\n" % (self.type, self.name, default)
         else:
-            return "%s %s;\n" % (self.type, self.name)
+            return "%s __attribute__((unused)) %s;\n" % (self.type, self.name)
 
     def byref(self):
         return "&%s" % self.name
@@ -1476,7 +1476,7 @@ class ProxyConstructor(ConstructorMethod):
 %(class_name)s_dealloc(py%(class_name)s *self) {
     if(self->base) {
         // Release the proxied object
-        Py_DECREF(self->base->proxied);
+        //Py_DECREF(self->base->proxied);
         talloc_free(self->ctx);
         self->base = NULL;
     };
@@ -1529,7 +1529,9 @@ static int %(class_name)s_destructor(void *this) {
 
         out.write("\n//Obtain python objects for all the args:\n")
         for arg in self.base_cons_method.args:
-            out.write(arg.to_python_object(result = "py_%s" % arg.name, BORROWED=True))
+            out.write(arg.to_python_object(result = "py_%s" % arg.name,
+                                           sense = 'proxied',
+                                           BORROWED=True))
 
         out.write('if(!((%s)self)->proxied) {\n RaiseError(ERuntimeError, "No proxied object in %s"); goto error;\n};\n' % (self.myclass.class_name, self.myclass.class_name))
 
@@ -1578,8 +1580,26 @@ if(PyErr_Occurred()) {
    goto error;
 };
 
+// Take over the proxied object now
 this->proxied = py_result;
 """ % dict(name=self.myclass.class_name, call = call));
+
+        ## Now we try to populate the C struct slots with proxies of
+        ## the python objects
+        for class_name, attr in self.myclass.module.classes[\
+            self.base_class_name].attributes.attributes:
+            out.write("""
+// Converting %(name)s from proxy:
+{
+   PyObject *py_result = PyObject_GetAttrString(this->proxied, "%(name)s");
+   if(!py_result) goto error;
+""" % dict(name = attr.name))
+            out.write("{ %s " % attr.definition())
+            out.write(attr.from_python_object("py_result",
+                                              "((%s)self)->%s" % (class_name, attr.name),
+                                              self))
+            out.write("}\nPy_DECREF(py_result);\n};\n")
+
         out.write("PyGILState_Release(gstate);\n")
         out.write("\n\nreturn self;\n")
         if self.error_set:
@@ -1622,7 +1642,7 @@ this->proxied = py_result;
  proxied C class can be freed independantly and only when both are
  freed the proxied object is freed.  */
 
- Py_INCREF(proxied);
+// Py_INCREF(proxied);
  Py_INCREF(proxied);
  talloc_set_destructor((void*)self->base, %(class_name)s_destructor);
 """ % self.__dict__)

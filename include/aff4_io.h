@@ -67,7 +67,7 @@ CLASS(AFFObject, Object)
      function can simply choose to free the object and not return it
      to the cache.
      */
-     DESTRUCTOR void METHOD(AFFObject, cache_return);
+     void METHOD(AFFObject, cache_return);
 
      /* When the object is closed it will write itself to its volume.
         This frees the object - do no use it after calling close.
