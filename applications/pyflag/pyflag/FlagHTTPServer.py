@@ -329,7 +329,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
         #Is this a request for a saved UI?
         elif query.has_key('draw_stored'):
-            result = Framework.STORE.get(query['draw_stored'])
+            result = HTMLUI.STORE.get(query['draw_stored'])
 
             ## This expires stored pictures in case pyflag is
             ## restarted
@@ -342,7 +342,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
             try:
                 ## Get the callback from the store
                 try:
-                    cb=Framework.STORE.get(cb_key)
+                    cb=HTMLUI.STORE.get(cb_key)
                 except KeyError:
                     raise Exception("Session expired. Please try to select this report from the menu\n")
 

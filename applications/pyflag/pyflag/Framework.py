@@ -10,8 +10,6 @@ from PyFlagConstants import *
 import conf
 config=conf.ConfObject()
 
-STORE = Store.Store()
-
 class EventHandler:
     """ An event handler object allows plugins to register their
     interst in being notified about sepecific events in the
@@ -95,13 +93,14 @@ def _init_new_object(proxied, path, base = '', navigatable = True, *args, **kwar
     """ A convenience function which automatically adds the new AFF4
     object to the pyflag volumes.
     """
+    volume_urn_components = [ x for x in RESULT_VOLUME.volume_urn.value.split("/") if x]
     proxied.urn.set(RESULT_VOLUME.volume_urn.value)
     proxied.urn.add(base)
     proxied.urn.add(path)
 
     if navigatable:
-        path = [ x for x in path.split("/") if x ]
-        RESULT_VOLUME.path_cache.add_path_relations(path)
+        path = [ x for x in proxied.urn.value.split("/") if x ]
+        RESULT_VOLUME.path_cache.add_path_relations(path[len(volume_urn_components):])
 
     proxied.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
     return proxied.finish()
@@ -125,7 +124,7 @@ class PathManager(Store.FastStore):
         self.URL = pyaff4.RDFURN()
         self.STR = pyaff4.XSDString()
         self.navigation_graph_urn = navigation_graph_urn
-        Store.FastStore.__init__(self, *args, **kwargs)
+        Store.FastStore.__init__(self, limit=500, *args, **kwargs)
 
     def add_path_relations(self, path):
         """ Adds navigation relations for path which is a list of components """

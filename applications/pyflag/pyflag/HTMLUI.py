@@ -40,10 +40,14 @@ import Registry
 import pyflaglog
 import Theme
 from Framework import expand
+import Store
 
 config.add_option("PAGESIZE", default=50, type='int',
                   help="number of rows to display per page in the Table widget")
 
+## This store is used to keep a cache of callable objects for various
+## UI elements.
+STORE = Store.FastStore()
 
 def quote_quotes(string):
     """ Replaces \' with \" for insertion into html """
@@ -251,12 +255,12 @@ class HTMLUI:
         example if we show a pop up window, we dont actually render
         the window until the user pops it up.
         """
-        cb_key = Framework.STORE.put(callback, prefix="CB")
+        cb_key = STORE.put(callback, prefix="CB")
         return cb_key
     
     def store(self,ui):
         """ Function stores the current UI in a dict in the class method. This is required when we need to store a UI and later get the browser to retrieve it. """
-        key = Framework.STORE.put(ui, prefix="UI")
+        key = STORE.put(ui, prefix="UI")
         return key
     
     def start_table(self,**options):
