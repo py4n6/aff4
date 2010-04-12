@@ -57,8 +57,9 @@ enum _error_type *aff4_get_current_error(char **error_str);
 
 // These macros are used when we need to do something which might
 // change the error state on the error path of a function.
-#define PUSH_ERROR_STATE { enum _error_type *tmp_p = aff4_get_current_error(NULL); enum _error_type tmp = *tmp_p;
-#define POP_ERROR_STATE *tmp_p = tmp;};
+#define PUSH_ERROR_STATE { enum _error_type *tmp_error_p = aff4_get_current_error(NULL); enum _error_type tmp_error = *tmp_error_p; enum _error_type exception __attribute__((unused));
+
+#define POP_ERROR_STATE *tmp_error_p = tmp_error;};
 
 
 void error_init();

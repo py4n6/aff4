@@ -39,53 +39,84 @@ def post_event(event, *args, **kwargs):
 oracle = pyaff4.Resolver()
 
 ## The following are extensions of basic AFF4 types for doing pyflag
-## specific things
-class Proxy:
-    """ A generic proxy class for proxying some other object """
-    proxied = None
+## specific things. We install these new versions of the basic AFF4
+## classes in order to have pyflag specific hooks in them.
+class _PyFlagMap(pyaff4.MapDriver):
+    dataType = pyaff4.AFF4_MAP
 
-    def __getattr__(self, attr):
-        """ This is only useful for proper methods (not ones that
-        start with __ )
-        """
-        # Don't do a __nonzero__ check on proxied or things like '' will fail
-        if self.proxied is None:
-            raise AttributeError("No proxied object set")
+    def close(self):
+        RESULT_VOLUME.update_tables(self.urn)
+        pyaff4.MapDriver.close(self)
 
-        return getattr(self.proxied, attr)
+    def finish(self):
+        self.__init__(self.urn, self.mode)
+        ## NOTE: We must wrap the returned object with a
+        ## ProxiedAFFObject so we continue to receive calls to it.
+        return pyaff4.ProxiedAFFObject(self)
 
-    def get_metadata(self, attribute):
-        return oracle.resolve_alloc(self.urn, attribute)
+## From now on, a _PyFlagMap will be used to access AFF4_MAP types.
+oracle.register_type_dispatcher(
+    pyaff4.AFF4_MAP, pyaff4.ProxiedAFFObject(_PyFlagMap))
 
-    def set_metadata(self, attribute, value, rdftype=None):
-        RESULT_VOLUME.set_metadata(self.urn, attribute, value, rdftype)
+class _PyFlagStream(pyaff4.Image):
+    dataType = pyaff4.AFF4_IMAGE
 
-class PyFlagMap(Proxy):
-    pyaff4_class = pyaff4.MapDriver
+    def close(self):
+        RESULT_VOLUME.update_tables(self.urn)
+        pyaff4.Image.close(self)
 
-    def __init__(self, path, base = '', navigatable = True, *args, **kwargs):
-        self.proxied = self.pyaff4_class(*args, **kwargs)
+    def finish(self):
+        self.__init__(self.urn, self.mode)
+        ## NOTE: We must wrap the returned object with a
+        ## ProxiedAFFObject so we continue to receive calls to it.
+        return pyaff4.ProxiedAFFObject(self)
 
-        self.urn.set(RESULT_VOLUME.volume_urn.value)
-        self.urn.add(base)
-        self.urn.add(path)
+oracle.register_type_dispatcher(
+    pyaff4.AFF4_IMAGE, pyaff4.ProxiedAFFObject(_PyFlagStream))
 
-        if navigatable:
-            path = [ x for x in path.split("/") if x ]
-            RESULT_VOLUME.path_cache.add_path_relations(path)
-
-        self.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
-        self.proxied = self.proxied.finish()
+class _PyFlagGraph(pyaff4.Graph):
+    dataType = pyaff4.AFF4_GRAPH
 
     def close(self):
         RESULT_VOLUME.update_tables(self.urn)
         self.proxied.close()
 
-class PyFlagStream(PyFlagMap):
-    pyaff4_class = pyaff4.Image
+    def finish(self):
+        self.__init__(self.urn, self.mode)
+        ## NOTE: We must wrap the returned object with a
+        ## ProxiedAFFObject so we continue to receive calls to it.
+        return pyaff4.ProxiedAFFObject(self)
 
-class PyFlagGraph(PyFlagMap):
-    pyaff4_class = pyaff4.Graph
+oracle.register_type_dispatcher(
+    pyaff4.AFF4_GRAPH, pyaff4.ProxiedAFFObject(_PyFlagGraph))
+
+
+def _init_new_object(proxied, path, base = '', navigatable = True, *args, **kwargs):
+    """ A convenience function which automatically adds the new AFF4
+    object to the pyflag volumes.
+    """
+    proxied.urn.set(RESULT_VOLUME.volume_urn.value)
+    proxied.urn.add(base)
+    proxied.urn.add(path)
+
+    if navigatable:
+        path = [ x for x in path.split("/") if x ]
+        RESULT_VOLUME.path_cache.add_path_relations(path)
+
+    proxied.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
+    return proxied.finish()
+
+def PyFlagMap(path, base = '', navigatable = True, *args, **kwargs):
+    proxied = _PyFlagMap(*args, **kwargs)
+    return _init_new_object(proxied, path, base, navigatable, *args, **kwargs)
+
+def PyFlagGraph(path, base = '', navigatable = True, *args, **kwargs):
+    proxied = _PyFlagGraph(*args, **kwargs)
+    return _init_new_object(proxied, path, base, navigatable, *args, **kwargs)
+
+def PyFlagStream(path, base = '', navigatable = True, *args, **kwargs):
+    proxied = _PyFlagStream(*args, **kwargs)
+    return _init_new_object(proxied, path, base, navigatable, *args, **kwargs)
 
 ## These classes are used to manage and create volume features (such
 ## as navigation).

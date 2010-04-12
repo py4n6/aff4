@@ -28,7 +28,7 @@
 # ******************************************************
 
 """ Main HTTP server module """
-import sys
+import sys, pdb
 sys.path.append("..")
 sys.path.append("pyflag")
 

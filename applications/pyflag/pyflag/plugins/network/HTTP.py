@@ -28,7 +28,7 @@ class RelaxedGzip(gzip.GzipFile):
 
 class HTTPScanner(Scanner.BaseScanner):
     """ Scan for HTTP connections """
-    request_re = re.compile("(GET|POST|PUT|OPTIONS|PROPFIND) +([^ ]+) +HTTP/1\..",
+    request_re = re.compile("^(GET|POST|PUT|OPTIONS|PROPFIND) +([^ ]+) +HTTP/1\..",
                                      re.IGNORECASE)
     response_re = re.compile("HTTP/1\.. (\\d+) +", re.IGNORECASE)
 
@@ -108,10 +108,16 @@ class HTTPScanner(Scanner.BaseScanner):
         We assume that the fd is already positioned at the very start
         of the object. After this function we will be positioned at
         the end of this object.
+
+        We return a new URN which can be opened for reading the body.
         """
         http_object_urn = self.handle_encoding(headers, stream_fd)
         ## Handle gzip encoded data
         if headers.get('content-encoding') == 'gzip':
+            ## Close the old file - we need to make a new one now instead
+            http_object = oracle.open(http_object_urn, 'w')
+            http_object.close()
+
             fd = oracle.open(http_object_urn, 'r')
             try:
                 gzip_fd = RelaxedGzip(fileobj = fd, mode='rb')
@@ -124,8 +130,10 @@ class HTTPScanner(Scanner.BaseScanner):
                         http_object.write(data)
 
                     return http_object.urn
+                ## Close the new object and return its URN. It is now
+                ## ready for reading:
                 finally:
-                    http_object.close()
+                    http_object.cache_return()
 
             finally:
                 fd.close()
@@ -133,6 +141,7 @@ class HTTPScanner(Scanner.BaseScanner):
         return http_object_urn
 
     def handle_encoding(self, headers, fd):
+#        pdb.set_trace()
         http_object = Framework.PyFlagMap("HTTP/%s" % fd.readptr,
                                           base = fd.urn.value)
         try:
@@ -169,13 +178,13 @@ class HTTPScanner(Scanner.BaseScanner):
             ## body (all data until connection is closed)
             try:
                 if "close" in headers['connection'].lower():
-                    http_object.write_from(fd.urn, fd.tell(), fd.size - fd.tell())
+                    http_object.write_from(fd.urn, fd.tell(), fd.size.value - fd.tell())
             except KeyError:
                 pass
 
             return http_object.urn
         finally:
-            http_object.close()
+            http_object.cache_return()
 
     def process_cookies(self, request, target):
         """ Merge in cookies if possible """
@@ -291,6 +300,23 @@ class HTTPScanner(Scanner.BaseScanner):
                 parse = True
                 request_body_urn = self.skip_body(request, self.forward_fd)
 
+                try: Framework.set_metadata(request_body_urn, HTTP_URL, request['url'])
+                except KeyError: pass
+
+                try: Framework.set_metadata(request_body_urn, HTTP_METHOD, request['method'])
+                except KeyError: pass
+
+                try: Framework.set_metadata(request_body_urn, HTTP_CODE, response['HTTP_code'])
+                except KeyError: pass
+
+                try: Framework.set_metadata(request_body_urn, HOST_TLD,
+                                            Framework.make_tld(request['host']))
+                except KeyError: pass
+
+                ## Finalise the object
+                request_body = oracle.open(request_body_urn, 'w')
+                request_body.close()
+
             packet = PCAP.dissect_packet(self.reverse_fd, self.reverse_pkt_fd)
             if self.read_response(response, self.reverse_fd):
                 try:
@@ -301,19 +327,8 @@ class HTTPScanner(Scanner.BaseScanner):
                 parse = True
                 response_body_urn = self.skip_body(response, self.reverse_fd)
 
-
-            try: Framework.set_metadata(request_body_urn, HTTP_URL, request['url'])
-            except KeyError: pass
-
-            try: Framework.set_metadata(request_body_urn, HTTP_METHOD, request['method'])
-            except KeyError: pass
-
-            try: Framework.set_metadata(request_body_urn, HTTP_CODE, response['HTTP_code'])
-            except KeyError: pass
-
-            try: Framework.set_metadata(request_body_urn, HOST_TLD,
-                                        Framework.make_tld(request['host']))
-            except KeyError: pass
+                response_body = oracle.open(response_body_urn, 'w')
+                response_body.close()
 
             return
             ## We hang all the parameters on the response object

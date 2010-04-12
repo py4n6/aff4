@@ -35,10 +35,10 @@ class Column(pyaff4.AFFObject):
     sql_type = ''
     attribute_name = ''
     rdfvalue_class = pyaff4.XSDString
+    nullok = True
 
     def __init__(self, urn=None, mode='w', *args):
         pyaff4.AFFObject.__init__(self, urn, mode)
-        #self.proxied = pyaff4.AFFObject(urn, mode)
         if urn:
             if mode == 'w':
                 print "Creating new column %s" % urn.value
@@ -86,6 +86,7 @@ class URLColumn(Column):
     sql_type = 'VARCHAR(1024)'
     attribute_name = HTTP_URL
     rdfvalue_class = pyaff4.RDFURN
+    nullok = False
 
 class DateColumn(Column):
     dataType = TIMESTAMP_CREATED
@@ -98,6 +99,7 @@ class DateColumn(Column):
 class Table(pyaff4.AFFObject):
     """ A Table is a collection of columns """
     dataType = PYFLAG_TABLE
+    sql_name = 'http'
 
     def make_table_filename(self, urn):
         ## Make a filename based on the urn to use for storing the
@@ -120,19 +122,23 @@ class Table(pyaff4.AFFObject):
                                        graph = 'schema')
             if mode == 'r':
                 print "Loading table %s" % urn.value
+                column_urn = pyaff4.RDFURN()
 
                 ## Read all the columns
                 iter = oracle.get_iter(urn, PYFLAG_COLUMN)
-                while 1:
-                    res = oracle.alloc_from_iter(iter)
-                    if not res: break
-
-                    self.columns.append(res)
+                while oracle.iter_next(iter, column_urn):
+                    ## We are holding the column open so we dont need
+                    ## to recreate it all the time. This is ok because
+                    ## we can have mulitiple objects opened for
+                    ## reading simultaneously.
+                    column = oracle.open(column_urn, 'r')
+                    self.columns.append(column)
 
                 ## Get the target file
                 name = oracle.resolve_alloc(urn, pyaff4.AFF4_TARGET).value
 
             self.filename = os.path.join(config.RESULTDIR, "%s.sqlite" % name)
+            self.con = sqlite3.connect(self.filename)
 
     def close(self):
         if self.mode == 'w':
@@ -150,14 +156,11 @@ class Table(pyaff4.AFFObject):
                 self.create_file()
 
     def create_file(self):
-        self.con = sqlite3.connect(self.filename)
         print "Creating new database %s" % self.filename
         columns = []
 
         cursor = self.con.cursor()
         for column in self.columns:
-            pdb.set_trace()
-
             c = oracle.open(column, 'r')
             try:
                 columns.append(c.sql_create())
@@ -165,8 +168,8 @@ class Table(pyaff4.AFFObject):
 
             finally:  c.cache_return()
 
-        cmd = 'CREATE  TABLE  IF NOT EXISTS "http" ("id" INTEGER NOT NULL , %s)' % ",".join(columns)
-        print cmd
+        cmd = 'CREATE  TABLE  IF NOT EXISTS "%s" ("id" INTEGER NOT NULL , %s)' % (
+            self.sql_name, ",".join(columns))
         cursor.execute(cmd)
 
 
@@ -178,17 +181,33 @@ class Table(pyaff4.AFFObject):
 
     def add_object(self, urn):
         row = []
+        columns = []
         ## Iterate over all our columns and ask them to produce SQL to
         ## insert the data into the db.
-        for column in self.columns:
-            c = Framework.oracle.open(column, 'r')
+        for c in self.columns:
             try:
                 row.append(c.add_value(urn))
-            except KeyError: pass
+                columns.append(c.sql_name)
+            except KeyError:
+                ## If this column is not allowed to be NULL - we cant
+                ## insert the entire row into the table
+                if not c.nullok:
+                    return
+
             finally: c.cache_return()
 
         if row:
-            print row
+            ## FIXME - might be faster to delay commit untill all the
+            ## data has been inserted.
+            row.append(oracle.get_id_by_urn(urn))
+            columns.append("id")
+
+            sql = "insert into %s (%s) values(%s)" % (
+                self.sql_name,
+                ",".join(columns),
+                ",".join(["?"] * len(row)))
+            self.con.execute(sql, row)
+            self.con.commit()
 
 class CoreEvents(Framework.EventHandler):
     """ Core events to set up PyFlag """

@@ -22,7 +22,6 @@ static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char m
     this->size = new_XSDInteger(this);
 
   return SUPER(AFFObject, AFFObject, Con, urn, mode);
-  //  return ((typeof(self))((Object)self)->__super__)->Con(self, urn, mode);
 };
 
 
@@ -228,12 +227,11 @@ static uint64_t FileLikeObject_tell(FileLikeObject self) {
 };
 
 static int FileLikeObject_close(AFFObject self) {
-  // Ask the resolver to expire ourselves - we no longer exist after
-  // this and can not access our memory any more - this must be the
-  // last statement:
-  CALL(oracle, expire, URNOF(self));
+  // Make sure we are no longer dirty - this is used to keep track of
+  // outstanding objects which are not closed when a volume is closed.
+  CALL(oracle, del, URNOF(self), AFF4_VOLATILE_DIRTY);
 
-  return 1;
+  return SUPER(AFFObject, AFFObject, close);
 };
 
 static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {

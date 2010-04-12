@@ -237,7 +237,6 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
   self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
   if(self && uri) {
-    URNOF(self) = CALL(uri, copy, self);
     this->chunk_size = new_XSDInteger(self);
     this->compression = new_XSDInteger(self);
     this->chunks_in_segment = new_XSDInteger(self);
@@ -265,8 +264,6 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
 
     // These are the essential properties:
     //CALL(oracle, set, URNOF(self), AFF4_TIMESTAMP, &tmp, RESOLVER_DATA_UINT32);
-
-
     CALL(oracle, resolve_value, URNOF(self), AFF4_CHUNK_SIZE,
 	 (RDFValue)this->chunk_size);
 
@@ -285,6 +282,8 @@ static AFFObject Image_Con(AFFObject self, RDFURN uri, char mode) {
     // Build writer workers
     if(mode=='w') {
       this->current = CONSTRUCT(ImageWorker, ImageWorker, Con, this, this);
+      CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
+           rdfvalue_from_urn(this, AFF4_IMAGE),0);
     };
 
     // Initialise the chunk cache:
@@ -401,9 +400,6 @@ static int Image_close(AFFObject aself) {
 
   CALL(oracle, set_value, URNOF(this), AFF4_CHUNKS_IN_SEGMENT,
        (RDFValue)this->chunks_in_segment,0);
-
-  CALL(oracle, set_value, URNOF(this), AFF4_TYPE,
-       rdfvalue_from_urn(this, AFF4_IMAGE),0);
 
   {
     XSDDatetime time = new_XSDDateTime(this);

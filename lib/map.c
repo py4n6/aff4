@@ -586,13 +586,13 @@ VIRTUAL(MapValueInline, MapValue) {
 
 
 /*** This is the implementation of the MapDriver */
-static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){ 
+static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
   MapDriver this = (MapDriver)self;
 
-  // Try to parse existing map object
-  if(uri) {
-    URNOF(self) = CALL(uri, copy, self);
+  self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
 
+  // Try to parse existing map object
+  if(self && uri) {
     this->stored = new_RDFURN(self);
     this->target_urn = new_RDFURN(self);
     this->dirty = new_XSDInteger(self);
@@ -649,8 +649,6 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
 
     // Ignore it if we cant open the map_urn
     ClearError();
-  } else {
-    self = SUPER(AFFObject, FileLikeObject, Con, uri, mode);
   };
 
   return self;
@@ -721,11 +719,6 @@ static int MapDriver_close(FileLikeObject self) {
 
   // Write the map to the stream:
   CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map,0);
-
-  // We are not dirty any more:
-  this->dirty->value = DIRTY_STATE_ALREADY_LOADED;
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-       (RDFValue)this->dirty,0);
 
   // Done
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size,0);

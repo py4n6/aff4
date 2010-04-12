@@ -48,7 +48,7 @@ void register_type_dispatcher(Resolver self, char *type,        \
     talloc_set_name_const(type_dispatcher, "Type Dispatcher");
   };
 
-  if(!CALL(type_dispatcher, present, ZSTRING(type))) {
+  if(1 || !CALL(type_dispatcher, present, ZSTRING(type))) {
     // Make a copy of the class for storage in the registry
     Object tmp =  talloc_memdup(NULL, classref, SIZEOF(classref));
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
@@ -65,7 +65,10 @@ static void Resolver_register_type_dispatcher(Resolver self, char *type, \
     goto error;
   };
 
-  if(!CALL(type_dispatcher, present, ZSTRING(type))) {
+  if(1 || !CALL(type_dispatcher, present, ZSTRING(type))) {
+    Object old_obj = CALL(type_dispatcher, get, ZSTRING(type));
+
+    if(old_obj) talloc_free(old_obj);
     // Make a copy of the class for storage in the registry
     talloc_set_name(classref, "handler %s for type '%s'", NAMEOF(classref), type);
 
@@ -118,6 +121,8 @@ void AFF4_Init(void) {
 
 /** Implementation of Caches */
 
+/** FIXME - Need to implement hash table rebalancing */
+
 /** A destructor on the cache object to automatically unlink us from
     the lists.
 */
@@ -128,8 +133,12 @@ static int Cache_destructor(void *this) {
 
   // We can automatically maintain a tally of elements in the cache
   // because we have a reference to the main cache object here.
-  if(self->cache_head)
-    self->cache_head->cache_size--;
+  /* It is not a good idea to keep count of objects in the cache by
+     reference counting because they might be alive due to external
+     references (e.g. in python).
+  */
+     if(self->cache_head)
+       self->cache_head->cache_size--;
 
   return 0;
 };
@@ -1184,7 +1193,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
         goto exit;
       };
     };
-  } else {
+  } else if(mode == 'w') {
     // If the object is write locked, there are two possibilities. If
     // its our own thread that locked it, we are in a deadlock because
     // noone is ever going to unlock it. If another thread locked it,
@@ -1311,7 +1320,9 @@ static inline void trim_cache(Cache cache) {
     if(cache->cache_size < RESOLVER_CACHE_SIZE) break;
 
     // Only remove objects which are not currently locked.
-    if(obj->thread_id == 0) talloc_unlink(cache, i);
+    if(obj->thread_id == 0) {
+      talloc_unlink(cache, i);
+    };
   };
 };
 
@@ -1759,6 +1770,8 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
   uuid_t uuid;
   char uuid_str[BUFF_SIZE];
 
+  // We have no valid URI - this is usually the first pass through
+  // this function.
   if(!uri) {
     // This function creates a new stream from scratch so the stream
     // name will be a new UUID
@@ -1779,8 +1792,13 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
       pthread_mutexattr_destroy(&mutex_attr);
     };
 
+    // We already have a valid URL - this is the second pass through
+    // the function.
   } else {
-    self->urn = CALL(uri, copy, self);
+    if(self->urn != uri)
+      self->urn = CALL(uri, copy, self);
+
+    self->complete = 1;
   };
 
   self->mode = mode;
@@ -1831,12 +1849,28 @@ static void AFFObject_cache_return(AFFObject self) {
   CALL(oracle, cache_return, self);
 };
 
+static int AFFObject_close(AFFObject self) {
+  Cache cache = oracle->read_cache;
+  Object o;
+
+  if(self->mode == 'w')
+    cache = oracle->write_cache;
+
+  o = CALL(cache, get, ZSTRING(STRING_URNOF(self)));
+  if(o) talloc_unlink(NULL, o);
+  ClearError();
+
+  talloc_unlink(NULL, self);
+  return 1;
+};
+
 VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set) = AFFObject_set_property;
      VMETHOD(add) = AFFObject_add;
      VMETHOD(delete) = AFFObject_delete;
      VMETHOD(cache_return) = AFFObject_cache_return;
+     VMETHOD(close) = AFFObject_close;
 
      VMETHOD(Con) = AFFObject_Con;
 } END_VIRTUAL
