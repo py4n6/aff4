@@ -41,16 +41,8 @@ def dissect_packet(stream_fd, stream_pkt_fd):
         except: pass
 
 class Reassembler:
-    def make_stream(self, name, base):
-        return Framework.PyFlagMap(base + name)
-
-        volume_urn = Framework.OUTPUT_VOLUME_URN
-        forward_stream = oracle.create(pyaff4.AFF4_MAP)
-        forward_stream.urn.set(volume_urn.value)
-        forward_stream.urn.add(base + name)
-
-        forward_stream.set(pyaff4.AFF4_STORED, volume_urn)
-        return forward_stream.finish()
+    def make_stream(self, name, base, navigatable=True):
+        return Framework.PyFlagMap(name, base=base, navigatable=navigatable)
 
     def Callback(self, mode, packet,connection):
         try:
@@ -84,14 +76,15 @@ class Reassembler:
                 ## Note that we hold the map locked while its in the
                 ## reassembler - this prevents it from getting freed
                 connection['map'] = forward_stream = self.make_stream("forward", base)
-                connection['map.pkt'] = self.make_stream("forward.pkt", base)
+                connection['map.pkt'] = self.make_stream("forward.pkt", base, navigatable=False)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 forward_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)
 
                 ## Make the reverse map
                 connection['reverse']['map'] = reverse_stream = self.make_stream("reverse", base)
-                connection['reverse']['map.pkt'] = self.make_stream("reverse.pkt", base)
+                connection['reverse']['map.pkt'] = self.make_stream(
+                    "reverse.pkt", base, navigatable=False)
                 timestamp = pyaff4.XSDDatetime()
                 timestamp.set(packet.ts_sec)
                 reverse_stream.set(pyaff4.AFF4_TIMESTAMP, timestamp)

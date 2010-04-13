@@ -29,8 +29,6 @@
 
 """ Main HTTP server module """
 import sys, pdb
-sys.path.append("..")
-sys.path.append("pyflag")
 
 import BaseHTTPServer, SimpleHTTPServer, SocketServer
 import Reports
@@ -133,7 +131,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
             env['CONTENT_TYPE'] = self.headers.type
         else:
             env['CONTENT_TYPE'] = self.headers.typeheader
-            
+
         length = self.headers.getheader('content-length')
         if length:
             env['CONTENT_LENGTH'] = length
@@ -215,7 +213,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
                 self.send_header(k,v)
             except socket.error:
                 pass
-    
+
     def do_GET(self):
         try:
             self.handle_request()
@@ -299,7 +297,7 @@ class FlagServerHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
                     self.send_header("Content-Type",ct)
                     self.send_header("Last-Modified",self.format_date_time_string(s.st_mtime))
                     self.send_header("Etag",s.st_ino)
-                    self.send_header("Expires","Sun, 17 Jan 2038 19:14:07 GMT")                
+                    self.send_header("Expires","Sun, 17 Jan 2038 19:14:07 GMT")
                     fd = open(path, "rb")
                     f = fd.read()
 

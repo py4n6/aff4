@@ -263,6 +263,10 @@ class Type:
     def python_name(self):
         return self.name
 
+    def python_proxy_post_call(self):
+        """ This is called after a proxy call """
+        return ''
+
     def returned_python_definition(self, *arg, **kw):
         return self.definition(*arg, **kw)
 
@@ -505,14 +509,30 @@ if(!tmp_%s) goto error;
 PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
 """ % (self.name, self.length, self.name, self.name, self.name, self.length)
 
-    def to_python_object(self, name=None, result='py_result', **kw):
+    def to_python_object(self, name=None, result='py_result', sense='in', **kw):
         name = name or self.name
 
         if 'results' in kw:
             kw['results'].pop(0)
 
+        if sense=='proxied':
+            return "py_%s = PyLong_FromLong(%s);\n" % (self.name, self.length)
+
         return """ _PyString_Resize(&tmp_%s, func_return); \n%s = tmp_%s;\n""" % (
             name, result, name)
+
+
+    def python_proxy_post_call(self, result='py_result'):
+        return """
+{
+    char *tmp_buff; int tmp_len;
+    if(-1==PyString_AsStringAndSize(%(result)s, &tmp_buff, &tmp_len)) goto error;
+
+    memcpy(%(name)s,tmp_buff, tmp_len);
+    Py_DECREF(%(result)s);
+    %(result)s = PyLong_FromLong(tmp_len);
+};
+""" % dict(result = result, name=self.name)
 
 class TDB_DATA_P(Char_and_Length_OUT):
     bare_type = "TDB_DATA"
@@ -1334,6 +1354,7 @@ class ProxiedGetattr(GetattrMethod):
 class ProxiedMethod(Method):
     def __init__(self, method, myclass):
         self.name = method.name
+        self.method = method
         self.myclass = myclass
         self.class_name = method.class_name
         self.base_class_name = method.base_class_name
@@ -1351,12 +1372,12 @@ class ProxiedMethod(Method):
 
     def _prototype(self, out):
         out.write("""
-static %(return_type)s %(name)s(%(base_class_name)s self""" % dict(
+static %(return_type)s %(name)s(%(definition_class_name)s self""" % dict(
                 return_type = self.return_type.original_type,
                 class_name = self.myclass.class_name,
                 method = self.name,
                 name = self.get_name(),
-                base_class_name = self.myclass.base_class_name))
+                definition_class_name = self.definition_class_name))
 
         for arg in self.args:
             out.write(", %s" % (arg.comment()))
@@ -1427,6 +1448,9 @@ if(PyErr_Occurred()) {
 };
 
 """);
+
+        for arg in self.args:
+            out.write(arg.python_proxy_post_call())
 
         ## Now convert the python value back to a value
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
@@ -1592,13 +1616,13 @@ this->proxied = py_result;
 // Converting %(name)s from proxy:
 {
    PyObject *py_result = PyObject_GetAttrString(this->proxied, "%(name)s");
-   if(!py_result) goto error;
+   if(py_result) {
 """ % dict(name = attr.name))
             out.write("{ %s " % attr.definition())
             out.write(attr.from_python_object("py_result",
                                               "((%s)self)->%s" % (class_name, attr.name),
                                               self))
-            out.write("}\nPy_DECREF(py_result);\n};\n")
+            out.write("}\nPy_DECREF(py_result);\n};\n};\n")
 
         out.write("PyGILState_Release(gstate);\n")
         out.write("\n\nreturn self;\n")
@@ -2111,6 +2135,9 @@ END_CLASS
                     self.current_class.methods.append(ProxiedMethod(method, self.current_class))
 
                 self.module.add_class(self.current_class, Wrapper)
+
+                ## Make sure that further lines are not interpreted as part of this class.
+                self.current_class = None
 
             m = self.method_re.search(line)
             if self.current_class and m:

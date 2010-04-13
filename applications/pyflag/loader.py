@@ -21,8 +21,11 @@ config.parse_options(final = True)
 Registry.Init()
 
 ## Let the application know we are about to start
-Framework.post_event("startup")
-Framework.post_event("create_volume")
+try:
+    Framework.post_event("startup")
+    Framework.post_event("create_volume")
+except:
+    pdb.post_mortem()
 
 oracle = pyaff4.Resolver()
 

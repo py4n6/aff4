@@ -423,7 +423,7 @@ static int Image_close(AFFObject aself) {
 #endif
 
   // Update the size
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size,0);
 
   return SUPER(AFFObject, FileLikeObject, close);

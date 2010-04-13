@@ -176,6 +176,8 @@
 /* A well known URL which is used to anchor navigation directives. */
 #define AFF4_NAVIGATION_ROOT  FQN "navigation/root"
 #define AFF4_NAVIGATION_CHILD  PREDICATE_NAMESPACE "NavChild"
+/* This links the navigation node to a real AFF4 node */
+#define AFF4_NAVIGATION_LINK   PREDICATE_NAMESPACE "NavLink"
 
 /** Cryptography related names */
 #define AFF4_CIPHER PREDICATE_NAMESPACE "cipher"

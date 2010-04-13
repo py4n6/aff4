@@ -26,6 +26,8 @@ struct statement_t {
 static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
   Graph this = (Graph)self;
 
+  self = SUPER(AFFObject, FileLikeObject, Con, url, mode);
+
   // Try to parse existing map object
   if(url) {
     URNOF(self) = CALL(url, copy, self);
@@ -46,8 +48,6 @@ static AFFObject Graph_Con(AFFObject self, RDFURN url, char mode) {
 
     // Ok done
     ClearError();
-  } else {
-    self = SUPER(AFFObject, FileLikeObject, Con, url, mode);
   };
 
   return self;
@@ -134,9 +134,6 @@ static int Graph_close(AFFObject self) {
   return 0;
 };
 
-VIRTUAL(GraphStatement, Cache)
-END_VIRTUAL
-
 VIRTUAL(Graph, AFFObject) {
   VMETHOD(set_triple) = Graph_set_triple;
 
@@ -147,7 +144,6 @@ VIRTUAL(Graph, AFFObject) {
 
 void graph_init() {
   INIT_CLASS(Graph);
-  INIT_CLASS(GraphStatement);
 
   register_type_dispatcher(oracle, AFF4_GRAPH, (AFFObject *)GETCLASS(Graph));
 };

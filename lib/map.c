@@ -721,7 +721,7 @@ static int MapDriver_close(FileLikeObject self) {
   CALL(oracle, set_value, URNOF(self), AFF4_MAP_DATA, (RDFValue)this->map,0);
 
   // Done
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size,0);
+  CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->size,0);
   SUPER(AFFObject, FileLikeObject, close);
   return 1;
 

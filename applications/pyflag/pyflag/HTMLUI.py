@@ -32,14 +32,14 @@
 The output within flag is abstracted such that it is possible to connect any GUI backend with any GUI Front end. This is done by use of UI objects. When a report runs, it will generate a UI object, which will be built during report execution. The report then returns the object to the calling framework which will know how to handle it. Therefore the report doesnt really know or care how the GUI is constructed """
 import re,cgi,types,textwrap,sys
 from urllib import quote
-import Framework
+import Framework, pdb
 import conf
 config=conf.ConfObject()
 import cStringIO,csv,time
 import Registry
 import pyflaglog
 import Theme
-from Framework import expand
+from Framework import expand, iri_to_uri
 import Store
 
 config.add_option("PAGESIZE", default=50, type='int',
@@ -61,6 +61,105 @@ class HTTPObject:
         self.content_type=None
         self.generator=None
         self.headers=[]
+
+
+class HexDump:
+    """ Class manages displaying arbitrary data as hex dump.
+
+    @ivar width: The width of the dump, in number of bytes. (default 16)
+    """
+    width = 16
+
+    def __init__(self,data,ui):
+        """ Constructor:
+        @arg data: The binary data to dump
+        @arg ui: A suitable UI object to use for the dump. This dumper uses ui.text to display the data. If ui is None, no UI will be used."""
+        self.data = data
+        self.ui = ui
+
+    def dump(self,offset=0,limit=10240,base_offset=0,highlight=[]):
+        """ Dumps out the data.
+
+        If a UI was specified in the constructor, we use it to display the data.
+
+        @arg offset: The initial offset to use as the start of the data. Note that this is used to seek within the data given.
+        @arg base_offset: An offset that will be added to the offset labels, but otherwise has no effect. Useful when data represents a chunk from a larger data set.
+
+        @arg highlight: This is a list of lists denoting highlighting regions. Each region is a list consisting of [offset, length, color]. 
+
+        @return: A string having the hex dump in it.
+        """
+        result = ''
+        ui = self.ui
+        offset_format =  "%06x   "
+        char_format = "%02x "
+        text_format = "   %s"
+        initial_offset=offset
+
+        def find_highlights(off):
+            """ Searches the highlight list and returns the color
+            which offset should be rendered in. Returns None if no
+            color is needed.
+            """
+            result = None
+            for offset, length, color in highlight:
+                if off >= offset and offset + length > off:
+                    result = color
+                    
+            return result
+
+        #Do the headers:
+        result += ' ' * len(offset_format % 0)
+        ui.text( ' ' * len(offset_format % 0),font='typewriter')
+        for i in range(self.width):
+            result += char_format % i
+            ui.text(char_format % i,style = 'blue',font='typewriter')
+
+        ui.text("\n",font='typewriter')
+        result+="\n"
+        finished=0
+        
+        while not finished and initial_offset+limit>offset:
+            tmp_offset=offset
+            ui.text(offset_format % (offset+base_offset), style='blue',font='typewriter')
+            result += offset_format % offset
+            text = ''
+
+            for offset in range(tmp_offset,tmp_offset+self.width):
+                try:
+                    color = find_highlights(offset)
+                    if color:
+                        ui.text(char_format % ord(self.data[offset]),
+                                font='typewriter',style=color)  
+                    else:
+                        ui.text(char_format % ord(self.data[offset]),style='black',
+                                font='typewriter')
+                        
+                    result += char_format % ord(self.data[offset])
+                except IndexError:
+                    ui.text("   ")
+                    result += "   "
+                    finished = 1
+
+            for offset in range(tmp_offset,tmp_offset+self.width):
+                args = dict(font='typewriter',sanitise='full',style='red')
+                color = find_highlights(offset)
+                if color:
+                    args['style'] = color
+                    
+                try:
+                    if 32 < ord(self.data[offset]) < 127:
+                        ui.text(self.data[offset],**args)
+                        result+=self.data[offset]
+                    else:
+                        ui.text('.',**args)
+                        result+='.'
+                except IndexError:
+                    finished = 1
+
+            ui.text("\n",font='typewriter',sanitise='full')
+#            ui.text(finish=1)
+            offset+=1
 
 class HTMLUI:
     """ A HTML UI implementation.
@@ -328,11 +427,11 @@ class HTMLUI:
         pane: The current javascript pane - this is useful for paging in trees etc.
         """
         if pane=='self':
-            return "post_link('f?%s',window.__pyflag_name); return false;" % iri_to_uri(target)
+            return "post_link('f?%s',window.__pyflag_name); alert(window.__pyflag_name); return false;" % iri_to_uri(target)
 
         if pane=='pane':
             return "post_link('f?%s',0); return false;" % iri_to_uri(target)
-        
+
         if pane=='popup':
             id=self.get_unique_id()
             return "window.open('f?%s&__pyflag_parent='+window.__pyflag_name+'&__pyflag_name=child_%s&__pane=naked','child_%s',  'width=600, height=600,scrollbars=yes'); return false;" % (target, id,id)
@@ -648,10 +747,10 @@ class HTMLUI:
                 self.defaults.remove("callback_stored", self.callback)
             except:
                 pass
-            
+
             left_url = "%s&callback_stored=%s&right_pane_cb=%s&__pyflag_parent=%s&__pyflag_name=%s" % (self.defaults,l,r,query['__pyflag_parent'], query['__pyflag_name'])
             right_url ="%s&callback_stored=%s&__pyflag_parent=%s&__pyflag_name=%s" % ( self.defaults, r, query['__pyflag_parent'], query['__pyflag_name'])
-                
+
             result.result = '''<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
             <HTML>
             <head>
@@ -666,163 +765,22 @@ class HTMLUI:
 
         id = self.get_unique_id()
         self.iframe(target = "TreeFrame%s" % id, callback = tree_frame_cb)
-        
+
     def iframe(self, target=None, callback=None, link=None):
         if not target:
             target = self.get_unique_id()
 
         if callback:
             link = "callback_stored=%s" % self.store_callback(callback)
-        
+
         self.result += """<iframe src='images/spacer.png' id='%s' name='%s' class=TreeFrame height=100%% ></iframe>
         <script>AdjustHeightToPageSize('%s');document.getElementById('%s').src='iframe?%s&__pyflag_parent=' + window.__pyflag_parent + '&__pyflag_name=' + window.__pyflag_name;</script>
         """ % (target,target,target,target,link)
-        
+
     def new_toolbar(self):
         id = "Toolbar%s" % self.get_unique_id()
         self.result += '''<div class="Toolbar" id="%s"></div>''' % id
         return id
-
-    def xxtree(self,tree_cb = None, pane_cb=None, branch = None, layout="horizontal"):
-        """ A tree widget.
-
-        This widget works by repeatadly calling the call back function for information about entries in the current tree. The format of the callback is:
-
-        >>> def tree_cb(branch):
-
-        The call back function is a generator which is expected to yield (name,value,state) tuples representing the entries under the requested branch:
-              - name: The name of the tree branch. This name will be used to access the tree branches and may have limitations on the characters that may be present. __This can not be empty, or the line will be rejected___.
-              - value: A string or a UI object that will be displayed at that position in the tree
-              - state: Indicates if this is a \"branch\" (i.e. can be opened up) or a leaf.
-
-        @Note: If you do not want to use generators you must return a list of (name,value,state) tuples from the call back function. (Its effectively the same thing).
-
-        @Note: It is very important to stress that the call back is a generator, therefore it must yield results rather than return them.
-
-        Also since multiple instances of the generator function may be called simultaneously, it is _imperative_ that the call back function not modify variables outside its scope, or serious locking issues may arise. In particular, it is imperative that database handles be created inside the local scope.
-
-        @arg tree_cb: Call back registered to build the tree
-        @arg branch: A list representing a branch to have initially expanded. Each item in the list represents a branch at its respective depth in the tree. e.g.
-
-        >>> /usr/share/local = ('usr','share','local')
-        
-        """
-        if not self.defaults: raise UIException("Must have default query for tree widget")
-        query = self.defaults
-
-        #Read in the current branch that needs to be opened from the open_tree parameter
-        if query.has_key('open_tree'):
-            open = query['open_tree']
-            branch = [ d for d in open.split('/') ]
-            branch[0]='/'
-
-        #Start building the tree using the branch.
-        def draw_branch(depth,tree_array):
-            """ This is a recursive function used to build the tree. Complicating matters is the need to omit rows which are further than config.MAXTREESIZE away from the selected item. This is done in order to speed up browsing through a browser (its not needed for GTKUI for example).
-
-            @note: We are using the callback as a generator here to ensure we do not need to parse potentially thousands of entries.
-        
-            @arg tree_array: This function builds tree_array as it goes to represent the final tree HTML structure.
-            @arg depth: The current depth to calculate - an int pointing into the branch array
-            """
-            found =0
-            tmp = []
-            #We search through all the items until we find the one
-            #that matches the branch for this depth, then recurse into
-            #it.
-            path=Framework.joinpath(branch[:depth])
-            for k,v,t in tree_cb(path):
-                if not k: continue
-                if not t: continue
-                tmp.append((depth,k,v,t))
-                try:
-                    #We are further than config.MAXTREESIZE after the
-                    #tree item that will matched, we can quit now
-                    #after placing an arrow
-                    if found and len(tmp)>config.MAXTREESIZE:
-                        tree_array += tmp
-                        if len(tmp) > config.MAXTREESIZE:
-                            tree_array.append((depth,tmp[-1][1],'<img src=images/down.png border=0> ...','special'))
-                        return
-
-                    #Do we find the current item in the list?
-                    if k == branch[depth]:
-                        match_pos = len(tmp)
-                        
-                        #Now slice the tmp array to append it to the tree array
-                        if match_pos-config.MAXTREESIZE < 0:
-                            start = 0
-                        else:
-                            start = match_pos - config.MAXTREESIZE
-                            tree_array.append((depth,tmp[start-1][1],'<img src=images/up.png border=0> ...','special'))
-                        
-                        tree_array += tmp[start:]
-                        tmp = []
-                        found = 1
-                        #Recurse into the next level in the tree
-                        draw_branch(depth+1,tree_array)
-                                                
-                except IndexError,e:
-                    #This is triggered when there is no deeper level in the tree
-                    if len(tmp) > config.MAXTREESIZE:
-                        break
-
-            #We get here if we exhausted all the items within
-            #config.MAXTREESIZE or did not find the requested branch
-            #in the tree
-            split =  tmp[:config.MAXTREESIZE]
-            tree_array += split
-            if len(split) == config.MAXTREESIZE:
-                tree_array.append( (depth,split[-1][1],'<img src=images/down.png border=0> ...','special'))
-
-        #### End draw_branch
-
-        link = query.clone()
-        tree_array = []
-
-        #The first item in the tree is the first one provided in branch
-        if not branch[0]:
-            tree_array.append((0,'/','/','branch'))
-        else:
-            tree_array.append((0,branch[0],branch[0],'branch'))
-
-        #Build the tree_array
-        draw_branch(1,tree_array)       
-
-        del link['open_tree']
-        link['open_tree'] = Framework.normpath("%s" % '/'.join(branch[:-1]))
-        if not link['open_tree']:
-            del link['open_tree']
-            link['open_tree']='/'
-        tmp = self.__class__()
-        tmp.link("Up\n",link)
-        self.text(tmp)
-
-        left=self.__class__()
-
-        #Now we draw the stuff saved in tree_array according to its classification
-        for depth,k,v,t in tree_array:
-            del link['open_tree']
-            link['open_tree'] = Framework.normpath("/".join(branch[:depth] + [k]))
-            open_tree = Framework.urlencode(link['open_tree'])
-            sv=v.__str__().replace(' ','&nbsp;')
-            left.icon("spacer.png",width=20*depth,height=20)
-            if t =='branch':
-                new_query = link
-                left.link(str(sv),tooltip=link['open_tree'],target=link, name=open_tree,icon="folder.png")
-                left.text("&nbsp;%s\n" % str(sv),style='black')
-            elif t == 'special':
-                left.link(str(v),tooltip=link['open_tree'],target=link, name=open_tree)
-                left.text("\n")
-            else:
-                left.link(str(sv),tooltip=link['open_tree'],target=link, name=open_tree,icon="corner.png")
-                left.text("&nbsp;%s\n" % str(sv),style='black')
-
-        right=self.__class__(self)
-        path=Framework.normpath(query.get('open_tree','/'))
-        pane_cb(path,right)
-
-        self.result += '''<div class="TreeLeft">%s</div><div class="TreeRight">%s</div>''' % (left,right)
 
     def toolbar(self, cb=None, text=None, icon=None, tooltip=None, link=None, toolbar=None, pane='popup'):
         """ Create a toolbar button.
@@ -1361,9 +1319,9 @@ class HTMLUI:
         <param name="menu" value="true">
         <param name="wmode" value="transparent">
         </object>''' % (id, id, cb)
-        
+
         self.row(description, object_tag)
-    
+
     def video_control(self, description, generator):
         """ This renders a video control which allows the user to play
         the video clip generated by the generator.
@@ -1390,7 +1348,7 @@ class HTMLUI:
         self.row(object_tag)
 
     def notebook(self,names=[],context="notebook",callbacks=[],
-                 descriptions=[], callback_args=[]):
+                 descriptions=[], callback_args=[], pane='self'):
         """ Draw a notebook like UI with tabs.
 
         If no tab is selected, the first tab will be selected.
@@ -1400,7 +1358,7 @@ class HTMLUI:
         @arg context: A context variable used to allow the selection of names in queries
         @arg descriptions: A list of descriptions to assign to each tab. The description should not be longer than 1 line.
         """
-        query=self.defaults.clone()            
+        query=self.defaults.clone()
         try:
             context_str=query[context]
             index = names.index(context_str)
@@ -1416,27 +1374,12 @@ class HTMLUI:
             del q[context]
             q[context]=i
 
-            js = self._calculate_js_for_pane(target = q, pane="self")
+            js = self._calculate_js_for_pane(target = q, pane=pane)
             if(i==context_str):
                 out+="<div class='TabActive'><span>%s</span></div>\n" % i
             else:
                 out+="<div class='Tab' onclick=\"%s\"><span>%s</span></div>\n" % (js, i)
-        
-##        out='\n<div id="notebook"><ul id="topmenu">'
-        
-##        for i in names:
-##            q=query.clone()
-##            del q[context]
-##            q[context]=i
-##            tmplink = '''<a class="tab" href="%s">%s</a>''' % (q,i)
 
-##            if(i==context_str):
-##                out+="<li><a class='tabactive'>%s</a></li>\n" % i
-##            else:
-##                out+="<li>%s</li>\n" % tmplink
-
-##        out+="</ul>"
-        
         #Now draw the results of the callback:
         result=self.__class__(self)
         try:
@@ -1446,7 +1389,7 @@ class HTMLUI:
             cbfunc(query,result)
 
         id=self.get_unique_id()
-        
+
         out+=expand("</div>\n<div class='TabContent' id='Notebook%s'>%s</div></div>\n",
                        (id,result))
         self.result+=out + expand("<script>AdjustHeightToPageSize('Notebook%s');</script>",( id))

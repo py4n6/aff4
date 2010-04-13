@@ -182,7 +182,7 @@ static int print_cache(Cache self) {
   Cache i;
 
   list_for_each_entry(i, &self->cache_list, cache_list) {
-    printf("%s: %p\n", i->key, i);
+    printf("%s %p %p\n",(char *) i->key,i , i->data);
   };
 
   return 0;
@@ -757,6 +757,12 @@ static int Resolver_resolve_value(Resolver self, RDFURN urn_str, char *attribute
   DEBUG_RESOLVER("Getting %s, %s\n", urn_str->value, attribute_str);
   if(get_data_head(self, urn, attribute, &i)) {
     char buff[i.length];
+
+    /* If the called is really not interested in the value we just
+       return. The allows callers to just test for the existance of an
+       attribute.
+    */
+    if(!result) return i.length;
 
     // Make sure its the type our caller expects
     if(i.encoding_type != result->id) {
@@ -1335,6 +1341,8 @@ static inline void trim_cache(Cache cache) {
     We also trim back the cache if needed.
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
+  Cache cache = self->read_cache;
+
   LOCK_RESOLVER;
 
   // Find the object in the cache which is owned by our thread (Note -
@@ -1343,11 +1351,11 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   // have the same URN.
   if(obj->mode == 'r') {
     TDB_DATA tdb_urn = tdb_data_from_string(obj->urn->value);
-    Object iter = CALL(self->read_cache, iter, TDB_DATA_STRING(tdb_urn));
+    Object iter = CALL(cache, iter, TDB_DATA_STRING(tdb_urn));
     long unsigned int thread_id = pthread_self();
 
     while(iter) {
-      AFFObject new_obj = (AFFObject)CALL(self->read_cache, next, &iter);
+      AFFObject new_obj = (AFFObject)CALL(cache, next, &iter);
 
       // Found it - reset its thread_id so others can use it now.
       if(new_obj && new_obj->thread_id == thread_id) {
@@ -1357,7 +1365,15 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
         break;
       };
     };
-  };
+  } else {
+    cache=self->write_cache;
+    // Make sure the object is in the relevant cache
+    if(!CALL(cache, present, ZSTRING(STRING_URNOF(obj)))) {
+      printf("%s returned but is not in write cache\n", STRING_URNOF(obj));
+      //CALL(cache, put, ZSTRING(STRING_URNOF(obj)), (Object)obj);
+    };
+
+  }
 
   // We are done with the object now
   obj->thread_id = 0;
@@ -1368,7 +1384,8 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   ClearError();
 
   // Make sure read caches are not too big. Write caches are emptied
-  // by the close() method.
+  // by the close() method. We never purge the write cache in order to
+  // guarantee cached writable objects will always be available.
   trim_cache(self->read_cache);
 
   // We unlink it from NULL here - the object is owned by NULL after
@@ -1795,8 +1812,22 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
     // We already have a valid URL - this is the second pass through
     // the function.
   } else {
+    Cache cache = oracle->read_cache;
+
     if(self->urn != uri)
       self->urn = CALL(uri, copy, self);
+
+#if 0
+    // Ok we successfully created the object - add it to the required
+    // cached now:
+    if(self->mode == 'w')
+      cache = oracle->write_cache;
+
+    // Put us in the right cache
+    if(!CALL(cache, present, ZSTRING(STRING_URNOF(self)))) {
+      CALL(cache, put, ZSTRING(STRING_URNOF(self)), (Object)self);
+    };
+#endif
 
     self->complete = 1;
   };
@@ -1830,6 +1861,7 @@ static AFFObject AFFObject_finish(AFFObject self) {
 
   // Ok we successfully created the object - add it to the required
   // cached now:
+#if 1
   if(self->mode == 'w')
     cache = oracle->write_cache;
 
@@ -1837,6 +1869,7 @@ static AFFObject AFFObject_finish(AFFObject self) {
   CALL(cache, put, ZSTRING(STRING_URNOF(result)), (Object)result);
 
   self->complete = 1;
+#endif
 
   return result;
 };

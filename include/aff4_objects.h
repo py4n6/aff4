@@ -26,14 +26,6 @@ extern "C" {
     statements contained with it using the appropriate RDF
     serialization.
 */
-  // The graph keeps a cache of all statements it owns until its
-  // closed. Its basically a dictionary keyed by the attribute name,
-  // the Cache->data is the URN object. These are extra pointers that
-  // hold some more data.
-CLASS(GraphStatement, Cache)
-  RESOLVER_ITER *iter;
-END_CLASS
-
 CLASS(Graph, AFFObject)
   RDFURN stored;
   RDFURN attribute_urn;
@@ -269,9 +261,9 @@ CLASS(MapDriver, FileLikeObject)
                  uint64_t length);
 
      void METHOD(MapDriver, save_map);
-
 END_CLASS
 
+PROXY_CLASS(MapDriver);
 
 #ifdef HAVE_OPENSSL
 #include "aff4_crypto.h"

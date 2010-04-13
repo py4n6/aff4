@@ -1620,6 +1620,8 @@ static int ZipFileStream_close(AFFObject aself) {
   // file. Its ok for other threads to write new segments now:
   CALL((AFFObject)this->file_fd, cache_return);
 
+  // Make sure we record the size of this object now
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size, 0);
   SUPER(AFFObject, FileLikeObject, close);
 
  exit:
@@ -1690,14 +1692,6 @@ VIRTUAL(ZipFileStream, FileLikeObject) {
 // Initialise the encoding luts
   encode_init();
 } END_VIRTUAL
-
-void print_cache(Cache self) {
-  Cache i;
-
-  list_for_each_entry(i, &self->cache_list, cache_list) {
-    printf("%s %p %s\n",(char *) i->key,i->data, (char *)i->data);
-  };
-};
 
 char *relative_name(void *ctx, char *name, char *volume_urn) {
   if(startswith(name, volume_urn)) {

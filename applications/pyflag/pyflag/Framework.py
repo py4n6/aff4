@@ -48,13 +48,19 @@ class _PyFlagMap(pyaff4.MapDriver):
 
     def finish(self):
         self.__init__(self.urn, self.mode)
+        result = pyaff4.ProxiedMapDriver(self)
+
         ## NOTE: We must wrap the returned object with a
         ## ProxiedAFFObject so we continue to receive calls to it.
-        return pyaff4.ProxiedAFFObject(self)
+        value = self.urn.value + '\x00'
+        if self.mode == 'w' and not oracle.write_cache.present(value):
+            oracle.write_cache.put(value, result)
+
+        return result
 
 ## From now on, a _PyFlagMap will be used to access AFF4_MAP types.
 oracle.register_type_dispatcher(
-    pyaff4.AFF4_MAP, pyaff4.ProxiedAFFObject(_PyFlagMap))
+    pyaff4.AFF4_MAP, pyaff4.ProxiedMapDriver(_PyFlagMap))
 
 class _PyFlagStream(pyaff4.Image):
     dataType = pyaff4.AFF4_IMAGE
@@ -67,17 +73,17 @@ class _PyFlagStream(pyaff4.Image):
         self.__init__(self.urn, self.mode)
         ## NOTE: We must wrap the returned object with a
         ## ProxiedAFFObject so we continue to receive calls to it.
-        return pyaff4.ProxiedAFFObject(self)
+        return pyaff4.ProxiedFileLikeObject(self)
 
 oracle.register_type_dispatcher(
-    pyaff4.AFF4_IMAGE, pyaff4.ProxiedAFFObject(_PyFlagStream))
+    pyaff4.AFF4_IMAGE, pyaff4.ProxiedFileLikeObject(_PyFlagStream))
 
 class _PyFlagGraph(pyaff4.Graph):
     dataType = pyaff4.AFF4_GRAPH
 
     def close(self):
         RESULT_VOLUME.update_tables(self.urn)
-        self.proxied.close()
+        pyaff4.Graph.close(self)
 
     def finish(self):
         self.__init__(self.urn, self.mode)
@@ -100,7 +106,8 @@ def _init_new_object(proxied, path, base = '', navigatable = True, *args, **kwar
 
     if navigatable:
         path = [ x for x in proxied.urn.value.split("/") if x ]
-        RESULT_VOLUME.path_cache.add_path_relations(path[len(volume_urn_components):])
+        RESULT_VOLUME.path_cache.add_path_relations(path[len(volume_urn_components):],
+                                                    proxied.urn)
 
     proxied.set(pyaff4.AFF4_STORED, RESULT_VOLUME.volume_urn)
     return proxied.finish()
@@ -126,11 +133,17 @@ class PathManager(Store.FastStore):
         self.navigation_graph_urn = navigation_graph_urn
         Store.FastStore.__init__(self, limit=500, *args, **kwargs)
 
-    def add_path_relations(self, path):
+    def add_path_relations(self, path, target_urn):
         """ Adds navigation relations for path which is a list of components """
         graph = oracle.open(self.navigation_graph_urn, 'w')
         try:
-            for i in range(len(path)-1):
+            ## Create a link from the path to the target_urn
+            self.URL.set(pyaff4.AFF4_NAVIGATION_ROOT)
+            self.URL.add("/".join(path))
+            graph.set_triple(self.URL, pyaff4.AFF4_NAVIGATION_LINK, target_urn)
+
+            ## Add any missing sub paths
+            for i in range(len(path)):
                 so_far = "/".join(path[:i])
                 try:
                     children = self.get(so_far)

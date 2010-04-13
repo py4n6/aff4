@@ -149,6 +149,8 @@ CLASS(FileBackedObject, FileLikeObject)
      int fd;
 END_CLASS
 
+PROXY_CLASS(FileLikeObject);
+
      /** This is an abstract class that implements AFF4 volumes */
 CLASS(AFF4Volume, AFFObject)
 // This method opens an existing member or creates a new one. We
