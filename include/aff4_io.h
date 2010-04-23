@@ -160,8 +160,8 @@ CLASS(AFF4Volume, AFFObject)
 // until this member is promptly closed). The ZipFile must have been
 // called with create_new_volume or append_volume before.
 //
-// DEFAULT(mode) = "r"
-// DEFAULT(compression) = ZIP_DEFLATE
+// DEFAULT(mode) = "r";
+// DEFAULT(compression) = ZIP_DEFLATE;
      FileLikeObject METHOD(AFF4Volume, open_member, char *filename, char mode,\
 			   uint16_t compression);
 

@@ -12,6 +12,7 @@
 # define   	AFF4_RESOLVER_H_
 
 #include "aff4_io.h"
+#include "tdb.h"
 
 struct SecurityProvider_t;
 
@@ -40,7 +41,7 @@ typedef struct TDB_DATA_LIST {
 
 /** This object is returned when iterating a result set from the
     resolver. Its basically a pointer into the resolver data store.*/
-BOUND typedef struct RESOLVER_ITER {
+typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
   // This is used to ensure we do not iterate over multiple values
@@ -48,6 +49,8 @@ BOUND typedef struct RESOLVER_ITER {
   Cache cache;
   RDFURN urn;
 } RESOLVER_ITER;
+
+BIND_STRUCT(RESOLVER_ITER);
 
 /** The resolver is at the heart of the AFF4 specification - it is
     responsible for returning objects keyed by attribute from a
@@ -92,7 +95,9 @@ CLASS(Resolver, Object)
           through */
        Logger logger;
 
-       /** DEFAULT(mode) = 0; */
+       /**
+           DEFAULT(mode) = 0;
+       */
        Resolver METHOD(Resolver, Con, int mode);
 
        // Resolvers are all in a list. Each resolver in the list is another

@@ -141,8 +141,6 @@ class HTTPScanner(Scanner.BaseScanner):
         return http_object_urn
 
     def handle_encoding(self, headers, fd):
-        if fd.readptr == 205:
-            pdb.set_trace()
         http_object = Framework.PyFlagMap("HTTP/%s" % fd.readptr,
                                           base = fd.urn.value)
         try:

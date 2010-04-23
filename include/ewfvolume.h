@@ -1,5 +1,5 @@
-#ifndef EWFVOLUME_H
-#define EWFVOLUME_H
+#ifndef _EWFVOLUME_H
+#define _EWFVOLUME_H
 
 #if HAVE_EWF
 

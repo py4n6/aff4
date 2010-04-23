@@ -887,7 +887,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     // noone is able to write on the storage file until this segment
     // is closed.
     result = (FileLikeObject)CONSTRUCT(ZipFileStream,
-				       ZipFileStream, Con, NULL,
+				       ZipFileStream, Con2, NULL,
 				       filename, self->storage_urn,
 				       URNOF(self),
 				       'w', fd);
@@ -895,7 +895,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   };
   case 'r': {
     result = (FileLikeObject)CONSTRUCT(ZipFileStream,
-				       ZipFileStream, Con, NULL,
+				       ZipFileStream, Con2, NULL,
 				       filename, self->storage_urn,
 				       URNOF(self),
 				       'r', NULL);
@@ -1565,7 +1565,7 @@ static int ZipFileStream_close(AFFObject aself) {
        (RDFValue)self->size, NULL);
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
        (RDFValue)this->compress_size, NULL);
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CRC, 
+  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CRC,
        (RDFValue)this->crc32, NULL);
 
   // Write a signature:
@@ -1683,7 +1683,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 VIRTUAL(ZipFileStream, FileLikeObject) {
   VMETHOD_BASE(AFFObject, Con) = ZipFileStream_AFFObject_Con;
   VMETHOD_BASE(AFFObject, dataType) = AFF4_SEGMENT;
-  VMETHOD(Con) = ZipFileStream_Con;
+  VMETHOD(Con2) = ZipFileStream_Con;
 
   VMETHOD_BASE(FileLikeObject, write) = ZipFileStream_write;
   VMETHOD_BASE(FileLikeObject, read) = ZipFileStream_read;

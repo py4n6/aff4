@@ -26,7 +26,7 @@ def build_python_bindings(target, source, env):
     module_name = os.path.splitext(os.path.basename(target[0].name))[0]
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
-    p = class_parser.parser(class_parser.Module(module_name), verbosity=env['V'])
+    p = class_parser.HeaderParser(module_name, verbose=env['V'])
     p.parse_filenames([s.get_abspath() for s in source])
 
     fd = open(target[0].get_abspath(), 'w')
@@ -42,3 +42,15 @@ nenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
 nenv.Depends('pyaff4.c', 'class_parser.py')
 
 nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=env.libaff4_so)
+
+BOUND_FILES = Split("""
+tsk/pytsk3.h
+tsk/tsk3.h
+/usr/local/include/tsk3/fs/tsk_fs.h
+/usr/local/include/tsk3/base/tsk_base.h
+""")
+
+nenv.Command('tsk/pytsk3.c', BOUND_FILES, build_python_bindings)
+nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
+
+nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=[env.libaff4_so, 'tsk3'])

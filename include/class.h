@@ -191,7 +191,7 @@ extern "C" {
 
 #include "talloc.h"
 
-#define CLASS(class,super_class)			\
+#define CLASS(class,super_class)                                 \
   typedef struct class ## _t *class;                             \
   int class ## _init(Object self);                               \
   extern struct class ## _t __ ## class;                         \
@@ -432,6 +432,8 @@ python method calls on the proxied object.
   */
 #define PROXY_CLASS(name)
 
+  /* This signals the autogenerator to bind the named struct */
+#define BIND_STRUCT(name)
 
 #endif
 #ifdef __cplusplus

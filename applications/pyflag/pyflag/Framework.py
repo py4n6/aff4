@@ -73,7 +73,7 @@ class _PyFlagStream(pyaff4.Image):
         self.__init__(self.urn, self.mode)
         ## NOTE: We must wrap the returned object with a
         ## ProxiedAFFObject so we continue to receive calls to it.
-        return pyaff4.ProxiedFileLikeObject(self)
+        return pyaff4.ProxiedImage(self)
 
 oracle.register_type_dispatcher(
     pyaff4.AFF4_IMAGE, pyaff4.ProxiedFileLikeObject(_PyFlagStream))

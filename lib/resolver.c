@@ -1367,12 +1367,11 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
     };
   } else {
     cache=self->write_cache;
+
     // Make sure the object is in the relevant cache
     if(!CALL(cache, present, ZSTRING(STRING_URNOF(obj)))) {
-      printf("%s returned but is not in write cache\n", STRING_URNOF(obj));
-      //CALL(cache, put, ZSTRING(STRING_URNOF(obj)), (Object)obj);
+      CALL(cache, put, ZSTRING(STRING_URNOF(obj)), (Object)obj);
     };
-
   }
 
   // We are done with the object now
@@ -1861,7 +1860,6 @@ static AFFObject AFFObject_finish(AFFObject self) {
 
   // Ok we successfully created the object - add it to the required
   // cached now:
-#if 1
   if(self->mode == 'w')
     cache = oracle->write_cache;
 
@@ -1869,7 +1867,6 @@ static AFFObject AFFObject_finish(AFFObject self) {
   CALL(cache, put, ZSTRING(STRING_URNOF(result)), (Object)result);
 
   self->complete = 1;
-#endif
 
   return result;
 };

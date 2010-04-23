@@ -75,13 +75,11 @@
 //#define AFF4_VOLATILE_CONTAINS   PREDICATE_NAMESPACE "contains"
 
 // Volume attributes
-#define AFF4_IDENTITY_STORED PREDICATE_NAMESPACE "identity" /* Indicates an identity
-						      is stored in this
-						      volume */
+#define AFF4_IDENTITY_STORED PREDICATE_NAMESPACE "identity"
 
-#define AFF4_AUTOLOAD PREDICATE_NAMESPACE "autoload" /* A hint that this stream
-					      should be automatically
-					      loaded as a volume */
+ /* A hint that this stream should be automatically loaded as a
+    volume */
+#define AFF4_AUTOLOAD PREDICATE_NAMESPACE "autoload"
 
 /** Image attributes */
 #define AFF4_CHUNK_SIZE PREDICATE_NAMESPACE "chunk_size"
@@ -164,12 +162,13 @@
 
 /* The following URNs are special and should be known by the
    implementation: */
-#define AFF4_SPECIAL_URN_NULL FQN "null" /* This URN refers to NULL data
-					    in Sparse maps (unread data
-					    not the same as zero) */
 
-#define AFF4_SPECIAL_URN_ZERO FQN "zero" /* This is used to represent long
-					    runs of zero */
+/* This URN refers to NULL data in Sparse maps (unread data not the
+   same as zero) */
+#define AFF4_SPECIAL_URN_NULL FQN "null"
+
+ /* This is used to represent long runs of zero */
+#define AFF4_SPECIAL_URN_ZERO FQN "zero"
 
 #define AFF4_NAVIGATION       PREDICATE_NAMESPACE "nav"
 

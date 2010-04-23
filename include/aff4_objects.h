@@ -93,7 +93,7 @@ CLASS(Image, FileLikeObject)
 
      // Thats the current worker we are using - when it gets full, we
      // simply dump its bevy and take a new worker here.
-     ImageWorker current;
+PRIVATE   ImageWorker current;
 
      XSDInteger chunk_size;
      XSDInteger compression;
@@ -264,6 +264,7 @@ CLASS(MapDriver, FileLikeObject)
 END_CLASS
 
 PROXY_CLASS(MapDriver);
+PROXY_CLASS(Image);
 
 #ifdef HAVE_OPENSSL
 #include "aff4_crypto.h"
@@ -399,7 +400,7 @@ CLASS(ZipFileStream, FileLikeObject)
 	container_urn. If the stream is opened for writing the file_fd
 	may be passed in. It remains locked until we are closed.
      */
-     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn, \
+     ZipFileStream METHOD(ZipFileStream, Con2, RDFURN urn, \
 			  RDFURN file_urn, RDFURN container_urn,\
 			  char mode, FileLikeObject file_fd);
 END_CLASS

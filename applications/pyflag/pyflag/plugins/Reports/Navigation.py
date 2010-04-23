@@ -103,16 +103,16 @@ class InformationNotebook:
         if previous != None:
             new_query.set('hexlimit',0)
             result.toolbar(text="Start", icon="stock_first.png",
-                           link = new_query,  pane="self")
+                           link = new_query,  pane="pane")
         else:
-            result.toolbar(text="Start", icon="stock_first_gray.png", pane="self")
+            result.toolbar(text="Start", icon="stock_first_gray.png", pane="pane")
 
         if previous != None:
             new_query.set('hexlimit',previous)
             result.toolbar(text="Previous page", icon="stock_left.png",
-                           link = new_query,  pane="self")
+                           link = new_query,  pane="pane")
         else:
-            result.toolbar(text="Previous page", icon="stock_left_gray.png", pane="self")
+            result.toolbar(text="Previous page", icon="stock_left_gray.png", pane="pane")
 
         next=limit + max
 
@@ -121,26 +121,57 @@ class InformationNotebook:
         if len(data)>=max:
             new_query.set('hexlimit',next)
             result.toolbar(text="Next page", icon="stock_right.png",
-                           link = new_query , pane="self")
+                           link = new_query , pane="pane")
         else:
-            result.toolbar(text="Next page", icon="stock_right_gray.png", pane="self")
+            result.toolbar(text="Next page", icon="stock_right_gray.png", pane="pane")
 
         if len(data)>=max:
             new_query.set('hexlimit',self.size.value - self.size.value % 1024)
             result.toolbar(text="End", icon="stock_last.png",
-                           link = new_query , pane="self")
+                           link = new_query , pane="pane")
         else:
-            result.toolbar(text="End", icon="stock_last_gray.png", pane="self")
+            result.toolbar(text="End", icon="stock_last_gray.png", pane="pane")
 
         ## Allow the user to skip to a certain page directly:
-#        result.toolbar(
-#            cb = partial(goto_page_cb, variable='hexlimit'),
-#            text="Current Offset %s" % limit,
-#            icon="stock_next-page.png", pane="popup"
-#            )
+        result.toolbar(
+            cb = partial(self.goto_page_cb, variable='hexlimit'),
+            text="Current Offset %s" % limit,
+            icon="stock_next-page.png", pane="popup"
+            )
 
         return result
 
+
+    def goto_page_cb(self, query,result,variable):
+        try:
+            limit = query[variable]
+        except KeyError:
+            limit='0'
+
+        try:
+            if query['__submit__']:
+                ## Accept hex representation for limits
+                if limit.startswith('0x'):
+                    del query[variable]
+                    query[variable]=int(limit,16)
+
+                result.refresh(0,query,pane='parent')
+                return
+        except KeyError:
+            pass
+
+        result.heading("Skip directly to an offset")
+        result.para("You may specify the offset in hex by preceeding it with 0x")
+        result.start_form(query)
+        result.start_table()
+        if limit.startswith('0x'):
+            limit=int(limit,16)
+        else:
+            limit=int(limit)
+
+        result.textfield('Offset in bytes (%s)' % hex(limit),variable)
+        result.end_table()
+        result.end_form()
 
 class Navigation(Reports.Report):
     """ Navigate the AFF4 Volume """
