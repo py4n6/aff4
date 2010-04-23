@@ -435,6 +435,12 @@ python method calls on the proxied object.
   /* This signals the autogenerator to bind the named struct */
 #define BIND_STRUCT(name)
 
+  // This means that the memory owned by this pointer is managed
+  // externally (not using talloc). It is dangerous to use this
+  // keyword too much because we are unable to manage its memory
+  // appropriately and it can be free'd from under us.
+#define FOREIGN
+
 #endif
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

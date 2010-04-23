@@ -16,19 +16,23 @@ def escape_for_string(string):
 class Module:
     def __init__(self, name):
         self.name = name
-        self.constants = []
+        self.constants = set()
         self.classes = {}
         self.headers = '#include <Python.h>\n'
         self.files = []
 
     def __str__(self):
         result = "Module %s\n" % (self.name)
-        for attr in self.classes.values():
+        l = self.classes.values()
+        l.sort()
+        for attr in l:
             if attr.is_active():
                 result += "    %s\n" % attr
 
+        l = list(self.constants)
+        l.sort()
         result += 'Constants:\n'
-        for attr, type in self.constants:
+        for attr, type in l:
             result += " %s\n" % attr
 
         return result
@@ -47,7 +51,7 @@ AFF4_Init();
 
     def add_constant(self, constant, type="numeric"):
         """ This will be called to add #define constant macros """
-        self.constants.append((constant, type))
+        self.constants.add((constant, type))
 
     def add_class(self, cls, handler):
         self.classes[cls.class_name] = cls
@@ -404,7 +408,7 @@ class Integer(Type):
 
     def __init__(self, name,type):
         Type.__init__(self,name,type)
-        self.type = 'uint64_t '
+        self.type = 'uint64_t'
         self.original_type = type
 
     def definition(self, default = 0, **kw):
@@ -762,7 +766,9 @@ PyErr_Clear();
 %(name)s->base = %(call)s;
 """ % args
 
-        if "BORROWED" in self.attributes:
+        if "FOREIGN" in self.attributes:
+            result += '// Not taking references to foreign memory\n'
+        elif "BORROWED" in self.attributes:
             result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
         else:
             result += "talloc_steal(%(name)s->ctx, %(name)s->base);\n" % args
@@ -909,7 +915,7 @@ class Method:
             ## Is it a wrapped type?
             if return_type:
                 log("Unable to handle return type %s.%s %s" % (self.class_name, self.name, return_type))
-                pdb.set_trace()
+                pdb.sebot_trace()
             self.return_type = Void()
 
     def clone(self, new_class_name):
@@ -1231,29 +1237,39 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
         out.write("\n};\n\n")
 
 class GetattrMethod(Method):
-    def __init__(self, class_name, base_class_name):
+    def __init__(self, class_name, base_class_name, myclass):
         self.class_name = class_name
         self.base_class_name = base_class_name
-        self.attributes = []
+        self._attributes = []
         self.error_set = True
         self.return_type = Void()
         self.name = "py%s_getattr" % class_name
+        self.myclass = myclass
 
     def add_attribute(self, attr):
         if attr.name:
-            self.attributes.append((self.class_name, attr))
+            self._attributes.append((self.class_name, attr))
+
+    def get_attributes(self):
+        for class_name, attr in self._attributes:
+            try:
+                if not self.myclass.module.classes[attr.type].active:
+                    continue
+            except KeyError: pass
+
+            yield class_name, attr
 
     def __str__(self):
         result = ""
-        for class_name, attr in self.attributes:
+        for class_name, attr in self.get_attributes():
             result += "    %s\n" % attr.__str__()
 
         return result
 
 
     def clone(self, class_name):
-        result = self.__class__(class_name, self.base_class_name)
-        result.attributes = self.attributes[:]
+        result = self.__class__(class_name, self.base_class_name, self.myclass)
+        result.attributes = self._attributes[:]
 
         return result
 
@@ -1273,7 +1289,7 @@ static PyObject *%(name)s(py%(class_name)s *self, PyObject *name);
      if(!result) goto error;
 """)
         ## Add attributes
-        for class_name, attr in self.attributes:
+        for class_name, attr in self.get_attributes():
             out.write(""" tmp = PyString_FromString("%(name)s");
     PyList_Append(result, tmp); Py_DECREF(tmp);
 """ % dict(name = attr.name))
@@ -1310,7 +1326,7 @@ static PyObject *py%(class_name)s_getattr(py%(class_name)s *self, PyObject *pyna
 
         self.built_ins(out)
 
-        for class_name, attr in self.attributes:
+        for class_name, attr in self.get_attributes():
             ## what we want to assign
             if self.base_class_name:
                 call = "(((%s)self->base)->%s)" % (class_name, attr.name)
@@ -1341,9 +1357,6 @@ if(!strcmp(name, "%(name)s")) {
         out.write("}\n\n")
 
 class ProxiedGetattr(GetattrMethod):
-    def __init__(self, class_name, base_class_name):
-        GetattrMethod.__init__(self, class_name, base_class_name)
-
     def built_ins(self,out):
         out.write("""  if(!strcmp(name, "__members__")) {
      PyObject *result;
@@ -1356,7 +1369,7 @@ class ProxiedGetattr(GetattrMethod):
      if(!result) goto error;
 """)
         ## Add attributes
-        for class_name, attr in self.attributes:
+        for class_name, attr in self.get_attributes():
             out.write(""" tmp = PyString_FromString("%(name)s");
     PyList_Append(result, tmp); Py_DECREF(tmp);
 """ % dict(name = attr.name))
@@ -1482,7 +1495,7 @@ if(PyErr_Occurred()) {
         ## Now convert the python value back to a value
         out.write(self.return_type.from_python_object('py_result',self.return_type.name, self, context = "self"))
 
-        out.write("if(py_result) Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
+        out.write("if(py_result) { Py_DECREF(py_result);};\nPy_DECREF(method_name);\n\n");
         out.write("PyGILState_Release(gstate);\n")
 
         ## Decref all our python objects:
@@ -1492,7 +1505,7 @@ if(PyErr_Occurred()) {
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:
             out.write("\nerror:\n")
-            out.write("if(py_result) Py_DECREF(py_result);\nPy_DECREF(method_name);\n\n");
+            out.write("if(py_result) { Py_DECREF(py_result);};\nPy_DECREF(method_name);\n\n");
             ## Decref all our python objects:
             for arg in self.args:
                 out.write("if(py_%s) { Py_DECREF(py_%s);};\n" % (arg.name, arg.name))
@@ -1732,6 +1745,7 @@ class EmptyConstructor(ConstructorMethod):
         out.write("""return 0;};\n\n""")
 
 class ClassGenerator:
+    docstring = ''
     def __init__(self, class_name, base_class_name, module):
         self.class_name = class_name
         self.methods = []
@@ -1740,7 +1754,7 @@ class ClassGenerator:
                                              "Con", [], '', myclass = self)
 
         self.base_class_name = base_class_name
-        self.attributes = GetattrMethod(self.class_name, self.base_class_name)
+        self.attributes = GetattrMethod(self.class_name, self.base_class_name, self)
         self.modifier = ''
         self.active = True
 
@@ -1748,9 +1762,9 @@ class ClassGenerator:
         result = "#%s\n" % self.docstring
 
         result += "Class %s(%s):\n" % (self.class_name, self.base_class_name)
-        result += " Constructor: %s\n" % self.constructor
-        result += " Attributes: \n%s\n" % self.attributes
-        result += " Methods: \n"
+        result += " Constructor:%s\n" % self.constructor
+        result += " Attributes:\n%s\n" % self.attributes
+        result += " Methods:\n"
         for a in self.methods:
             result += "    %s\n" % a.__str__()
 
@@ -1784,7 +1798,7 @@ class ClassGenerator:
         result.docstring = docstring
         self.methods.append(result)
 
-    def add_attribute(self, attr_name, attr_type):
+    def add_attribute(self, attr_name, attr_type, modifier):
         try:
             if not self.module.classes[attr_type].is_active(): return
         except KeyError: pass
@@ -1799,6 +1813,7 @@ class ClassGenerator:
                                                           attr_name))
             return
 
+        type_class.attributes.add(modifier)
         self.attributes.add_attribute(type_class)
 
     def add_constructor(self, method_name, args, return_type, docstring):
@@ -1973,7 +1988,7 @@ class StructGenerator(ClassGenerator):
         self.constructor = StructConstructor(class_name, base_class_name,
                                              'Con', [], "void", myclass = self)
         self.base_class_name = base_class_name
-        self.attributes = GetattrMethod(self.class_name, self.base_class_name)
+        self.attributes = GetattrMethod(self.class_name, self.base_class_name, self)
         self.active = False
         self.modifier = ''
 
@@ -1981,7 +1996,7 @@ class StructGenerator(ClassGenerator):
         result = "#%s\n" % self.docstring
 
         result += "Struct %s:\n" % (self.class_name)
-        result += self.attributes.__str__()
+        result += "%s\n" % self.attributes
 
         return result
 
@@ -2003,9 +2018,9 @@ class ProxyClassGenerator(ClassGenerator):
                                             self.base_class_name, '__init__',
                                             [('PyObject *', 'proxied')],
                                             'void', myclass = self)
-
-        self.attributes = ProxiedGetattr(self.class_name, self.base_class_name)
         self.module = module
+        self.attributes = ProxiedGetattr(self.class_name, self.base_class_name, self)
+
 
     def initialise(self):
         return "INIT_CLASS(%(class_name)s);\n" % self.__dict__ + ClassGenerator.initialise(self)
@@ -2350,12 +2365,12 @@ class HeaderParser(lexer.SelfFeederMixIn):
         [ 'INITIAL', r"^([A-Z]+)?\s*CLASS\(([A-Z_a-z0-9]+)\s*,\s*([A-Z_a-z0-9]+)\)",
                      'PUSH_STATE,CLASS_START', 'CLASS'],
 
-        [ 'CLASS', r"^\s*([0-9A-Z_a-z ]+( |\*))METHOD\(([A-Z_a-z0-9]+),\s*([A-Z_a-z0-9]+),?",
+        [ 'CLASS', r"^\s*(FOREIGN|ABSTRACT|PRIVATE)?([0-9A-Z_a-z ]+( |\*))METHOD\(([A-Z_a-z0-9]+),\s*([A-Z_a-z0-9]+),?",
                      "PUSH_STATE,METHOD_START", "METHOD"],
         [ 'METHOD', r"\s*([0-9A-Z a-z_]+\s+\*?)([0-9A-Za-z_]+),?", "METHOD_ARG", None ],
         [ 'METHOD', r'\);', 'POP_STATE,METHOD_END', None],
 
-        [ 'CLASS', r"^\s*([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z0-9]+)\s*;",
+        [ 'CLASS', r"^\s*(FOREIGN|ABSTRACT)?([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z0-9]+)\s*;",
                    'CLASS_ATTRIBUTE', None],
         [ 'CLASS', "END_CLASS", 'END_CLASS,POP_STATE', None],
 
@@ -2384,7 +2399,7 @@ class HeaderParser(lexer.SelfFeederMixIn):
         [ 'ENUM', r'}\s+([0-9A-Za-z_]+);', 'POP_STATE,TYPEDEFED_ENUM_END', None],
         [ 'ENUM', r'}', 'POP_STATE,ENUM_END', None],
 
-        [ 'INITIAL', r'BIND_STRUCT\(([0-9A-Za-z_]+)\)', 'BIND_STRUCT', None],
+        [ 'INITIAL', r'BIND_STRUCT\(([0-9A-Za-z_ \*]+)\)', 'BIND_STRUCT', None],
 
         ## A simple typedef of one type for another type:
         [ 'INITIAL', r"typedef ([A-Za-z_0-9]+) +([^;]+);", 'SIMPLE_TYPEDEF', None],
@@ -2421,14 +2436,14 @@ END_CLASS
         else:
             type = 'numeric'
 
-        name = m.group(1)
+        name = m.group(1).strip()
         if len(name)>3 and name[0]!='_' and name==name.upper():
             self.module.add_constant(name, type)
 
     current_class = None
     def CLASS_START(self, t, m):
-        class_name = m.group(2)
-        base_class_name = m.group(3)
+        class_name = m.group(2).strip()
+        base_class_name = m.group(3).strip()
 
         try:
             self.current_class = self.module.classes[base_class_name].clone(class_name)
@@ -2443,10 +2458,11 @@ END_CLASS
 
     current_method = None
     def METHOD_START(self, t, m):
-        return_type = m.group(1).strip()
-        method_name = m.group(4).strip()
+        return_type = m.group(2).strip()
+        method_name = m.group(5).strip()
+        modifier = m.group(1) or ''
 
-        if 'PRIVATE' in return_type: return
+        if 'PRIVATE' in modifier: return
 
         ## Is it a regular method or a constructor?
         self.current_method = Method
@@ -2459,6 +2475,7 @@ END_CLASS
                                                   method_name, [], return_type,
                                                   myclass = self.current_class)
         self.current_method.docstring = self.current_comment
+        self.current_method.modifier = modifier
 
     def METHOD_ARG(self, t, m):
         name = m.group(2).strip()
@@ -2477,16 +2494,17 @@ END_CLASS
         self.current_method = None
 
     def CLASS_ATTRIBUTE(self, t, m):
-        type = m.group(1)
-        name = m.group(2)
-        self.current_class.add_attribute(name, type)
+        modifier = m.group(1) or ''
+        type = m.group(2).strip()
+        name = m.group(3).strip()
+        self.current_class.add_attribute(name, type, modifier)
 
     def END_CLASS(self, t, m):
         self.current_class = None
 
     current_struct = None
     def STRUCT_START(self, t, m):
-        self.current_struct = StructGenerator(m.group(2), None, self.module)
+        self.current_struct = StructGenerator(m.group(2).strip(), None, self.module)
         self.current_struct.docstring = self.current_comment
         self.current_struct.modifier = m.group(1)
 
@@ -2497,7 +2515,7 @@ END_CLASS
     def STRUCT_ATTRIBUTE(self, t, m):
         name = m.group(2).strip()
         type = m.group(1).strip()
-        self.current_struct.add_attribute(name, type)
+        self.current_struct.add_attribute(name, type, '')
 
     def STRUCT_END(self, t, m):
         self.module.add_class(self.current_struct, StructWrapper)
@@ -2505,22 +2523,30 @@ END_CLASS
         self.current_struct = None
 
     def TYPEDEF_STRUCT_END(self, t, m):
-        self.current_struct.class_name = m.group(1)
+        self.current_struct.class_name = m.group(1).strip()
         self.STRUCT_END(t, m)
 
     current_enum = None
     def ENUM_START(self, t, m):
         self.current_enum = Enum()
-        self.current_enum.name = m.group(1)
+        self.current_enum.name = m.group(1).strip()
 
     def TYPEDEF_ENUM_START(self, t, m):
         self.current_enum = Enum()
 
     def ENUM_VALUE(self, t, m):
-        self.current_enum.values.append(m.group(1))
+        self.current_enum.values.append(m.group(1).strip())
 
     def ENUM_END(self, t, m):
         #self.module.classes[self.current_enum.name] = self.current_enum
+        ## For now we just treat enums as an integer, and also add
+        ## them to the constant table. In future it would be nice to
+        ## have them as a proper python object so we can override
+        ## __str__ and __int__.
+        for attr in self.current_enum.values:
+            self.module.add_constant(attr, 'integer')
+
+        type_dispatcher[self.current_enum.name] = Integer
         self.current_enum = None
 
     def TYPEDEFED_ENUM_END(self, t, m):
@@ -2538,7 +2564,7 @@ END_CLASS
             type_dispatcher[new] = type_dispatcher[old]
 
     def PROXY_CLASS(self, t, m):
-        base_class_name = m.group(1)
+        base_class_name = m.group(1).strip()
         class_name = "Proxied%s" % base_class_name
         try:
             proxied_class = self.module.classes[base_class_name]

@@ -44,10 +44,11 @@ nenv.Depends('pyaff4.c', 'class_parser.py')
 nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=env.libaff4_so)
 
 BOUND_FILES = Split("""
-tsk/pytsk3.h
-tsk/tsk3.h
+/usr/local/include/tsk3/libtsk.h
 /usr/local/include/tsk3/fs/tsk_fs.h
 /usr/local/include/tsk3/base/tsk_base.h
+tsk/pytsk3.h
+tsk/tsk3.h
 """)
 
 nenv.Command('tsk/pytsk3.c', BOUND_FILES, build_python_bindings)
