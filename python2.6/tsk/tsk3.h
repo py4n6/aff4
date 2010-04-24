@@ -20,6 +20,9 @@ typedef struct Extended_TSK_IMG_INFO_t {
 } *Extended_TSK_IMG_INFO;
 
 BIND_STRUCT(TSK_FS_INFO);
+BIND_STRUCT(TSK_FS_NAME);
+BIND_STRUCT(TSK_FS_FILE);
+
 
 /** This is an image info object based on an AFF4 object.
 
@@ -46,6 +49,30 @@ CLASS(AFF4ImgInfo, Object)
    void METHOD(AFF4ImgInfo, close);
 END_CLASS
 
+// Forward declerations
+struct FS_Info_t;
+
+CLASS(File, Object)
+     FOREIGN TSK_FS_FILE *info;
+
+     File METHOD(File, Con);
+END_CLASS
+
+CLASS(Directory, Object)
+     FOREIGN TSK_FS_DIR *info;
+     size_t size;
+
+     int current;
+
+     /* We can open the directory using a path, its inode number.
+
+        DEFAULT(path) = NULL;
+        DEFAULT(inode) = 0;
+      */
+     Directory METHOD(Directory, Con, struct FS_Info_t *fs, ZString path, TSK_INUM_T inode);
+
+     File METHOD(Directory, iternext);
+END_CLASS
 
 /** This is used to obtain a filesystem object from an AFF4ImgInfo */
 CLASS(FS_Info, Object)
@@ -56,6 +83,14 @@ CLASS(FS_Info, Object)
        DEFAULT(type) = TSK_FS_TYPE_DETECT;
      */
      FS_Info METHOD(FS_Info, Con, AFF4ImgInfo img, TSK_FS_TYPE_ENUM type);
+
+     /** A convenience function to open a directory in this image. 
+
+         DEFAULT(path) = NULL;
+         DEFAULT(inode) = 2;
+     */
+     Directory METHOD(FS_Info, open_dir, ZString path, TSK_INUM_T inode);
+
 END_CLASS
 
 #endif 	    /* !TSK3_H_ */

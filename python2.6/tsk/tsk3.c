@@ -99,7 +99,8 @@ static FS_Info FS_Info_Con(FS_Info self, AFF4ImgInfo img, TSK_FS_TYPE_ENUM type)
   // Now try to open the filesystem
   self->fs = tsk_fs_open_img((struct TSK_IMG_INFO *)img->img, img->offset, type);
   if(!self->fs) {
-    RaiseError(ERuntimeError, "Unable to open the image as a filesystem");
+    RaiseError(ERuntimeError, "Unable to open the image as a filesystem: %s",
+               tsk_error_get());
     goto error;
   };
 
@@ -112,6 +113,91 @@ static FS_Info FS_Info_Con(FS_Info self, AFF4ImgInfo img, TSK_FS_TYPE_ENUM type)
   return NULL;
 };
 
+static Directory FS_Info_open_dir(FS_Info self, ZString path, TSK_INUM_T inode) {
+  return CONSTRUCT(Directory, Directory, Con, NULL, self, path, inode);
+};
+
 VIRTUAL(FS_Info, Object) {
   VMETHOD(Con) = FS_Info_Con;
+  VMETHOD(open_dir) = FS_Info_open_dir;
+} END_VIRTUAL
+
+
+static int Directory_dest(void *self) {
+  Directory this = (Directory)self;
+  tsk_fs_dir_close(this->info);
+
+  return 0;
+};
+
+static Directory Directory_Con(Directory self, FS_Info fs,
+                               ZString path, TSK_INUM_T inode) {
+  if(!path) {
+    self->info = tsk_fs_dir_open_meta(fs->fs, inode);
+  } else {
+    self->info = tsk_fs_dir_open(fs->fs, path);
+  };
+
+  if(!self->info) {
+    RaiseError(ERuntimeError, "Unable to open directory: %s", tsk_error_get());
+    goto error;
+  };
+
+  self->current = 0;
+  self->size = tsk_fs_dir_getsize(self->info);
+  talloc_set_destructor((void *)self, Directory_dest);
+
+  return self;
+
+ error:
+  talloc_free(self);
+  return NULL;
+};
+
+static File Directory_next(Directory self) {
+  File result;
+
+  if(self->current >= self->size) {
+    return NULL;
+  };
+
+  result = CONSTRUCT(File, File, Con, NULL);
+  result->info = tsk_fs_dir_get(self->info, self->current);
+
+  if(!result->info) {
+    RaiseError(ERuntimeError, "Error opening File: %s", tsk_error_get());
+    goto error;
+  };
+
+  self->current ++;
+
+  return result;
+
+ error:
+  talloc_free(result);
+  return NULL;
+};
+
+VIRTUAL(Directory, Object) {
+  VMETHOD(Con) = Directory_Con;
+  VMETHOD(iternext) = Directory_next;
+} END_VIRTUAL
+
+static int File_dest(void *self) {
+  File this = (File)self;
+  if(this->info) {
+    tsk_fs_file_close(this->info);
+  };
+
+  return 0;
+};
+
+
+static File File_Con(File self) {
+  talloc_set_destructor((void *)self, File_dest);
+  return self;
+};
+
+VIRTUAL(File, Object) {
+  VMETHOD(Con) = File_Con;
 } END_VIRTUAL
