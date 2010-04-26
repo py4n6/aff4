@@ -161,6 +161,20 @@ static int type_check(PyObject *obj, PyTypeObject *type) {
   return 0;
 };
 
+static int check_error() {
+   if(!CheckError(EZero)) {
+         char *buffer;
+         PyObject *exception = resolve_exception(&buffer);
+
+         PyErr_Format(exception, "%%s", buffer);
+         ClearError();
+         return 1;
+   };
+  return 0;
+};
+
+#define CHECK_ERROR if(check_error()) goto error;
+
 """ % (len(self.classes)+1)
 
     def initialise_class(self, class_name, out, done = None):
@@ -543,15 +557,18 @@ PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
 
     def to_python_object(self, name=None, result='py_result', sense='in', **kw):
         name = name or self.name
-
         if 'results' in kw:
             kw['results'].pop(0)
 
         if sense=='proxied':
             return "py_%s = PyLong_FromLong(%s);\n" % (self.name, self.length)
 
-        return """ _PyString_Resize(&tmp_%s, func_return); \n%s = tmp_%s;\n""" % (
-            name, result, name)
+        return  """if(func_return > %(length)s) {
+  func_return = 0;
+};
+
+_PyString_Resize(&tmp_%(name)s, func_return); \n%(result)s = tmp_%(name)s;\n""" % \
+            dict(name= name, result= result, length=self.length)
 
 
     def python_proxy_post_call(self, result='py_result'):
@@ -706,26 +723,19 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
        returned_object = (Object)%(call)s;
        Py_END_ALLOW_THREADS
 
-       if(!CheckError(EZero)) {
-         char *buffer;
-         PyObject *exception = resolve_exception(&buffer);
-
-         PyErr_Format(exception,
-                    "%%s", buffer);
-         ClearError();
-         goto error;
+       CHECK_ERROR;
 """ % args
 
         ## Is NULL an acceptable return type? In some python code NULL
         ## can be returned (e.g. in iterators) but usually it should
         ## be converted to None.
         if "NULL_OK" in self.attributes:
-            result += """ } if(returned_object == NULL) {
+            result += """if(returned_object == NULL) {
      %(name)s = NULL; """ % args
         else:
             result += """
        // A NULL return without errors means we return None
-       } else if(!returned_object) {
+       if(!returned_object) {
          %(name)s = (Gen_wrapper *)Py_None;
          Py_INCREF(Py_None);
 """ % args
@@ -2553,7 +2563,8 @@ class EnumType(Integer):
         method.error_set = True
         return """
 // Check if the integer passed is actually a valid member of the enum
-{ PyObject *py_%(name)s = PyLong_FromLong(%(name)s);
+// Enum value of 0 is always allowed
+if(%(name)s) { PyObject *py_%(name)s = PyLong_FromLong(%(name)s);
   PyObject *tmp = PyDict_GetItem(%(type)s_rev_lookup, py_%(name)s);
 
   Py_DECREF(py_%(name)s);
@@ -2614,9 +2625,9 @@ class HeaderParser(lexer.SelfFeederMixIn):
         [ 'STRUCT', '}\s+([0-9A-Za-z_]+);', 'POP_STATE,TYPEDEF_STRUCT_END', None],
         [ 'STRUCT', '}', 'POP_STATE,STRUCT_END', None],
 
-        ## Handle recursive struct definition (At the moment we cant
-        ## handle them at all)
-        [ 'STRUCT', 'struct\s+{', 'PUSH_STATE', 'RECURSIVE_STRUCT'],
+        ## Handle recursive struct or union definition (At the moment
+        ## we cant handle them at all)
+        [ '(RECURSIVE_)?STRUCT', '(struct|union)\s+{', 'PUSH_STATE', 'RECURSIVE_STRUCT'],
         [ 'RECURSIVE_STRUCT', '}\s+[0-9A-Za-z]+', 'POP_STATE', None],
 
         ## Process enums (2 forms - named and typedefed)
