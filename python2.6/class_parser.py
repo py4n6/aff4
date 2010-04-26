@@ -83,6 +83,11 @@ table to do so.
 */
 static int TOTAL_CLASSES=0;
 
+/* This is a global reference to this module so classes can call each
+   other.
+*/
+static PyObject *g_module = NULL;
+
 static struct python_wrapper_map_t {
        Object class_ref;
        PyTypeObject *python_type;
@@ -176,7 +181,7 @@ static int type_check(PyObject *obj, PyTypeObject *type) {
                 ## Now assign ourselves as derived from them
                 out.write(" %s_Type.tp_base = &%s_Type;" % (
                         cls.class_name, cls.base_class_name))
-
+            
             out.write("""
  %(name)s_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&%(name)s_Type) < 0)
@@ -234,6 +239,8 @@ PyMODINIT_FUNC init%(module)s(void) {
                                    "%(module)s module.");
    PyObject *d = PyModule_GetDict(m);
    PyObject *tmp;
+
+   g_module = m;
 """ % {'module': self.name})
 
         ## The trick is to initialise the classes in order of their
@@ -1988,11 +1995,12 @@ static PyNumberMethods %(class)s_as_number = {
         args = {'class':self.class_name, 'module': self.module.name, 
                 'iterator': 0,
                 'iternext': 0,
+                'tp_str': 0,
                 'getattr_func': 0,
                 'docstring': "%s: %s" % (self.class_name, 
                                          escape_for_string(self.docstring))}
 
-        if self.attributes.name:
+        if self.attributes:
             args['getattr_func'] = self.attributes.name
 
         args['numeric_protocol'] = self.numeric_protocol(out)
@@ -2002,6 +2010,9 @@ static PyNumberMethods %(class)s_as_number = {
 
         if "SELF_ITER" in self.modifier:
             args['iterator'] = 'py%s___iter__' % self.class_name
+
+        if "TP_STR" in self.modifier:
+            args['tp_str'] = 'py%s___str__' % self.class_name
 
         out.write("""
 static PyTypeObject %(class)s_Type = {
@@ -2021,7 +2032,7 @@ static PyTypeObject %(class)s_Type = {
     0,                         /* tp_as_mapping */
     0,                         /* tp_hash */
     0,                         /* tp_call */
-    0,                         /* tp_str */
+    (reprfunc)%(tp_str)s,      /* tp_str */
     (getattrofunc)%(getattr_func)s,                         /* tp_getattro */
     0,                         /* tp_setattro */
     0,                         /* tp_as_buffer */
@@ -2049,11 +2060,11 @@ static PyTypeObject %(class)s_Type = {
 
 class StructGenerator(ClassGenerator):
     """ A wrapper generator for structs """
-    def __init__(self, class_name, base_class_name, module):
+    def __init__(self, class_name, module):
         self.class_name = class_name
         self.methods = []
         self.module = module
-        self.base_class_name = base_class_name
+        self.base_class_name = None
         self.active = False
         self.modifier = set()
         self.constructor = None
@@ -2404,12 +2415,56 @@ END_CLASS
 
 import lexer
 
-class Enum:
-    name = None
-    values = None
+class EnumConstructor(ConstructorMethod):
+    def write_destructor(self, out):
+        out.write("""static void
+%(class_name)s_dealloc(py%(class_name)s *self) {
+ Py_DECREF(self->value);
+ PyObject_Del(self);
+};\n
+""" % dict(class_name = self.class_name))
+    def write_definition(self, out):
+        self.myclass.modifier.add("TP_STR")
+        self._prototype(out)
+        out.write("""{
+static char *kwlist[] = {"value", NULL};
 
-    def __init__(self):
+if(!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &self->value))
+ goto error;
+
+Py_INCREF(self->value);
+
+  return 0;
+error:
+    return -1;
+};
+
+static PyObject *py%(class_name)s___str__(py%(class_name)s *self) {
+  PyObject *result = PyDict_GetItem(%(class_name)s_rev_lookup, self->value);
+
+  if(result) {
+     Py_INCREF(result);
+ } else {
+     result = PyObject_Str(self->value);
+ };
+
+ return result;
+};
+
+""" % self.__dict__)
+
+class Enum(StructGenerator):
+    def __init__(self, name, module):
+        StructGenerator.__init__(self, name, module)
         self.values = []
+        self.name = name
+        self.attributes = None
+        self.active = True
+
+    def prepare(self):
+        self.constructor = EnumConstructor(self.class_name, self.base_class_name,
+                                           'Con', [], "void", myclass = self)
+        StructGenerator.prepare(self)
 
     def __str__(self):
         result = "Enum %s:\n" % (self.name)
@@ -2417,6 +2472,57 @@ class Enum:
             result += "    %s\n" % attr.__str__()
 
         return result
+
+    def struct(self,out):
+        out.write("""\ntypedef struct {
+  PyObject_HEAD
+  PyObject *value;
+} py%(class_name)s; \n
+
+
+static PyObject *%(class_name)s_Dict_lookup;
+static PyObject *%(class_name)s_rev_lookup;
+""" % dict(class_name=self.class_name))
+
+    def PyMethodDef(self, out):
+        out.write("static PyMethodDef %s_methods[] = {\n" % self.class_name)
+        out.write("     {NULL}  /* Sentinel */\n};\n")
+
+    def numeric_protocol(self, out):
+        return '0'
+
+    def initialise(self):
+        result = """
+%(class_name)s_Dict_lookup = PyDict_New();
+%(class_name)s_rev_lookup = PyDict_New();
+""" % self.__dict__
+
+        if self.values:
+            result += "{ PyObject *tmp, *tmp2;\n"
+            for attr in self.values:
+                result += ''' tmp = PyLong_FromLong(%(value)s);
+  tmp2 = PyString_FromString("%(value)s");
+  PyDict_SetItem(%(class_name)s_Dict_lookup, tmp2, tmp);
+  PyDict_SetItem(%(class_name)s_rev_lookup, tmp, tmp2);
+  Py_DECREF(tmp);
+  Py_DECREF(tmp2);
+
+''' % dict(value = attr, class_name=self.class_name)
+            result += "};\n"
+
+        return result
+
+class EnumType(Integer):
+    def __init__(self, name, type):
+        Integer.__init__(self, name, type)
+        self.type = type
+
+    def to_python_object(self, name=None, result='py_result', **kw):
+        name = name or self.name
+        return """PyErr_Clear();
+%s = PyObject_CallMethod(g_module, "%s", "K", (uint64_t)%s);
+""" % (result, self.type, name)
+
 
 class HeaderParser(lexer.SelfFeederMixIn):
     tokens = [
@@ -2558,6 +2664,8 @@ END_CLASS
         elif method_name == '__iter__':
             self.current_method = SelfIteratorMethod
             self.current_class.modifier.add("SELF_ITER")
+        elif method_name == '__str__':
+            self.current_class.modifier.add("TP_STR")
 
         self.current_method = self.current_method(self.current_class.class_name,
                                                   self.current_class.base_class_name,
@@ -2593,12 +2701,12 @@ END_CLASS
 
     current_struct = None
     def STRUCT_START(self, t, m):
-        self.current_struct = StructGenerator(m.group(2).strip(), None, self.module)
+        self.current_struct = StructGenerator(m.group(2).strip(), self.module)
         self.current_struct.docstring = self.current_comment
         self.current_struct.modifier.add(m.group(1))
 
     def TYPEDEF_STRUCT_START(self, t, m):
-        self.current_struct = StructGenerator(None, None, self.module)
+        self.current_struct = StructGenerator(None, self.module)
         self.current_struct.docstring = self.current_comment
 
     def STRUCT_ATTRIBUTE(self, t, m):
@@ -2619,17 +2727,17 @@ END_CLASS
 
     current_enum = None
     def ENUM_START(self, t, m):
-        self.current_enum = Enum()
-        self.current_enum.name = m.group(1).strip()
+        self.current_enum = Enum(m.group(1).strip(), self.module)
 
     def TYPEDEF_ENUM_START(self, t, m):
-        self.current_enum = Enum()
+        self.current_enum = Enum(None, self.module)
 
     def ENUM_VALUE(self, t, m):
         self.current_enum.values.append(m.group(1).strip())
 
     def ENUM_END(self, t, m):
-        #self.module.classes[self.current_enum.name] = self.current_enum
+        self.module.classes[self.current_enum.name] = self.current_enum
+
         ## For now we just treat enums as an integer, and also add
         ## them to the constant table. In future it would be nice to
         ## have them as a proper python object so we can override
@@ -2637,11 +2745,12 @@ END_CLASS
         for attr in self.current_enum.values:
             self.module.add_constant(attr, 'integer')
 
-        type_dispatcher[self.current_enum.name] = Integer
+        #type_dispatcher[self.current_enum.name] = Integer
+        type_dispatcher[self.current_enum.name] = EnumType
         self.current_enum = None
 
     def TYPEDEFED_ENUM_END(self, t, m):
-        self.current_enum.name = m.group(1)
+        self.current_enum.name = self.current_enum.class_name = m.group(1)
         self.ENUM_END(t, m)
 
     def BIND_STRUCT(self, t, m):

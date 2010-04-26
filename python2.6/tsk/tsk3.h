@@ -26,6 +26,8 @@ BIND_STRUCT(TSK_FS_BLOCK);
 BIND_STRUCT(TSK_FS_ATTR);
 BIND_STRUCT(TSK_FS_ATTR_RUN);
 
+BIND_STRUCT(TSK_FS_ATTR_TYPE_ENUM);
+
 /** This is an image info object based on an AFF4 object.
 
     Before we can use libtsk we need to instantiate one of these from
