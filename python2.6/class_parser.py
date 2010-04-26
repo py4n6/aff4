@@ -801,6 +801,14 @@ PyErr_Clear();
 %(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
 %(name)s->ctx = talloc_size(NULL, 1);
 %(name)s->base = %(call)s;
+
+// A NULL object gets translated to a None
+if(!%(name)s->base) {
+   Py_DECREF(%(name)s);
+   Py_INCREF(Py_None);
+   %(name)s = (Gen_wrapper *)Py_None;
+};
+
 """ % args
 
         if "FOREIGN" in self.attributes:
@@ -1405,7 +1413,7 @@ static PyObject *py%(class_name)s_getattr(py%(class_name)s *self, PyObject *pyna
   // No - nothing interesting was found by python
   name = PyString_AsString(pyname);
 
-  if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Wrapped object no longer valid");
+  if(!self->base) return PyErr_Format(PyExc_RuntimeError, "Wrapped object (%(class_name)s.%(name)s) no longer valid");
   if(!name) return NULL;
 """ % self.__dict__)
 

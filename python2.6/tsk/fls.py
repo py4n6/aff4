@@ -9,6 +9,9 @@ parser = OptionParser()
 parser.add_option("-f", "--fstype", default=None,
                   help="File system type (use '-f list' for supported types)")
 
+parser.add_option('-o', '--offset', default=0, type='int',
+                  help='Offset in the image (in bytes)')
+                  
 parser.add_option("-l", "--long", action='store_true', default=False,
                   help="Display long version (like ls -l)")
 
@@ -41,7 +44,7 @@ else:
 
 ## Step 1: get an IMG_INFO object (url can be any URL that AFF4 can
 ## handle)
-img = pytsk3.AFF4ImgInfo(url)
+img = pytsk3.AFF4ImgInfo(url, offset=options.offset)
 
 ## Step 2: Open the filesystem
 fs = pytsk3.FS_Info(img)
@@ -54,4 +57,7 @@ directory = fs.open_dir(path=path, inode=inode)
 ## TSK_FS_FILE struct - you can further dereference this struct into a
 ## TSK_FS_NAME and TSK_FS_META structs.
 for f in directory:
-    print f.info.meta.size, f.info.name.name
+    try:
+        print f.info.meta.size, f.info.name.name
+    except Exception,e:
+        print e, f.info.name.name
