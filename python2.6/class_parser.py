@@ -252,10 +252,13 @@ PyMODINIT_FUNC init%(module)s(void) {
 
         ## Add the constants in here
         for constant, type in self.constants:
-            if type == 'numeric':
-                out.write(""" tmp = PyLong_FromUnsignedLongLong((int)%s); \n""" % constant)
+            if type == 'integer':
+                out.write(""" tmp = PyLong_FromUnsignedLongLong((int64_t)%s); \n""" % constant)
             elif type == 'string':
                 out.write(" tmp = PyString_FromString((char *)%s); \n" % constant)
+            else:
+                out.write(" // I dont know how to convert %s type %s\n" % (constant, type))
+                continue
 
             out.write("""
  PyDict_SetItemString(d, "%s", tmp);
@@ -266,7 +269,7 @@ PyMODINIT_FUNC init%(module)s(void) {
 
 class Type:
     interface = None
-    buidstr = 'O'
+    buildstr = 'O'
     sense = 'IN'
     error_value = "return 0;"
     active = True
@@ -331,7 +334,7 @@ class Type:
 
 class String(Type):
     interface = 'string'
-    buidstr = 's'
+    buildstr = 's'
     error_value = "return NULL;"
 
     def __init__(self, name, type):
@@ -382,7 +385,7 @@ class BorrowedString(String):
 
 class Char_and_Length(Type):
     interface = 'char_and_length'
-    buidstr = 's#'
+    buildstr = 's#'
     error_value = "return NULL;"
 
     def __init__(self, data, data_type, length, length_type):
@@ -416,7 +419,7 @@ class Char_and_Length(Type):
 
 class Integer(Type):
     interface = 'integer'
-    buidstr = 'K'
+    buildstr = 'K'
 
     def __init__(self, name,type):
         Type.__init__(self,name,type)
@@ -439,7 +442,7 @@ class Integer(Type):
         return "%s %s " % (self.original_type, self.name)
 
 class Integer32(Integer):
-    buidstr = 'I'
+    buildstr = 'I'
 
     def __init__(self, name,type):
         Type.__init__(self,name,type)
@@ -451,11 +454,11 @@ class Integer32(Integer):
         return "PyErr_Clear();\n%s = PyLong_FromLong(%s);\n" % (result, name)
 
 class Integer64(Integer):
-    buidstr = 'K'
+    buildstr = 'K'
     type = 'unsigned int'
 
 class Char(Integer):
-    buidstr = "s"
+    buildstr = "s"
     interface = 'small_integer'
 
     def to_python_object(self, name = None, result = 'py_result', **kw):
@@ -492,7 +495,7 @@ class StringOut(String):
 
 class IntegerOut(Integer):
     sense = 'OUT_DONE'
-    buidstr = ''
+    buildstr = ''
 
     def python_name(self):
         return None
@@ -505,7 +508,7 @@ class IntegerOut(Integer):
 
 class Integer32Out(Integer32):
     sense = 'OUT_DONE'
-    buidstr = ''
+    buildstr = ''
 
     def python_name(self):
         return None
@@ -518,7 +521,7 @@ class Integer32Out(Integer32):
 
 class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT_DONE'
-    buidstr = 'l'
+    buildstr = 'l'
 
     def definition(self, default = 0, **kw):
         return "char *%s=NULL; Py_ssize_t %s=%s;\n" % (
@@ -618,7 +621,7 @@ class TDB_DATA(TDB_DATA_P):
             name, name)
 
 class Void(Type):
-    buidstr = ''
+    buildstr = ''
     error_value = "return;"
     original_type = ''
 
@@ -820,7 +823,7 @@ class PointerStructWrapper(StructWrapper):
 class Timeval(Type):
     """ handle struct timeval values """
     interface = 'numeric'
-    buidstr = 'f'
+    buildstr = 'f'
 
     def definition(self, default = None, **kw):
         return "float %(name)s_flt; struct timeval %(name)s;\n" % self.__dict__
@@ -840,7 +843,7 @@ class Timeval(Type):
 class PyObject(Type):
     """ Accept an opaque python object """
     interface = 'opaque'
-    buidstr = 'O'
+    buildstr = 'O'
     def definition(self, default = 'NULL', **kw):
         self.default = default
         return 'PyObject *%(name)s = %(default)s;\n' % self.__dict__
@@ -1002,14 +1005,14 @@ class Method:
         parse_line = ''
         for type in self.args:
             python_name = type.python_name()
-            if type.buidstr and python_name not in self.defaults:
-                parse_line += type.buidstr
+            if type.buildstr and python_name not in self.defaults:
+                parse_line += type.buildstr
 
         parse_line += '|'
         for type in self.args:
             python_name = type.python_name()
-            if type.buidstr and python_name in self.defaults:
-                parse_line += type.buidstr
+            if type.buildstr and python_name in self.defaults:
+                parse_line += type.buildstr
 
         if parse_line != '|':
             ## Now parse the args from python objects
@@ -1936,17 +1939,30 @@ class ClassGenerator:
         for method in self.methods:
             method.prototype(out)
 
-    def numeric_protocol(self, out):
-        args = {'class':self.class_name}
-        out.write("""
+    def numeric_protocol_int(self):
+        pass
 
+    def numeric_protocol_nonzero(self):
+        return """
 static int
-%(class)s_nonzero(py%(class)s *v)
+%(class_name)s_nonzero(py%(class_name)s *v)
 {
         return v->base != 0;
 };
+""" % self.__dict__
 
+    def numeric_protocol(self, out):
+        args = {'class':self.class_name}
+        for type, func in [ ('nonzero', self.numeric_protocol_nonzero),
+                            ('int', self.numeric_protocol_int) ]:
+            definition = func()
+            if definition:
+                out.write(definition)
+                args[type] = "%s_%s" % (self.class_name,type)
+            else:
+                args[type] = '0'
 
+        out.write("""
 static PyNumberMethods %(class)s_as_number = {
         (binaryfunc)    0,       /*nb_add*/
         (binaryfunc)    0,       /*nb_subtract*/
@@ -1958,7 +1974,7 @@ static PyNumberMethods %(class)s_as_number = {
         (unaryfunc)     0,       /*nb_negative*/
         (unaryfunc)     0,       /*tp_positive*/
         (unaryfunc)     0,       /*tp_absolute*/
-        (inquiry)       %(class)s_nonzero,   /*tp_nonzero*/
+        (inquiry)       %(nonzero)s,   /*tp_nonzero*/
         (unaryfunc)     0,       /*nb_invert*/
                         0,       /*nb_lshift*/
         (binaryfunc)    0,       /*nb_rshift*/
@@ -1966,7 +1982,7 @@ static PyNumberMethods %(class)s_as_number = {
                         0,       /*nb_xor*/
                         0,       /*nb_or*/
                         0,       /*nb_coerce*/
-                        0,       /*nb_int*/
+         (unaryfunc)    %(int)s,       /*nb_int*/
                         0,       /*nb_long*/
                         0,       /*nb_float*/
                         0,       /*nb_oct*/
@@ -2238,7 +2254,7 @@ END_CLASS
             elif self.state == 'enum':
                 m = self.enum_re.search(line)
                 if m:
-                    self.module.add_constant(m.group(1), 'numeric')
+                    self.module.add_constant(m.group(1), 'integer')
 
                 if '}' in line:
                     self.state = 'DEFAULT'
@@ -2290,7 +2306,7 @@ END_CLASS
                     ## Its a string
                     self.module.add_constant(m.group(1), 'string')
                 else:
-                    self.module.add_constant(m.group(1), 'numeric')
+                    self.module.add_constant(m.group(1), 'integer')
 
             ## Wrap structs
             m = self.struct_re.search(line)
@@ -2488,8 +2504,16 @@ static PyObject *%(class_name)s_rev_lookup;
         out.write("static PyMethodDef %s_methods[] = {\n" % self.class_name)
         out.write("     {NULL}  /* Sentinel */\n};\n")
 
-    def numeric_protocol(self, out):
-        return '0'
+    def numeric_protocol_nonzero(self):
+        pass
+
+    def numeric_protocol_int(self):
+        return """
+static PyObject *%(class_name)s_int(py%(class_name)s *self) {
+    Py_INCREF(self->value);
+    return self->value;
+};
+""" % self.__dict__
 
     def initialise(self):
         result = """
@@ -2513,6 +2537,8 @@ static PyObject *%(class_name)s_rev_lookup;
         return result
 
 class EnumType(Integer):
+    buildstr = 'i'
+
     def __init__(self, name, type):
         Integer.__init__(self, name, type)
         self.type = type
@@ -2523,6 +2549,21 @@ class EnumType(Integer):
 %s = PyObject_CallMethod(g_module, "%s", "K", (uint64_t)%s);
 """ % (result, self.type, name)
 
+    def pre_call(self, method):
+        method.error_set = True
+        return """
+// Check if the integer passed is actually a valid member of the enum
+{ PyObject *py_%(name)s = PyLong_FromLong(%(name)s);
+  PyObject *tmp = PyDict_GetItem(%(type)s_rev_lookup, py_%(name)s);
+
+  Py_DECREF(py_%(name)s);
+  if(!tmp) {
+    PyErr_Format(PyExc_RuntimeError, "value %%lu is not valid for Enum %(type)s of arg '%(name)s'", (unsigned long)%(name)s);
+    goto error;
+  };
+  Py_DECREF(tmp);
+};
+""" % self.__dict__
 
 class HeaderParser(lexer.SelfFeederMixIn):
     tokens = [
@@ -2623,7 +2664,7 @@ END_CLASS
         if '"' in m.group(0):
             type = 'string'
         else:
-            type = 'numeric'
+            type = 'integer'
 
         name = m.group(1).strip()
         if len(name)>3 and name[0]!='_' and name==name.upper():
