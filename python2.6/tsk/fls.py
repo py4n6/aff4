@@ -4,6 +4,9 @@ import pytsk3
 from optparse import OptionParser
 import sys
 import pdb
+import time
+
+#time.sleep(1)
 
 parser = OptionParser()
 parser.add_option("-f", "--fstype", default=None,
@@ -44,7 +47,7 @@ else:
 
 ## Step 1: get an IMG_INFO object (url can be any URL that AFF4 can
 ## handle)
-img = pytsk3.AFF4ImgInfo(url, offset=options.offset)
+img = pytsk3.Img_Info(url)
 
 ## Step 2: Open the filesystem
 fs = pytsk3.FS_Info(img)

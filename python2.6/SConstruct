@@ -47,6 +47,7 @@ BOUND_FILES = Split("""
 /usr/local/include/tsk3/libtsk.h
 /usr/local/include/tsk3/fs/tsk_fs.h
 /usr/local/include/tsk3/base/tsk_base.h
+/usr/local/include/tsk3/img/tsk_img.h
 tsk/pytsk3.h
 tsk/tsk3.h
 """)

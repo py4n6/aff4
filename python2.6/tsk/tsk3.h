@@ -14,11 +14,12 @@
 #include "aff4.h"
 #include <tsk3/libtsk.h>
 
-typedef struct Extended_TSK_IMG_INFO_t {
+typedef struct {
   TSK_IMG_INFO base;
-  struct AFF4ImgInfo_t *container;
-} *Extended_TSK_IMG_INFO;
+  struct Img_Info_t *container;
+} Extended_TSK_IMG_INFO;
 
+/** Bind the following structs */
 BIND_STRUCT(TSK_FS_INFO);
 BIND_STRUCT(TSK_FS_NAME);
 BIND_STRUCT(TSK_FS_META);
@@ -27,32 +28,37 @@ BIND_STRUCT(TSK_FS_BLOCK);
 BIND_STRUCT(TSK_FS_ATTR);
 BIND_STRUCT(TSK_FS_ATTR_RUN);
 
-BIND_STRUCT(TSK_FS_ATTR_TYPE_ENUM);
+   /** This is a normal IMG_INFO which takes a filename and passes it
+       to TSK. It just uses the standard TSK image handling code to
+       support EWF, AFF etc.
+   */
+CLASS(Img_Info, Object)
+     Extended_TSK_IMG_INFO *img;
+
+     /** Open an image using the Sleuthkit.
+
+         DEFAULT(type) = TSK_IMG_TYPE_DETECT;
+     */
+     Img_Info METHOD(Img_Info, Con, ZString url, TSK_IMG_TYPE_ENUM type);
+
+     // Read a random buffer from the image
+     ssize_t METHOD(Img_Info, read, TSK_OFF_T off, OUT char *buf, size_t len);
+
+     // Closes the image
+     void METHOD(Img_Info, close);
+END_CLASS
 
 /** This is an image info object based on an AFF4 object.
 
     Before we can use libtsk we need to instantiate one of these from
     a base URN.
  */
-CLASS(AFF4ImgInfo, Object)
-   RDFURN urn;
-   TSK_OFF_T offset;
-
+CLASS(AFF4ImgInfo, Img_Info)
    // This is used to create a new TSK_IMG_INFO for TSK to use:
-   Extended_TSK_IMG_INFO img;
+   RDFURN urn;
 
-   /** Read the filesystem from the urn specified.
-
-       DEFAULT(offset) = 0;
-   */
-   AFF4ImgInfo METHOD(AFF4ImgInfo, Con, ZString urn, TSK_OFF_T offset);
-
-   // Read a random buffer from the image
-   ssize_t METHOD(AFF4ImgInfo, read, TSK_OFF_T off, OUT char *buf, size_t len);
-
-   // Closes the image
-   void METHOD(AFF4ImgInfo, close);
 END_CLASS
+
 
 // Forward declerations
 struct FS_Info_t;
@@ -143,8 +149,10 @@ CLASS(FS_Info, Object)
      /** Open the filesystem stored on image.
 
        DEFAULT(type) = TSK_FS_TYPE_DETECT;
+       DEFAULT(offset) = 0;
      */
-     FS_Info METHOD(FS_Info, Con, AFF4ImgInfo img, TSK_FS_TYPE_ENUM type);
+     FS_Info METHOD(FS_Info, Con, Img_Info img, TSK_OFF_T offset,
+                    TSK_FS_TYPE_ENUM type);
 
      /** A convenience function to open a directory in this image. 
 

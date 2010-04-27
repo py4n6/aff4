@@ -17,32 +17,59 @@
 #define GET_Object_from_member(type, object, member)                    \
   (type)(((char *)object) - (unsigned long)(&((type)0)->member))
 
+Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
+  self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type, 0);
+  if(!self->img) {
+    RaiseError(ERuntimeError, "Unable to open image: %s", tsk_error_get());
+    goto error;
+  };
+
+  return self;
+ error:
+  talloc_free(self);
+  return NULL;
+};
+
+ssize_t Img_Info_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
+  return CALL((TSK_IMG_INFO *)self->img, read, off, buf, len);
+};
+
+// Dont really do anything here
+void Img_Info_close(Img_Info self) {
+
+};
+
+VIRTUAL(Img_Info, Object) {
+  VMETHOD(Con) = Img_Info_Con;
+  VMETHOD(read) = Img_Info_read;
+  VMETHOD(close) = Img_Info_close;
+} END_VIRTUAL
+
 void IMG_INFO_close(TSK_IMG_INFO *img) {
-  Extended_TSK_IMG_INFO self = (Extended_TSK_IMG_INFO)img;
+  Extended_TSK_IMG_INFO *self = (Extended_TSK_IMG_INFO *)img;
 
   CALL(self->container, close);
 };
 
 ssize_t IMG_INFO_read(TSK_IMG_INFO *img, TSK_OFF_T off, char *buf, size_t len) {
-  Extended_TSK_IMG_INFO self = (Extended_TSK_IMG_INFO)img;
+  Extended_TSK_IMG_INFO *self = (Extended_TSK_IMG_INFO *)img;
 
   return (ssize_t)CALL(self->container, read, (uint64_t)off, buf, len);
 };
 
-AFF4ImgInfo AFF4ImgInfo_Con(AFF4ImgInfo self, char *urn, TSK_OFF_T offset) {
+Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   FileLikeObject fd;
+  AFF4ImgInfo this = (AFF4ImgInfo)self;
 
-  self->urn = new_RDFURN(self);
-  CALL(self->urn, set, urn);
-
-  self->offset = offset;
+  this->urn = new_RDFURN(self);
+  CALL(this->urn, set, urn);
 
   // Try to open it for reading just to make sure its ok:
-  fd = (FileLikeObject)CALL(oracle, open, self->urn, 'r');
+  fd = (FileLikeObject)CALL(oracle, open, this->urn, 'r');
   if(!fd) goto error;
 
   // Initialise the img struct with the correct callbacks:
-  self->img = talloc_zero(self, struct Extended_TSK_IMG_INFO_t);
+  self->img = talloc_zero(self, Extended_TSK_IMG_INFO);
   self->img->container = self;
 
   self->img->base.read = IMG_INFO_read;
@@ -60,8 +87,9 @@ AFF4ImgInfo AFF4ImgInfo_Con(AFF4ImgInfo self, char *urn, TSK_OFF_T offset) {
   return NULL;
 };
 
-ssize_t AFF4ImgInfo_read(AFF4ImgInfo self, TSK_OFF_T off, OUT char *buf, size_t len) {
-  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, self->urn, 'r');
+ssize_t AFF4ImgInfo_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
+  AFF4ImgInfo this = (AFF4ImgInfo)self;
+  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->urn, 'r');
 
   if(fd) {
     ssize_t res;
@@ -76,15 +104,9 @@ ssize_t AFF4ImgInfo_read(AFF4ImgInfo self, TSK_OFF_T off, OUT char *buf, size_t 
   return -1;
 };
 
-// Dont really do anything here
-void AFF4ImgInfo_close(AFF4ImgInfo self) {
-
-};
-
-VIRTUAL(AFF4ImgInfo, Object) {
-  VMETHOD(Con) = AFF4ImgInfo_Con;
-  VMETHOD(read) = AFF4ImgInfo_read;
-  VMETHOD(close) = AFF4ImgInfo_close;
+VIRTUAL(AFF4ImgInfo, Img_Info) {
+  VMETHOD_BASE(Img_Info, Con) = AFF4ImgInfo_Con;
+  VMETHOD_BASE(Img_Info, read) = AFF4ImgInfo_read;
 } END_VIRTUAL
 
 
@@ -95,9 +117,10 @@ int FS_Info_dest(void *this) {
   return 0;
 };
 
-static FS_Info FS_Info_Con(FS_Info self, AFF4ImgInfo img, TSK_FS_TYPE_ENUM type) {
+static FS_Info FS_Info_Con(FS_Info self, Img_Info img, TSK_OFF_T offset,
+                           TSK_FS_TYPE_ENUM type) {
   // Now try to open the filesystem
-  self->info = tsk_fs_open_img((struct TSK_IMG_INFO *)img->img, img->offset, type);
+  self->info = tsk_fs_open_img((struct TSK_IMG_INFO *)img->img, offset, type);
   if(!self->info) {
     RaiseError(ERuntimeError, "Unable to open the image as a filesystem: %s",
                tsk_error_get());

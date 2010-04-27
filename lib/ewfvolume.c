@@ -6,7 +6,9 @@
 pthread_mutex_t LIBEWF_LOCK;
 
 // Global error handler for libewf
+#if HAVE_EWF_V2_API
 static libewf_error_t *ewf_error;
+#endif
 
 #if 0
 #define LOCK_EWF pthread_mutex_lock(&LIBEWF_LOCK)
@@ -70,7 +72,7 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   RDFURN stream;
   uint64_t media_size;
   XSDInteger size = new_XSDInteger(self);
-  XSDString string = new_XSDString(size);
+  RDFURN url = new_RDFURN(size);
 
   if(strlen(urn->parser->scheme) > 0 &&
      strcmp(urn->parser->scheme, "file")) {
@@ -89,9 +91,10 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
     goto libewf_error;
   };
 #else
-  if(libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
-                 LIBEWF_FORMAT_UNKNOWN,
-                 &filenames) < 1) {
+  amount_of_filenames = libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
+                                    LIBEWF_FORMAT_UNKNOWN,
+                                    &filenames);
+  if(amount_of_filenames < 1) {
     goto libewf_error;
   };
 #endif
@@ -164,7 +167,7 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   CALL(stream, set, STRING_URNOF(self));
   CALL(stream, add, "stream");
 
-  CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_STREAM));
+  CALL(url, set, AFF4_EWF_STREAM);
 
   // Set the file we are stored in
   CALL(oracle, set_value, urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self),0);
@@ -174,12 +177,12 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   // resolver to emulate a full AFF4 volume
   CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CONTAINS, (RDFValue)stream,0);
   CALL(oracle, set_value, stream, AFF4_STORED, (RDFValue)URNOF(self),0);
-  CALL(oracle, set_value, stream, AFF4_TYPE, (RDFValue)string,0);
+  CALL(oracle, set_value, stream, AFF4_TYPE, (RDFValue)url,0);
   CALL(oracle, set_value, stream, AFF4_SIZE, (RDFValue)size,0);
 
   // Set our own type so we can be reopened
-  CALL(string, set, ZSTRING_NO_NULL(AFF4_EWF_VOLUME));
-  CALL(oracle, set_value, URNOF(self), AFF4_TYPE, (RDFValue)string,0);
+  CALL(url, set, AFF4_EWF_VOLUME);
+  CALL(oracle, set_value, URNOF(self), AFF4_TYPE, (RDFValue)url,0);
 
   talloc_free(size);
   return 1;
