@@ -105,7 +105,7 @@ void AFF4_Init(void) {
   // AFF1Stream_init();
 #endif
 
-#ifdef HAVE_EWF
+#ifdef HAVE_LIBEWF_H
   EWF_init();
   // EWFStream_init();
 #endif
@@ -824,7 +824,6 @@ static void set_new_value(Resolver self, RESOLVER_ITER *iter,
   TDB_DATA key,offset;
   char buff[BUFF_SIZE];
   char buff2[BUFF_SIZE];
-  uint32_t new_offset;
 
   if(type_id == 0) abort();
 
@@ -1523,9 +1522,8 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense) {
 static int Resolver_attributes_iter(Resolver self, RDFURN urn, XSDString attribute,
                                     RESOLVER_ITER *iter) {
   int max_id, attribute_id =0;
-  TDB_DATA tdb_urn_id, tdb_urn, tdb_attribute;
+  TDB_DATA tdb_urn, tdb_attribute;
   int urn_id;
-  unsigned char buff[BUFF_SIZE];
 
   // Find the attribute_id
   tdb_attribute = tdb_data_from_string(attribute->value);
@@ -1811,8 +1809,6 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
     // We already have a valid URL - this is the second pass through
     // the function.
   } else {
-    Cache cache = oracle->read_cache;
-
     if(self->urn != uri)
       self->urn = CALL(uri, copy, self);
 

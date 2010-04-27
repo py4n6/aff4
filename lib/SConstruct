@@ -17,7 +17,7 @@ source_files = """
 """
 
 ## Optional support for EWF and AFF1 volumes
-if utils.HEADERS.get("HAVE_EWF"):
+if utils.HEADERS.get("HAVE_LIBEWF_H"):
     source_files += "  #lib/ewfvolume.c "
 
 if utils.HEADERS.get("HAVE_OPENSSL"):

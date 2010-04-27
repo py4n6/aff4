@@ -50,7 +50,10 @@ img = pytsk3.AFF4ImgInfo(url, offset=options.offset)
 fs = pytsk3.FS_Info(img)
 
 ## Step 3: Open the directory node
-directory = fs.open_dir(path=path, inode=inode)
+if path:
+    directory = fs.open_dir(path=path)
+else:
+    directory = fs.open_dir(inode=inode)
 
 ## Step 4: Iterate over all files in the directory and print their
 ## name. What you get in each iteration is a proxy object for the

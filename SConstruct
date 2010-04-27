@@ -119,7 +119,7 @@ if not env.GetOption('clean') and not env.GetOption('help'):
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
 crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
-utime.h arpa/inet.h stdargs.h
+utime.h arpa/inet.h stdargs.h libewf.h
 """))
 
    ## Mandatory dependencies
@@ -166,6 +166,18 @@ int main() {
    SconsUtils.utils.check("lib", conf, Split("""
 ewf curl afflib pthread HAVE_OPENSSL:ssl
 """))
+
+   ## libewf comes in two flavours a V2 API and an older API
+   SconsUtils.utils.check_build(conf, "libewf_glob", "HAVE_EWF_V2_API", """
+#include <libewf.h>
+
+int main() {
+  libewf_glob(NULL, 0, 0, NULL, NULL, NULL);
+  libewf_glob_free(NULL, 0, NULL);
+
+  return 0;
+}
+""")
 
    ## Types
    SconsUtils.utils.check_type(conf, Split("""

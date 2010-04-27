@@ -16,7 +16,7 @@ BOUND_FILES = Split("""
               #include/aff4_crypto.h
 """)
 
-if utils.HEADERS.get("HAVE_EWF"):
+if utils.HEADERS.get("HAVE_LIBEWF_H"):
     BOUND_FILES.append("#include/ewfvolume.h")
 
 import class_parser

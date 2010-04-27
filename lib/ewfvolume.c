@@ -21,7 +21,12 @@ static int EWFVolume_destructor(void *this) {
 
   if(self->handle) {
     LOCK_EWF;
+#if HAVE_EWF_V2_API
     libewf_handle_close(&self->handle, &ewf_error);
+#else
+    libewf_close(self->handle);
+#endif
+
     UNLOCK_EWF;
   };
 
@@ -75,18 +80,34 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   };
 
   LOCK_EWF;
+
+#if HAVE_EWF_V2_API
   if(libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
                  LIBEWF_FORMAT_UNKNOWN,
                  &filenames,
                  &amount_of_filenames, &ewf_error) < 1) {
     goto libewf_error;
   };
+#else
+  if(libewf_glob(ZSTRING_NO_NULL(urn->parser->query),
+                 LIBEWF_FORMAT_UNKNOWN,
+                 &filenames) < 1) {
+    goto libewf_error;
+  };
+#endif
 
+#if HAVE_EWF_V2_API
   if(libewf_handle_open(&this->handle, filenames,
                         amount_of_filenames, LIBEWF_OPEN_READ,
                         &ewf_error)==0) {
     goto libewf_error;
   };
+#else
+  this->handle = libewf_open(filenames, amount_of_filenames, LIBEWF_OPEN_READ);
+  if(!this->handle) {
+    goto libewf_error;
+  };
+#endif
   UNLOCK_EWF;
 
   if(!this->handle) {
@@ -95,13 +116,21 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   };
 
   LOCK_EWF;
+#if HAVE_EWF_V2_API
   if(-1==libewf_handle_get_media_size(&this->handle, &media_size, &ewf_error)) {
+#else
+  if(-1==libewf_get_media_size(this->handle, &media_size)) {
+#endif
     goto libewf_error;
   };
   UNLOCK_EWF;
 
   // Only seems to exist in experimental API
-  //  libewf_glob_free(filenames, amount_of_filenames
+#if HAVE_EWF_V2_API
+  if(libewf_glob_free(filenames, amount_of_filenames, &ewf_error) < 0) {
+    goto libewf_error;
+  };
+#endif
 
   CALL(size, set, media_size);
 
@@ -156,8 +185,11 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   return 1;
 
  libewf_error:
+#if HAVE_EWF_V2_API
   RaiseError(ERuntimeError, "libewf error: %s", ewf_error);
-
+#else
+  RaiseError(ERuntimeError, "libewf error");
+#endif
  error:
   // We were unable to load this volume - invalidate anything we know
   // about it (remove streams etc).
@@ -225,8 +257,13 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   };
 
   LOCK_EWF;
+#if HAVE_EWF_V2_API
   res = libewf_handle_read_random(&volume->handle, buffer, length,
                                   self->readptr, &ewf_error);
+#else
+  res = libewf_read_random(volume->handle, buffer, length,
+                           self->readptr);
+#endif
   UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");

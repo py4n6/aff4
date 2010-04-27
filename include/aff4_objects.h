@@ -451,6 +451,7 @@ ZipFile open_volume(char *urn);
 void zip_init();
 void image_init();
 void mapdriver_init();
+void graph_init();
 
 #ifdef __cplusplus
 } /* closing brace for extern "C" */

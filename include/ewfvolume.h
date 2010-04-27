@@ -1,7 +1,7 @@
 #ifndef _EWFVOLUME_H
 #define _EWFVOLUME_H
 
-#if HAVE_EWF
+#if HAVE_LIBEWF_H
 
 #include <libewf.h>
 
@@ -26,7 +26,11 @@
     "ewf" method.
 **/
 CLASS(EWFVolume, AFF4Volume)
+#if HAVE_EWF_V2_API
    libewf_handle_t handle;
+#else
+   libewf_handle_t *handle;
+#endif
    RDFURN stored;
 END_CLASS
 
