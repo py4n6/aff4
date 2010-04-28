@@ -50,7 +50,7 @@ else:
 img = pytsk3.Img_Info(url)
 
 ## Step 2: Open the filesystem
-fs = pytsk3.FS_Info(img)
+fs = pytsk3.FS_Info(img, offset=options.offset)
 
 ## Step 3: Open the directory node
 if path:
@@ -63,7 +63,8 @@ else:
 ## TSK_FS_FILE struct - you can further dereference this struct into a
 ## TSK_FS_NAME and TSK_FS_META structs.
 for f in directory:
-    try:
-        print f.info.meta.size, f.info.name.name
-    except Exception,e:
-        print e, f.info.name.name
+    meta = f.info.meta
+    name = f.info.name
+
+    if meta and name:
+        print meta.mtime, meta.atime, meta.ctime, meta.size, name.name

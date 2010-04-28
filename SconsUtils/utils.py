@@ -395,8 +395,11 @@ class ExtendedEnvironment(SCons.Environment.Environment):
 import subprocess
 
 def pkg_config(pkg, type):
-    result = subprocess.Popen(["%s-config" % pkg, "--%s" % type],
-                              stdout=subprocess.PIPE).communicate()[0]
+    try:
+        result = subprocess.Popen(["%s-config" % pkg, "--%s" % type],
+                                  stdout=subprocess.PIPE).communicate()[0]
+    except:
+        error("Unable to run %s-config - do you have the dev package installed?" % pkg)
 
     return result.strip()
 
