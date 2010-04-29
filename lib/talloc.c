@@ -102,7 +102,7 @@
    talloc_enable_leak_report_full() is called, otherwise it remains
    NULL
 */
-static void *null_context;
+void *null_context;
 static void *autofree_context;
 
 struct talloc_reference_handle {

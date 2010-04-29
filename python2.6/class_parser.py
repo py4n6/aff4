@@ -41,7 +41,7 @@ class Module:
         result = """
 talloc_set_log_fn((void *)printf);
 AFF4_Init();
-
+//    talloc_enable_leak_report_full();
 """
         for cls in self.classes.values():
             if cls.is_active():
@@ -123,6 +123,12 @@ Gen_wrapper *new_class_wrapper(Object item) {
          result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
          result->ctx = talloc_asprintf(NULL, "new_class_wrapper %%s@%%p", NAMEOF(item), item);
          result->base = (void *)item;
+
+         /* If its owned by the null_context it means that the function does
+            not want to own the memory - we therefore steal it so it gets freed
+            with the python object. */
+         if(talloc_parent(result->base) == null_context)
+                  talloc_steal(result->ctx, result->base);
 
          return result;
        };
@@ -908,6 +914,10 @@ method_attributes = ['BORROWED', 'DESTRUCTOR','IGNORE']
 def dispatch(name, type):
     if not type: return Void()
 
+    m = re.match("struct ([a-zA-Z0-9]+)_t *", type)
+    if m:
+        type = m.group(1)
+
     type_components = type.split()
     attributes = set()
 
@@ -916,6 +926,7 @@ def dispatch(name, type):
 
     type = " ".join(type_components)
     result = type_dispatcher[type](name, type)
+
     result.attributes = attributes
 
     return result
@@ -965,7 +976,7 @@ class Method:
             ## Is it a wrapped type?
             if return_type:
                 log("Unable to handle return type %s.%s %s" % (self.class_name, self.name, return_type))
-                pdb.sebot_trace()
+                #pdb.set_trace()
             self.return_type = Void()
 
     def clone(self, new_class_name):

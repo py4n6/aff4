@@ -23,6 +23,7 @@ typedef struct {
 BIND_STRUCT(TSK_FS_INFO);
 BIND_STRUCT(TSK_FS_NAME);
 BIND_STRUCT(TSK_FS_META);
+BIND_STRUCT(TSK_FS_DIR);
 BIND_STRUCT(TSK_FS_FILE);
 BIND_STRUCT(TSK_FS_BLOCK);
 BIND_STRUCT(TSK_FS_ATTR);
@@ -62,6 +63,7 @@ END_CLASS
 
 // Forward declerations
 struct FS_Info_t;
+struct Directory_t;
 
 CLASS(Attribute, Object)
    FOREIGN TSK_FS_ATTR *info;
@@ -89,11 +91,12 @@ END_CLASS
    */
 CLASS(File, Object)
      FOREIGN TSK_FS_FILE *info;
+     PRIVATE struct FS_Info_t *fs;
 
      int max_attr;
      int current_attr;
 
-     File METHOD(File, Con, TSK_FS_FILE *info);
+     File METHOD(File, Con, struct FS_Info_t *fs, TSK_FS_FILE *info);
 
      /** Read a buffer from a random location in the file.
 
@@ -105,6 +108,8 @@ CLASS(File, Object)
                     OUT char *buff, int len,
                     TSK_FS_ATTR_TYPE_ENUM type, int id,
                     TSK_FS_FILE_READ_FLAG_ENUM flags);
+
+     struct Directory_t *METHOD(File, as_directory);
 
      void METHOD(File, __iter__);
      Attribute METHOD(File, iternext);
@@ -119,6 +124,7 @@ END_CLASS
      */
 CLASS(Directory, Object)
      FOREIGN TSK_FS_DIR *info;
+     PRIVATE struct FS_Info_t *fs;
 
      // Total number of files in this directory
      size_t size;
@@ -166,6 +172,8 @@ CLASS(FS_Info, Object)
 
      // Open a file by inode number
      File METHOD(FS_Info, open_meta, TSK_INUM_T inode);
+
+     void METHOD(FS_Info, exit);
 
 END_CLASS
 

@@ -35,6 +35,8 @@
 int talloc_version_major(void);
 int talloc_version_minor(void);
 
+extern void *null_context;
+
 /* this is only needed for compatibility with the old talloc */
 typedef void TALLOC_CTX;
 

@@ -17,13 +17,22 @@
 #define GET_Object_from_member(type, object, member)                    \
   (type)(((char *)object) - (unsigned long)(&((type)0)->member))
 
-Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
+static int Img_Info_dest(void *x) {
+  Img_Info self = (Img_Info)x;
+
+  tsk_img_close((TSK_IMG_INFO *)self->img);
+
+  return 0;
+};
+
+static Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type, 0);
   if(!self->img) {
     RaiseError(ERuntimeError, "Unable to open image: %s", tsk_error_get());
     goto error;
   };
 
+  talloc_set_destructor((void *)self, Img_Info_dest);
   return self;
  error:
   talloc_free(self);
@@ -149,7 +158,7 @@ static File FS_Info_open(FS_Info self, ZString path) {
     return NULL;
   };
 
-  result = CONSTRUCT(File, File, Con, NULL, handle);
+  result = CONSTRUCT(File, File, Con, NULL, self, handle);
 
   return result;
 };
@@ -163,9 +172,13 @@ static File FS_Info_open_meta(FS_Info self, TSK_INUM_T inode) {
     return NULL;
   };
 
-  result = CONSTRUCT(File, File, Con, NULL, handle);
+  result = CONSTRUCT(File, File, Con, NULL, self, handle);
 
   return result;
+};
+
+static void FS_Info_exit(FS_Info self) {
+  exit(0);
 };
 
 VIRTUAL(FS_Info, Object) {
@@ -173,6 +186,7 @@ VIRTUAL(FS_Info, Object) {
   VMETHOD(open_dir) = FS_Info_open_dir;
   VMETHOD(open) = FS_Info_open;
   VMETHOD(open_meta) = FS_Info_open_meta;
+  VMETHOD(exit) = FS_Info_exit;
 } END_VIRTUAL
 
 
@@ -198,6 +212,10 @@ static Directory Directory_Con(Directory self, FS_Info fs,
 
   self->current = 0;
   self->size = tsk_fs_dir_getsize(self->info);
+  self->fs = fs;
+  // Add a reference to them to ensure they dont get freed until we
+  // do.
+  //talloc_reference(self, fs);
   talloc_set_destructor((void *)self, Directory_dest);
 
   return self;
@@ -221,7 +239,7 @@ static File Directory_next(Directory self) {
     return NULL;
   };
 
-  result = CONSTRUCT(File, File, Con, NULL, info);
+  result = CONSTRUCT(File, File, Con, NULL, self->fs, info);
   result->info = info;
   self->current ++;
 
@@ -240,16 +258,15 @@ VIRTUAL(Directory, Object) {
 
 static int File_dest(void *self) {
   File this = (File)self;
-  if(this->info) {
-    tsk_fs_file_close(this->info);
-  };
+  tsk_fs_file_close(this->info);
 
   return 0;
 };
 
 
-static File File_Con(File self, TSK_FS_FILE *info) {
+static File File_Con(File self, FS_Info fs, TSK_FS_FILE *info) {
   self->info = info;
+  self->fs = fs;
 
   // Get the total number of attributes:
   self->max_attr = tsk_fs_file_attr_getsize(info);
@@ -276,6 +293,19 @@ static ssize_t File_read_random(File self, TSK_OFF_T offset,
   };
 
   return result;
+};
+
+static Directory File_as_directory(File self) {
+  if(self->info->meta && self->info->meta->type == TSK_FS_META_TYPE_DIR) {
+    Directory result = CONSTRUCT(Directory, Directory, Con, NULL,
+                                 self->fs, NULL,
+                                 self->info->meta->addr);
+
+    if(result) return result;
+  };
+
+  RaiseError(ERuntimeError, "Not a directory");
+  return NULL;
 };
 
 static Attribute File_iternext(File self) {
@@ -305,6 +335,7 @@ static void File_iter__(File self) {
 VIRTUAL(File, Object) {
   VMETHOD(Con) = File_Con;
   VMETHOD(read_random) = File_read_random;
+  VMETHOD(as_directory) = File_as_directory;
   VMETHOD(iternext) = File_iternext;
   VMETHOD(__iter__) = File_iter__;
 } END_VIRTUAL
