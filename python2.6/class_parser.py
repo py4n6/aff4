@@ -684,14 +684,17 @@ class StringArray(String):
     def from_python_object(self, source, destination, method, context='NULL'):
         method.error_set = True
         return """{
-Py_ssize_t i,size;
+Py_ssize_t i,size=0;
 
-if(!PySequence_Check(%(source)s)) {
-    PyErr_Format(PyExc_ValueError, "%(destination)s must be a sequence");
-    goto error;
+if(%(source)s) {
+   if(!PySequence_Check(%(source)s)) {
+     PyErr_Format(PyExc_ValueError, "%(destination)s must be a sequence");
+     goto error;
+   };
+
+   size = PySequence_Size(%(source)s);
 };
 
-size = PySequence_Size(%(source)s);
 %(destination)s = talloc_zero_array(NULL, char *, size + 1);
 
 for(i=0; i<size;i++) {
