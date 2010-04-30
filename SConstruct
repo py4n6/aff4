@@ -164,7 +164,7 @@ int main() {
 
    ## Libraries
    SconsUtils.utils.check("lib", conf, Split("""
-ewf curl afflib pthread HAVE_OPENSSL:ssl
+ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
 """))
 
    ## libewf comes in two flavours a V2 API and an older API

@@ -9,6 +9,7 @@
 */
 
 #include "pyregfi.h"
+
 static int RegistryFile_dest(void *self) {
   RegistryFile this = (RegistryFile)self;
 
@@ -54,6 +55,9 @@ static int KeyIterator_dest(void *self) {
   KeyIterator this = (KeyIterator)self;
 
   regfi_iterator_free(this->iter);
+  if(this->next_item) {
+    regfi_free_record(this->next_item);
+  };
 
   return 0;
 };
@@ -86,18 +90,26 @@ static KeyIterator KeyIterator_Con(KeyIterator self, RegistryFile file, char **p
 };
 
 static void KeyIterator__iter__(KeyIterator self) {
+  if(self->next_item) {
+    regfi_free_record(self->next_item);
+  };
+
   self->next_item = regfi_iterator_first_subkey(self->iter);
 };
 
 static REGFI_NK_REC *KeyIterator_next(KeyIterator self) {
-  const REGFI_NK_REC * result = self->next_item;
+  REGFI_NK_REC * result;
+
+  if(!self->next_item) return NULL;
+
+  result = self->next_item;
 
   self->next_item = regfi_iterator_next_subkey(self->iter);
 
-  return (REGFI_NK_REC *)result;
+  return result;
 };
 
-ValueIterator KeyIterator_list_values(KeyIterator self) {
+static ValueIterator KeyIterator_list_values(KeyIterator self) {
   return CONSTRUCT(ValueIterator, ValueIterator, Con, NULL, self);
 };
 
@@ -108,6 +120,14 @@ VIRTUAL(KeyIterator, Object) {
   VMETHOD(list_values) = KeyIterator_list_values;
 } END_VIRTUAL
 
+static int ValueIterator_dest(void *self) {
+  ValueIterator this = (ValueIterator)self;
+
+  if(this->next_item) regfi_free_record(this->next_item);
+
+  return 0;
+};
+
 static ValueIterator ValueIterator_Con(ValueIterator self, KeyIterator key) {
   // Take a copy of the iterator
   self->iter = key->iter;
@@ -115,10 +135,14 @@ static ValueIterator ValueIterator_Con(ValueIterator self, KeyIterator key) {
 
   self->next_item = regfi_iterator_first_value(self->iter);
 
+  talloc_set_destructor((void *)self, ValueIterator_dest);
+
   return self;
 };
 
 static void ValueIterator__iter__(ValueIterator self) {
+  if(self->next_item) regfi_free_record(self->next_item);
+
   self->next_item = regfi_iterator_first_value(self->iter);
 };
 
@@ -151,6 +175,12 @@ static RawData ValueIterator_iternext(ValueIterator self) {
     break;
   };
 
+
+  /*  if(self->next_item) {
+    regfi_free_record(self->next_item);
+  };
+  */
+
   self->next_item = regfi_iterator_next_value(self->iter);
 
   return result;
@@ -165,14 +195,30 @@ VIRTUAL(ValueIterator, Object) {
   VMETHOD(iternext) = ValueIterator_iternext;
 } END_VIRTUAL
 
-RawData RawData_Con(RawData self, REGFI_DATA *data, REGFI_VK_REC *record) {
+static int RawData_dest(void *self) {
+  RawData this = (RawData)self;
+
+  if(this->data) {
+    regfi_free_record(this->data);
+  };
+
+  if(this->rec) {
+    regfi_free_record(this->rec);
+  };
+
+  return 0;
+};
+
+static RawData RawData_Con(RawData self, REGFI_DATA *data, REGFI_VK_REC *record) {
   self->rec = record;
   self->data = data;
+
+  talloc_set_destructor((void *)self, RawData_dest);
 
   return self;
 };
 
-int RawData_get_value(RawData self, char *buff, int len) {
+static int RawData_get_value(RawData self, char *buff, int len) {
   int available_to_read = min(len, self->data->interpreted_size);
 
   memcpy(buff, self->data->raw, available_to_read);
@@ -185,7 +231,7 @@ VIRTUAL(RawData, Object) {
   VMETHOD(get_value) = RawData_get_value;
 } END_VIRTUAL
 
-char *DataString_get_value(DataString self) {
+static char *DataString_get_value(DataString self) {
   RawData this = (RawData)self;
 
   return this->data->interpreted.string;
@@ -195,7 +241,7 @@ VIRTUAL(DataString, RawData) {
   VMETHOD(get_value) = DataString_get_value;
 } END_VIRTUAL
 
-uint64_t DWORDData_get_value(DWORDData self) {
+static uint64_t DWORDData_get_value(DWORDData self) {
   RawData this = (RawData)self;
 
   return this->data->interpreted.dword;

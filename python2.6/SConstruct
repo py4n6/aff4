@@ -46,31 +46,34 @@ nenv.Depends('pyaff4.c', 'class_parser.py')
 
 nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=env.libaff4_so)
 
-BOUND_FILES = Split("""
-%(TSK3_HEADER_LOCATION)s/libtsk.h
-%(TSK3_HEADER_LOCATION)s/fs/tsk_fs.h
-%(TSK3_HEADER_LOCATION)s/base/tsk_base.h
-%(TSK3_HEADER_LOCATION)s/img/tsk_img.h
-tsk/tsk3.h
-""" % nenv.config.__dict__)
+## Only build those if they exist and are configured:
+if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
+    BOUND_FILES = Split("""
+    %(TSK3_HEADER_LOCATION)s/libtsk.h
+    %(TSK3_HEADER_LOCATION)s/fs/tsk_fs.h
+    %(TSK3_HEADER_LOCATION)s/base/tsk_base.h
+    %(TSK3_HEADER_LOCATION)s/img/tsk_img.h
+    tsk/tsk3.h
+    """ % nenv.config.__dict__)
 
-nenv.Append(CFLAGS = " -I %(TSK3_HEADER_LOCATION)s " % nenv.config.__dict__)
+    nenv.Append(CFLAGS = " -I %(TSK3_HEADER_LOCATION)s " % nenv.config.__dict__)
 
-nenv.Command('tsk/pytsk3.c', BOUND_FILES, partial(build_python_bindings,
-                                                  initialization=''))
-nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
+    nenv.Command('tsk/pytsk3.c', BOUND_FILES, partial(build_python_bindings,
+                                                      initialization=''))
+    nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
 
-nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=[env.libaff4_so, 'tsk3'])
+    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=[env.libaff4_so, 'tsk3'])
 
-BOUND_FILES = Split("""
-%(REGFI_HEADER_LOCATION)s/regfi.h
-regfi/pyregfi.h
-""" % nenv.config.__dict__)
+if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
+    BOUND_FILES = Split("""
+    %(REGFI_HEADER_LOCATION)s/regfi.h
+    regfi/pyregfi.h
+    """ % nenv.config.__dict__)
 
-nenv.Append(CFLAGS = " -I %(REGFI_HEADER_LOCATION)s " % nenv.config.__dict__)
+    nenv.Append(CFLAGS = " -I %(REGFI_HEADER_LOCATION)s " % nenv.config.__dict__)
 
-nenv.Command('regfi/pyregfi.c', BOUND_FILES, partial(build_python_bindings,
-                                                     initialization='pyregfi_init();'))
-nenv.Depends('regfi/pyregfi.c', 'class_parser.py')
+    nenv.Command('regfi/pyregfi.c', BOUND_FILES, partial(build_python_bindings,
+                                                         initialization='pyregfi_init();'))
+    nenv.Depends('regfi/pyregfi.c', 'class_parser.py')
 
-nenv.PythonModule("pyregfi", ['regfi/pyregfi.c', 'regfi/regfi.c'], LIBS=[env.libaff4_so, 'regfi'])
+    nenv.PythonModule("pyregfi", ['regfi/pyregfi.c', 'regfi/regfi.c'], LIBS=[env.libaff4_so, 'regfi'])

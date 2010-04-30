@@ -41,6 +41,7 @@ class Module:
     def initialization(self):
         result = self.init_string + """
 talloc_set_log_fn((void *)printf);
+//talloc_enable_leak_report();
 """
         for cls in self.classes.values():
             if cls.is_active():

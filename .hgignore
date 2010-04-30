@@ -41,6 +41,7 @@ unittests
 raid_reconstructor
 pyaff4.c
 pytsk3.c
+pyregfi.c
 *\#
 .\#*
 .sconf_temp
