@@ -556,6 +556,10 @@ void *_talloc_reference_loc(const void *context, const void *ptr, const char *lo
 	return handle->ptr;
 }
 
+void *_talloc_reference(const void *context, const void *ptr) {
+  return _talloc_reference_loc(context, ptr, "");
+};
+
 static void *_talloc_steal_internal(const void *new_ctx, const void *ptr);
 
 /* 
@@ -759,6 +763,10 @@ void *_talloc_steal_loc(const void *new_ctx, const void *ptr, const char *locati
 	
 	return _talloc_steal_internal(new_ctx, ptr);
 }
+
+void *_talloc_steal(const void *new_ctx, const void *ptr) {
+  return _talloc_steal_loc(new_ctx, ptr, "");
+};
 
 /* 
    this is like a talloc_steal(), but you must supply the old
@@ -1135,7 +1143,9 @@ int _talloc_free(void *ptr, const char *location)
 	return _talloc_free_internal(ptr, location);
 }
 
-
+int talloc_free(void *ptr) {
+  return _talloc_free(ptr, "");
+};
 
 /*
   A talloc version of realloc. The context argument is only used if

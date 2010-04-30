@@ -116,7 +116,7 @@ typedef void TALLOC_CTX;
 #define talloc_get_type_abort(ptr, type) (type *)_talloc_get_type_abort(ptr, #type, __location__)
 
 #define talloc_find_parent_bytype(ptr, type) (type *)talloc_find_parent_byname(ptr, #type)
-#define talloc_free(ctx) _talloc_free(ctx, __location__)
+int talloc_free(void *ctx);
 
 
 #if TALLOC_DEPRECATED
@@ -137,6 +137,7 @@ void _talloc_set_destructor(const void *ptr, int (*_destructor)(void *));
 int talloc_increase_ref_count(const void *ptr);
 size_t talloc_reference_count(const void *ptr);
 void *_talloc_reference_loc(const void *context, const void *ptr, const char *location);
+void *_talloc_reference(const void *context, const void *ptr);
 int talloc_unlink(const void *context, void *ptr);
 const char *talloc_set_name(const void *ptr, const char *fmt, ...) PRINTF_ATTRIBUTE(2,3);
 void talloc_set_name_const(const void *ptr, const char *name);
@@ -153,6 +154,7 @@ int _talloc_free(void *ptr, const char *location);
 void talloc_free_children(void *ptr);
 void *_talloc_realloc(const void *context, void *ptr, size_t size, const char *name);
 void *_talloc_steal_loc(const void *new_ctx, const void *ptr, const char *location);
+void *_talloc_steal(const void *new_ctx, const void *ptr);
 void *talloc_reparent(const void *old_parent, const void *new_parent, const void *ptr);
 void *_talloc_move(const void *new_ctx, const void *pptr);
 size_t talloc_total_size(const void *ptr);

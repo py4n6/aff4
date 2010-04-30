@@ -37,11 +37,10 @@ class Module:
 
         return result
 
+    init_string = ''
     def initialization(self):
-        result = """
+        result = self.init_string + """
 talloc_set_log_fn((void *)printf);
-AFF4_Init();
-//    talloc_enable_leak_report_full();
 """
         for cls in self.classes.values():
             if cls.is_active():
@@ -671,6 +670,49 @@ class Void(Type):
     def return_value(self, value):
         return "return;"
 
+class StringArray(String):
+    interface = 'array'
+    buildstr = 'O'
+
+    def definition(self, default = '""', **kw):
+        return "char **%s=NULL; PyObject *py_%s=NULL;\n" % (
+            self.name, self.name)
+
+    def byref(self):
+        return "&py_%s" % (self.name)
+
+    def from_python_object(self, source, destination, method, context='NULL'):
+        method.error_set = True
+        return """{
+Py_ssize_t i,size;
+
+if(!PySequence_Check(%(source)s)) {
+    PyErr_Format(PyExc_ValueError, "%(destination)s must be a sequence");
+    goto error;
+};
+
+size = PySequence_Size(%(source)s);
+%(destination)s = talloc_zero_array(NULL, char *, size + 1);
+
+for(i=0; i<size;i++) {
+ PyObject *tmp = PySequence_GetItem(%(source)s, i);
+ if(!tmp) goto error;
+ %(destination)s[i] = PyString_AsString(tmp);
+ if(!%(destination)s[i]) {
+   Py_DECREF(tmp);
+   goto error;
+ };
+ Py_DECREF(tmp);
+};
+
+};""" % dict(source = source, destination = destination, context = context)
+
+    def pre_call(self, method):
+        return self.from_python_object("py_%s" % self.name, self.name, method)
+
+    def error_condition(self):
+        return """if(%s) talloc_free(%s);\n""" % (self.name, self.name)
+
 class Wrapper(Type):
     """ This class represents a wrapped C type """
     sense = 'IN'
@@ -808,14 +850,18 @@ PyErr_Clear();
 %(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
 %(name)s->ctx = talloc_size(NULL, 1);
 %(name)s->base = %(call)s;
+""" % args
 
+        if "NULL_OK" in self.attributes:
+            result += "if(!%(name)s->base) { Py_DECREF(%(name)s); return NULL; };" % args
+
+        result += """
 // A NULL object gets translated to a None
-if(!%(name)s->base) {
+ if(!%(name)s->base) {
    Py_DECREF(%(name)s);
    Py_INCREF(Py_None);
    %(name)s = (Gen_wrapper *)Py_None;
-};
-
+ } else {
 """ % args
 
         if "FOREIGN" in self.attributes:
@@ -825,8 +871,7 @@ if(!%(name)s->base) {
         else:
             result += "talloc_steal(%(name)s->ctx, %(name)s->base);\n" % args
 
-        if "NULL_OK" in self.attributes:
-            result += "if(!%(name)s->base) { Py_DECREF(%(name)s); %(name)s = NULL; };" % args
+        result += "}\n"
 
         return result
 
@@ -905,6 +950,7 @@ type_dispatcher = {
     'size_t': Integer,
     'unsigned long int': Integer,
     'struct timeval': Timeval,
+    'char **': StringArray,
 
     'PyObject *': PyObject,
     }
@@ -1301,7 +1347,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
 
         ## Now call the wrapped function
         out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
-        out.write("\n Py_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
+        out.write("\n ClearError();\nPy_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
                 self.class_name,
                 self.definition_class_name,
                 self.name))
@@ -1375,7 +1421,7 @@ class GetattrMethod(Method):
 
     def clone(self, class_name):
         result = self.__class__(class_name, self.base_class_name, self.myclass)
-        result.attributes = self._attributes[:]
+        result._attributes = self._attributes[:]
 
         return result
 
@@ -1660,7 +1706,7 @@ static int %(class_name)s_destructor(void *this) {
 """ % dict(class_name = self.class_name))
 
     def initialise_attributes(self, out):
-        attributes = self.myclass.module.classes[self.base_class_name].attributes.attributes
+        attributes = self.myclass.module.classes[self.base_class_name].attributes.get_attributes()
         for definition_class_name, attribute in attributes:
             out.write("""
 {
@@ -1757,7 +1803,7 @@ this->proxied = py_result;
         ## Now we try to populate the C struct slots with proxies of
         ## the python objects
         for class_name, attr in self.myclass.module.classes[\
-            self.base_class_name].attributes.attributes:
+            self.base_class_name].attributes.get_attributes():
             out.write("""
 // Converting %(name)s from proxy:
 {
@@ -2623,7 +2669,7 @@ class HeaderParser(lexer.SelfFeederMixIn):
 
         [ 'CLASS', r"^\s*(FOREIGN|ABSTRACT|PRIVATE)?([0-9A-Z_a-z ]+( |\*))METHOD\(([A-Z_a-z0-9]+),\s*([A-Z_a-z0-9]+),?",
                      "PUSH_STATE,METHOD_START", "METHOD"],
-        [ 'METHOD', r"\s*([0-9A-Z a-z_]+\s+\*?)([0-9A-Za-z_]+),?", "METHOD_ARG", None ],
+        [ 'METHOD', r"\s*([0-9A-Z a-z_]+\s+\*?\*?)([0-9A-Za-z_]+),?", "METHOD_ARG", None ],
         [ 'METHOD', r'\);', 'POP_STATE,METHOD_END', None],
 
         [ 'CLASS', r"^\s*(FOREIGN|ABSTRACT)?([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z0-9]+)\s*;",
@@ -2641,13 +2687,16 @@ class HeaderParser(lexer.SelfFeederMixIn):
         [ 'STRUCT', r"^\s*([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z0-9]+)\s*;",
                      'STRUCT_ATTRIBUTE', None],
 
+        [ 'STRUCT', r"^\s*([0-9A-Z_a-z ]+)\*\s+([A-Z_a-z0-9]+)\s*;",
+                     'STRUCT_ATTRIBUTE_PTR', None],
+
         ## Struct ended with typedef
         [ 'STRUCT', '}\s+([0-9A-Za-z_]+);', 'POP_STATE,TYPEDEF_STRUCT_END', None],
         [ 'STRUCT', '}', 'POP_STATE,STRUCT_END', None],
 
         ## Handle recursive struct or union definition (At the moment
         ## we cant handle them at all)
-        [ '(RECURSIVE_)?STRUCT', '(struct|union)\s+{', 'PUSH_STATE', 'RECURSIVE_STRUCT'],
+        [ '(RECURSIVE_)?STRUCT', '(struct|union)\s+([_A-Za-z0-9]+)?\s*{', 'PUSH_STATE', 'RECURSIVE_STRUCT'],
         [ 'RECURSIVE_STRUCT', '}\s+[0-9A-Za-z]+', 'POP_STATE', None],
 
         ## Process enums (2 forms - named and typedefed)
@@ -2692,7 +2741,9 @@ END_CLASS
         self.current_comment = ''
 
     def DEFINE(self, t, m):
-        if '"' in m.group(0):
+        line = m.group(0)
+        line = line.split('/*')[0]
+        if '"' in line:
             type = 'string'
         else:
             type = 'integer'
@@ -2758,6 +2809,16 @@ END_CLASS
         if isinstance(self.current_method, ConstructorMethod):
             self.current_class.constructor = self.current_method
         else:
+            found = False
+            for i in range(len(self.current_class.methods)):
+                ## Try to replace existing methods with this new method
+                method = self.current_class.methods[i]
+                if method.name == self.current_method.name:
+                    self.current_class.methods[i] = self.current_method
+                    self.current_method = None
+                    return
+
+            ## Method does not exist, just add to the end
             self.current_class.methods.append(self.current_method)
 
         self.current_method = None
@@ -2786,14 +2847,18 @@ END_CLASS
         type = m.group(1).strip()
         self.current_struct.add_attribute(name, type, '')
 
+    def STRUCT_ATTRIBUTE_PTR(self, t, m):
+        type = "%s *" % m.group(1).strip()
+        name = m.group(2).strip()
+        self.current_struct.add_attribute(name, type, '')
+
     def STRUCT_END(self, t, m):
         self.module.add_class(self.current_struct, StructWrapper)
         type_dispatcher["%s *" % self.current_struct.class_name] = PointerStructWrapper
         self.current_struct = None
 
     def TYPEDEF_STRUCT_END(self, t, m):
-        if not self.current_struct.class_name:
-            self.current_struct.class_name = m.group(1).strip()
+        self.current_struct.class_name = m.group(1).strip()
 
         self.STRUCT_END(t, m)
 

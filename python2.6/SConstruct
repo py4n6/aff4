@@ -1,5 +1,6 @@
 import os, os.path, pdb
 import SconsUtils.utils as utils
+from functools import partial
 
 Import('env')
 
@@ -21,12 +22,13 @@ if utils.HEADERS.get("HAVE_LIBEWF_H"):
 
 import class_parser
 
-def build_python_bindings(target, source, env):
+def build_python_bindings(target, source, env, initialization=''):
     """ A command to generate python bindings """
     module_name = os.path.splitext(os.path.basename(target[0].name))[0]
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
     p = class_parser.HeaderParser(module_name, verbose=env['V'])
+    p.module.init_string = initialization
     p.parse_filenames([s.get_abspath() for s in source])
 
     fd = open(target[0].get_abspath(), 'w')
@@ -38,21 +40,37 @@ nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
-nenv.Command('pyaff4.c', BOUND_FILES, build_python_bindings)
+nenv.Command('pyaff4.c', BOUND_FILES, partial(build_python_bindings,
+                                              initialization='AFF4_Init();'))
 nenv.Depends('pyaff4.c', 'class_parser.py')
 
 nenv.PythonModule("pyaff4", ["pyaff4.c"],LIBS=env.libaff4_so)
 
 BOUND_FILES = Split("""
-/usr/local/include/tsk3/libtsk.h
-/usr/local/include/tsk3/fs/tsk_fs.h
-/usr/local/include/tsk3/base/tsk_base.h
-/usr/local/include/tsk3/img/tsk_img.h
-tsk/pytsk3.h
+%(TSK3_HEADER_LOCATION)s/libtsk.h
+%(TSK3_HEADER_LOCATION)s/fs/tsk_fs.h
+%(TSK3_HEADER_LOCATION)s/base/tsk_base.h
+%(TSK3_HEADER_LOCATION)s/img/tsk_img.h
 tsk/tsk3.h
-""")
+""" % nenv.config.__dict__)
 
-nenv.Command('tsk/pytsk3.c', BOUND_FILES, build_python_bindings)
+nenv.Append(CFLAGS = " -I %(TSK3_HEADER_LOCATION)s " % nenv.config.__dict__)
+
+nenv.Command('tsk/pytsk3.c', BOUND_FILES, partial(build_python_bindings,
+                                                  initialization=''))
 nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
 
 nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=[env.libaff4_so, 'tsk3'])
+
+BOUND_FILES = Split("""
+%(REGFI_HEADER_LOCATION)s/regfi.h
+regfi/pyregfi.h
+""" % nenv.config.__dict__)
+
+nenv.Append(CFLAGS = " -I %(REGFI_HEADER_LOCATION)s " % nenv.config.__dict__)
+
+nenv.Command('regfi/pyregfi.c', BOUND_FILES, partial(build_python_bindings,
+                                                     initialization='pyregfi_init();'))
+nenv.Depends('regfi/pyregfi.c', 'class_parser.py')
+
+nenv.PythonModule("pyregfi", ['regfi/pyregfi.c', 'regfi/regfi.c'], LIBS=[env.libaff4_so, 'regfi'])

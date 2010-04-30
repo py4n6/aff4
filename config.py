@@ -40,6 +40,12 @@ RAPTOR_TURTLE = True
 RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
 
+## Location of tsk3 headers
+TSK3_HEADER_LOCATION = "/usr/local/include/tsk3/"
+
+## Location of regfi headers
+REGFI_HEADER_LOCATION = "/usr/local/include/regfi/"
+
 ## Darwin specific options (Only used when running on OSX)
 DARWIN_ARCHITECTURE = "-arch x86_64"
 
