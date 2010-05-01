@@ -77,7 +77,8 @@ META_TYPE_LOOKUP = {
 
 NTFS_TYPES_TO_PRINT = [
     TSK_FS_ATTR_TYPE_NTFS_IDXROOT,
-    TSK_FS_ATTR_TYPE_NTFS_DATA
+    TSK_FS_ATTR_TYPE_NTFS_DATA,
+    TSK_FS_ATTR_TYPE_DEFAULT,
 ]
 
 def print_inode(f, prefix=''):
@@ -153,4 +154,3 @@ def list_directory(directory, stack=None):
     stack.pop(-1)
 
 list_directory(directory, [])
-
