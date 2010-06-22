@@ -29,8 +29,8 @@ also maintain a chunk cache for faster read access.
 
 /** This is a chunck of data we cache */
 CLASS(ChunkCache, Object)
-     char *data;
-     int len;
+     Bytef *data;
+     uLongf len;
 
      ChunkCache METHOD(ChunkCache, Con, int len);
 END_CLASS
@@ -83,10 +83,13 @@ static ImageWorker ImageWorker_Con(ImageWorker self, Image image) {
 
 static int dump_bevy_thread(ImageWorker this);
 
-// Compresses all the data in the current bevy and dumps it on the
-// storage. The bevy must be as full as can be (image->bevy_size)
-// before we dump it (except for the last bevy in the image which can
-// be short).
+/* Compresses all the data in the current bevy and dumps it on the
+   storage. The bevy must be as full as can be (image->bevy_size)
+   before we dump it (except for the last bevy in the image which can
+   be short).
+
+   We return the length of the bevy is successful, 0 on error.
+*/
 static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
   char buff[BUFF_SIZE];
   RDFURN stream_urn = URNOF(this->image);
@@ -113,7 +116,7 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
     // Get another worker from the queue:
     this->image->current = CALL(this->image->workers, get, this->image);
   } else {
-    dump_bevy_thread(this);
+    return dump_bevy_thread(this);
   };
 
   return 0;
@@ -126,21 +129,21 @@ static int dump_bevy_thread(ImageWorker this) {
   AFF4Volume volume;
 
   while(bevy_index < this->bevy->size) {
-    int length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
+    uLong length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
     // We just use compress() to get the compressed buffer.
     char cbuffer[2*compressBound(this->image->chunk_size->value)];
-    int clength=2*compressBound(this->image->chunk_size->value);
+    uLongf clength=2*compressBound(this->image->chunk_size->value);
 
     // Should we offer to store chunks uncompressed?
     if(this->image->compression->value == 0) {
       memcpy(cbuffer, this->bevy->data + bevy_index, length);
       clength = length;
     } else {
-      if(compress2((unsigned char *)cbuffer, (unsigned long int *)(char *)&clength,
-		   (unsigned char *)this->bevy->data + bevy_index,
-                   (unsigned long int)length, 1) != Z_OK) {
+      if(compress2((Bytef *)cbuffer, &clength,
+		   (Bytef *)this->bevy->data + bevy_index,
+                   (uLong)length, 1) != Z_OK) {
 	RaiseError(ERuntimeError, "Compression error");
-	return -1;
+        return 0;
       };
     };
 
@@ -223,7 +226,7 @@ static int dump_bevy_thread(ImageWorker this) {
     CALL(this->image->workers, put, (Object)this);
   };
 
-  return result;
+  return 0;
 };
 
 VIRTUAL(ImageWorker, AFFObject) {
@@ -367,7 +370,8 @@ static int Image_close(AFFObject aself) {
 
   // Write the last chunk
   this->current->segment_count = this->segment_count;
-  dump_bevy(this->current, this->segment_count, 0);
+  if(!dump_bevy(this->current, this->segment_count, 0))
+    return 0;
 
   // Wait for all busy threads to finish - its not safe to traverse
   // the busy list without locking it. So we lock it - pull the first
@@ -413,7 +417,7 @@ static int Image_close(AFFObject aself) {
 #if 0
   {
     TDB_DATA tmp;
-    
+
     tmp.dptr = buff;
     EVP_DigestFinal(&this->digest, buff, &tmp.dsize);
 
@@ -508,16 +512,16 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   switch(this->compression->value) {
   case ZIP_DEFLATE: {
     /* Temporary storage for the compressed chunk */
-    char compressed_chunk[compressed_length];
+    const Bytef compressed_chunk[compressed_length];
 
-    if(CALL(fd, read, compressed_chunk, compressed_length)<0)
+    if(CALL(fd, read, (char *)compressed_chunk, compressed_length)<0)
       goto error;
 
     // Try to decompress it:
-    if(uncompress((unsigned char *)chunk_cache->data,
-		  (unsigned long int *)&chunk_cache->len,
-		  (unsigned char *)compressed_chunk,
-		  (unsigned long int)compressed_length) != Z_OK ) {
+    if(uncompress(chunk_cache->data,
+		  &chunk_cache->len,
+                  compressed_chunk,
+		  (uLong)compressed_length) != Z_OK ) {
       RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_id);
       goto error;
     };
@@ -526,7 +530,7 @@ static int partial_read(FileLikeObject self, char *buffer, int length) {
   };
     /** No compression */
   case ZIP_STORED:
-    CALL(fd, read, chunk_cache->data, chunk_cache->len);
+    CALL(fd, read, (char *)chunk_cache->data, chunk_cache->len);
     break;
 
   default:

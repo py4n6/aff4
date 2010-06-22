@@ -334,10 +334,13 @@ class Type:
         return "Py_BEGIN_ALLOW_THREADS\n%s = %s;\nPy_END_ALLOW_THREADS\n" % (target or self.name, call)
 
     def post_call(self, method):
-        if "DESTRUCTOR" in self.attributes:
-            return "talloc_free(self->ctx); self->base = NULL;\n"
+        ## Check for errors
+        result = "if(check_error()) goto error;\n"
 
-        return ''
+        if "DESTRUCTOR" in self.attributes:
+            result+= "talloc_free(self->ctx); self->base = NULL;\n"
+
+        return result
 
     def from_python_object(self, source, destination, method, **kw):
         return ''
@@ -572,11 +575,17 @@ PyString_AsStringAndSize(tmp_%s, &%s, (Py_ssize_t *)&%s);
         if sense=='proxied':
             return "py_%s = PyLong_FromLong(%s);\n" % (self.name, self.length)
 
-        return  """if(func_return > %(length)s) {
-  func_return = 0;
+        return  """
+// NOTE - this should never happen - it might indicate an overflow condition.
+if(func_return > %(length)s) {
+  printf(\"Programming Error - possible overflow!!\\n\");
+  abort();
+// Do we need to truncate the buffer for a short read?
+} else if(func_return < %(length)s) {
+ _PyString_Resize(&tmp_%(name)s, (Py_ssize_t)func_return);
 };
 
-_PyString_Resize(&tmp_%(name)s, func_return); \n%(result)s = tmp_%(name)s;\n""" % \
+%(result)s = tmp_%(name)s;\n""" % \
             dict(name= name, result= result, length=self.length)
 
 
