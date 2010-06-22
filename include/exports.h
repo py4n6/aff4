@@ -32,6 +32,7 @@ extern XSDInteger new_XSDInteger(void *ctx);
 extern XSDString new_XSDString(void *ctx);
 extern XSDDatetime new_XSDDateTime(void *ctx);
 
+extern struct AES256Password_t __AES256Password;
 #pragma GCC visibility pop
 
 

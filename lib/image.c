@@ -173,9 +173,6 @@ static int dump_bevy_thread(ImageWorker this) {
   CALL(bevy, write, this->segment_buffer->data,
        this->segment_buffer->readptr);
 
-  CALL((AFFObject)bevy, close);
-  CALL((AFFObject)volume, cache_return);
-
   // Stupid divide by zero ....
   if(this->bevy->size > 0) {
     AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_IMAGE_STREAM,
@@ -194,6 +191,9 @@ static int dump_bevy_thread(ImageWorker this) {
 
   // Set the index on the bevy
   CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index,0);
+
+  CALL((AFFObject)bevy, close);
+  CALL((AFFObject)volume, cache_return);
 
 #if 1
   // Reset everything to the start
@@ -595,7 +595,7 @@ VIRTUAL(Image, FileLikeObject) {
      VMETHOD(set_workers) = Image_set_workers;
 } END_VIRTUAL
 
-void image_init() {
+AFF4_MODULE_INIT(image) {
   INIT_CLASS(Image);
 
   register_type_dispatcher(oracle, AFF4_IMAGE, (AFFObject *)GETCLASS(Image));

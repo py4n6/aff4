@@ -836,12 +836,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
      UNIMPLEMENTED(FileLikeObject, write);
 } END_VIRTUAL
 
-void mapdriver_init() {
-  INIT_CLASS(MapDriver);
-  INIT_CLASS(MapValue);
-  INIT_CLASS(MapValueBinary);
-  INIT_CLASS(MapValueInline);
-
+AFF4_MODULE_INIT(map) {
   register_type_dispatcher(oracle, AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));

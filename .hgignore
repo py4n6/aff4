@@ -51,3 +51,4 @@ talloc_test
 python2.6/tests/sign.key
 *.dylib
 *.pyc
+lib/init.c

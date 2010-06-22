@@ -9,7 +9,7 @@ iter = r.get_key("ControlSet001/Control/Class/{4D36E972-E325-11CE-BFC1-08002bE10
 #iter = r.get_key()
 
 for x in iter.list_values():
-    print x, x.get_value(), x.data.type
+    print "%s = %s (%s)" % (x.rec.valuename, x.get_value(), x.data.type)
 
 for k in iter:
     print k.keyname

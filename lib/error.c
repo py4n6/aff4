@@ -20,7 +20,7 @@ void error_dest(void *slot) {
   if(slot) talloc_free(slot);
 };
 
-void *raise_errors(enum _error_type t, char *reason, ...) {
+void *aff4_raise_errors(enum _error_type t, char *reason, ...) {
   char *error_buffer;
   // This has to succeed:
   enum _error_type *type = aff4_get_current_error(&error_buffer);
@@ -69,7 +69,7 @@ enum _error_type *aff4_get_current_error(char **error_buffer) {
 };
 
 /** Initialise the error subsystem */
-void error_init() {
+AFF4_MODULE_INIT(error) {
   error_subsystem_initialised = 1;
 
   // We create the error buffer slots

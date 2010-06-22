@@ -300,10 +300,7 @@ VIRTUAL(EWFStream, FileLikeObject) {
   VMETHOD_BASE(AFFObject, close) = EWFStream_close;
 } END_VIRTUAL
 
-void EWF_init() {
-  INIT_CLASS(EWFVolume);
-  INIT_CLASS(EWFStream);
-
+AFF4_MODULE_INIT(EWF) {
   register_type_dispatcher(oracle, AFF4_EWF_VOLUME, (AFFObject *)GETCLASS(EWFVolume));
   register_type_dispatcher(oracle, AFF4_EWF_STREAM, (AFFObject *)GETCLASS(EWFStream));
 

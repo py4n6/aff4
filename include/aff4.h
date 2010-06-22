@@ -7,9 +7,14 @@ The low level API is found in zip.h which describes all the classes
 and their interfaces.
 
 This file describes the high level interface.
+
+This file is generated from sc_aff4.h.in
 */
 #ifndef __AFF4_H
 #define __AFF4_H
+
+#define DLL_PUBLIC __attribute__ ((visibility("default")))
+
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -36,6 +41,8 @@ This file describes the high level interface.
 #include "aff4_crypto.h"
 #include "aff4_objects.h"
 #include "ewfvolume.h"
+#include "aff4_rdf.h"
+#include "aff4_rdf_serialise.h"
 
 /** 
     Opens the URIs specified in images and uses them to populate the

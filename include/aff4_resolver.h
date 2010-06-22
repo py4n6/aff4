@@ -11,6 +11,21 @@
 #ifndef   	AFF4_RESOLVER_H_
 # define   	AFF4_RESOLVER_H_
 
+/* This is a funtion that will be run when the library is imported. It
+   should be used to initialise static stuff.
+
+   It will only be called once. If you require some other subsystem to
+   be called first you may call it from here.
+*/
+#define AFF4_MODULE_INIT(name) static int name ## _initialised = 0;     \
+  static inline void name ## _init_2();                                        \
+  void name ## _init() {                                                \
+    if(name ## _initialised) return;                                    \
+    name ## _initialised = 1;                                           \
+    name ## _init_2();                                                  \
+  };                                                                    \
+  inline void name ## _init_2()
+
 #include "aff4_io.h"
 #include "tdb.h"
 
@@ -252,7 +267,7 @@ CLASS(Resolver, Object)
        passed. Returns 1 if the ID is found, or 0 if the ID is not
        found.
 
-       RAISES(func_return == 0, KeyError) = "URI not found for id %llu", id
+       RAISES(func_return == 0, KeyError) = "URI not found for id %llu", (long long unsigned int)id
        **/
        int METHOD(Resolver, get_urn_by_id, int id, RDFURN uri);
 
@@ -285,9 +300,7 @@ CLASS(Resolver, Object)
        /** This is a handler for new types - types get registered here */
        void METHOD(Resolver, register_type_dispatcher, char *type, AFFObject class_ref);
 
-#if HAVE_OPENSSL
        void METHOD(Resolver, register_security_provider, struct SecurityProvider_t *class_ref);
-#endif
 
        /** A Utility method to create a new instance of a registered
            RDF dataType.

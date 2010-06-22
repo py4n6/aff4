@@ -318,14 +318,18 @@ static TDB_DATA *XSDString_encode(RDFValue self, RDFURN subject) {
 };
 
 static void XSDString_set(XSDString self, char *string, int length) {
+  if(length < 0) {
+    RaiseError(ERuntimeError, "Length is negative");
+    return;
+  };
+
   if(self->value) {
     talloc_free(self->value);
   };
 
   self->length = length;
-  self->value = talloc_memdup(self, string, length);
-
-  return;
+  self->value = talloc_memdup(self, string, length+1);
+  self->value[length]=0;
 };
 
 static int XSDString_decode(RDFValue this, char *data, int length, RDFURN subject) {
@@ -851,15 +855,8 @@ void register_rdf_value_class(RDFValue classref) {
 };
 
 /** This function initialises the RDF types registry. */
-void rdf_init() {
+AFF4_MODULE_INIT(rdf) {
   raptor_init();
-  INIT_CLASS(RDFValue);
-  INIT_CLASS(XSDInteger);
-  INIT_CLASS(XSDString);
-  INIT_CLASS(RDFURN);
-  INIT_CLASS(XSDDatetime);
-  INIT_CLASS(IntegerArrayBinary);
-  INIT_CLASS(IntegerArrayInline);
 
   // Register all the known basic types
   register_rdf_value_class((RDFValue)GETCLASS(XSDInteger));

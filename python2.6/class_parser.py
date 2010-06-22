@@ -127,9 +127,11 @@ Gen_wrapper *new_class_wrapper(Object item) {
          /* If its owned by the null_context it means that the function does
             not want to own the memory - we therefore steal it so it gets freed
             with the python object. */
-         if(talloc_parent(result->base) == null_context)
-                  talloc_steal(result->ctx, result->base);
-
+         //if(talloc_parent(result->base) == null_context) {
+         if(talloc_parent(result->base) == NULL) {
+                  talloc_reference(result->ctx, result->base);
+                  talloc_unlink(NULL, result->base);
+         };
          return result;
        };
      };
@@ -581,7 +583,7 @@ _PyString_Resize(&tmp_%(name)s, func_return); \n%(result)s = tmp_%(name)s;\n""" 
     def python_proxy_post_call(self, result='py_result'):
         return """
 {
-    char *tmp_buff; int tmp_len;
+    char *tmp_buff; Py_ssize_t tmp_len;
     if(-1==PyString_AsStringAndSize(%(result)s, &tmp_buff, &tmp_len)) goto error;
 
     memcpy(%(name)s,tmp_buff, tmp_len);
@@ -2243,7 +2245,7 @@ class parser:
     arg_re = re.compile(r"\s*([0-9A-Z a-z_]+\s+\*?)([0-9A-Za-z_]+),?")
     constant_re = re.compile(r"#define\s+([A-Z_0-9]+)\s+[^\s]+")
     struct_re = re.compile(r"([A-Z]+)?\s+(typedef )?struct\s+([A-Z_a-z0-9]+)\s+{")
-    proxy_class_re = re.compile(r"^([A-Z]+)?\s*PROXY_CLASS\(([A-Za-z0-9]+)\)")
+    proxy_class_re = re.compile(r"PROXY_CLASS\(([A-Za-z0-9]+)\)")
     end_class_re = re.compile("END_CLASS")
     attribute_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z]+)\s*;")
     comment_re = re.compile(r"^\s*//")

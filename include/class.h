@@ -191,10 +191,12 @@ extern "C" {
 
 #include "talloc.h"
 
+#define DLL_PUBLIC __attribute__ ((visibility("default")))
+
 #define CLASS(class,super_class)                                 \
   typedef struct class ## _t *class;                             \
   int class ## _init(Object self);                               \
-  extern struct class ## _t __ ## class;                         \
+  DLL_PUBLIC extern struct class ## _t __ ## class;              \
   struct class ## _t { struct super_class ## _t super;		 \
   class   __class__;                                             \
   super_class  __super__;
@@ -232,10 +234,10 @@ extern "C" {
    those with foos methods and attributes.
 
 **********************************************************/
-#define VIRTUAL(class,superclass)				\
+#define VIRTUAL(class,superclass)                                       \
   struct class ## _t __ ## class;                                       \
                                                                         \
-  int class ## _init(Object this) {                                    \
+  DLL_PUBLIC  int class ## _init(Object this) {                         \
   class self = (class)this;                                             \
   if(self->__super__) return 1;                                         \
   superclass ##_init(this);                                             \
@@ -303,6 +305,7 @@ extern "C" {
 
 // The following only initialises the class if the __super__ element
 // is NULL. This is fast as it wont call the initaliser unnecessaily
+#if 0
 #define CONSTRUCT(class, virt_class, constructor, context, ... )        \
   (class)( __## class.__super__ == NULL ?                               \
            class ## _init((Object)&__ ## class) : 0,                    \
@@ -310,6 +313,14 @@ extern "C" {
            virt_class ## _init((Object)&__ ## virt_class): 0,           \
              ((virt_class)(&__ ## class))->constructor(                 \
                        (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
+				   ## __VA_ARGS__) )
+#endif
+
+  // This requires the class initializers to have been called
+  // previously. Therefore they are not exported.
+#define CONSTRUCT(class, virt_class, constructor, context, ... )        \
+  (class)(((virt_class)(&__ ## class))->constructor(                    \
+      (virt_class)_talloc_memdup(context, &__ ## class, sizeof(struct class ## _t),  __location__ "(" #class ")"), \
 				   ## __VA_ARGS__) )
 
 /** This variant is useful when all we have is a class reference
@@ -367,11 +378,11 @@ struct Object_t {
 
 inline void Object_init(Object);
 
-extern struct Object_t __Object;
+DLL_PUBLIC extern struct Object_t __Object;
 
 int issubclass(Object obj, Object class);
 
-extern void unimplemented(Object self);
+DLL_PUBLIC extern void unimplemented(Object self);
 
 #define UNIMPLEMENTED(class, method)             \
   ((class)self)->method = (void *)unimplemented;

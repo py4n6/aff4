@@ -58,6 +58,8 @@ CLASS(RDFValue, Object)
       /* This method is called to parse a serialised form into this
 	 instance. Return 1 if parsing is successful, 0 if error
 	 occured.
+
+         DEFAULT(subject) = NULL;
       */
       int METHOD(RDFValue, parse, char *serialised_form, struct RDFURN_t *subject);
 
@@ -75,6 +77,8 @@ CLASS(RDFValue, Object)
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be
 	  allocated to the NULL context and should be unlinked by the caller.
+
+          DEFAULT(subject) = NULL;
       */
       char *METHOD(RDFValue, serialise, struct RDFURN_t *subject);
 

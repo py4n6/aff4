@@ -924,16 +924,10 @@ VIRTUAL(SecurityProvider, Object) {
   VMETHOD(x509_private_key) = SecurityProvider_x509_private_key;
 } END_VIRTUAL
 
-void encrypt_init() {
+AFF4_MODULE_INIT(encrypt) {
   // Initialise the SSL library must be done once:
   SSL_load_error_strings();
   SSL_library_init();
-
-  INIT_CLASS(AFF4Cipher);
-  INIT_CLASS(AES256Password);
-  INIT_CLASS(AES256X509);
-  INIT_CLASS(Encrypted);
-  INIT_CLASS(Key);
 
   register_type_dispatcher(oracle, AFF4_ENCRYTED, (AFFObject *)GETCLASS(Encrypted));
   register_rdf_value_class((RDFValue)GETCLASS(AES256Password));
@@ -944,3 +938,4 @@ void encrypt_init() {
 
   KeyCache = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
 };
+

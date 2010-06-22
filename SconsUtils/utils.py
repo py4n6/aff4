@@ -144,6 +144,12 @@ link_python_module_message = '%sLinking Native Python module %s==> %s${TARGET}%s
 java_library_message = '%sCreating Java Archive %s==> %s$TARGET%s' % \
    (colors['red'], colors['purple'], colors['yellow'], colors['end'])
 
+def info_string(subject, verb, adjective):
+    return "%s%s %s%s %s%s%s" % (colors['blue'], subject,
+                                 colors['purple'], verb,
+                                 colors['yellow'], adjective,
+                                 colors['end'])
+
 def install_colors(args):
     """ Installs colors into an environment """
     args.update(dict( CXXCOMSTR = compile_source_message,
@@ -269,6 +275,8 @@ class ExtendedEnvironment(SCons.Environment.Environment):
     python_cppflags = distutils.util.split_quoted(
         "-I"+sysconfig.get_python_inc())
 
+    talloc_shared = None
+
     def PythonModule(self, libname, lib_objs=[], **kwargs):
         """ This builds a python module which is almost a library but
         is sometimes named differently.
@@ -302,7 +310,8 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         ## For some stupid reason they include the compiler in LDSHARED
         shlink_flags.extend([x for x in flags if 'gcc' not in x])
 
-        shlink_flags.append(sysconfig.get_config_var('LOCALMODLIBS'))
+        shlink_flags.append(distutils.util.split_quoted(
+                sysconfig.get_config_var('LOCALMODLIBS')))
 
         ## TODO cross compile mode
         kwargs['LIBPREFIX'] = ''
@@ -314,7 +323,12 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             kwargs['SHCCCOMSTR'] = compile_python_source_message
             kwargs['SHLINKCOMSTR'] = link_python_module_message
 
-        lib = self.SharedLibrary(libname,lib_objs,
+        if not self.talloc_shared:
+            self.talloc_shared = self.SharedObject(
+                source = "#lib/talloc.c", target='shared_talloc',
+                CFLAGS='-Ilibreplace/ -Ilib/')
+
+        lib = self.SharedLibrary(libname, lib_objs + self.talloc_shared,
                                  **kwargs)
 
         ## Install it to the right spot

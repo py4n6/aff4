@@ -1468,7 +1468,7 @@ static void talloc_report_null(void)
 /*
   report on any memory hanging off the null context
 */
-void talloc_report_null_full(void)
+static void talloc_report_null_full(void)
 {
 	if (talloc_total_size(null_context) != 0) {
 		talloc_report_full(null_context, stderr);

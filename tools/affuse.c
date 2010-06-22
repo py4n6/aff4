@@ -16,6 +16,8 @@
 #include <libgen.h>
 #include <time.h>
 
+extern Resolver oracle;
+
 struct stream_info {
   RDFURN urn;
   XSDInteger size;
@@ -180,7 +182,7 @@ static struct fuse_operations affuse_oper = {
      .open       = affuse_open,
      .read       = affuse_read,
 };
-
+ 
 static void
 usage(void)
 {
@@ -305,6 +307,7 @@ int main(int argc, char **argv)
     // Make sure the library is initialised:
     AFF4_Init();
     oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
+    //oracle = get_oracle();
 
     streams = populate_streams(volume_names, argc, 0);
 

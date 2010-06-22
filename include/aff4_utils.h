@@ -155,6 +155,6 @@ CLASS(Logger, Object)
                  char *service, struct RDFURN_t *subject, char *message);
 END_CLASS
 
-PROXY_CLASS(Logger)
+PROXY_CLASS(Logger);
 
 #endif 	    /* !AFF4_UTILS_H_ */

@@ -125,7 +125,7 @@ class Lexer:
                         next_state = cb(t, m)
                         if next_state == "CONTINUE":
                             continue
-                        
+
                         elif next_state:
                             next = next_state
                             self.state = next

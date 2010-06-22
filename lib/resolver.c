@@ -79,46 +79,6 @@ static void Resolver_register_type_dispatcher(Resolver self, char *type, \
   return;
 };
 
-
-void AFF4_Init(void) {
-  INIT_CLASS(Resolver);
-  INIT_CLASS(AFFObject);
-  INIT_CLASS(Logger);
-
-  error_init();
-  image_init();
-  mapdriver_init();
-  zip_init();
-  rdf_init();
-  graph_init();
-
-#ifdef HAVE_OPENSSL
-  encrypt_init();
-#endif
-
-#ifdef HAVE_LIBCURL
-  //  HTTPObject_init();
-#endif
-
-#ifdef HAVE_LIBAFFLIB
-  //  AFF1Volume_init();
-  // AFF1Stream_init();
-#endif
-
-#ifdef HAVE_LIBEWF_H
-  EWF_init();
-  // EWFStream_init();
-#endif
-
-  init_luts();
-
-  // Make a global oracle
-  if(!oracle) {
-    // Create the global oracle
-    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
-  };
-};
-
 /** Implementation of Caches */
 
 /** FIXME - Need to implement hash table rebalancing */
@@ -1988,3 +1948,18 @@ VIRTUAL(TDB, Object) {
   VMETHOD(store) = TDB_store;
   VMETHOD(fetch) = TDB_fetch;
 }  END_VIRTUAL;
+
+Resolver get_oracle(void) {
+  return oracle;
+};
+
+AFF4_MODULE_INIT(resolver) {
+  rdf_init();
+  init_luts();
+
+  // Make a global oracle
+  if(!oracle) {
+    // Create the global oracle
+    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
+  };
+};

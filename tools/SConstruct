@@ -14,6 +14,6 @@ for prog in Split(programs):
                        LIBS=env.libaff4_so, LIBPATH="#lib/")
     nenv.Install("$prefix/bin/", prog)
 
-if utils.HEADERS.get("HAVE_FUSE"):
-    nenv.Program("aff4fuse", ['affuse.c'] + common_files, LIBS=['aff4', 'fuse'], LIBPATH="#lib/")
+if 0 and utils.HEADERS.get("HAVE_FUSE_H"):
+    nenv.Program("aff4fuse", ['affuse.c'], LIBS=[env.libaff4_so, 'fuse'],)
     nenv.Install("$prefix/bin/", Split("aff4fuse"))

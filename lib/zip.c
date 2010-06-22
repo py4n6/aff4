@@ -1688,9 +1688,6 @@ VIRTUAL(ZipFileStream, FileLikeObject) {
   VMETHOD_BASE(FileLikeObject, write) = ZipFileStream_write;
   VMETHOD_BASE(FileLikeObject, read) = ZipFileStream_read;
   VMETHOD_BASE(AFFObject, close) = ZipFileStream_close;
-
-// Initialise the encoding luts
-  encode_init();
 } END_VIRTUAL
 
 char *relative_name(void *ctx, char *name, char *volume_urn) {
@@ -1701,15 +1698,8 @@ char *relative_name(void *ctx, char *name, char *volume_urn) {
   return talloc_strdup(ctx,name);
 };
 
-void zip_init() {
-  INIT_CLASS(FileLikeObject);
-  INIT_CLASS(FileBackedObject);
-  INIT_CLASS(ZipFile);
-  INIT_CLASS(ZipFileStream);
-  INIT_CLASS(AFF4Volume);
-
+AFF4_MODULE_INIT(zip) {
   register_type_dispatcher(oracle, AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
   register_type_dispatcher(oracle, AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
   register_type_dispatcher(oracle, AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
-
 };

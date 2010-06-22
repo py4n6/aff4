@@ -192,7 +192,7 @@ Export("env")
 
 config_h_build([File('lib/config.h')], [File('lib/sc_config.h.in')], env)
 
-SConscript(['libraptor/SConscript', 'lib/SConstruct', 'tools/SConstruct',
+SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
             'python2.6/SConstruct',
             'tests/SConstruct', 'applications/SConstruct'])
 
