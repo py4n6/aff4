@@ -15,6 +15,7 @@ source_files = """
 #lib/encode.c #lib/queue.c
 #lib/graph.c #lib/error.c
 #libreplace/replace.c
+#lib/public.c
 """
 
 ## Optional support for EWF and AFF1 volumes

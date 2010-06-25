@@ -5,6 +5,8 @@ import pyaff4,pdb, gc
 #time.sleep(1)
 
 urn = pyaff4.RDFURN()
+print dir(urn)
+urn._definition()
 
 urn.set("http://www.google.com/hello/")
 #urn.add_query("world/../../../fo#obar.txt")

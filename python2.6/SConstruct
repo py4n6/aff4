@@ -24,24 +24,52 @@ import class_parser
 
 def build_python_bindings(target, source, env, initialization=''):
     """ A command to generate python bindings """
-    module_name = os.path.splitext(os.path.basename(target[0].name))[0]
+    target, public_api, public_header = target
+    module_name = os.path.splitext(os.path.basename(target.name))[0]
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
     p = class_parser.HeaderParser(module_name, verbose=env['V'])
     p.module.init_string = initialization
+    p.module.public_header = open(public_header.path, 'w')
+    p.module.public_header.write("""
+#include <sys/types.h>
+#include <stdint.h>
+
+#include <string.h>
+
+#include <sys/types.h>
+#include <time.h>
+#include <stdlib.h>
+
+#define IN
+#define OUT
+
+typedef struct TDB_DATA {
+	unsigned char *dptr;
+	size_t dsize;
+} TDB_DATA;
+
+
+""")
+    p.module.public_api = open(public_api.path, 'w')
+
     p.parse_filenames([s.get_abspath() for s in source])
 
-    fd = open(target[0].get_abspath(), 'w')
+    fd = open(target.get_abspath(), 'w')
     p.write(fd)
     fd.close()
+
+    p.module.public_header.close()
+    p.module.public_api.close()
 
 nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 
 if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
-nenv.Command('pyaff4.c', BOUND_FILES, partial(build_python_bindings,
-                                              initialization=''))
+nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'], 
+             BOUND_FILES, partial(build_python_bindings,
+                                  initialization=''))
 nenv.Depends('pyaff4.c', 'class_parser.py')
 
 nenv.PythonModule("pyaff4", ["pyaff4.c"], LIBS=env.libaff4_so)

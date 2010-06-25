@@ -301,6 +301,17 @@ static int check_error() {
 """ % {'name': cls.class_name})
 
     def write(self, out):
+        ## Write the headers
+        self.public_api.write('''
+#ifdef BUILDING_DLL
+#include "aff4.h"
+#else
+#include "aff4_public.h"
+#endif
+''')
+        for cls in self.classes.keys():
+            self.public_header.write("typedef void * %s;\n" % cls)
+
         ## Prepare all classes
         for cls in self.classes.values():
             cls.prepare()
@@ -413,6 +424,10 @@ class Type:
 
     def call_arg(self):
         return self.name
+
+    def passthru_call(self):
+        """ Returns how we should call the function when simply passing args directly """
+        return self.call_arg()
 
     def pre_call(self, method):
         return ''
@@ -619,6 +634,9 @@ class IntegerOut(Integer):
     def call_arg(self):
         return "&%s" % self.name
 
+    def passthru_call(self):
+        return self.name
+
 class Integer32Out(Integer32):
     sense = 'OUT_DONE'
     buildstr = ''
@@ -631,6 +649,9 @@ class Integer32Out(Integer32):
 
     def call_arg(self):
         return "&%s" % self.name
+
+    def passthru_call(self):
+        return self.name
 
 class Char_and_Length_OUT(Char_and_Length):
     sense = 'OUT_DONE'
@@ -747,8 +768,11 @@ class Void(Type):
     error_value = "return;"
     original_type = ''
 
-    def __init__(self, *args):
-        Type.__init__(self, None, 'void *')
+    def __init__(self, name, type = 'void', *args):
+        Type.__init__(self, name, type)
+
+    def comment(self):
+        return ''
 
     def definition(self, default = None, **kw):
         return ''
@@ -768,6 +792,11 @@ class Void(Type):
 
     def return_value(self, value):
         return "return;"
+
+class PVoid(Void):
+    def __init__(self, name, type = 'void *', *args):
+        Type.__init__(self, name, type)
+
 
 class StringArray(String):
     interface = 'array'
@@ -838,27 +867,28 @@ if(!type_check(%(source)s, &%(type)s_Type)) {
         return "%s %s;\n" % (self.type, self.name)
 
     def definition(self, default = 'NULL', sense='in', **kw):
-        result = "Gen_wrapper *%s __attribute__((unused)) = %s;\n" % (self.name, default)
+        result = "Gen_wrapper *wrapped_%s __attribute__((unused)) = %s;\n" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
-            result += " %s __attribute__((unused)) call_%s;\n" % (self.type, self.name)
+            result += " %s __attribute__((unused)) %s;\n" % (self.type, self.name)
 
         return result
 
     def call_arg(self):
-        return "call_%s" % self.name
+        return "%s" % self.name
 
     def pre_call(self, method):
         if 'OUT' in self.attributes or self.sense == 'OUT':
             return ''
+        self.original_type = self.type.split()[0]
 
         return """
-if(!%(name)s || (PyObject *)%(name)s==Py_None) {
-   call_%(name)s = NULL;
-} else if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
-     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
+if(!wrapped_%(name)s || (PyObject *)wrapped_%(name)s==Py_None) {
+   %(name)s = NULL;
+} else if(!type_check((PyObject *)wrapped_%(name)s,&%(original_type)s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(original_type)s");
      goto error;
 } else {
-   call_%(name)s = %(name)s->base;
+   %(name)s = wrapped_%(name)s->base;
 };\n""" % self.__dict__
 
     def assign(self, call, method, target=None):
@@ -887,18 +917,18 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
             result += """
        // A NULL return without errors means we return None
        if(!returned_object) {
-         %(name)s = (Gen_wrapper *)Py_None;
+         wrapped_%(name)s = (Gen_wrapper *)Py_None;
          Py_INCREF(Py_None);
 """ % args
 
         result += """
        } else {
-         %(name)s = new_class_wrapper(returned_object);
-         if(!%(name)s) goto error;
+         wrapped_%(name)s = new_class_wrapper(returned_object);
+         if(!wrapped_%(name)s) goto error;
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "  %(incref)s(%(name)s->base); \n" % args
+            result += "  %(incref)s(wrapped_%(name)s->base); \n" % args
 
         result += """       };
     }
@@ -913,7 +943,7 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
         if sense=='proxied':
             return "%(result)s = (PyObject *)new_class_wrapper((Object)%(name)s);\n" % args
 
-        return "%(result)s = (PyObject *)%(name)s;\n" % args
+        return "%(result)s = (PyObject *)wrapped_%(name)s;\n" % args
 
 class PointerWrapper(Wrapper):
     """ A pointer to a wrapped class """
@@ -921,46 +951,58 @@ class PointerWrapper(Wrapper):
         type = type.split()[0]
         Wrapper.__init__(self,name, type)
 
+    def comment(self):
+        return "%s *%s" % (self.type, self.name)
+
     def definition(self, default = 'NULL', sense='in', **kw):
-        result = "Gen_wrapper *%s = %s;" % (self.name, default)
+        result = "Gen_wrapper *wrapped_%s = %s;" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
-            result += " %s *call_%s;\n" % (self.type, self.name)
+            result += " %s *%s;\n" % (self.type, self.name)
 
         return result
+
+    def byref(self):
+        return "&wrapped_%s" % self.name
 
     def pre_call(self, method):
         if 'OUT' in self.attributes or self.sense == 'OUT':
             return ''
+        self.original_type = self.type.split()[0]
 
         return """
-if(!%(name)s || (PyObject *)%(name)s==Py_None) {
-   call_%(name)s = NULL;
-} else if(!type_check((PyObject *)%(name)s,&%(type)s_Type)) {
-     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(type)s");
+if(!wrapped_%(name)s || (PyObject *)wrapped_%(name)s==Py_None) {
+   %(name)s = NULL;
+} else if(!type_check((PyObject *)wrapped_%(name)s,&%(original_type)s_Type)) {
+     PyErr_Format(PyExc_RuntimeError, "%(name)s must be derived from type %(original_type)s");
      goto error;
 } else {
-   call_%(name)s = (%(type)s *)&%(name)s->base;
+   %(name)s = (%(original_type)s *)&wrapped_%(name)s->base;
 };\n""" % self.__dict__
 
 class StructWrapper(Wrapper):
     """ A wrapper for struct classes """
+    def __init__(self, name, type):
+        Wrapper.__init__(self,name, type)
+        self.original_type = type.split()[0]
+
     def assign(self, call, method, target = None):
-        args = dict(name = target or self.name, call = call, type = self.type)
+        self.original_type = self.type.split()[0]
+        args = dict(name = target or self.name, call = call, type = self.original_type)
         result = """
 PyErr_Clear();
-%(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
-%(name)s->base = %(call)s;
+wrapped_%(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
+wrapped_%(name)s->base = %(call)s;
 """ % args
 
         if "NULL_OK" in self.attributes:
-            result += "if(!%(name)s->base) { Py_DECREF(%(name)s); return NULL; };" % args
+            result += "if(!wrapped_%(name)s->base) { Py_DECREF(wrapped_%(name)s); return NULL; };" % args
 
         result += """
 // A NULL object gets translated to a None
- if(!%(name)s->base) {
-   Py_DECREF(%(name)s);
+ if(!wrapped_%(name)s->base) {
+   Py_DECREF(wrapped_%(name)s);
    Py_INCREF(Py_None);
-   %(name)s = (Gen_wrapper *)Py_None;
+   wrapped_%(name)s = (Gen_wrapper *)Py_None;
  } else {
 """ % args
 
@@ -979,16 +1021,14 @@ PyErr_Clear();
         return "&%s" % self.name
 
     def definition(self, default = 'NULL', sense='in', **kw):
-        result = "Gen_wrapper *%s = %s;" % (self.name, default)
+        result = "Gen_wrapper *wrapped_%s = %s;" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
-            result += " %s *call_%s;\n" % (self.type, self.name)
+            result += " %s *%s;\n" % (self.original_type, self.name)
 
         return result;
 
 class PointerStructWrapper(StructWrapper):
-    def __init__(self, name, type):
-        type = type.split()[0]
-        Wrapper.__init__(self,name, type)
+    pass
 
 class Timeval(Type):
     """ handle struct timeval values """
@@ -1036,7 +1076,7 @@ type_dispatcher = {
     'OUT uint32_t *': Integer32Out,
     'char': Char,
     'void': Void,
-    'void *': Void,
+    'void *': PVoid,
 
     'TDB_DATA *': TDB_DATA_P,
     'TDB_DATA': TDB_DATA,
@@ -1058,7 +1098,7 @@ type_dispatcher = {
 method_attributes = ['BORROWED', 'DESTRUCTOR','IGNORE']
 
 def dispatch(name, type):
-    if not type: return Void()
+    if not type: return PVoid(name)
 
     m = re.match("struct ([a-zA-Z0-9]+)_t *", type)
     if m:
@@ -1123,7 +1163,7 @@ class Method:
             if return_type:
                 log("Unable to handle return type %s.%s %s" % (self.class_name, self.name, return_type))
                 #pdb.set_trace()
-            self.return_type = Void()
+            self.return_type = PVoid('func_return')
 
     def clone(self, new_class_name):
         self.find_optional_vars()
@@ -1474,7 +1514,7 @@ class GetattrMethod(Method):
         self.base_class_name = base_class_name
         self._attributes = []
         self.error_set = True
-        self.return_type = Void()
+        self.return_type = Void('')
         self.myclass = myclass
         self.rename_class_name(class_name)
 
@@ -1977,11 +2017,73 @@ class EmptyConstructor(ConstructorMethod):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
         out.write("""return 0;};\n\n""")
 
+class DefinitionMethod(Method):
+    """ Creates a python method which generates struct definitions for the specified class """
+    def write_definition(self, out):
+        impl = self.myclass.module.public_api
+        headers = self.myclass.module.public_header
+
+        cls = self.myclass.module.classes[self.class_name]
+
+        headers.write("""
+/************************** Class %s **************************
+%s
+************************** Methods  **************************/
+""" % (self.class_name, cls.docstring))
+
+        for method in cls.methods:
+            if method.name[0] != '_':
+                args = [ Type('self', self.class_name) ] + method.args
+
+                return_type = method.return_type.type
+                return_expr = 'return '
+                if return_type == 'void':
+                    return_expr = ''
+
+                prototype = 'DLL_PUBLIC %s aff4_%s_%s(%s)' % (
+                    return_type, self.class_name, method.name,
+                    ' , '.join([ arg.comment() for arg in args if arg.comment() ]))
+
+                if method.docstring:
+                    # FIXME - use filltext to nicely format this
+                    docstring = '\n/*\n%s\n*/\n' % method.docstring.strip()
+                else:
+                    docstring = ''
+
+                headers.write("%s%s;\n" % (docstring,prototype))
+
+                impl.write("""%s {
+  %s((%s)self)->%s((%s)%s);
+};
+""" % (prototype, return_expr, method.definition_class_name, method.name, method.definition_class_name,
+       ' , '.join([ arg.passthru_call() for arg in args])))
+
+        args = dict(method = self.name, class_name = self.class_name)
+        out.write("\n/********************************************************\nAutogenerated wrapper for function:\n")
+        out.write(self.comment())
+        out.write("********************************************************/\n")
+
+        self._prototype(out)
+        out.write("{\n//Class Attributes:\n")
+        for t,x in cls.attributes.get_attributes():
+            out.write('printf("%s, %%lu\\n", (unsigned long)&(((%s)NULL)->%s));\n' % (
+                    x.name, t, x.name))
+
+        out.write("// Class Methods\n")
+
+        for method in cls.methods:
+            if method.name[0] != '_':
+                out.write('printf("%s, %%lu\\n", (unsigned long)&(((%s)NULL)->%s));\n' % (
+                        method.name, method.definition_class_name, method.name))
+
+        out.write("Py_INCREF(Py_None); return Py_None;\n};")
+
 class ClassGenerator:
     docstring = ''
     def __init__(self, class_name, base_class_name, module):
         self.class_name = class_name
-        self.methods = []
+        self.methods = [DefinitionMethod(class_name, base_class_name, '_definition', [],
+                                         '', myclass = self)]
         self.module = module
         self.constructor = EmptyConstructor(class_name, base_class_name,
                                              "Con", [], '', myclass = self)
@@ -2280,6 +2382,7 @@ class ProxyClassGenerator(ClassGenerator):
                                             [('PyObject *', 'proxied')],
                                             'void', myclass = self)
         self.module = module
+        self.methods = []
         self.attributes = ProxiedGetattr(self.class_name, self.base_class_name, self)
 
 
@@ -2513,7 +2616,8 @@ END_CLASS
 
                 ## Create proxies for all these methods
                 for method in proxied_class.methods:
-                    self.current_class.methods.append(ProxiedMethod(method, self.current_class))
+                    if method.name[0] != '_':
+                        self.current_class.methods.append(ProxiedMethod(method, self.current_class))
 
                 self.module.add_class(self.current_class, Wrapper)
 
@@ -2993,7 +3097,8 @@ END_CLASS
 
         ## Create proxies for all these methods
         for method in proxied_class.methods:
-            current_class.methods.append(ProxiedMethod(method, current_class))
+            if method.name[0] != '_':
+                current_class.methods.append(ProxiedMethod(method, current_class))
 
         self.module.add_class(current_class, Wrapper)
 
@@ -3017,6 +3122,10 @@ END_CLASS
     def write(self, out):
         self.module.write(out)
 
+    def write_headers(self):
+        pass
+        #pdb.set_trace()
+
 
 if __name__ == '__main__':
     p = HeaderParser('pyaff4', verbose = 1)
@@ -3027,8 +3136,8 @@ if __name__ == '__main__':
     for arg in sys.argv[1:]:
         p.parse_fd(open(arg))
 
-    pdb.set_trace()
     p.write(sys.stdout)
+    p.write_headers()
 
 #    p = parser(Module("pyaff4"))
 #    for arg in sys.argv[1:]:
