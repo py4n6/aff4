@@ -142,6 +142,6 @@ VIRTUAL(Graph, AFFObject) {
   VMETHOD_BASE(AFFObject, close) = Graph_close;
 } END_VIRTUAL
 
-AFF4_MODULE_INIT(graph) {
+AFF4_MODULE_INIT(A000_graph) {
   register_type_dispatcher(oracle, AFF4_GRAPH, (AFFObject *)GETCLASS(Graph));
 };

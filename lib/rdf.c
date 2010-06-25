@@ -855,7 +855,7 @@ void register_rdf_value_class(RDFValue classref) {
 };
 
 /** This function initialises the RDF types registry. */
-AFF4_MODULE_INIT(rdf) {
+AFF4_MODULE_INIT(A000_rdf) {
   raptor_init();
 
   // Register all the known basic types

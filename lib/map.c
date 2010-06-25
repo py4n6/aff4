@@ -669,6 +669,11 @@ static void MapDriver_add(MapDriver self, uint64_t image_offset, uint64_t target
 static void MapDriver_write_from(MapDriver self, RDFURN target, uint64_t target_offset, uint64_t target_length) {
   FileLikeObject this = (FileLikeObject)self;
 
+  if(!self->map) {
+    RaiseError(ERuntimeError, "No map implementation set in driver - did you call finish()?");
+    return;
+  };
+
   CALL(self->map, add_point, this->readptr, target_offset, target->value);
   this->readptr += target_length;
   this->size->value = max(this->size->value, this->readptr);
@@ -679,12 +684,15 @@ static int MapDriver_close(FileLikeObject self) {
   MapDriver this = (MapDriver)self;
   AFFObject obj_self = (AFFObject)self;
 
+  // We dont need to do anything special to close a map opened for reading
+  if(obj_self->mode == 'r') goto exit;
+
   if(obj_self->mode == 'w' && !obj_self->complete) {
     RaiseError(EProgrammingError, "You must call finish() before the object can be used");
     return 0;
   };
 
-  // We want the storage volume to be dirty while we write ourselves
+  // We need the storage volume to be dirty while we write ourselves
   // into it - this is a sanity check which could happen if the user
   // closed the containing volume before they closed the map:
   if(CALL(oracle, resolve_value, this->stored, AFF4_VOLATILE_DIRTY,
@@ -722,6 +730,8 @@ static int MapDriver_close(FileLikeObject self) {
 
   // Done
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE, (RDFValue)self->size,0);
+
+ exit:
   SUPER(AFFObject, FileLikeObject, close);
   return 1;
 
@@ -836,7 +846,7 @@ VIRTUAL(MapDriver, FileLikeObject) {
      UNIMPLEMENTED(FileLikeObject, write);
 } END_VIRTUAL
 
-AFF4_MODULE_INIT(map) {
+AFF4_MODULE_INIT(A000_map) {
   register_type_dispatcher(oracle, AFF4_MAP, (AFFObject *)GETCLASS(MapDriver));
   register_rdf_value_class((RDFValue)GETCLASS(MapValue));
   register_rdf_value_class((RDFValue)GETCLASS(MapValueBinary));

@@ -202,7 +202,13 @@
 
 /** Objects can be marked as dirty in a number of cases: */
 #define DIRTY_STATE_UNKNOWN 0
+
+/** We need to close this volume - it is inconsistent */
 #define DIRTY_STATE_NEED_TO_CLOSE 1
+
+/** The volume is not dirty, and there is no need to reparse its
+    information. This indicates that the volume and the resolver are
+    in sync and allows us to load it quickly. */
 #define DIRTY_STATE_ALREADY_LOADED 2
 
 /* This is the largest size of the inline integer array - bigger

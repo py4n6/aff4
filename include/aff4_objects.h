@@ -162,7 +162,7 @@ struct map_point {
   // The offset in the target
   uint64_t target_offset;
   uint32_t target_index;
-};
+} __attribute__((packed));
 
   /* The points form a tree here */
 typedef struct map_point_node_s map_point_node_t;

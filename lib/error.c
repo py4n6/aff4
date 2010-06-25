@@ -40,12 +40,8 @@ void *aff4_raise_errors(enum _error_type t, char *reason, ...) {
   return NULL;
 };
 
-static int error_subsystem_initialised=0;
-
 enum _error_type *aff4_get_current_error(char **error_buffer) {
   enum _error_type *type;
-
-  if(!error_subsystem_initialised) error_init();
 
   type = pthread_getspecific(error_value_slot);
 
@@ -69,9 +65,7 @@ enum _error_type *aff4_get_current_error(char **error_buffer) {
 };
 
 /** Initialise the error subsystem */
-AFF4_MODULE_INIT(error) {
-  error_subsystem_initialised = 1;
-
+AFF4_MODULE_INIT(A000_error) {
   // We create the error buffer slots
   if(pthread_key_create(&error_str_slot, error_dest) ||
      pthread_key_create(&error_value_slot, error_dest)) {

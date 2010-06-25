@@ -1,6 +1,97 @@
 import sys, os, re, pdb, StringIO
- 
+
+"""
+Documentation regarding the python bounded code.
+
+
+Memory Management
+=================
+
+AFF4 uses a reference count system for memory management similar in
+many ways to the native python system. The basic idea is that memory
+returned by the library always carries a new reference. When the
+caller is done with the memory, they must call aff4_free() on the
+memory, afterwhich the memory is considered invalid. The memory may
+still not be freed at this point depending on its total reference
+count.
+
+New references may be taken to the same memory at any time using the
+aff4_incref() function. This increases the reference count of the
+object, and prevents it from being really freed until the correct
+number of aff4_free() calls are made to it.
+
+This idea is important for example in the following sequence:
+
+FileLikeObject fd = resolver->create(resolver, 'w');
+RDFURN uri = fd->urn;
+
+Now uri hold a reference to the urn attribute of fd, but that
+attribute is actually owned by fd. If fd is freed in future, e.g. (the
+close method actually frees the fd implicitely):
+
+fd->close(fd);
+
+Now the uri object is dangling. To prevent fd->urn from disappearing
+when fd is freed, we need to take another reference to it:
+
+FileLikeObject fd = resolver->create(resolver, 'w');
+RDFURN uri = fd->urn;
+aff4_incref(uri);
+
+fd->close(fd);
+
+Now uri is valid (but fd is no longer valid). When we are finished
+with uri we just call:
+
+aff4_free(uri);
+
+
+Python Integration
+------------------
+
+For every AFF4 object, we create a python wrapper object of the
+corresponding type. The wrapper object contains python wrapper methods
+to allow access to the AFF4 object methods, as well as getattr methods
+for attributes.
+
+When calling a method which returns a new reference, we just store the
+reference in the "base" member of the python object. When python
+garbage collects our python object, we call aff4_free() on it.
+
+The getattr method creates a new python wrapper object of the correct
+type, and sets its base attribute to point at the target AFF4
+object. We then aff4_incref() the target to ensure that it does not
+get freed until we are finished with it.
+
+
+   Python Object
+  -----
+ |  P1 |    C Object
+ | Base|-->+------+
+ |     |   |  C1  |
+ |     |   |      |
+  -----    |Member|--------------+-->+----+
+           +------+              |   | C2 |
+                                 |   |    |
+              Getattr  -------   |   |    |
+              Member  |  P2   |  |   +----+
+                      | Base  |--+ New reference
+                       -------
+                        Python Object
+
+   Figure 1: Python object 1 owns C1's memory (when P1 is GC'ed C1 is
+             freed). A reference to a member of C1 is made via P1's
+             getattr method. The getattr method creates P2 to provide
+             access to C2 by setting base to C2's address. We need to
+             guarantee however, that C2 will not be freed suddenly
+             (e.g. if C1 is freed). We therefore increase C2's
+             reference count using aff4_incref();
+"""
 DEBUG = 0
+
+## These functions are used to manage library memory
+FREE = "aff4_free"
+INCREF = "aff4_incref"
 
 def log(msg):
     if DEBUG>0:
@@ -93,11 +184,16 @@ static struct python_wrapper_map_t {
        PyTypeObject *python_type;
 } python_wrappers[%s];
 
+/** A useful macro to construct new classes */
+#undef CONSTRUCT
+#define CONSTRUCT(class, virt_class, constructor, ...)    \
+        (class)((virt_class)&__ ## class )->constructor(  \
+                (virt_class)alloc_ ## class(), ## __VA_ARGS__)
+
 /** This is a generic wrapper type */
 typedef struct {
   PyObject_HEAD
   void *base;
-  void *ctx;
 } Gen_wrapper;
 
 /* Create the relevant wrapper from the item based on the lookup
@@ -121,17 +217,8 @@ Gen_wrapper *new_class_wrapper(Object item) {
          PyErr_Clear();
 
          result = (Gen_wrapper *)_PyObject_New(python_wrappers[i].python_type);
-         result->ctx = talloc_asprintf(NULL, "new_class_wrapper %%s@%%p", NAMEOF(item), item);
          result->base = (void *)item;
 
-         /* If its owned by the null_context it means that the function does
-            not want to own the memory - we therefore steal it so it gets freed
-            with the python object. */
-         //if(talloc_parent(result->base) == null_context) {
-         if(talloc_parent(result->base) == NULL) {
-                  talloc_reference(result->ctx, result->base);
-                  talloc_unlink(NULL, result->base);
-         };
          return result;
        };
      };
@@ -203,7 +290,7 @@ static int check_error() {
                 ## Now assign ourselves as derived from them
                 out.write(" %s_Type.tp_base = &%s_Type;" % (
                         cls.class_name, cls.base_class_name))
-            
+
             out.write("""
  %(name)s_Type.tp_new = PyType_GenericNew;
  if (PyType_Ready(&%(name)s_Type) < 0)
@@ -338,7 +425,7 @@ class Type:
         result = "if(check_error()) goto error;\n"
 
         if "DESTRUCTOR" in self.attributes:
-            result+= "talloc_free(self->ctx); self->base = NULL;\n"
+            result+= "self->base = NULL;  //DESTRUCTOR - C object no longer valid\n"
 
         return result
 
@@ -643,7 +730,7 @@ class TDB_DATA_P(Char_and_Length_OUT):
 }
 // We no longer need the python object
 Py_DECREF(%(source)s);
-""" % dict(source = source, destination = destination, 
+""" % dict(source = source, destination = destination,
            bare_type = self.bare_type)
 
 class TDB_DATA(TDB_DATA_P):
@@ -776,7 +863,7 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
 
     def assign(self, call, method, target=None):
         method.error_set = True;
-        args = dict(name = target or self.name, call = call, type = self.type)
+        args = dict(name = target or self.name, call = call, type = self.type, incref=INCREF)
 
         result = """{
        Object returned_object;
@@ -806,13 +893,12 @@ if(!%(name)s || (PyObject *)%(name)s==Py_None) {
 
         result += """
        } else {
-         //printf("%%s: Wrapping %%s@%%p\\n", __FUNCTION__, NAMEOF(returned_object), returned_object);
          %(name)s = new_class_wrapper(returned_object);
          if(!%(name)s) goto error;
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "           talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
+            result += "  %(incref)s(%(name)s->base); \n" % args
 
         result += """       };
     }
@@ -863,7 +949,6 @@ class StructWrapper(Wrapper):
         result = """
 PyErr_Clear();
 %(name)s = (Gen_wrapper *)PyObject_New(py%(type)s, &%(type)s_Type);
-%(name)s->ctx = talloc_size(NULL, 1);
 %(name)s->base = %(call)s;
 """ % args
 
@@ -879,12 +964,12 @@ PyErr_Clear();
  } else {
 """ % args
 
-        if "FOREIGN" in self.attributes:
-            result += '// Not taking references to foreign memory\n'
-        elif "BORROWED" in self.attributes:
-            result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
-        else:
-            result += "talloc_steal(%(name)s->ctx, %(name)s->base);\n" % args
+#        if "FOREIGN" in self.attributes:
+#            result += '// Not taking references to foreign memory\n'
+#        elif "BORROWED" in self.attributes:
+#            result += "talloc_reference(%(name)s->ctx, %(name)s->base);\n" % args
+#        else:
+#            result += "talloc_steal(%(name)s->ctx, %(name)s->base);\n" % args
 
         result += "}\n"
 
@@ -1123,7 +1208,7 @@ class Method:
     def error_condition(self):
         result = ""
         if "DESTRUCTOR" in self.return_type.attributes:
-            result += "talloc_free(self->ctx); self->base = NULL;\n"
+            result += "self->base = NULL;\n"
 
         return result +"return NULL;\n";
 
@@ -1329,24 +1414,15 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
 """ % dict(method = self.name, class_name = self.class_name))
 
     def write_destructor(self, out):
-        ## We make sure that we unlink exactly the reference we need
-        ## (the object will persist if it has some other
-        ## references). Note that if we just used talloc_free here it
-        ## will remove some random reference which may not actually be
-        ## the reference we own (which is NULL).
-        free = """
-    if(self->base) {
-        //printf("Unlinking %s@%p\\n", NAMEOF(self->base), self->base);
-        talloc_free(self->ctx);
-        self->base=NULL;
-    };
-"""
         out.write("""static void
 %(class_name)s_dealloc(py%(class_name)s *self) {
-%(free)s
+ if(self->base) {
+   %(free)s(self->base);
+   self->base = NULL;
+ };
  PyObject_Del(self);
 };\n
-""" % dict(class_name = self.class_name, free=free))
+""" % dict(class_name = self.class_name, free=FREE))
 
     def error_condition(self):
         return "return -1;";
@@ -1361,8 +1437,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
             out.write(type.pre_call(self))
 
         ## Now call the wrapped function
-        out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
-        out.write("\n ClearError();\nPy_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s, self->ctx" % (
+        out.write("\n ClearError();\nPy_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s" % (
                 self.class_name,
                 self.definition_class_name,
                 self.name))
@@ -1470,7 +1545,7 @@ static PyObject *%(name)s(py%(class_name)s *self, PyObject *name);
     }; """ % self.class_name)
 
         out.write("""
-     return result; 
+     return result;
    }\n""")
 
     def write_definition(self, out):
@@ -1690,16 +1765,8 @@ class StructConstructor(ConstructorMethod):
     """
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
-        out.write("\nself->ctx = talloc_strdup(NULL, \"%s\");" % self.class_name)
-        out.write("\nself->base = talloc(self->ctx, %s);\n" % self.class_name)
+        out.write("\nself->base = talloc(NULL, %s);\n" % self.class_name)
         out.write("  return 0;\n};\n\n")
-
-    def write_destructor(self, out):
-        out.write("""static void
-%(class_name)s_dealloc(py%(class_name)s *self) {
-   talloc_free(self->ctx);
-};\n
-""" % dict(class_name = self.class_name))
 
 class ProxyConstructor(ConstructorMethod):
     def write_destructor(self, out):
@@ -1708,7 +1775,7 @@ class ProxyConstructor(ConstructorMethod):
     if(self->base) {
         // Release the proxied object
         //Py_DECREF(self->base->proxied);
-        talloc_free(self->ctx);
+        %(free)s(self->base);
         self->base = NULL;
     };
 };\n
@@ -1718,7 +1785,7 @@ static int %(class_name)s_destructor(void *this) {
   Py_DECREF(self->base->proxied);
   return 0;
 };
-""" % dict(class_name = self.class_name))
+""" % dict(class_name = self.class_name, free = FREE))
 
     def initialise_attributes(self, out):
         attributes = self.myclass.module.classes[self.base_class_name].attributes.get_attributes()
@@ -1992,7 +2059,6 @@ class ClassGenerator:
         out.write("""\ntypedef struct {
   PyObject_HEAD
   %(class_name)s base;
-  void *ctx;
 } py%(class_name)s;\n
 """ % dict(class_name=self.class_name))
 
@@ -2099,12 +2165,12 @@ static PyNumberMethods %(class)s_as_number = {
         return "&%(class)s_as_number" % args
 
     def PyTypeObject(self, out):
-        args = {'class':self.class_name, 'module': self.module.name, 
+        args = {'class':self.class_name, 'module': self.module.name,
                 'iterator': 0,
                 'iternext': 0,
                 'tp_str': 0,
                 'getattr_func': 0,
-                'docstring': "%s: %s" % (self.class_name, 
+                'docstring': "%s: %s" % (self.class_name,
                                          escape_for_string(self.docstring))}
 
         if self.attributes:
@@ -2200,7 +2266,6 @@ class StructGenerator(ClassGenerator):
         out.write("""\ntypedef struct {
   PyObject_HEAD
   %(class_name)s *base;
-  void *ctx;
 } py%(class_name)s;\n
 """ % dict(class_name=self.class_name))
 
@@ -2236,7 +2301,6 @@ VIRTUAL(%(class_name)s, %(base_class_name)s) {
 typedef struct {
   PyObject_HEAD
   %(class_name)s base;
-  void *ctx;
 } py%(class_name)s;\n
 """ % self.__dict__)
 

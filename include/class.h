@@ -195,6 +195,7 @@ extern "C" {
 
 #define CLASS(class,super_class)                                 \
   typedef struct class ## _t *class;                             \
+  class alloc_ ## class();                                       \
   int class ## _init(Object self);                               \
   DLL_PUBLIC extern struct class ## _t __ ## class;              \
   struct class ## _t { struct super_class ## _t super;		 \
@@ -237,7 +238,12 @@ extern "C" {
 #define VIRTUAL(class,superclass)                                       \
   struct class ## _t __ ## class;                                       \
                                                                         \
-  DLL_PUBLIC  int class ## _init(Object this) {                         \
+  DLL_PUBLIC  class alloc_ ## class() {                                 \
+    class result = talloc_memdup(NULL, &__## class, sizeof(__## class)); \
+    return result;                                                      \
+  };                                                                    \
+                                                                        \
+  DLL_PUBLIC int class ## _init(Object this) {                          \
   class self = (class)this;                                             \
   if(self->__super__) return 1;                                         \
   superclass ##_init(this);                                             \

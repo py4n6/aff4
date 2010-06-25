@@ -737,20 +737,20 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   {
     RESOLVER_ITER *iter = CALL(oracle, get_iter, ctx, URNOF(self), AFF4_CONTAINS);
     RDFURN urn = new_RDFURN(ctx);
-    int properties_length = strlen(AFF4_INFORMATION);
+    int information_length = strlen(AFF4_INFORMATION);
 
-      // Is this file a properties file?
+      // Is this file an information file?
     while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
       char *base_name = basename(urn->value);
 
       // We identify streams by their filename being information.encoding
       // for example information.turtle. The basename is then taken
       // to be the volume name.
-      if(!memcmp(AFF4_INFORMATION, base_name, properties_length)) {
+      if(!memcmp(AFF4_INFORMATION, base_name, information_length)) {
         FileLikeObject fd = CALL((AFF4Volume)self, open_member, base_name, 'r', 0);
         if(fd) {
           RDFParser parser = CONSTRUCT(RDFParser, RDFParser, Con, NULL);
-          char *rdf_format = (char *)base_name + properties_length;
+          char *rdf_format = (char *)base_name + information_length;
 
           CALL(parser, parse, fd, rdf_format, URNOF(self)->value);
           talloc_free(parser);
@@ -950,7 +950,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 };
 
 // This function dumps all the URNs contained within this volume
-static int dump_volume_properties(ZipFile this) {
+static int dump_volume_information(ZipFile this) {
   RESOLVER_ITER *iter = NULL;
   AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w', 
@@ -1019,8 +1019,8 @@ static int ZipFile_close(AFFObject this) {
       goto exit;
     };
 
-    // Write a properties file if needed
-    if(!dump_volume_properties(self))
+    // Write an information file if needed
+    if(!dump_volume_information(self))
       goto error;
 
     fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
@@ -1186,7 +1186,7 @@ static int ZipFile_close(AFFObject this) {
     // We are not dirty any more - but the resolver is up to date:
     self->_didModify->value = DIRTY_STATE_ALREADY_LOADED;
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-         (RDFValue)self->_didModify,0);
+         (RDFValue)self->_didModify, 0);
 
     // Close the fd
     CALL((AFFObject)fd, close);
@@ -1421,9 +1421,9 @@ static int ZipFileStream_write(FileLikeObject self, char *buffer, unsigned long 
   if(length == 0) goto exit;
 
   // Update the crc:
-  this->crc32->value = crc32(this->crc32->value, 
+  this->crc32->value = crc32(this->crc32->value,
 			     (unsigned char*)buffer,
-			     length);
+			     (unsigned int)length);
 
   // Update the sha1:
   EVP_DigestUpdate(&this->digest,(const unsigned char *)buffer,length);
@@ -1698,7 +1698,7 @@ char *relative_name(void *ctx, char *name, char *volume_urn) {
   return talloc_strdup(ctx,name);
 };
 
-AFF4_MODULE_INIT(zip) {
+AFF4_MODULE_INIT(A000_zip) {
   register_type_dispatcher(oracle, AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
   register_type_dispatcher(oracle, AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
   register_type_dispatcher(oracle, AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));

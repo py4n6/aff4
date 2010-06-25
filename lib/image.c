@@ -124,7 +124,7 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
 
 static int dump_bevy_thread(ImageWorker this) {
   int bevy_index=0;
-  int result;
+  int result=0;
   FileLikeObject bevy;
   AFF4Volume volume;
 
@@ -226,7 +226,7 @@ static int dump_bevy_thread(ImageWorker this) {
     CALL(this->image->workers, put, (Object)this);
   };
 
-  return 0;
+  return result;
 };
 
 VIRTUAL(ImageWorker, AFFObject) {
@@ -368,10 +368,13 @@ static int Image_close(AFFObject aself) {
   FileLikeObject self = (FileLikeObject)aself;
   Image this = (Image)self;
 
+  // We only do stuff when opened for writing
+  if(((AFFObject)self)->mode != 'w') goto exit;
+
   // Write the last chunk
   this->current->segment_count = this->segment_count;
   if(!dump_bevy(this->current, this->segment_count, 0))
-    return 0;
+    goto exit;
 
   // Wait for all busy threads to finish - its not safe to traverse
   // the busy list without locking it. So we lock it - pull the first
@@ -430,6 +433,7 @@ static int Image_close(AFFObject aself) {
   CALL(oracle, set_value, URNOF(self), AFF4_SIZE,
        (RDFValue)self->size,0);
 
+ exit:
   return SUPER(AFFObject, FileLikeObject, close);
 };
 
@@ -599,8 +603,8 @@ VIRTUAL(Image, FileLikeObject) {
      VMETHOD(set_workers) = Image_set_workers;
 } END_VIRTUAL
 
-AFF4_MODULE_INIT(image) {
-  INIT_CLASS(Image);
+AFF4_MODULE_INIT(A000_image) {
+  INIT_CLASS(ChunkCache);
 
   register_type_dispatcher(oracle, AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
 

@@ -49,7 +49,7 @@ CLASS(AFFObject, Object)
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.
      */
-     DESTRUCTOR AFFObject METHOD(AFFObject, finish);
+     BORROWED AFFObject METHOD(AFFObject, finish);
 
      /** This method is used to return this object to the primary
      resolver cache. The object should not be used after calling this
@@ -72,7 +72,7 @@ CLASS(AFFObject, Object)
      /* When the object is closed it will write itself to its volume.
         This frees the object - do no use it after calling close.
       */
-     DESTRUCTOR int METHOD(AFFObject, close);
+     int METHOD(AFFObject, close);
 
 
      /*  This method is used to delete the object from the resolver.
@@ -111,7 +111,6 @@ PROXY_CLASS(AFFObject);
 CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
      XSDInteger size;
-     char mode;
      char *data;
 
      /** Seek the file like object to the specified offset.

@@ -1846,7 +1846,7 @@ static int AFFObject_close(AFFObject self) {
   if(o) talloc_unlink(NULL, o);
   ClearError();
 
-  talloc_unlink(NULL, self);
+  //  talloc_unlink(NULL, self);
   return 1;
 };
 
@@ -1953,13 +1953,20 @@ Resolver get_oracle(void) {
   return oracle;
 };
 
-AFF4_MODULE_INIT(resolver) {
-  rdf_init();
-  init_luts();
-
+// Note that we preceed the init function name with an altitude to
+// control the order at which these will be called.
+AFF4_MODULE_INIT(A100_resolver) {
   // Make a global oracle
   if(!oracle) {
     // Create the global oracle
     oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
   };
+};
+
+DLL_PUBLIC void aff4_free(void *ptr) {
+  talloc_unlink(NULL, ptr);
+};
+
+DLL_PUBLIC void aff4_incref(void *ptr) {
+  talloc_reference(NULL, ptr);
 };

@@ -375,5 +375,14 @@ void register_type_dispatcher(Resolver self, char *type, AFFObject *class_ref);
        */
 void print_volume_drivers();
 
+/* An exported function to free any AFF4 object. Objects are not
+   really freed until their reference counts have reached 0.
+
+   AFF4 Objects (and basically anything allocated by AFF4) can have
+   their reference counts increased using aff4_incref.
+*/
+void aff4_free(void *ptr);
+void aff4_incref(void *ptr);
+
 #endif 	    /* !AFF4_RESOLVER_H_ */
 

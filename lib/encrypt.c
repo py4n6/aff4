@@ -924,7 +924,7 @@ VIRTUAL(SecurityProvider, Object) {
   VMETHOD(x509_private_key) = SecurityProvider_x509_private_key;
 } END_VIRTUAL
 
-AFF4_MODULE_INIT(encrypt) {
+AFF4_MODULE_INIT(A000_encrypt) {
   // Initialise the SSL library must be done once:
   SSL_load_error_strings();
   SSL_library_init();
