@@ -1,6 +1,7 @@
 import os, os.path, pdb
 import SconsUtils.utils as utils
 from functools import partial
+import subprocess
 
 Import('env')
 

@@ -1,17 +1,33 @@
 /*
-** aff4_resolver.h
-** 
-** Made by mic
-** Login   <mic@laptop>
-** 
-** Started on  Thu Nov 12 20:41:24 2009 mic
-** Last update Mon Feb  1 15:24:54 2010 mic
+  The main AFF4 Resolver.
+
+  The resolver is the most important part of the AFF4
+  library. Virtually all access to the library is made through the
+  resolver. Broadly the resolver serves to:
+
+  1) Manage metadata storage and retrieval through the set_value(),
+     add_value() methods. Lists of values can be iterated over using
+     the get_iter() and iter_next() methods.
+
+  2) Opening, locking and caching of AFF4 objects is managed via the
+     open() and cache_return() methods. The resolver centrally manages
+     object ownership by multiple threads. The create() method is used
+     to make new instances of AFF4 objects.
+
+  3) Manages the AFF4 engine by introducing new types for
+     serialization and execution - this is done by the
+     register_rdf_value_class(), register_type_dispatcher(),
+     register_security_provider(), register_logger() methods.
+
+  4) Opening and loading new AFF4 volumes which are not known to the
+     system using the load() method. This also imports all metadata
+     stored in the volume graphs into the resolver knowledge base.
 */
 
 #ifndef   	AFF4_RESOLVER_H_
 # define   	AFF4_RESOLVER_H_
 
-/* This is a funtion that will be run when the library is imported. It
+/* This is a function that will be run when the library is imported. It
    should be used to initialise static stuff.
 
    It will only be called once. If you require some other subsystem to
@@ -39,18 +55,20 @@ extern int AFF4_TDB_FLAGS;
 */
 #define RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED 1
 
-// The data store is basically a singly linked list of these records:
+/* The data store is basically a singly linked list of these records: */
 typedef struct TDB_DATA_LIST {
   uint64_t next_offset;
   uint16_t length;
-  // This is the urn_id of the object which asserted this
-  // statement. Can be 0 to indicate unknown.
+
+  /* This is the urn_id of the object which asserted this
+     statement. Can be 0 to indicate unknown.
+  */
   int32_t asserter_id;
 
-  // This type refers to the full name type as stored in types.tdb
+  /* This type refers to the full name type as stored in types.tdb */
   uint8_t encoding_type;
 
-  // This field contains various flags about this entry
+  /* This field contains various flags about this entry */
   uint8_t flags;
 }__attribute__((packed)) TDB_DATA_LIST;
 
@@ -59,8 +77,10 @@ typedef struct TDB_DATA_LIST {
 typedef struct RESOLVER_ITER {
   TDB_DATA_LIST head;
   uint64_t offset;
-  // This is used to ensure we do not iterate over multiple values
-  // which are the same.
+
+  /* This is used to ensure we do not iterate over multiple values
+     which are the same (Cache is basically used as a set here).
+  */
   Cache cache;
   RDFURN urn;
 } RESOLVER_ITER;
@@ -73,51 +93,54 @@ BIND_STRUCT(RESOLVER_ITER);
     information store.
 */
 CLASS(Resolver, Object)
-// This is a global cache of URN and their values - we try to only
-// have small URNs here and keep everything in memory.
+/* These are the various TDB files we have open */
        struct tdb_context *urn_db;
        struct tdb_context *attribute_db;
        struct tdb_context *data_db;
 
+       /* This descriptor is for the data.tdb store (which is not a tdb file btw) */
        int data_store_fd;
+
+       /* The mode we opened the Resolver with */
        int mode;
 
        /** This is used to restore state if the RDF parser fails */
        jmp_buf env;
        char *message;
 
-       // Read and write caches. These have different policies. The
-       // read cache is just for efficiency - if an object is not in
-       // the cache or is used by another thread, we just create a new
-       // one of those.
+       /* Read and write caches. These have different policies. The
+          read cache is just for efficiency - if an object is not in
+          the cache or is used by another thread, we just create a new
+          one of those.
+       */
        Cache read_cache;
 
-       // Write cache is used for locks - it is not possible to have
-       // multiple write objects at the same time, and all writers are
-       // opened exclusively.
+       /* Write cache is used for locks - it is not possible to have
+          multiple write objects at the same time, and all writers are
+          opened exclusively. Attempting to open an already locked
+          object for writing will block until that object is returned
+          to the cache.
+       */
        Cache write_cache;
 
-       // This mutex protects our internal data structures
+       /* This mutex protects our internal data structures */
        pthread_mutex_t mutex;
 
-       // Resolvers contain the identity behind them (see below):
-       struct Identity_t *identity;
-
-       // This is used to check the type of new objects
+       /* This is used to check the type of new objects */
        RDFURN type;
 
-       /* If this is set objects will use this to send messgaes
-          through */
+       /*
+         All logging takes place thorough this object which may be overridden by the user.
+       */
        Logger logger;
 
-       /**
-           DEFAULT(mode) = 0;
+       /*
+         Main constructor for the resolver. Mode can be set to turn on
+         various options, mainly for developement.
+
+         DEFAULT(mode) = 0;
        */
        Resolver METHOD(Resolver, Con, int mode);
-
-       // Resolvers are all in a list. Each resolver in the list is another
-       // identity which can be signed.
-       struct list_head identities;
 
 /* This method tries to resolve the provided uri and returns an
  instance of whatever the URI refers to (As an AFFObject which is the
@@ -125,14 +148,11 @@ CLASS(Resolver, Object)
  actually what you need. For example:
 
  FileLikeObject fd = (FileLikeObject)CALL(resolver, resolve, uri);
- if(!fd || !ISSUBCLASS(fd, FileLikeObject)) goto error;
- 
- Once the resolver provides the object it is attached to the context
- ctx and removed from the cache. This ensures that the object can not
- expire from the cache while callers are holding it. You must return
- the object to the cache as soon as possible by calling
- cache_return. The object will be locked until you return it with
- cache_return. 
+ if(!fd || !issubclass(fd, &__FileLikeObject)) goto error;
+
+ You must return the object to the cache as soon as possible after use
+ by calling its cache_return method. The object will be locked until
+ you return it with cache_return.
 
  DEFAULT(mode) = "r"
 */
@@ -158,34 +178,34 @@ CLASS(Resolver, Object)
         */
        AFFObject METHOD(Resolver, create, char *name, char mode);
 
-  /* This function resolves the value in uri and attribute and sets it
-     into the RDFValue object. So you must first create such an object
-     (e.g. XSDDatetime) and then pass the object here to be updated
-     from the data store. Note that only a single value is returned -
-     if you want to iterate over all the values for this attribute you
-     need to call get_iter and iter_next.
-  */
-  int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute,\
-	     RDFValue value);
+       /* This function resolves the value in uri and attribute and sets it
+          into the RDFValue object. So you must first create such an object
+          (e.g. XSDDatetime) and then pass the object here to be updated
+          from the data store. Note that only a single value is returned -
+          if you want to iterate over all the values for this attribute you
+          need to call get_iter and iter_next.
+       */
+       int METHOD(Resolver, resolve_value, RDFURN uri, char *attribute, \
+                  RDFValue value);
 
        /** Similar to Resolver.resolve_value, but a new RDFValue is
            allocated with the context provided. */
-   RDFValue METHOD(Resolver, resolve_alloc, void *ctx, RDFURN uri, char *attribute);
+       RDFValue METHOD(Resolver, resolve_alloc, void *ctx, RDFURN uri, char *attribute);
 
-  /* This is a version of the above which uses an iterator to iterate
-     over the list.
+       /* This is a version of the above which uses an iterator to iterate
+          over the list.
 
-     The iterator is obtained using get_iter first. This function
-     returns 1 if an iterator can be found (i.e. at least one result
-     exists) or 0 if no results exist.
+          The iterator is obtained using get_iter first. This function
+          returns 1 if an iterator can be found (i.e. at least one result
+          exists) or 0 if no results exist.
 
-     Each call to iter_next will write a new value into the buffer set
-     up by result with maximal length length. Only results matching
-     the type specified are returned. We return length written for
-     each successful iteration, and zero when we have no more items.
-  */
-  RESOLVER_ITER *METHOD(Resolver, get_iter, void *ctx, RDFURN uri, \
-                        char *attribute);
+          Each call to iter_next will write a new value into the buffer set
+          up by result with maximal length length. Only results matching
+          the type specified are returned. We return length written for
+          each successful iteration, and zero when we have no more items.
+       */
+       RESOLVER_ITER *METHOD(Resolver, get_iter, void *ctx, RDFURN uri, \
+                             char *attribute);
 
        /* This method reads the next result from the iterator. result
 	  must be an allocated and valid RDFValue object */
@@ -211,7 +231,7 @@ CLASS(Resolver, Object)
        /* Deletes all values for this attribute from the resolver
 
           DEFAULT(attribute) = NULL;
-        */
+       */
        void METHOD(Resolver, del, RDFURN uri, char *attribute);
 
        /* Expires this object and all objects it owns.
@@ -219,7 +239,7 @@ CLASS(Resolver, Object)
           NOTE: any outstanding objects will become invalidated. For
           example, if you expire a volume, any outstanding streams
           opened within the volume will become invalidated.
-        */
+       */
        void METHOD(Resolver, expire, RDFURN uri);
 
        /* Sets a new value for an attribute. Note that this function
@@ -302,6 +322,11 @@ CLASS(Resolver, Object)
 
        void METHOD(Resolver, register_security_provider, struct SecurityProvider_t *class_ref);
 
+       /* This can be used to install a logger object. All messages
+          will then be output through this object.
+       */
+       void METHOD(Resolver, register_logger, Logger logger);
+
        /** A Utility method to create a new instance of a registered
            RDF dataType.
        */
@@ -315,11 +340,6 @@ CLASS(Resolver, Object)
           one works and then load them from the URI.
        */
        int METHOD(Resolver, load, RDFURN uri);
-
-       /* This can be used to install a logger object. All messages
-          will then be output through this object.
-       */
-       void METHOD(Resolver, set_logger, Logger logger);
 
        /** A generic interface to the logger allows any code to send
            messages to the provided logger.
@@ -351,23 +371,14 @@ CLASS(TDB, Object)
      TDB_DATA METHOD(TDB, fetch, char *key, int len);
 END_CLASS
 
-       /** The following are private functions */
-RESOLVER_ITER *_Resolver_get_iter(Resolver self,
-                                  void *ctx,
-                                  TDB_DATA tdb_urn,
-                                  TDB_DATA attribute);
+     /* This is a global instance of the resolver. All AFFObjects must
+        communicate with the oracle rather than instantiate their own.
+     */
+DLL_PUBLIC extern Resolver oracle;
 
-     /* Special variants which also take the graph name.
-
-        These should not be called externally.
-      */
-PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
-                            RDFValue value);
-
-// This is a global instance of the oracle. All AFFObjects must
-// communicate with the oracle rather than instantiate their own.
-extern Resolver oracle;
-
+     /* This function can be used to register a new AFF4 type with the
+        library
+     */
 void register_type_dispatcher(Resolver self, char *type, AFFObject *class_ref);
 
        /** This following are help related function for

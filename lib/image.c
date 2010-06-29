@@ -4,6 +4,45 @@
 
 #define MAX_IMAGER_THREADS 3
 
+/** This class is used by the image worker thread to dump the segments
+    out. It is only created by the Image class internally.
+*/
+PRIVATE CLASS(ImageWorker, AFFObject)
+       struct list_head list;
+
+  // The URL of the bevy we are working on now:
+       RDFURN bevy_urn;
+
+       int segment_count;
+
+       // This is the queue which this worker belongs in
+       Queue queue;
+
+       // The bevy is written here in its entirety. When its finished,
+       // we compress it all and dump it to the output file.
+       StringIO bevy;
+
+       // The segment is written here until it is complete and then it
+       // gets flushed
+       StringIO segment_buffer;
+
+       // When we finish writing a bevy, a thread is launched to
+       // compress and dump it
+       pthread_t thread;
+       struct Image_t *image;
+
+       // The index into the bevy - we use an IntegerArrayBinary
+       // RDFValue, unless the array is very small in which case we
+       // switch to the IntegerArrayInline
+       IntegerArrayBinary index;
+
+       ImageWorker METHOD(ImageWorker, Con, struct Image_t *image);
+
+       // A write method for the worker
+       int METHOD(ImageWorker, write, char *buffer, int len);
+END_CLASS
+
+
 /*************************************************************
   The Image stream works by collecting chunks into segments. Chunks
   are compressed seperately using zlib's compress function.
@@ -605,6 +644,7 @@ VIRTUAL(Image, FileLikeObject) {
 
 AFF4_MODULE_INIT(A000_image) {
   INIT_CLASS(ChunkCache);
+  INIT_CLASS(ImageWorker);
 
   register_type_dispatcher(oracle, AFF4_IMAGE, (AFFObject *)GETCLASS(Image));
 

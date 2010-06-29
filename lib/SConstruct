@@ -3,6 +3,7 @@ import pdb
 import SCons.Util, SCons.Subst
 import SconsUtils.utils as utils
 import re
+import subprocess
 
 nenv = env.Clone()
 
@@ -103,3 +104,55 @@ env.installed_libaff4_so = nenv.InstallVersionedSharedLibrary("${prefix}/lib/", 
 utils.install_target = nenv.Alias('install', '${prefix}')
 
 #utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)
+
+
+PROCESSED_FILES = Split("""
+              #include/aff4_utils.h
+              #include/aff4_rdf.h
+              #include/aff4_io.h
+              #include/aff4_resolver.h
+              #include/aff4_rdf_serialise.h
+              #include/aff4_objects.h
+              #include/aff4_crypto.h
+""")
+
+VERBATIM_FILES = Split("""
+              #include/misc.h
+              #include/list.h
+              #include/aff4_public_misc.h
+              #include/aff4_constants.h
+""")
+
+def build_aff4_objects_h(target, source, env):
+    target = target[0]
+    data = ''
+    for s in source:
+        data += open(s.get_abspath()).read()
+
+    p = subprocess.Popen(["cpp", "-CC", "-DHEADERS_ONLY", "-imacros", "include/class.h", "-P"],
+                         stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+
+    data = '\n'.join([x for x in data.splitlines() if '#include' not in x ])
+
+    p.stdin.write(data)
+
+    result = ''
+    for s in VERBATIM_FILES:
+        result += open(s[1:]).read()
+
+    result += p.communicate()[0]
+
+    p = subprocess.Popen("indent -linux -bbb -bad -cdb".split(),
+                         stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+
+    p.stdin.write(result)
+    result = p.communicate()[0]
+
+    fd = open(target.get_abspath(),'w')
+    fd.write(result)
+    fd.close()
+
+target = '#include/aff4_public_objects.h'
+nenv.Command(target, PROCESSED_FILES, build_aff4_objects_h)
+nenv.Depends(target, VERBATIM_FILES)
+nenv.Depends("install", target)

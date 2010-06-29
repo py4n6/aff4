@@ -1,5 +1,38 @@
 #include "aff4.h"
 
+/* This is the serialised struct on disk. All values are given in
+   little endian format. A map is:
+
+   struct map_point map[];
+
+*/
+struct map_point {
+  /* The logical offset in this stream */
+  long long int image_offset;
+
+  /* The offset in the target */
+  long long int target_offset;
+
+  /* The target index */
+  uint32_t target_index;
+} __attribute__((packed));
+
+  /* The points form a tree here */
+typedef struct map_point_node_s map_point_node_t;
+struct map_point_node_s {
+  long long int image_offset;
+  long long int target_offset;
+  uint32_t target_idx;
+  trp_node(map_point_node_t) link;
+};
+
+typedef struct map_point_tree_s map_point_tree_t;
+struct map_point_tree_s {
+  trp(map_point_node_t) head;
+  // A back reference to the MapValue that owns this tree.
+  struct MapValue_t *value;
+};
+
   /* The comparison function for the treap. */
 static int map_point_cmp(map_point_node_t *a, map_point_node_t *b) {
   int rVal = (a->image_offset > b->image_offset) -      \
@@ -23,8 +56,9 @@ static RDFValue MapValue_Con(RDFValue self) {
   this->cache = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
 
   /* Initialize tree. */
-  tree_new(&this->tree, 42);
-  this->tree.value = this;
+  this->tree = talloc(self, map_point_tree_t);
+  tree_new(this->tree, 42);
+  this->tree->value = this;
 
   this->targets = talloc_array(self, RDFURN, 1);
 
@@ -148,7 +182,7 @@ static char *MapValue_serialise(RDFValue self, RDFURN subject) {
 
   // Now save the map to the segment - Iterating over the treap in
   // forward order will produce a sorted array.
-  tree_iter(&this->tree, NULL, text_map_iterate_cb, (void *)fd);
+  tree_iter(this->tree, NULL, text_map_iterate_cb, (void *)fd);
 
   // Done writing
   CALL((AFFObject)fd, close);
@@ -217,9 +251,9 @@ static uint64_t MapValue_add_point(MapValue self, uint64_t image_offset, uint64_
 
     memset(&q, 0, sizeof(q));
     q.image_offset = node->image_offset;
-    old_node = tree_search(&self->tree, &q);
+    old_node = tree_search(self->tree, &q);
     if(old_node && old_node->image_offset == node->image_offset) {
-      tree_remove(&self->tree, old_node);
+      tree_remove(self->tree, old_node);
       talloc_free(old_node);
       DEBUG_OBJECT("0x%X Removed point %llu %s while inserting %s\n", pthread_self(),
                    node->image_offset, self->targets[old_node->target_idx]->value,
@@ -247,7 +281,7 @@ static uint64_t MapValue_add_point(MapValue self, uint64_t image_offset, uint64_
   DEBUG_OBJECT("0x%X Adding point %llu %s\n", pthread_self(),
                node->image_offset, self->targets[node->target_idx]->value);
 
-  tree_insert(&self->tree, node);
+  tree_insert(self->tree, node);
   self->number_of_points++;
 
   return available_to_read;
@@ -273,10 +307,10 @@ static RDFURN MapValue_get_range(MapValue self, uint64_t readptr,
 
   node.image_offset = readptr;
 
-  pnode = tree_psearch(&self->tree, &node);
+  pnode = tree_psearch(self->tree, &node);
 
   node.image_offset += 1;
-  nnode = tree_nsearch(&self->tree, &node);
+  nnode = tree_nsearch(self->tree, &node);
 
   // Now we have a range for our point:
   if(!nnode) {
@@ -393,7 +427,7 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFURN s
       node->target_offset = ntohll(buff[j].target_offset);
       node->target_idx = ntohll(buff[j].target_index);
 
-      tree_insert(&this->tree, node);
+      tree_insert(this->tree, node);
       i--;
     };
   };
@@ -478,7 +512,7 @@ static char *MapValueBinary_serialise(RDFValue self, RDFURN subject) {
     goto error;
   };
 
-  tree_iter(&this->tree, NULL, binary_map_iterate_cb, (void *)fd);
+  tree_iter(this->tree, NULL, binary_map_iterate_cb, (void *)fd);
   CALL((AFFObject)fd, close);
 
   // Done with our volume now
@@ -534,7 +568,7 @@ static char *MapValueInline_serialise(RDFValue self, RDFURN subject) {
 
   // Now save the map to the segment - Iterating over the treap in
   // forward order will produce a sorted array.
-  tree_iter(&((MapValue)this)->tree, NULL, inline_map_iterate_cb, (void *)self);
+  tree_iter(((MapValue)this)->tree, NULL, inline_map_iterate_cb, (void *)self);
 
   return this->buffer;
 };

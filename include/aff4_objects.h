@@ -15,15 +15,14 @@ extern "C" {
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
-  // Treap implementation
+#include "queue.h"
 #include "trp.h"
 
 /** A Graph is a named collection of RDF statements about various
     objects.
 
-    When the graph is stored it will serialise into a segment all the
-    statements contained with it using the appropriate RDF
+    When the graph is stored it will serialise into a segment with all
+    the statements contained with it using the appropriate RDF
     serialization.
 */
 CLASS(Graph, AFFObject)
@@ -31,78 +30,45 @@ CLASS(Graph, AFFObject)
   RDFURN attribute_urn;
   XSDString statement;
 
+  /** Add a new triple to this Graph */
   void METHOD(Graph, set_triple, RDFURN subject, char *attribute, RDFValue value);
 END_CLASS
 
-#include "queue.h"
-/** This class is used by the image worker thread to dump the segments
-    out. It is only created by the Image class internally.
-*/
-PRIVATE CLASS(ImageWorker, AFFObject)
-       struct list_head list;
-
-  // The URL of the bevy we are working on now:
-       RDFURN bevy_urn;
-
-       int segment_count;
-
-       // This is the queue which this worker belongs in
-       Queue queue;
-
-       // The bevy is written here in its entirety. When its finished,
-       // we compress it all and dump it to the output file.
-       StringIO bevy;
-
-       // The segment is written here until it is complete and then it
-       // gets flushed
-       StringIO segment_buffer;
-
-       // When we finish writing a bevy, a thread is launched to
-       // compress and dump it
-       pthread_t thread;
-       struct Image_t *image;
-
-       // The index into the bevy - we use an IntegerArrayBinary
-       // RDFValue, unless the array is very small in which case we
-       // switch to the IntegerArrayInline
-       IntegerArrayBinary index;
-
-       ImageWorker METHOD(ImageWorker, Con, struct Image_t *image);
-
-       // A write method for the worker
-       int METHOD(ImageWorker, write, char *buffer, int len);
-END_CLASS
+/* This is the worker object itself (private) */
+struct ImageWorker_t;
 
 /** The Image Stream represents an Image in chunks */
 CLASS(Image, FileLikeObject)
-     // This is where the image is stored
-     RDFURN stored;
+/* This is where the image is stored */
+  RDFURN stored;
 
-     // These are the URNs for the bevy and the bevy index
-     RDFURN bevy_urn;
+  /* These are the URNs for the bevy and the bevy index */
+  RDFURN bevy_urn;
 
-     // Chunks are cached here. We cant use the main zip file cache
-     // because the zip file holds the full segment
-     Cache chunk_cache;
+  /* Chunks are cached here for faster randoom reading performance.
+  */
+  Cache chunk_cache;
 
-     // This is a queue of all workers available
-     Queue workers;
+  /* This is a queue of all workers available */
+  Queue workers;
 
-     // This is a queue of all workers busy
-     Queue busy;
+  /* This is a queue of all workers busy */
+  Queue busy;
 
-     // Thats the current worker we are using - when it gets full, we
-     // simply dump its bevy and take a new worker here.
-PRIVATE   ImageWorker current;
+  /* Thats the current worker we are using - when it gets full, we
+     simply dump its bevy and take a new worker here.
+  */
+  struct ImageWorker_t *current;
 
-     XSDInteger chunk_size;
-     XSDInteger compression;
-     XSDInteger chunks_in_segment;
-     uint32_t bevy_size;
+  /** Some parameters about this image */
+  XSDInteger chunk_size;
+  XSDInteger compression;
+  XSDInteger chunks_in_segment;
+  uint32_t bevy_size;
 
-     int segment_count;
+  int segment_count;
 
-     EVP_MD_CTX digest;
+  EVP_MD_CTX digest;
 
   /** This sets the number of working threads.
 
@@ -137,11 +103,6 @@ END_CLASS
     0-1000 we fetch bytes 1000-2000 from the target stream, and after
     that we fetch bytes from offset 4000.
 
-    Required properties:
-
-    - target%d starts with 0 the number of target (may be specified as
-      a URL). e.g. target0, target1, target2
-
     Optional properties:
 
     - file_period - number of bytes in the file offset which this map
@@ -150,35 +111,7 @@ END_CLASS
     - image_period - number of bytes in the target image each period
       will advance by. (Useful for RAID)
 */
-/* This is the serialised struct on disk. All values are given in
-   little endian format. A map is:
-
-   struct map_point map[];
-
-*/
-struct map_point {
-  // The logical offset this represents
-  uint64_t image_offset;
-  // The offset in the target
-  uint64_t target_offset;
-  uint32_t target_index;
-} __attribute__((packed));
-
-  /* The points form a tree here */
-typedef struct map_point_node_s map_point_node_t;
-struct map_point_node_s {
-  uint64_t image_offset;
-  uint64_t target_offset;
-  uint32_t target_idx;
-  trp_node(map_point_node_t) link;
-};
-
-typedef struct map_point_tree_s map_point_tree_t;
-struct map_point_tree_s {
-  trp(map_point_node_t) head;
-  // A back reference to the MapValue that owns this tree.
-  struct MapValue_t *value;
-};
+struct map_point_tree_s;
 
 CLASS(MapValue, RDFValue)
   // The urn of the map object we belong to
@@ -189,7 +122,7 @@ CLASS(MapValue, RDFValue)
   int number_of_urns;
 
   // This is where we store the node treap
-  map_point_tree_t tree;
+  struct map_point_tree_s *tree;
 
   // An array of all the targets we know about
   RDFURN *targets;

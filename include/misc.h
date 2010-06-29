@@ -25,9 +25,6 @@ typedef  unsigned long int in_addr_t;
 #include <inttypes.h>
 #endif
 
-#include "encode.h"
-#include "aff4_constants.h"
-
 #define BUFF_SIZE 40960
 
 int _mkdir(const char *path);

@@ -8,6 +8,19 @@
 #include <pthread.h>
 #include "config.h"
 
+       /** The following are private functions */
+RESOLVER_ITER *_Resolver_get_iter(Resolver self,
+                                  void *ctx,
+                                  TDB_DATA tdb_urn,
+                                  TDB_DATA attribute);
+
+     /* Special variants which also take the graph name.
+
+        These should not be called externally.
+      */
+PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
+                            RDFValue value);
+
 //int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
 //int AFF4_TDB_FLAGS = TDB_INTERNAL;
 int AFF4_TDB_FLAGS = TDB_DEFAULT;
@@ -600,8 +613,6 @@ static Resolver Resolver_Con(Resolver self, int mode) {
 
   // Create local read and write caches
   CALL(self, flush);
-
-  INIT_LIST_HEAD(&self->identities);
 
   // Make sure we close our files when we get freed
   talloc_set_destructor((void *)self, Resolver_destructor);
@@ -1731,7 +1742,7 @@ VIRTUAL(Resolver, Object) {
 #endif
 
      VMETHOD(load) = Resolver_load;
-     VMETHOD(set_logger) = Resolver_set_logger;
+     VMETHOD(register_logger) = Resolver_set_logger;
      VMETHOD(log) = Resolver_log;
      VMETHOD(flush) = Resolver_flush;
      VMETHOD(close) = Resolver_close;

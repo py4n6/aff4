@@ -64,41 +64,45 @@ enum Cache_policy {
     and you must not use it (because it might be freed at any time).
 */
 CLASS(Cache, Object)
-// The key which is used to access the data
+/* The key which is used to access the data */
      char *key;
      int key_len;
 
-     // An opaque data object and its length. The object will be
-     // talloc_stealed into the cache object as we will be manging its
-     // memory.
+     /* An opaque data object and its length. The object will be
+        talloc_stealed into the cache object as we will be manging its
+        memory.
+     */
      Object data;
 
-     // Cache objects are put into two lists - the cache_list contains
-     // all the cache objects currently managed by us in order of
-     // least used to most used at the tail of the list. The same
-     // objects are also present on one of the hash lists which hang
-     // off the respective hash table. The hash_list should be shorter
-     // to search linearly as it only contains objects with the same hash.
+     /* Cache objects are put into two lists - the cache_list contains
+        all the cache objects currently managed by us in order of
+        least used to most used at the tail of the list. The same
+        objects are also present on one of the hash lists which hang
+        off the respective hash table. The hash_list should be shorter
+        to search linearly as it only contains objects with the same
+        hash.
+     */
      struct list_head cache_list;
      struct list_head hash_list;
 
-     // This is a pointer to the head of the cache
+     /* This is a pointer to the head of the cache */
      struct Cache_t *cache_head;
      enum Cache_policy policy;
 
-     // The current number of objects managed by this cache
+     /* The current number of objects managed by this cache */
      int cache_size;
 
-     // The maximum number of objects which should be managed
+     /* The maximum number of objects which should be managed */
      int max_cache_size;
 
-     // A hash table of the keys
+     /* A hash table of the keys */
      int hash_table_width;
      Cache *hash_table;
 
-     // These functions can be tuned to manage the hash table. The
-     // default implementation assumes key is a null terminated
-     // string.
+     /* These functions can be tuned to manage the hash table. The
+        default implementation assumes key is a null terminated
+        string.
+     */
      unsigned int METHOD(Cache, hash, char *key, int len);
      int METHOD(Cache, cmp, char *other, int len);
 
@@ -110,28 +114,31 @@ CLASS(Cache, Object)
      */
      Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
 
-     // Return a cache object or NULL if its not there. The
-     // object is removed from the cache.
+     /* Return a cache object or NULL if its not there. The
+        object is removed from the cache.
+     */
      Object METHOD(Cache, get, char *key, int len);
 
-     // Returns a reference to the object. The object is still owned
-     // by the cache. Note that this should only be used in
-     // caches which do not expire objects or if the cache is locked,
-     // otherwise the borrowed reference may disappear
-     // unexpectadly. References may be freed when other items are
-     // added.
+     /* Returns a reference to the object. The object is still owned
+      by the cache. Note that this should only be used in caches which
+      do not expire objects or if the cache is locked, otherwise the
+      borrowed reference may disappear unexpectadly. References may be
+      freed when other items are added.
+     */
      BORROWED Object METHOD(Cache, borrow, char *key, int len);
 
-     // Store the key, data in a new Cache object. The key and data will be
-     // stolen.
+     /* Store the key, data in a new Cache object. The key and data will be
+        stolen.
+     */
      BORROWED Cache METHOD(Cache, put, char *key, int len, Object data);
 
-     // Returns true if the object is in cache
+     /* Returns true if the object is in cache */
      int METHOD(Cache, present, char *key, int len);
 
-     // This returns an opaque reference to a cache iterator. Note:
-     // The cache must be locked the entire time between receiving the
-     // iterator and getting all the objects.
+     /* This returns an opaque reference to a cache iterator. Note:
+        The cache must be locked the entire time between receiving the
+        iterator and getting all the objects.
+     */
      BORROWED Object METHOD(Cache, iter, char *key, int len);
      BORROWED Object METHOD(Cache, next, Object *iter);
 

@@ -866,6 +866,9 @@ if(!type_check(%(source)s, &%(type)s_Type)) {
     def returned_python_definition(self, default = 'NULL', sense='in', **kw):
         return "%s %s;\n" % (self.type, self.name)
 
+    def byref(self):
+        return "&wrapped_%s" % self.name
+
     def definition(self, default = 'NULL', sense='in', **kw):
         result = "Gen_wrapper *wrapped_%s __attribute__((unused)) = %s;\n" % (self.name, default)
         if sense == 'in' and not 'OUT' in self.attributes:
@@ -2026,7 +2029,7 @@ class DefinitionMethod(Method):
         cls = self.myclass.module.classes[self.class_name]
 
         headers.write("""
-/************************** Class %s **************************
+/************************** Class AFF4_%s **************************
 %s
 ************************** Methods  **************************/
 """ % (self.class_name, cls.docstring))
@@ -2040,7 +2043,7 @@ class DefinitionMethod(Method):
                 if return_type == 'void':
                     return_expr = ''
 
-                prototype = 'DLL_PUBLIC %s aff4_%s_%s(%s)' % (
+                prototype = '%s aff4_%s_%s(%s)' % (
                     return_type, self.class_name, method.name,
                     ' , '.join([ arg.comment() for arg in args if arg.comment() ]))
 
@@ -2050,9 +2053,9 @@ class DefinitionMethod(Method):
                 else:
                     docstring = ''
 
-                headers.write("%s%s;\n" % (docstring,prototype))
+                headers.write("%s %s;\n" % (docstring,prototype))
 
-                impl.write("""%s {
+                impl.write("""DLL_PUBLIC %s {
   %s((%s)self)->%s((%s)%s);
 };
 """ % (prototype, return_expr, method.definition_class_name, method.name, method.definition_class_name,

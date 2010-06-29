@@ -17,62 +17,40 @@
 #include <openssl/pem.h>
 #include "stringio.h"
 
-/** This object represents an identify - like a person for example. 
+/** This class implements a security provider. This is used by AFF4
+    ciphers to request passwords or certificates. Users of the library
+    should implement their own security provider and install it using
+    the Resolver.install_security_provider() function. When a cipher
+    needs to obtain a passphrase or certificate they call here to
+    obtain it - the user code can choose how to manage their own
+    password (e.g. bring up an interactive GUI, use the OS secure
+    storage facility etc).
 
-An identity is someone who makes statements about other AFFObjects in
-the universe.
+    There is currently only a single global security provider.
 */
-PRIVATE CLASS(Identity, AFFObject)
-       Resolver info;
-
-       EVP_PKEY *priv_key;
-       EVP_PKEY *pub_key;
-       X509 *x509;
-
-       Identity METHOD(Identity, Con, char *cert, char *priv_key, char mode);
-       void METHOD(Identity, store, char *volume_urn);
-  /** This method asks the identity to verify its statements. This
-       essentially populates our Resolver with statements which can be
-       verified from our statements. Our Resolver can then be
-       compared to the oracle to see which objects do not match.
-  */
-       void METHOD(Identity, verify, int (*cb)(uint64_t progress, char *urn));
-END_CLASS
-
-       /** This class implements a security provider. This is used by
-           AFF4 ciphers to request passwords or certificates. Users of
-           the library should implement their own security provider
-           and install it using the
-           Resolver.install_security_provider() function. When a
-           cipher needs to obtain a passphrase or certificate they
-           call here to obtain it - the user code can choose how to
-           manage their own password (e.g. bring up an interactive
-           GUI, use the OS secure storage facility etc).
-
-           There is currently only a single global security provider.
-       */
 CLASS(SecurityProvider, Object)
      SecurityProvider METHOD(SecurityProvider, Con);
 
-/* This is called when we need to obtain a passphrase for a subject
-     stream. Returns 0 on error, and the length of the passphrase in
-     len (which must initially contain the length of the passphrase
-     buffer).
-*/
-     char *METHOD(SecurityProvider, passphrase,              \
+     /* This is called when we need to obtain a passphrase for a subject
+        stream. Returns 0 on error, and the length of the passphrase in
+        len (which must initially contain the length of the passphrase
+        buffer).
+     */
+     char *METHOD(SecurityProvider, passphrase,                 \
                   char *cipher_type, struct RDFURN_t *subject);
 
      /* This method should return the location (URL) of the
-        certificate that will be used to encrypt the data. */
+        certificate that will be used to encrypt the data.
+     */
      char *METHOD(SecurityProvider, x509_private_key,           \
                   char *cert_name, struct RDFURN_t *subject);
 
 END_CLASS
 
-     /** Allow the user to make their own class */
 PROXY_CLASS(SecurityProvider);
 
-extern SecurityProvider AFF4_SECURITY_PROVIDER;
+     /** This is a static pointer for the global security provider */
+SecurityProvider AFF4_SECURITY_PROVIDER;
 
 /************************************************************
   An implementation of the encrypted Stream.
@@ -81,6 +59,12 @@ extern SecurityProvider AFF4_SECURITY_PROVIDER;
   blocks determined by the "block_size" attribute. The IV consists of
   the block number (as 32 bit int in little endian) appended to an 8
   byte salt.
+
+  Encryption is controlled through an AFF4Cipher object which is
+  responsible for encryption and decryption of blocks. The AFF4Cipher
+  is an RDFValue and therefore gets serialised in the RDF infomation
+  space. Many AFF4Ciphers may be implemented to encrypt/decrypt the
+  same Encrypted stream. This allows multiple keys, to be employed.
 *************************************************************/
 #include <openssl/aes.h>
 
@@ -103,10 +87,12 @@ END_CLASS
 CLASS(AFF4Cipher, RDFValue)
        int blocksize;
 
-       // A type string which identifies the cipher
+       /* A type string which identifies the cipher */
        char *type;
 
-       // This contains the key for this cipher
+       /* This contains the key for this cipher. Most ciphers will
+          encrypt this key in some way upon being serialised.
+       */
        Key master_key;
 
        int METHOD(AFF4Cipher, encrypt, int chunk_number,         \
@@ -149,7 +135,6 @@ END_CLASS
 /**
    This cipher uses AES256.
 
-
    The serialised form is the url of the x509 certificate that was
    used to encrypt the key, with the base64 encoded struct
    aff4_cipher_data_t being encoded as the query string. The security
@@ -164,6 +149,10 @@ CLASS(AES256X509, AES256Password)
 **/
      X509 *authority;
      RDFURN location;
+
+     /* This method sets the X509 certificate with which the master
+        key is encrypted.
+     */
      int METHOD(AES256X509, set_authority, RDFURN location);
 END_CLASS
 
@@ -198,7 +187,5 @@ CLASS(Encrypted, FileLikeObject)
        RDFURN stored;
        XSDInteger chunk_size;
 END_CLASS
-
-void encrypt_init();
 
 #endif 	    /* !AFF4_CRYPTO_H_ */

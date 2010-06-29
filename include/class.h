@@ -191,17 +191,21 @@ extern "C" {
 
 #include "talloc.h"
 
+#ifndef HEADERS_ONLY
 #define DLL_PUBLIC __attribute__ ((visibility("default")))
+#else
+#define DLL_PUBLIC
+#endif
 
-#define CLASS(class,super_class)                                 \
-  typedef struct class ## _t *class;                             \
-  class alloc_ ## class();                                       \
-  int class ## _init(Object self);                               \
-  DLL_PUBLIC extern struct class ## _t __ ## class;              \
-  struct class ## _t { struct super_class ## _t super;		 \
-  class   __class__;                                             \
-  super_class  __super__;
-
+#define CLASS(class,super_class)                                        \
+  typedef struct class ## _t *class;                                    \
+  class alloc_ ## class();          /* Allocates object memory */       \
+  int class ## _init(Object self);   /* Class initializer */            \
+  DLL_PUBLIC extern struct class ## _t __ ## class; /* Public class template */ \
+  struct class ## _t {                                                  \
+  struct super_class ## _t super;  /* Superclass Fields we inherit */   \
+  class   __class__;       /* Pointer to our own class */               \
+  super_class  __super__;  /* Pointer to our superclass */
 
 #define METHOD(cls, name, ... )		\
   (* name)(cls self, ## __VA_ARGS__ )
@@ -386,6 +390,27 @@ inline void Object_init(Object);
 
 DLL_PUBLIC extern struct Object_t __Object;
 
+/** Find out if obj is an instance of cls or a derived class.
+
+    Use like this:
+
+    if(issubclass(obj, (Object)&__FileLikeObject)) {
+       ...
+    };
+
+
+    You can also do this in a faster way if you already know the class
+    hierarchy (but it could break if the hierarchy changes):
+    {
+     Object cls = ((Object)obj)->__class__;
+
+     if(cls == (Object)&__Image || \
+        cls == (Object)&__FileLikeObject || \
+        cls == (Object)&__AFFObject || ....) {
+     ...
+     };
+    };
+ */
 int issubclass(Object obj, Object class);
 
 DLL_PUBLIC extern void unimplemented(Object self);
