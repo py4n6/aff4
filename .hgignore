@@ -54,3 +54,4 @@ python2.6/tests/sign.key
 lib/init.c
 *public.?
 aff4_public_objects.h
+aff4.h

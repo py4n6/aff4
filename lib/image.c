@@ -118,6 +118,25 @@ static ImageWorker ImageWorker_Con(ImageWorker self, Image image) {
   return self;
 };
 
+static void join_worker_threads(Queue workers) {
+  // Make sure all the threads joined
+  if(workers){
+    Queue i;
+
+    pthread_mutex_lock(&workers->mutex);
+    list_for_each_entry(i, &workers->list, list) {
+        ImageWorker w = (ImageWorker)i->data;
+
+        if(w->thread ) {
+          void *foo;
+          pthread_join( w->thread, &foo );
+          w->thread = 0;
+        };
+      };
+    pthread_mutex_unlock(&workers->mutex);
+  };
+};
+
 static int dump_bevy_thread(ImageWorker this);
 
 /* Compresses all the data in the current bevy and dumps it on the
@@ -152,6 +171,19 @@ static int dump_bevy(ImageWorker this,  int bevy_number, int backgroud) {
 
     // Get another worker from the queue:
     this->image->current = CALL(this->image->workers, get, this->image);
+
+    if(this->image->current->thread) {
+      void *foo;
+      pthread_join( this->image->current->thread, &foo);
+      this->image->current->thread = 0;
+    };
+
+    join_worker_threads(this->image->workers);
+
+    /* FIXME: We have no way of passing back if the worker had any
+       errors. what should we do?
+    */
+    return 1;
   } else {
     return dump_bevy_thread(this);
   };
@@ -164,6 +196,7 @@ static int dump_bevy_thread(ImageWorker this) {
   int result=0;
   FileLikeObject bevy;
   AFF4Volume volume;
+  RDFURN bevy_urn=NULL;
 
   while(bevy_index < this->bevy->size) {
     uLong length = min(this->image->chunk_size->value, this->bevy->size - bevy_index);
@@ -202,16 +235,30 @@ static int dump_bevy_thread(ImageWorker this) {
   };
 
   volume = (AFF4Volume)CALL(oracle, open, this->image->stored, 'w');
+  if(!volume) goto error;
+
   bevy = (FileLikeObject)CALL(volume, open_member, URNOF(this)->value,
                               'w', ZIP_STORED);
+
+  // We are done with the volume here
+  CALL((AFFObject)volume, cache_return);
 
   if(!bevy) {
     result = -1;
     goto error;
   };
 
+  // Keep a copy of the URN around for later
+  bevy_urn = URNOF(bevy);
+  talloc_reference(this, bevy_urn);
+
   CALL(bevy, write, this->segment_buffer->data,
        this->segment_buffer->readptr);
+
+  /* We need to release the file as soon as possible because later
+     serializing might need to write its own segments.
+  */
+  CALL((AFFObject)bevy, close);
 
   // Stupid divide by zero ....
   if(this->bevy->size > 0) {
@@ -222,6 +269,7 @@ static int dump_bevy_thread(ImageWorker this) {
              this->segment_buffer->size * 100 /this->bevy->size);
   };
 
+  // Now dump the index by serializing the RDFValue
   // If the index is small enough, make it inline
   if(this->index->size < MAX_SIZE_OF_INLINE_ARRAY) {
     ((RDFValue)this->index)->dataType = ((RDFValue)&__IntegerArrayInline)->dataType;
@@ -229,11 +277,10 @@ static int dump_bevy_thread(ImageWorker this) {
     ((RDFValue)this->index)->id = ((RDFValue)&__IntegerArrayInline)->id;
   };
 
-  // Set the index on the bevy
-  CALL(oracle, set_value, URNOF(bevy), AFF4_INDEX, (RDFValue)this->index,0);
-
-  CALL((AFFObject)bevy, close);
-  CALL((AFFObject)volume, cache_return);
+  // Set the index on the bevy - trap any possible errors
+  if(!CALL(oracle, set_value, bevy_urn, AFF4_INDEX, (RDFValue)this->index,0)) {
+    goto error;
+  };
 
 #if 1
   // Reset everything to the start
@@ -247,7 +294,6 @@ static int dump_bevy_thread(ImageWorker this) {
   CALL(this->segment_buffer, truncate, 0);
 #endif
 
-
   // Make a new index
   talloc_free(this->index);
   this->index = (IntegerArrayBinary)CALL(oracle, new_rdfvalue,
@@ -255,11 +301,13 @@ static int dump_bevy_thread(ImageWorker this) {
 
   result = 1;
 
+  // Fall through to put ourselves back on the busy queue.
+
  error:
   // Return ourselves to the queue of workers so we can be called
   // again:
   if(this->image->busy) {
-    CALL(this->image->busy, remove, this->image, (Object)this);
+    CALL(this->image->busy, remove, NULL, (Object)this);
     CALL(this->image->workers, put, (Object)this);
   };
 
@@ -375,8 +423,10 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
       // that the worker has the same URN of the bevy it will produce.
 
       // Invoke a thread to do the work
-      dump_bevy(this->current, this->segment_count, 1);
-
+      if(!dump_bevy(this->current, this->segment_count, 1)) {
+        this->segment_count++;
+        goto error;
+      };
       /*
       //Preallocate the memory in the worker's buffer to save on memcpys
       CALL(this->current->bevy, seek, this->bevy_size, SEEK_SET);
@@ -399,6 +449,9 @@ static int Image_write(FileLikeObject self, char *buffer, unsigned long int leng
        (RDFValue)((FileLikeObject)self)->size,0);
 
   return length;
+
+ error:
+  return -1;
 };
 
 static int Image_close(AFFObject aself) {
@@ -434,6 +487,8 @@ static int Image_close(AFFObject aself) {
       pthread_join(worker->thread, NULL);
     };
   };
+
+  join_worker_threads(this->workers);
 
   // Now store all our parameters in the resolver
   CALL(oracle, set_value, URNOF(this), AFF4_CHUNK_SIZE,

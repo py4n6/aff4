@@ -20,6 +20,7 @@ void error_dest(void *slot) {
 
 void *aff4_raise_errors(enum _error_type t, char *reason, ...) {
   char *error_buffer;
+  char tmp[BUFF_SIZE];
   // This has to succeed:
   enum _error_type *type = aff4_get_current_error(&error_buffer);
 
@@ -27,13 +28,21 @@ void *aff4_raise_errors(enum _error_type t, char *reason, ...) {
     va_list ap;
     va_start(ap, reason);
 
-    vsnprintf(error_buffer, BUFF_SIZE-1, reason,ap);
-    error_buffer[BUFF_SIZE-1]=0;
+    vsnprintf(tmp, BUFF_SIZE-1, reason,ap);
+    tmp[BUFF_SIZE-1]=0;
     va_end(ap);
   };
 
-  //update the error type
-  *type = t;
+  if(*type == EZero) {
+    *error_buffer = 0;
+
+    //update the error type
+    *type = t;
+  } else {
+    strncat(error_buffer, "\n", BUFF_SIZE -1 );
+  };
+
+  strncat(error_buffer, tmp, BUFF_SIZE-1);
 
   return NULL;
 };

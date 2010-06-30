@@ -717,16 +717,24 @@ static char *IntegerArrayBinary_serialise(RDFValue self, RDFURN subject) {
     RaiseError(ERuntimeError, "Unable to open storage for %s", subject->value);
     goto error;
   } else {
-    uint32_t *stored_array = talloc_array_size(segment, sizeof(uint32_t), this->size);
+    uint32_t *stored_array = talloc_array_size(segment, sizeof(*this->array), this->size);
     int i;
     for(i=0; i<this->size; i++) {
       stored_array[i] = htonl(this->array[i]);
     };
 
-    CALL(volume, writestr, segment->value,
-         (char *)stored_array, this->size * sizeof(uint32_t), ZIP_STORED);
+    if(-1==CALL(volume, writestr, segment->value,
+                (char *)stored_array, this->size * sizeof(uint32_t), ZIP_STORED)) {
+      PUSH_ERROR_STATE;
+      CALL((AFFObject)volume, cache_return);
+      POP_ERROR_STATE;
 
-    CALL(oracle, cache_return, (AFFObject)volume);
+      RaiseError(ERuntimeError, "Unable to write binary segment");
+
+      goto error;
+    };
+
+    CALL((AFFObject)volume, cache_return);
   };
 
  exit:

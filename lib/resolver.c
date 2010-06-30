@@ -2017,3 +2017,7 @@ DLL_PUBLIC void aff4_end() {
 
   if(buff) talloc_free(buff);
 };
+
+DLL_PUBLIC void print_error_message() {
+  PrintError();
+};

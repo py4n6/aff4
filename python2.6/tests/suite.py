@@ -194,7 +194,6 @@ class ImageTest(ZipFile):
     def close_volume(self):
         volume = oracle.open(self.volume_urn, 'w')
         volume.close()
-        pdb.set_trace()
 
     def make_image_stream(self):
         image = oracle.create(pyaff4.AFF4_IMAGE)

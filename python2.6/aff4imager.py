@@ -207,7 +207,7 @@ parser.add_option("-p", "--password", default='',
 oracle = pyaff4.Resolver()
 
 ## Now register the renderer as an output module
-oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
+oracle.register_logger(pyaff4.ProxiedLogger(Renderer()))
 
 if options.dump:
    output = options.output

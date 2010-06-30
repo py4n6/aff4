@@ -29,9 +29,7 @@ DLL_PUBLIC void *aff4_raise_errors(enum _error_type t, char *string,  ...);
 
 /** We only set the error state if its not already set */
 #define RaiseError(t, message, ...)                                     \
-  if(*aff4_get_current_error(NULL) == EZero) {                          \
-    aff4_raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__); \
-  };
+  aff4_raise_errors(t, "%s: (%s:%d) " message, __FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__);
 
 #define LogWarnings(format, ...)		\
   do {						\

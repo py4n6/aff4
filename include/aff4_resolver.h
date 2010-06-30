@@ -405,5 +405,7 @@ void aff4_incref(void *ptr);
       */
 void aff4_end();
 
+void print_error_message();
+
 #endif 	    /* !AFF4_RESOLVER_H_ */
 

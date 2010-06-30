@@ -498,6 +498,11 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     goto error;
   };
 
+  /* Try to restore our URN from previous knowledge about what should
+     be stored there.
+  */
+  CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self));
+
   // Is there a directory_offset and does it make sense?
   if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
           (RDFValue)self->directory_offset) &&          \
@@ -516,8 +521,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   // see if there is a ZipFile stored on the fd_urn, and then if that
   // ZipFile is dirty. If we do not know the volume's dirty state we
   // just try to load it.
-  if(CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self)) &&
-     CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+  if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
           (RDFValue)self->_didModify)) {
     switch(self->_didModify->value) {
       // If we already loaded this volume - no need to reload it (we

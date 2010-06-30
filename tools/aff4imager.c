@@ -1,4 +1,4 @@
-#include "aff4.h"
+#include <aff4.h>
 #include <openssl/bio.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
@@ -8,7 +8,7 @@
 
 #define IMAGE_BUFF_SIZE (1024*1024)
 
-Resolver oracle;
+static Resolver oracle;
 
 // Searches for an object and tries to open it
 FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
@@ -25,7 +25,7 @@ FileLikeObject open_urn(char *in_urn, RDFURN volume_urn) {
   obj = (FileLikeObject)CALL(oracle, open, result, 'r');
   if(obj) goto exit;
 
-  talloc_free(result);
+  aff4_free(result);
   return NULL;
 
  exit:
@@ -506,12 +506,7 @@ int main(int argc, char **argv)
   int verify = 0;
   uint64_t max_size=0;
 
-  // Initialise the library
-  AFF4_Init();
-
-  talloc_enable_leak_report_full();
-
-  oracle = CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
+  oracle = AFF4_get_resolver();
 
   //talloc_enable_leak_report_full();
 
