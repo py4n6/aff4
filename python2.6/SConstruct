@@ -8,6 +8,7 @@ Import('env')
 nenv = env.Clone()
 
 BOUND_FILES = Split("""
+              #include/misc.h
               #include/aff4_constants.h
               #include/aff4_utils.h
               #include/aff4_rdf.h
@@ -32,26 +33,6 @@ def build_python_bindings(target, source, env, initialization=''):
     p = class_parser.HeaderParser(module_name, verbose=env['V'])
     p.module.init_string = initialization
     p.module.public_header = open(public_header.path, 'w')
-    p.module.public_header.write("""
-#include <sys/types.h>
-#include <stdint.h>
-
-#include <string.h>
-
-#include <sys/types.h>
-#include <time.h>
-#include <stdlib.h>
-
-#define IN
-#define OUT
-
-typedef struct TDB_DATA {
-	unsigned char *dptr;
-	size_t dsize;
-} TDB_DATA;
-
-
-""")
     p.module.public_api = open(public_api.path, 'w')
 
     p.parse_filenames([s.get_abspath() for s in source])

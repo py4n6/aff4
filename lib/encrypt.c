@@ -2,7 +2,7 @@
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 #include <openssl/err.h>
-#include "aff4.h"
+#include "misc.h"
 
 #define OpenSSL_error                           \
   RaiseError(ERuntimeError, "%s", ERR_error_string(ERR_get_error(), NULL))

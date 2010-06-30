@@ -5,16 +5,8 @@
 extern "C" {
 #endif
 
-#include "aff4.h"
 #include "misc.h"
-#include "list.h"
 #include <zlib.h>
-#include <pthread.h>
-#include <tdb.h>
-#include <setjmp.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include "queue.h"
 #include "trp.h"
 

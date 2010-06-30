@@ -1,12 +1,7 @@
 /** This file implemnts the resolver */
-#include "aff4.h"
-#include <uuid/uuid.h>
-#include <pthread.h>
-#include <tdb.h>
-#include <raptor.h>
-#include <errno.h>
-#include <pthread.h>
-#include "config.h"
+#include "misc.h"
+
+extern Cache RDF_Registry;
 
        /** The following are private functions */
 RESOLVER_ITER *_Resolver_get_iter(Resolver self,
@@ -1981,3 +1976,12 @@ DLL_PUBLIC void aff4_free(void *ptr) {
 DLL_PUBLIC void aff4_incref(void *ptr) {
   talloc_reference(NULL, ptr);
 };
+
+DLL_PUBLIC Resolver AFF4_get_resolver() {
+  return oracle;
+};
+
+/* This is a global instance of the resolver. All AFFObjects must
+   communicate with the oracle rather than instantiate their own.
+*/
+Resolver oracle;

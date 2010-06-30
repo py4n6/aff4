@@ -304,13 +304,13 @@ static int check_error() {
         ## Write the headers
         self.public_api.write('''
 #ifdef BUILDING_DLL
-#include "aff4.h"
+#include "misc.h"
 #else
 #include "aff4_public.h"
 #endif
 ''')
-        for cls in self.classes.keys():
-            self.public_header.write("typedef void * %s;\n" % cls)
+        #for cls in self.classes.keys():
+        #    self.public_header.write("typedef void * %s;\n" % cls)
 
         ## Prepare all classes
         for cls in self.classes.values():
@@ -351,7 +351,7 @@ static PyMethodDef %(module)s_methods[] = {
      {NULL}  /* Sentinel */
 };
 
-PyMODINIT_FUNC init%(module)s(void) {
+DLL_PUBLIC PyMODINIT_FUNC init%(module)s(void) {
    /* Make sure threads are enabled */
    PyEval_InitThreads();
 
@@ -2415,282 +2415,6 @@ typedef struct {
         ## For now no methods
         out.write("     {NULL}  /* Sentinel */\n};\n")
 
-class parser:
-    class_re = re.compile(r"^([A-Z]+)?\s*CLASS\(([A-Z_a-z0-9]+)\s*,\s*([A-Z_a-z0-9]+)\)")
-    method_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)METHOD\(([A-Z_a-z0-9]+),\s*([A-Z_a-z0-9]+),?")
-    enum_start_re = re.compile(r'enum ([0-9A-Z_a-z]+) {')
-    enum_re = re.compile(r'([0-9A-Z_a-z]+) = [^,]+,')
-    enum_end_re = re.compile('}')
-    arg_re = re.compile(r"\s*([0-9A-Z a-z_]+\s+\*?)([0-9A-Za-z_]+),?")
-    constant_re = re.compile(r"#define\s+([A-Z_0-9]+)\s+[^\s]+")
-    struct_re = re.compile(r"([A-Z]+)?\s+(typedef )?struct\s+([A-Z_a-z0-9]+)\s+{")
-    proxy_class_re = re.compile(r"PROXY_CLASS\(([A-Za-z0-9]+)\)")
-    end_class_re = re.compile("END_CLASS")
-    attribute_re = re.compile(r"^\s*([0-9A-Z_a-z ]+\s+\*?)\s*([A-Z_a-z]+)\s*;")
-    comment_re = re.compile(r"^\s*//")
-    comment_start_re = re.compile(r"/\*+")
-    comment_end_re = re.compile(r"\*+/")
-    blank_line_re = re.compile("\s+")
-    typedef_re = re.compile("typedef ([A-Za-z_0-9]+) +([A-Za-z_0-9]+) *;")
-    bind_re = re.compile("BIND\(([a-zA-Z_0-9]+)\);")
-    current_class = None
-
-    def __init__(self, module, verbosity=0):
-        self.module = module
-        self.current_comment = ''
-        self.verbosity = verbosity
-        self.state = 'DEFAULT'
-
-        ## this is a list of objects which are to be bound
-        self.to_bind = []
-
-        global DEBUG
-
-        DEBUG = verbosity
-
-        io = StringIO.StringIO("""
-// Base object
-CLASS(Object, Obj)
-END_CLASS
-""")
-        self.parse_fd(io, '')
-
-    def add_class(self, class_name, base_class_name, class_type, handler, docstring, modifier):
-        try:
-            self.current_class = self.module.classes[base_class_name].clone(class_name)
-        except (KeyError, AttributeError):
-            log("Base class %s is not defined !!!!" % base_class_name)
-            self.current_class = class_type(class_name, base_class_name, self.module)
-
-        ## Now add the new class to the module object
-        self.current_class.docstring = docstring
-        self.current_class.modifier = modifier
-        self.module.add_class(self.current_class, handler)
-
-    def parse_filenames(self, filenames):
-        ## Be quiet for the first pass as many problems will be
-        ## resolved on the second pass anyway.
-        global DEBUG
-        DEBUG = 0
-        for f in filenames:
-            self._parse(f)
-
-        DEBUG = self.verbosity
-        log("Second pass: Consolidating definitions")
-        for f in filenames:
-            self._parse(f)
-
-    def _parse(self, filename):
-        fd = open(filename)
-        self.parse_fd(fd, filename)
-        fd.close()
-
-        if filename not in self.module.files:
-              self.module.headers += '#include "%s"\n' % filename
-              self.module.files.append(filename)
-
-    def parse_fd(self, fd, filename):
-        self.current_class = None
-        self.current_comment = ''
-
-        while 1:
-            line = fd.readline()
-            if not line: break
-
-            ## Handle binds
-            m= self.bind_re.search(line)
-            if m:
-                print "Will bind %s" % m.group(1)
-                self.to_bind.append(m.group(1))
-                continue
-
-            ## Handle enums
-            if self.state == 'DEFAULT':
-                m = self.enum_start_re.search(line)
-                if m:
-                    self.state = 'enum'
-                    type_dispatcher[m.group(1)] = type_dispatcher['int']
-                    continue
-
-            elif self.state == 'enum':
-                m = self.enum_re.search(line)
-                if m:
-                    self.module.add_constant(m.group(1), 'integer')
-
-                if '}' in line:
-                    self.state = 'DEFAULT'
-                    continue
-
-            ## Handle c++ style comments //
-            m = self.comment_re.match(line)
-            if m:
-                self.current_comment = line[m.end():]
-                while 1:
-                    line = fd.readline()
-
-                    m = self.comment_re.match(line)
-                    if not m:
-                        break
-
-                    self.current_comment += line[m.end():]
-
-            ## Multiline C style comments
-            m = self.comment_start_re.search(line)
-            if m:
-                line = line[m.end():]
-                while 1:
-                    m = self.comment_end_re.search(line)
-                    if m:
-                        self.current_comment += line[:m.start()]
-                        line = fd.readline()
-                        break
-                    else:
-                        self.current_comment += line
-
-                    line = fd.readline()
-                    if not line: break
-
-            ## Handle simple typdefs (as if typedef uint64_t my_fancy_type;)
-            m = self.typedef_re.search(line)
-            if m:
-                ## We basically add a new type as a copy of the old
-                ## type
-                old, new = m.group(1), m.group(2)
-                if old in type_dispatcher:
-                    type_dispatcher[new] = type_dispatcher[old]
-
-            ## Handle constant #define
-            m = self.constant_re.search(line)
-            if m:
-                ## We need to determine if it is a string or integer
-                if re.search('"', line):
-                    ## Its a string
-                    self.module.add_constant(m.group(1), 'string')
-                else:
-                    self.module.add_constant(m.group(1), 'integer')
-
-            ## Wrap structs
-            m = self.struct_re.search(line)
-            if m:
-                modifier = m.group(1)
-                class_name = m.group(3)
-                base_class_name = None
-                ## Structs may be refered to as a pointer or absolute
-                ## - its the same thing ultimatley.
-
-                ## We only wrap structures which are explicitely bound
-                if (modifier and 'BOUND' in modifier) or \
-                        class_name in self.to_bind:
-                    self.add_class(class_name, base_class_name, StructGenerator, StructWrapper,
-                                   self.current_comment, modifier)
-                    type_dispatcher["%s *" % class_name] = PointerStructWrapper
-
-                continue
-
-            m = self.class_re.search(line)
-            if m:
-                ## We need to make a new class now... We basically
-                ## need to build on top of previously declared base
-                ## classes - so we try to find base classes, clone
-                ## them if possible:
-                modifier = m.group(1)
-                class_name = m.group(2)
-                base_class_name = m.group(3)
-                self.add_class(class_name, base_class_name, ClassGenerator, Wrapper,
-                               self.current_comment, modifier)
-                type_dispatcher["%s *" % class_name] = PointerWrapper
-
-                continue
-
-            ## Make a proxy class for python callbacks
-            m = self.proxy_class_re.search(line)
-            if m:
-                modifier = m.group(1)
-                base_class_name = m.group(2)
-                class_name = "Proxied%s" % base_class_name
-                try:
-                    proxied_class = self.module.classes[base_class_name]
-                except KeyError:
-                    raise RuntimeError("Need to create a proxy for %s but it has not been defined (yet). You must place the PROXIED_CLASS() instruction after the class definition" % base_class_name)
-                self.current_class = ProxyClassGenerator(class_name,
-                                                         base_class_name, self.module)
-                #self.current_class.constructor.args += proxied_class.constructor.args
-                self.current_class.docstring = self.current_comment
-
-                ## Create proxies for all these methods
-                for method in proxied_class.methods:
-                    if method.name[0] != '_':
-                        self.current_class.methods.append(ProxiedMethod(method, self.current_class))
-
-                self.module.add_class(self.current_class, Wrapper)
-
-                ## Make sure that further lines are not interpreted as part of this class.
-                self.current_class = None
-
-            m = self.method_re.search(line)
-            if self.current_class and m:
-                args = []
-                method_name = m.group(3)
-                return_type = m.group(1).strip()
-                ## Ignore private methods
-                if return_type.startswith("PRIVATE"): continue
-
-                ## Now parse the args
-                offset = m.end()
-                while 1:
-                    m = self.arg_re.match(line[offset:])
-                    if not m:
-                        ## Allow multiline definitions if there is \\
-                        ## at the end of the line
-                        if line.strip().endswith("\\"):
-                            line = fd.readline()
-                            offset = 0
-                            if line:
-                                continue
-
-                        break
-
-                    offset += m.end()
-                    args.append([m.group(1).strip(), m.group(2).strip()])
-
-                if return_type == self.current_class.class_name and \
-                        method_name.startswith("Con"):
-                    self.current_class.add_constructor(method_name, args, return_type,
-                                                       self.current_comment)
-                else:
-                    self.current_class.add_method(method_name, args, return_type,
-                                                  self.current_comment)
-
-            m = self.attribute_re.search(line)
-            if self.current_class and m:
-                type = m.group(1)
-                name = m.group(2)
-                self.current_class.add_attribute(name, type)
-
-            m = self.end_class_re.search(line)
-            if m:
-                ## Just clear the current class context
-                self.current_class = None
-
-            ## If this is a shadow file we do not include it from the
-            ## main module. A shadow file is a way for us to redefine
-            ## other C constructs which will be imported from an
-            ## external header file so we can bind them slightly
-            ## differently.
-            if "this is a shadow file" in self.current_comment \
-                    and filename not in self.module.files:
-                self.module.files.append(filename)
-
-            ## We only care about comment immediately above methods
-            ## etc as we take them to be documentation. If we get here
-            ## the comment is not above anything we care about - so we
-            ## clear it:
-            self.current_comment = ''
-
-    def write(self, out):
-        self.module.write(out)
-
-
 import lexer
 
 class EnumConstructor(ConstructorMethod):
@@ -2833,6 +2557,8 @@ class HeaderParser(lexer.SelfFeederMixIn):
         [ 'INITIAL', r'#define\s+', 'PUSH_STATE', 'DEFINE' ],
         [ 'DEFINE', r'([A-Za-z_0-9]+)\s+[^\n]+', 'DEFINE,POP_STATE', None ],
         [ 'DEFINE', r'\n', 'POP_STATE', None],
+        ## Ignore macros with args
+        [ 'DEFINE', r'\([^\n]+', 'POP_STATE', None],
 
         ## Recognize ansi c comments
         [ '.', r'/\*(.)', 'PUSH_STATE', 'COMMENT' ],

@@ -1,13 +1,4 @@
-#include "time.h"
-#include <uuid/uuid.h>
-#include <libgen.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <stdint.h>
-#include <string.h>
 #include "misc.h"
-#include <tdb.h>
-#include "aff4.h"
 
 uint64_t parse_int(char *string) {
   char *endptr;
@@ -42,7 +33,7 @@ uint64_t parse_int(char *string) {
 char *from_int(uint64_t arg) {
   static char buffer[BUFF_SIZE];
 
-  snprintf(buffer, BUFF_SIZE, "0x%02llX", arg);
+  snprintf(buffer, BUFF_SIZE, "0x%02lX", (long unsigned int)arg);
   return buffer;
 };
 
@@ -50,11 +41,11 @@ static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*# ";
 static char illegal_filename_lut[128];
 void init_luts() {
   char *i;
-  
-  memset(illegal_filename_lut, 0, 
+
+  memset(illegal_filename_lut, 0,
 	 sizeof(illegal_filename_lut));
 
-  for(i=illegal_filename_chars;*i;i++) 
+  for(i=illegal_filename_chars;*i;i++)
     illegal_filename_lut[(int)*i]=1;
 };
 
@@ -97,7 +88,7 @@ TDB_DATA unescape_filename(void *ctx, const char *filename) {
 
   int i,j=0;
   int length = strlen(filename)+1;
-  
+
   for(i=0;i<min(length, BUFF_SIZE-10);i++) {
     if(filename[i]=='%') {
       char tmp[10];

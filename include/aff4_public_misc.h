@@ -6,6 +6,47 @@
 #include <openssl/aes.h>
 #include <setjmp.h>
 
+#include <assert.h>
+
+#define BUFF_SIZE 40960
+
+#ifdef WINDOWS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <io.h>
+#include <stdio.h>
+#define MSG_NOSIGNAL 0
+typedef  unsigned long int in_addr_t;
+#else
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <uuid/uuid.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <string.h>
+#include <error.h>
+#include <errno.h>
+#include <pthread.h>
+#include <setjmp.h>
+#include <fcntl.h>
+
+#define O_BINARY 0
+#endif
+
+#ifdef HAVE_INTTYPES_H
+#include <inttypes.h>
+#endif
+
+
 // Some required definitions from class.h if not already used
 #ifndef ___CLASS_H
 typedef struct Object_t *Object;
@@ -74,3 +115,7 @@ typedef struct TDB_DATA {
 
 typedef void* Queue;
 typedef void* StringIO;
+
+// A helper to access the URN of an object.
+#define URNOF(x)  ((AFFObject)x)->urn
+#define STRING_URNOF(x) ((char *)URNOF(x)->value)

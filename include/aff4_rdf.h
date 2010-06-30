@@ -2,14 +2,6 @@
 #ifndef   	AFF4_RDF_H_
 # define   	AFF4_RDF_H_
 
-#include "class.h"
-#include <tdb.h>
-#include <raptor.h>
-#include <setjmp.h>
-#include "misc.h"
-#include "aff4_utils.h"
-#include <sys/time.h>
-
 struct RDFURN_t;
 
 /**** A class used to parse URNs */
@@ -197,7 +189,6 @@ END_CLASS
     Resolver.register_rdf_value_class() function instead.
 **/
 void register_rdf_value_class(RDFValue class_ref);
-extern Cache RDF_Registry;
 
 /** The following are convenience functions that allow easy
     access to some common types.

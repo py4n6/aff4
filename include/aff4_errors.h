@@ -38,7 +38,7 @@ DLL_PUBLIC void *aff4_raise_errors(enum _error_type t, char *string,  ...);
     RaiseError(EWarning, format, ## __VA_ARGS__);	\
     PrintError();				\
   } while(0);
-  
+
 #define ClearError()				\
   do {*aff4_get_current_error(NULL) = EZero;} while(0);
 
@@ -60,8 +60,5 @@ DLL_PUBLIC enum _error_type *aff4_get_current_error(char **error_str);
 #define PUSH_ERROR_STATE { enum _error_type *tmp_error_p = aff4_get_current_error(NULL); enum _error_type tmp_error = *tmp_error_p; enum _error_type exception __attribute__((unused));
 
 #define POP_ERROR_STATE *tmp_error_p = tmp_error;};
-
-
-void error_init();
 
 #endif 	    /* !AFF4_ERRORS_H_ */

@@ -371,10 +371,14 @@ CLASS(TDB, Object)
      TDB_DATA METHOD(TDB, fetch, char *key, int len);
 END_CLASS
 
-     /* This is a global instance of the resolver. All AFFObjects must
-        communicate with the oracle rather than instantiate their own.
+     /* This function is the main entry point into the AFF4
+        library. The first thing that users need to do is obtain a
+        resolver by calling AFF4_get_resolver(). Once they have a
+        resolver, new instances of AFF4 objects and RDFValue objects
+        can be obtained throught the open(), create(), and
+        new_rdfvalue() method.
      */
-DLL_PUBLIC extern Resolver oracle;
+Resolver AFF4_get_resolver();
 
      /* This function can be used to register a new AFF4 type with the
         library

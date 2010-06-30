@@ -97,6 +97,7 @@ compileFlags += [ ('-W' + warning) for warning in warnings ]
 
 env['CCFLAGS'] = compileFlags
 env['CPPDEFINES'] = cppDefines
+env['INSTALLSTR'] = utils.installed_message
 
 ## Not working yet
 if config.MINGW_XCOMPILE:
@@ -106,8 +107,6 @@ if config.MINGW_XCOMPILE:
 
 conf = Configure(env)
 conf.AddTests({'CheckTypeSize': utils.CheckTypeSize})
-
-config_h_build([File('include/aff4.h')], [File('include/sc_aff4.h.in')], env)
 
 ## Check for different things
 if not env.GetOption('clean') and not env.GetOption('help'):
@@ -193,8 +192,8 @@ Export("env")
 config_h_build([File('lib/config.h')], [File('lib/sc_config.h.in')], env)
 
 SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
-            'python2.6/SConstruct',
-            'tests/SConstruct', 'applications/SConstruct'])
+            'python2.6/SConstruct', #'tests/SConstruct',
+            'applications/SConstruct'])
 
 # env.Package( NAME           = 'libaff4',
 #              VERSION        = '0.1.rc1',

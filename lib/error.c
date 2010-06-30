@@ -8,9 +8,7 @@
 ** Last update Sun May 12 01:17:25 2002 Speed Blue
 */
 
-#include "aff4.h"
-#include "aff4_errors.h"
-#include <pthread.h>
+#include "misc.h"
 
 /** These slots carry the TLS error keys */
 static pthread_key_t error_str_slot;

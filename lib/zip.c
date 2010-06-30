@@ -3,17 +3,7 @@
 
     FIXME: The FileBackedObject needs to be tailored for windows.
 */
-#include <errno.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <zlib.h>
-#include <time.h>
-#include <libgen.h>
-#include "aff4.h"
-#include "aff4_rdf_serialise.h"
-#include "exports.h"
+#include "misc.h"
 
 static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   FileLikeObject this = (FileLikeObject)self;

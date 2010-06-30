@@ -144,6 +144,9 @@ link_python_module_message = '%sLinking Native Python module %s==> %s${TARGET}%s
 java_library_message = '%sCreating Java Archive %s==> %s$TARGET%s' % \
    (colors['red'], colors['purple'], colors['yellow'], colors['end'])
 
+installed_message = '%sInstall %s ${SOURCE} to  "$TARGETS" %s' % (
+    colors['cyan'], colors['green'], colors['end'])
+
 def info_string(subject, verb, adjective):
     return "%s%s %s%s %s%s%s" % (colors['blue'], subject,
                                  colors['purple'], verb,
@@ -161,7 +164,8 @@ def install_colors(args):
                       SHLINKCOMSTR = link_shared_library_message,
                       LINKCOMSTR = link_program_message,
                       JARCOMSTR = java_library_message,
-                      JAVACCOMSTR = compile_source_message,))
+                      JAVACCOMSTR = compile_source_message,
+                      INSTALLSTR = installed_message))
 
 import optparse
 
@@ -272,10 +276,9 @@ import SCons.Environment
 class ExtendedEnvironment(SCons.Environment.Environment):
     """ Implementation from Richard Levitte email to
     org.tigris.scons.dev dated Jan 26, 2006 7:05:10 am."""
-    python_cppflags = distutils.util.split_quoted(
-        "-I"+sysconfig.get_python_inc())
-
     talloc_shared = None
+    python_cppflags = distutils.util.split_quoted(
+        "-I"+sysconfig.get_python_inc() + ' -fvisibility=hidden ')
 
     def PythonModule(self, libname, lib_objs=[], **kwargs):
         """ This builds a python module which is almost a library but
@@ -296,8 +299,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             shlib_suffix = distutils.util.split_quoted(
                 sysconfig.get_config_var('SO'))
             shlib_post_action = None
-            cppflags = distutils.util.split_quoted(
-                "-I"+sysconfig.get_python_inc())
+            cppflags = self.python_cppflags
             shlink_flags = self['LINKFLAGS'].split()
 
         install_dest = distutils.util.split_quoted(
@@ -326,7 +328,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         if not self.talloc_shared:
             self.talloc_shared = self.SharedObject(
                 source = "#lib/talloc.c", target='shared_talloc',
-                CFLAGS='-Ilibreplace/ -Ilib/')
+                CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
 
         lib = self.SharedLibrary(libname, lib_objs + self.talloc_shared,
                                  **kwargs)

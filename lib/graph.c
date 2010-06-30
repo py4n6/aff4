@@ -1,18 +1,18 @@
 /*
-** graph.c
-** 
-** Made by (mic)
-** Login   <mic@laptop>
-** 
-** Started on  Sat Feb 27 01:49:25 2010 mic
-** Last update Sun May 12 01:17:25 2002 Speed Blue
+This is an implementation of the RDF Graph object. An RDF Graph is a
+container of RDF statements. It is used to keep some statements
+separate and to provided provenance to statements (in conjunction with
+segment signing).
 
-This is an implementation of the RDF Graph object
-
+To use a graph you need to instantiate it, set the AFF4_STORED
+attribute to ensure it will be stored in a volume, finish() the object
+to complete it. Once completed, the set_triple() method can be used to
+add triples to the graph (they also get added to the resolver at the
+same time). When close()ed the graph will be serialised to the volume
+as an RDF encoded segment (by default using the turtle encoding).
 */
 
-#include "aff4.h"
-#include "aff4_rdf_serialise.h"
+#include "misc.h"
 
 // We store these in the resolver as the statements stored within this graph
 struct statement_t {

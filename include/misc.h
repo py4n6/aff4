@@ -1,6 +1,6 @@
-#ifndef MISC_H
-#define MISC_H
 #include <assert.h>
+
+#define BUFF_SIZE 40960
 
 #ifdef WINDOWS
 #include <winsock2.h>
@@ -17,6 +17,21 @@ typedef  unsigned long int in_addr_t;
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <uuid/uuid.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <string.h>
+#include <tdb.h>
+#include <error.h>
+#include <errno.h>
+#include <pthread.h>
+#include <raptor.h>
+#include <setjmp.h>
+#include <fcntl.h>
 
 #define O_BINARY 0
 #endif
@@ -25,7 +40,24 @@ typedef  unsigned long int in_addr_t;
 #include <inttypes.h>
 #endif
 
-#define BUFF_SIZE 40960
+#include "encode.h"
+#include "class.h"
+#include "aff4_errors.h"
+#include "aff4_utils.h"
+#include "aff4_rdf.h"
+#include "aff4_io.h"
+#include "aff4_resolver.h"
+#include "aff4_constants.h"
+#include "aff4_errors.h"
+
+// This file defines the rdf side of the AFF4 specification
+#include "aff4_crypto.h"
+#include "aff4_objects.h"
+#include "ewfvolume.h"
+#include "aff4_rdf_serialise.h"
+
+// The global oracle
+extern Resolver oracle;
 
 int _mkdir(const char *path);
 void init_luts();
@@ -95,4 +127,17 @@ uint64_t htonll(uint64_t n);
                                       "FATAL (%s:%u): " fmt "\n\n",     \
                                       __FUNCTION__, __LINE__, ##__VA_ARGS__); abort();
 
-#endif
+/** Some helper functions used to serialize int to and from URN
+    attributes
+*/
+uint64_t parse_int(char *string);
+char *from_int(uint64_t arg);
+char *escape_filename(void *ctx, const char *filename, unsigned int length);
+TDB_DATA escape_filename_data(void *ctx, TDB_DATA name);
+TDB_DATA unescape_filename(void *ctx, const char *filename);
+
+TDB_DATA tdb_data_from_string(char *string);
+
+// A helper to access the URN of an object.
+#define URNOF(x)  ((AFFObject)x)->urn
+#define STRING_URNOF(x) ((char *)URNOF(x)->value)

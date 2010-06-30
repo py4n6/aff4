@@ -18,21 +18,6 @@
 #define HASH_TABLE_SIZE 256
 #define CACHE_SIZE 15
 
-// A helper to access the URN of an object.
-#define URNOF(x)  ((AFFObject)x)->urn
-#define STRING_URNOF(x) ((char *)URNOF(x)->value)
-
-/** Some helper functions used to serialize int to and from URN
-    attributes
-*/
-uint64_t parse_int(char *string);
-char *from_int(uint64_t arg);
-char *escape_filename(void *ctx, const char *filename, unsigned int length);
-TDB_DATA escape_filename_data(void *ctx, TDB_DATA name);
-TDB_DATA unescape_filename(void *ctx, const char *filename);
-
-TDB_DATA tdb_data_from_string(char *string);
-
 /** A cache is an object which automatically expires data which is
     least used - that is the data which is most used is put at the end
     of the list, and when memory pressure increases we expire data

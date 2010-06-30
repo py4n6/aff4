@@ -4,10 +4,7 @@
 /** The following are related to raptor - RDF serialization and
     parsing
 */
-#include "aff4.h"
-#include "aff4_rdf_serialise.h"
-#include "aff4_rdf.h"
-#include <time.h>
+#include "misc.h"
 
 /** Parsing URLs - basically a state machine */
 enum url_state {
@@ -277,7 +274,7 @@ static char *XSDInteger_serialise(RDFValue self, RDFURN subject) {
   if(this->serialised)
     talloc_unlink(self, this->serialised);
 
-  this->serialised = talloc_asprintf(self, "%llu", this->value);
+  this->serialised = talloc_asprintf(self, "%llu", (long long unsigned int)this->value);
 
   talloc_reference(NULL, this->serialised);
 
@@ -1207,7 +1204,6 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
 static int RDFSerializer_serialize_urn(RDFSerializer self, 
 				       RDFURN urn) {
   Cache i;
-  void *raptor_urn;
 
   printf(".");
   fflush(stdout);
