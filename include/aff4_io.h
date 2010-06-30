@@ -72,7 +72,7 @@ CLASS(AFFObject, Object)
      /* When the object is closed it will write itself to its volume.
         This frees the object - do no use it after calling close.
       */
-     int METHOD(AFFObject, close);
+     DESTRUCTOR int METHOD(AFFObject, close);
 
 
      /*  This method is used to delete the object from the resolver.

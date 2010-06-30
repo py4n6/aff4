@@ -490,7 +490,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
      be sane.
 
      NOTE - we open the file for writing here because we want to
-     ensure we get a lock on it (we cant have the file growing file we
+     ensure we get a lock on it (we cant have the file growing while we
      do this check).
   */
   fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'w');
@@ -943,7 +943,7 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 static int dump_volume_information(ZipFile this) {
   RESOLVER_ITER *iter = NULL;
   AFF4Volume self = (AFF4Volume)this;
-  FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w', 
+  FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w',
 			   ZIP_DEFLATE);
   RDFSerializer serializer;
   RDFURN urn = new_RDFURN(NULL);
@@ -975,13 +975,19 @@ static int dump_volume_information(ZipFile this) {
   CALL(serializer, close);
 
  exit:
-  if(fd) CALL((AFFObject)fd, close);
+  if(fd) {
+    CALL((AFFObject)fd, close);
+  };
+
   talloc_free(urn);
   return 1;
 
  error:
   PUSH_ERROR_STATE;
-  if(fd) CALL((AFFObject)fd, close);
+  if(fd) {
+    CALL((AFFObject)fd, close);
+  };
+
   POP_ERROR_STATE;
 
   talloc_free(urn);
@@ -1047,6 +1053,8 @@ static int ZipFile_close(AFFObject this) {
 	struct CDFileHeader cd;
 	struct tm *now;
         TDB_DATA relative_name, escaped_filename;
+
+        printf("%s\n", urn->value);
 
         // Flush the cache if needed
         if(cache->readptr > BUFF_SIZE * 10) {

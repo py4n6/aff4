@@ -1741,6 +1741,13 @@ void aff4_free(void *ptr);
 
 void aff4_incref(void *ptr);
 
+     /*
+        This function is used for debugging only. We use it to free
+        miscelaneous objects which should never be freed. Never call
+        this in production.
+      */
+void aff4_end();
+
 /*
 ** aff4_rdf_serialise.h
 ** 

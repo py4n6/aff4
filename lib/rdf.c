@@ -1077,6 +1077,14 @@ static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key,
   return 0;
 };
 
+static int RDFSerializer_destructor(void *this) {
+  RDFSerializer self = (RDFSerializer)this;
+
+  raptor_free_iostream(self->iostream);
+
+  return 0;
+};
+
 static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base, 
                                        FileLikeObject fd) {
   char *type = "turtle";
@@ -1119,6 +1127,9 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
     raptor_free_uri(uri);
   };
 
+
+  talloc_set_destructor((void *)self, RDFSerializer_destructor);
+
   return self;
 
  error:
@@ -1154,10 +1165,11 @@ static int RDFSerializer_serialize_statement(RDFSerializer self,
     value = CALL(oracle, alloc_from_iter, raptor_urn, iter);
 
     if(!value) goto error;
+
+    // New reference here:
+    triple.object = CALL(value, serialise, urn);
   };
 
-  // New reference here:
-  triple.object = CALL(value, serialise, urn);
   if(!triple.object) {
     AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
              urn,

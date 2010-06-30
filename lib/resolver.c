@@ -156,6 +156,16 @@ static int print_cache(Cache self) {
   return 0;
 };
 
+static int print_cache_urns(Cache self) {
+  Cache i;
+
+  list_for_each_entry(i, &self->cache_list, cache_list) {
+    printf("%s %p %s\n",(char *) i->key,i , ((RDFURN)(i->data))->value);
+  };
+
+  return 0;
+};
+
 static Cache Cache_put(Cache self, char *key, int len, Object data) {
   unsigned int hash;
   Cache hash_list_head;
@@ -1011,9 +1021,10 @@ static int Resolver_iter_next(Resolver self,
           // doesnt actually store anything, but simply ensure the key
           // is stored.
           CALL(iter->cache, put, key, key_len, NULL);
+
+          res_code = CALL(result, decode, key, iter->head.length, iter->urn);
         };
       };
-      res_code = CALL(result, decode, key, iter->head.length, iter->urn);
 
       talloc_free(key);
     };
@@ -1852,7 +1863,7 @@ static int AFFObject_close(AFFObject self) {
   if(o) talloc_unlink(NULL, o);
   ClearError();
 
-  //  talloc_unlink(NULL, self);
+  talloc_unlink(NULL, self);
   return 1;
 };
 
@@ -1970,7 +1981,8 @@ AFF4_MODULE_INIT(A100_resolver) {
 };
 
 DLL_PUBLIC void aff4_free(void *ptr) {
-  talloc_unlink(NULL, ptr);
+  if(ptr)
+    talloc_unlink(NULL, ptr);
 };
 
 DLL_PUBLIC void aff4_incref(void *ptr) {
@@ -1985,3 +1997,23 @@ DLL_PUBLIC Resolver AFF4_get_resolver() {
    communicate with the oracle rather than instantiate their own.
 */
 Resolver oracle;
+
+extern Cache KeyCache;
+
+DLL_PUBLIC void aff4_end() {
+  enum _error_type *current_error;
+  char *buff = NULL;
+
+  talloc_free(RDF_Registry);
+  talloc_free(type_dispatcher);
+  talloc_free(AFF4_SECURITY_PROVIDER);
+  talloc_free(KeyCache);
+  raptor_finish();
+
+  current_error = aff4_get_current_error(&buff);
+  if(current_error) {
+    talloc_free(current_error);
+  };
+
+  if(buff) talloc_free(buff);
+};

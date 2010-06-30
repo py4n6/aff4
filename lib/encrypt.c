@@ -56,7 +56,7 @@ SecurityProvider AFF4_SECURITY_PROVIDER=NULL;
    cipher will just get it from the cache and encode it using the cert
    scheme.
 */
-static Cache KeyCache = NULL;
+Cache KeyCache = NULL;
 
 static Key Key_Con(Key self, char *type, RDFURN subject, int create) {
   Object iter = CALL(KeyCache, iter, ZSTRING(subject->value));

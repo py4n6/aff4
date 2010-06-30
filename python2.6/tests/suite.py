@@ -194,6 +194,7 @@ class ImageTest(ZipFile):
     def close_volume(self):
         volume = oracle.open(self.volume_urn, 'w')
         volume.close()
+        pdb.set_trace()
 
     def make_image_stream(self):
         image = oracle.create(pyaff4.AFF4_IMAGE)
@@ -334,10 +335,13 @@ elif options.compare:
     result = open(options.compare, 'r').read()
     result = pickle.loads(result)
 
-    for test in test_cases:
-        print "Checking %s ..." % test.__class__.__name__,
-        res = test.test(result)
-        if not res:
-            print "OK"
-        else:
-            print "Failed: %s" % res
+    try:
+        for test in test_cases:
+            print "Checking %s ..." % test.__class__.__name__,
+            res = test.test(result)
+            if not res:
+                print "OK"
+            else:
+                print "Failed: %s" % res
+
+    except: pdb.post_mortem()
