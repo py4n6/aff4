@@ -514,6 +514,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     RaiseError(EIOError, "File %s is %llu bytes long, but it should be %llu",
                STRING_URNOF(fd), fd->size->value, self->directory_offset->value);
 
+    self->directory_offset->value = 0;
     goto error;
   };
 
@@ -596,14 +597,14 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       This mark the volume as already loaded. We are almost there -
       just need to parse the RDF file now. This prevents recursive
       loads which might happen if parsing the RDF file opens members in
-      this volume as well:
+      this volume as well (e.g. if decoding complex RDFValues):
     */
     self->_didModify->value  = DIRTY_STATE_ALREADY_LOADED;
     CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, 
          (RDFValue)self->_didModify,0);
 
-    // Find the CD
-    if(!find_cd(self, fd)) 
+    // Find the Central Directory
+    if(!find_cd(self, fd))
       goto error_reason;
 
     while(j < self->total_entries) {
@@ -1051,6 +1052,9 @@ static int ZipFile_close(AFFObject this) {
 
       CALL(zip64_header, write, "\x01\x00\x00\x00", 4);
 
+      AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_ZIP_VOLUME, URNOF(this),
+               "Closing ZipFile volume");
+
       // Iterate over all the AFF4_VOLATILE_CONTAINS URNs
       iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
       while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
@@ -1058,7 +1062,8 @@ static int ZipFile_close(AFFObject this) {
 	struct tm *now;
         TDB_DATA relative_name, escaped_filename;
 
-        printf("%s\n", urn->value);
+        AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_ZIP_VOLUME, urn,
+                 "Writing to Central Directory");
 
         // Flush the cache if needed
         if(cache->readptr > BUFF_SIZE * 10) {

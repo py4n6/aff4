@@ -330,7 +330,11 @@ class ExtendedEnvironment(SCons.Environment.Environment):
                 source = "#lib/talloc.c", target='shared_talloc',
                 CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
 
-        lib = self.SharedLibrary(libname, lib_objs + self.talloc_shared,
+            self.class_shared = self.SharedObject(
+                source = "#lib/class.c", target='shared_class',
+                CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
+
+        lib = self.SharedLibrary(libname, lib_objs + self.talloc_shared + self.class_shared,
                                  **kwargs)
 
         ## Install it to the right spot

@@ -10,6 +10,7 @@
 
 #include "tsk3.h"
 
+static Resolver resolver;
 
 /** This macro is used to receive the object reference from a
     member of the type.
@@ -70,11 +71,13 @@ Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   FileLikeObject fd;
   AFF4ImgInfo this = (AFF4ImgInfo)self;
 
-  this->urn = new_RDFURN(self);
+  resolver = AFF4_get_resolver();
+
+  this->urn = CONSTRUCT(RDFURN, RDFValue, Con, self);
   CALL(this->urn, set, urn);
 
   // Try to open it for reading just to make sure its ok:
-  fd = (FileLikeObject)CALL(oracle, open, this->urn, 'r');
+  fd = (FileLikeObject)CALL(resolver, open, this->urn, 'r');
   if(!fd) goto error;
 
   // Initialise the img struct with the correct callbacks:
@@ -98,7 +101,7 @@ Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
 
 ssize_t AFF4ImgInfo_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
   AFF4ImgInfo this = (AFF4ImgInfo)self;
-  FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->urn, 'r');
+  FileLikeObject fd = (FileLikeObject)CALL(resolver, open, this->urn, 'r');
 
   if(fd) {
     ssize_t res;
@@ -370,3 +373,13 @@ VIRTUAL(Attribute, Object) {
   VMETHOD(iternext) = Attribute_iternext;
   VMETHOD(__iter__) = Attribute_iter;
 } END_VIRTUAL
+
+
+void tsk_init() {
+  Img_Info_init((Object)&__Img_Info);
+  AFF4ImgInfo_init((Object)&__AFF4ImgInfo);
+  FS_Info_init((Object)&__FS_Info);
+  Directory_init((Object)&__Directory);
+  File_init((Object)&__File);
+  Attribute_init((Object)&__Attribute);
+};

@@ -105,12 +105,16 @@ def escape_for_string(string):
     return result
 
 class Module:
+    public_api = None
+    public_header = None
+
     def __init__(self, name):
         self.name = name
         self.constants = set()
         self.classes = {}
         self.headers = '#include <Python.h>\n'
         self.files = []
+        self.active_structs = set()
 
     def __str__(self):
         result = "Module %s\n" % (self.name)
@@ -302,15 +306,14 @@ static int check_error() {
 
     def write(self, out):
         ## Write the headers
-        self.public_api.write('''
+        if self.public_api:
+            self.public_api.write('''
 #ifdef BUILDING_DLL
 #include "misc.h"
 #else
 #include "aff4_public.h"
 #endif
 ''')
-        #for cls in self.classes.keys():
-        #    self.public_header.write("typedef void * %s;\n" % cls)
 
         ## Prepare all classes
         for cls in self.classes.values():
@@ -915,7 +918,7 @@ if(!wrapped_%(name)s || (PyObject *)wrapped_%(name)s==Py_None) {
         ## be converted to None.
         if "NULL_OK" in self.attributes:
             result += """if(returned_object == NULL) {
-     %(name)s = NULL; """ % args
+     goto error; """
         else:
             result += """
        // A NULL return without errors means we return None
@@ -984,6 +987,8 @@ if(!wrapped_%(name)s || (PyObject *)wrapped_%(name)s==Py_None) {
 
 class StructWrapper(Wrapper):
     """ A wrapper for struct classes """
+    active = False
+
     def __init__(self, name, type):
         Wrapper.__init__(self,name, type)
         self.original_type = type.split()[0]
@@ -1084,6 +1089,7 @@ type_dispatcher = {
     'TDB_DATA *': TDB_DATA_P,
     'TDB_DATA': TDB_DATA,
     'uint64_t': Integer,
+    'TSK_INUM_T': Integer,
     'uint32_t': Integer32,
     'time_t': Integer32,
     'uint16_t': Integer,
@@ -1094,7 +1100,6 @@ type_dispatcher = {
     'unsigned long int': Integer,
     'struct timeval': Timeval,
     'char **': StringArray,
-
     'PyObject *': PyObject,
     }
 
@@ -1457,6 +1462,8 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
 """ % dict(method = self.name, class_name = self.class_name))
 
     def write_destructor(self, out):
+        free = FREE
+
         out.write("""static void
 %(class_name)s_dealloc(py%(class_name)s *self) {
  if(self->base) {
@@ -1465,7 +1472,7 @@ static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObjec
  };
  PyObject_Del(self);
 };\n
-""" % dict(class_name = self.class_name, free=FREE))
+""" % dict(class_name = self.class_name, free=free))
 
     def error_condition(self):
         return "return -1;";
@@ -1538,9 +1545,13 @@ class GetattrMethod(Method):
     def get_attributes(self):
         for class_name, attr in self._attributes:
             try:
-                if not self.myclass.module.classes[attr.type].active:
+                ## If its not an active struct, skip it
+                if not type_dispatcher[attr.type].active and \
+                        not attr.type in self.myclass.module.active_structs:
                     continue
-            except KeyError: pass
+
+            except KeyError:
+                pass
 
             yield class_name, attr
 
@@ -1806,6 +1817,22 @@ class StructConstructor(ConstructorMethod):
     """ A constructor for struct wrappers - basically just allocate
     memory for the struct.
     """
+    def write_destructor(self, out):
+        """ We do not deallocate memory from structs.
+
+        This is a real problem since struct memory is usually
+        allocated in some proprietary way and we cant just call free
+        on it when done.
+        """
+        out.write("""static void
+%(class_name)s_dealloc(py%(class_name)s *self) {
+ if(self->base) {
+   self->base = NULL;
+ };
+ PyObject_Del(self);
+};\n
+""" % dict(class_name = self.class_name))
+
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
         out.write("\nself->base = talloc(NULL, %s);\n" % self.class_name)
@@ -2028,7 +2055,8 @@ class DefinitionMethod(Method):
 
         cls = self.myclass.module.classes[self.class_name]
 
-        headers.write("""
+        if impl:
+            headers.write("""
 /************************** Class AFF4_%s **************************
 %s
 ************************** Methods  **************************/
@@ -2053,9 +2081,11 @@ class DefinitionMethod(Method):
                 else:
                     docstring = ''
 
-                headers.write("%s %s;\n" % (docstring,prototype))
+                if headers:
+                    headers.write("%s %s;\n" % (docstring,prototype))
 
-                impl.write("""DLL_PUBLIC %s {
+                if impl:
+                    impl.write("""DLL_PUBLIC %s {
   %s((%s)self)->%s((%s)%s);
 };
 """ % (prototype, return_expr, method.definition_class_name, method.name, method.definition_class_name,
@@ -2117,6 +2147,9 @@ class ClassGenerator:
 
     def is_active(self):
         """ Returns true if this class is active and should be generated """
+        if self.class_name in self.module.active_structs:
+            return True
+
         if not self.active or self.modifier and \
                 ('PRIVATE' in self.modifier or 'ABSTRACT' in self.modifier):
             log("%s is not active %s" % (self.class_name, self.modifier))
@@ -2803,7 +2836,8 @@ END_CLASS
         self.ENUM_END(t, m)
 
     def BIND_STRUCT(self, t, m):
-        self.module.classes[m.group(1)].active = True
+        self.module.active_structs.add(m.group(1))
+        self.module.active_structs.add("%s *" % m.group(1))
 
     def SIMPLE_TYPEDEF(self, t, m):
         ## We basically add a new type as a copy of the old

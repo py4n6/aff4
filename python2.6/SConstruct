@@ -26,14 +26,20 @@ import class_parser
 
 def build_python_bindings(target, source, env, initialization=''):
     """ A command to generate python bindings """
-    target, public_api, public_header = target
+    try:
+        target, public_api, public_header = target
+    except:
+        target = target[0]
+
     module_name = os.path.splitext(os.path.basename(target.name))[0]
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
     p = class_parser.HeaderParser(module_name, verbose=env['V'])
     p.module.init_string = initialization
-    p.module.public_header = open(public_header.path, 'w')
-    p.module.public_api = open(public_api.path, 'w')
+    try:
+        p.module.public_header = open(public_header.path, 'w')
+        p.module.public_api = open(public_api.path, 'w')
+    except: pass
 
     p.parse_filenames([s.get_abspath() for s in source])
 
@@ -41,8 +47,10 @@ def build_python_bindings(target, source, env, initialization=''):
     p.write(fd)
     fd.close()
 
-    p.module.public_header.close()
-    p.module.public_api.close()
+    try:
+        p.module.public_header.close()
+        p.module.public_api.close()
+    except: pass
 
 nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 
@@ -68,11 +76,11 @@ if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
 
     nenv.Append(CFLAGS = " -I %(TSK3_HEADER_LOCATION)s " % nenv.config.__dict__)
 
-    nenv.Command('tsk/pytsk3.c', BOUND_FILES, partial(build_python_bindings,
-                                                      initialization=''))
+    nenv.Command(['tsk/pytsk3.c'], BOUND_FILES, partial(build_python_bindings,
+                                                        initialization='tsk_init();'))
     nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
 
-    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=[env.libaff4_so, 'tsk3'])
+    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3', 'aff4'])
 
 if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
     BOUND_FILES = Split("""

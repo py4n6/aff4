@@ -10,8 +10,7 @@
 
 #ifndef   	TSK3_H_
 # define   	TSK3_H_
-#include "class.h"
-#include "aff4.h"
+#include "misc.h"
 #include <tsk3/libtsk.h>
 
 typedef struct {
@@ -123,7 +122,7 @@ END_CLASS
             print f.info.name.name
      */
 CLASS(Directory, Object)
-     FOREIGN TSK_FS_DIR *info;
+     TSK_FS_DIR *info;
      PRIVATE struct FS_Info_t *fs;
 
      // Total number of files in this directory
@@ -176,5 +175,7 @@ CLASS(FS_Info, Object)
      void METHOD(FS_Info, exit);
 
 END_CLASS
+
+     void tsk_init();
 
 #endif 	    /* !TSK3_H_ */
