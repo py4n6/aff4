@@ -41,7 +41,7 @@ RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
 
 ## Location of tsk3 headers
-TSK3_HEADER_LOCATION = "/usr/local/include/tsk3/"
+TSK3_HEADER_LOCATION = "/usr/include/tsk3/"
 
 ## Location of regfi headers
 REGFI_HEADER_LOCATION = "/usr/local/include/regfi/"

@@ -27,7 +27,12 @@ static int Img_Info_dest(void *x) {
 };
 
 static Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
+#ifdef TSK_VERSION_NUM
   self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type, 0);
+#else
+  self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type);
+#endif
+
   if(!self->img) {
     RaiseError(ERuntimeError, "Unable to open image: %s", tsk_error_get());
     goto error;
@@ -87,7 +92,11 @@ Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   self->img->base.read = IMG_INFO_read;
   self->img->base.close = IMG_INFO_close;
   self->img->base.size = fd->size->value;
+
+#ifdef TSK_VERSION_NUM
   self->img->base.sector_size = 512;
+#endif
+
   self->img->base.itype = TSK_IMG_TYPE_RAW_SING;
 
   CALL((AFFObject)fd, cache_return);

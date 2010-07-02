@@ -87,6 +87,9 @@ if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
 
     nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3', 'aff4'])
 
+    # Keep this around for debian package
+    env.python_tsk3_env = nenv
+
 if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
     nenv = env.Clone()
 
@@ -102,3 +105,6 @@ if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
     nenv.Depends('regfi/pyregfi.c', 'class_parser.py')
 
     nenv.PythonModule("pyregfi", ['regfi/pyregfi.c', 'regfi/regfi.c'], LIBS=[env.libaff4_so, 'regfi'])
+
+    # Keep this around for debian package
+    env.python_regfi_env = nenv

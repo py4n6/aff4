@@ -1,4 +1,6 @@
 import os, shutil, sys, subprocess, re, pdb
+import SconsUtils.utils as utils
+
 Import('env') # exported by parent SConstruct
 
 ## Grab the revision version from hg
@@ -121,6 +123,27 @@ class PythonPackage(AFF4DebianPackage):
             ("%s/%s" % (target,filename),   "#python2.6/%s" % filename),
             ]
 
+class TSKPackage(AFF4DebianPackage):
+    """ This packages the TSK python binding """
+    def set_defaults(self):
+        library = env.python_tsk3_env.libname
+        target = env.python_tsk3_env.install_dest[0][1:]
+        filename = library + '.so'
+
+        self.DEB_NAME = "python-%s" % library
+        self.DEB_VERSION = "0.01"
+        self.DEB_MAINT = "scudette@gmail.com"
+        self.DEB_DEPENDS = "libtsk3-3"
+        self.DEB_DESC = "The advanced forensics file format v4 (AFF4) - python bindings"
+
+        self.DEB_FILES = [
+            ("%s/%s" % (target,filename),   "#python2.6/%s" % filename),
+            ]
+
 ## Build all the required modules:
 AFF4DebianPackage().make_deb_file()
 PythonPackage().make_deb_file()
+
+try:
+    TSKPackage().make_deb_file()
+except AttributeError: pass
