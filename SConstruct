@@ -166,6 +166,16 @@ int main() {
 ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
 """))
 
+   ## We dont want to actually link to tsk3 and regfi - just check
+   ## that they exist:
+   try:
+      env._dict['LIBS'].remove('tsk3')
+   except ValueError: pass
+
+   try:
+      env._dict['LIBS'].remove('regfi')
+   except ValueError: pass
+
    ## libewf comes in two flavours a V2 API and an older API
    SconsUtils.utils.check_build(conf, "libewf_glob", "HAVE_EWF_V2_API", """
 #include <libewf.h>

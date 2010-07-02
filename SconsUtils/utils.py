@@ -288,6 +288,8 @@ class ExtendedEnvironment(SCons.Environment.Environment):
         to guess the flags. In the native mode we can get the required
         flags directly from distutils.
         """
+        self.libname = libname
+
         if config.MINGW_XCOMPILE:
             shlib_suffix = ".pyd"
             cppflags = "-I%s" % config.XCOMPILE_PYTHON_PATH
@@ -302,7 +304,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             cppflags = self.python_cppflags
             shlink_flags = self['LINKFLAGS'].split()
 
-        install_dest = distutils.util.split_quoted(
+        self.install_dest = distutils.util.split_quoted(
             os.path.join(
                 sysconfig.get_config_var('BINLIBDEST'),os.path.dirname(libname)))
 
@@ -325,21 +327,21 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             kwargs['SHCCCOMSTR'] = compile_python_source_message
             kwargs['SHLINKCOMSTR'] = link_python_module_message
 
-        if not self.talloc_shared:
-            self.talloc_shared = self.SharedObject(
+        if not self.__class__.talloc_shared:
+            self.__class__.talloc_shared = self.SharedObject(
                 source = "#lib/talloc.c", target='shared_talloc',
                 CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
 
-            self.class_shared = self.SharedObject(
+            self.__class__.class_shared = self.SharedObject(
                 source = "#lib/class.c", target='shared_class',
                 CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
 
-        lib = self.SharedLibrary(libname, lib_objs + self.talloc_shared + self.class_shared,
+        lib = self.SharedLibrary(libname, lib_objs + self.__class__.talloc_shared + self.__class__.class_shared,
                                  **kwargs)
 
         ## Install it to the right spot
-        self.Install(install_dest, lib)
-        self.Alias('install', install_dest)
+        self.Install(self.install_dest, lib)
+        self.Alias('install', self.install_dest)
 
         return lib
 

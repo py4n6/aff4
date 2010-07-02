@@ -62,11 +62,14 @@ nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'],
              BOUND_FILES, partial(build_python_bindings,
                                   initialization=''))
 nenv.Depends('pyaff4.c', 'class_parser.py')
-
 nenv.PythonModule("pyaff4", ["pyaff4.c"], LIBS=env.libaff4_so)
 
-## Only build those if they exist and are configured:
+## Keep this around for debian package
+env.python_aff4_env = nenv
+
 if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
+    nenv = env.Clone()
+
     BOUND_FILES = Split("""
     %(TSK3_HEADER_LOCATION)s/libtsk.h
     %(TSK3_HEADER_LOCATION)s/fs/tsk_fs.h
@@ -85,6 +88,8 @@ if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
     nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3', 'aff4'])
 
 if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
+    nenv = env.Clone()
+
     BOUND_FILES = Split("""
     %(REGFI_HEADER_LOCATION)s/regfi.h
     regfi/pyregfi.h

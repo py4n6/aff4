@@ -1,61 +1,67 @@
-import os, shutil, sys, subprocess, re
+import os, shutil, sys, subprocess, re, pdb
 Import('env') # exported by parent SConstruct
-
-dpkg_arch = subprocess.Popen(['dpkg-architecture'], stdout=subprocess.PIPE).communicate()[0]
-dpkg_conf = dict(
-    DEB_NAME = "libaff4",
-    DEB_VERSION = "0.01",
-    DEB_MAINT = "scudette@gmail.com",
-    DEB_BUILD_ARCH = "i386",
-    DEB_DEPENDS = "openssl", # what are we dependent on?
-    DEB_DESC = "The advanced forensics file format v4 (AFF4)",
-    hg_version = '',
-    )
-
-for line in dpkg_arch.splitlines():
-    k, v = line.split("=",1)
-    dpkg_conf[k]=v
 
 ## Grab the revision version from hg
 hg_output = subprocess.Popen(["hg", "tip"], stdout=subprocess.PIPE).communicate()[0]
 m = re.search(r"changeset:\s+(\d+)", hg_output)
 if m:
-    dpkg_conf['DEB_VERSION'] += "_rev_" + m.group(1)
+    HG_VERSION = m.group(1)
+else:
+    HG_VERSION = ''
 
-DEB_FILES = [
-    # Now we specify the files to be included in the .deb
-    # Where they should go, and where they should be copied from.
-    # If you have a lot of files, you may wish to generate this 
-    # list in some other way.
-    ("usr/lib/libaff4.so",   "#lib/libaff4.so"),
-    ("usr/lib/libaff4.so.0", "#lib/libaff4.so.0"),
-    ("usr/include/aff4.h",  "#include/aff4.h"),
-]
+## Install basic dpkg configurations
+dpkg_arch = subprocess.Popen(['dpkg-architecture'], stdout=subprocess.PIPE).communicate()[0]
+DPKG_CONF = {}
+for line in dpkg_arch.splitlines():
+    k, v = line.split("=",1)
+    DPKG_CONF[k]=v
 
-# This is the debian package we're going to create
-debpkg = '#%(DEB_NAME)s_%(DEB_VERSION)s_%(DEB_BUILD_ARCH)s.deb' % dpkg_conf
+class AFF4DebianPackage:
+    """ This is the main package for AFF4 """
+    def __init__(self):
+        self.set_defaults()
 
-# and we want it to be built when we build 'debian'
-env.Alias("debian", debpkg)
+        self.DEB_BUILD_ARCH = DPKG_CONF['DEB_BUILD_ARCH']
+        self.DEB_VERSION += '_rev_' + HG_VERSION
 
-DEB_CONTROL_FILE = os.path.join(dpkg_conf['DEB_NAME'], "DEBIAN/control")
+        self.debpkg = '#%(DEB_NAME)s_%(DEB_VERSION)s_%(DEB_BUILD_ARCH)s.deb' % self.__dict__
 
-# This copies the necessary files into place into place.
-# Fortunately, SCons creates the necessary directories for us.
-for f in DEB_FILES:
-    # We put things in a directory named after the package
-    dest = os.path.join(dpkg_conf['DEB_NAME'], f[0])
-    # The .deb package will depend on this file
-    env.Depends(debpkg, dest)
-    # Copy from the the source tree.
-    env.Command(dest, f[1], Copy('$TARGET','$SOURCE'))
-    # The control file also depends on each source because we'd like
-    # to know the total installed size of the package
-    env.Depends(DEB_CONTROL_FILE, dest)
+        # and we want it to be built when we build 'debian'
+        env.Alias("debian", self.debpkg)
 
-# Now to create the control file:
+    def set_defaults(self):
+        self.DEB_NAME = "libaff4"
+        self.DEB_VERSION = "0.01"
+        self.DEB_MAINT = "scudette@gmail.com"
+        self.DEB_DEPENDS = "openssl"
+        self.DEB_DESC = "The advanced forensics file format v4 (AFF4)"
 
-CONTROL_TEMPLATE = """
+        self.DEB_FILES = [
+            ("usr/lib/libaff4.so",   "#lib/libaff4.so"),
+            ("usr/lib/libaff4.so.0", "#lib/libaff4.so.0"),
+            ("usr/include/aff4.h",   "#include/aff4.h"),
+            ]
+
+    def make_debian_fakeroot(self):
+        self.make_control_file()
+
+        # This copies the necessary files into place into place.
+        # Fortunately, SCons creates the necessary directories for us.
+        for f in self.DEB_FILES:
+            # We put things in a directory named after the package
+            dest = os.path.join(self.DEB_NAME, f[0])
+            # The .deb package will depend on this file
+            env.Depends(self.debpkg, dest)
+            # Copy from the the source tree.
+            env.Command(dest, f[1], Copy('$TARGET','$SOURCE'))
+            # The control file also depends on each source because we'd like
+            # to know the total installed size of the package
+            env.Depends(self.DEB_CONTROL_FILE, dest)
+
+    def make_control_file(self):
+        self.DEB_CONTROL_FILE = os.path.join(self.DEB_NAME, "DEBIAN/control")
+
+        CONTROL_TEMPLATE = """
 Package: %(DEB_NAME)s
 Priority: extra
 Section: misc
@@ -67,25 +73,54 @@ Depends: %(DEB_DEPENDS)s
 Description: %(DEB_DESC)s
 
 """
-env.Depends(debpkg,DEB_CONTROL_FILE )
+        env.Depends(self.debpkg, self.DEB_CONTROL_FILE )
 
-# The control file should be updated when the SVN version changes
-env.Depends(DEB_CONTROL_FILE, env.Value(dpkg_conf['hg_version']))
+        # The control file should be updated when the SVN version changes
+        env.Depends(self.DEB_CONTROL_FILE, env.Value(HG_VERSION))
 
-# This function creates the control file from the template and info
-# specified above, and works out the final size of the package.
-def make_control(target=None, source=None, env=None):
-    dpkg_conf['installed_size'] = 0
-    for i in DEB_FILES:
-        dpkg_conf['installed_size'] += os.stat(str(env.File(i[1])))[6]
-    control_info = CONTROL_TEMPLATE % dpkg_conf
-    f = open(str(target[0]), 'w')
-    f.write(control_info)
-    f.close()
+        # This function creates the control file from the template and info
+        # specified above, and works out the final size of the package.
+        def make_control(target=None, source=None, env=None):
+            self.installed_size = 0
+            for i in self.DEB_FILES:
+                self.installed_size += os.stat(str(env.File(i[1])))[6]
 
-# We can generate the control file by calling make_control
-env.Command(DEB_CONTROL_FILE, None, make_control)
+            control_info = CONTROL_TEMPLATE % self.__dict__
+            f = open(str(target[0]), 'w')
+            f.write(control_info)
+            f.close()
 
-# And we can generate the .deb file by calling dpkg-deb
-env.Command(debpkg, DEB_CONTROL_FILE,
-            "fakeroot dpkg-deb -b %s %s" % ("deb/%s" % dpkg_conf['DEB_NAME'], "$TARGET"))
+        # We can generate the control file by calling make_control
+        env.Command(self.DEB_CONTROL_FILE, None, make_control)
+
+    def make_deb_file(self):
+        ## Make the fakeroot directory
+        self.make_debian_fakeroot()
+
+        # And we can generate the .deb file by calling dpkg-deb
+        t = env.Command(self.debpkg, self.DEB_CONTROL_FILE,
+                        "fakeroot dpkg-deb -b %s %s" % ("deb/%s" % self.DEB_NAME, "$TARGET"))
+
+        # Make sure we clean after outselves
+        env.Clean(t, self.DEB_NAME)
+
+class PythonPackage(AFF4DebianPackage):
+    """ This packages the python module """
+    def set_defaults(self):
+        library = env.python_aff4_env.libname
+        target = env.python_aff4_env.install_dest[0][1:]
+        filename = library + '.so'
+
+        self.DEB_NAME = "python-%s" % library
+        self.DEB_VERSION = "0.01"
+        self.DEB_MAINT = "scudette@gmail.com"
+        self.DEB_DEPENDS = "libaff4"
+        self.DEB_DESC = "The advanced forensics file format v4 (AFF4) - python bindings"
+
+        self.DEB_FILES = [
+            ("%s/%s" % (target,filename),   "#python2.6/%s" % filename),
+            ]
+
+## Build all the required modules:
+AFF4DebianPackage().make_deb_file()
+PythonPackage().make_deb_file()
