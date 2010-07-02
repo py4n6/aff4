@@ -195,6 +195,9 @@ SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
             'python2.6/SConstruct', #'tests/SConstruct',
             'applications/SConstruct'])
 
+if 'debian' in COMMAND_LINE_TARGETS:
+      SConscript("deb/SConscript")
+
 # env.Package( NAME           = 'libaff4',
 #              VERSION        = '0.1.rc1',
 #              PACKAGEVERSION = 0,

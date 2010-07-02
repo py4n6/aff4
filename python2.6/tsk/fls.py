@@ -154,3 +154,5 @@ def list_directory(directory, stack=None):
     stack.pop(-1)
 
 list_directory(directory, [])
+
+del fs

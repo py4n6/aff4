@@ -1,5 +1,5 @@
 /** This file implements support for ewf volumes */
-#include "aff4.h"
+#include "misc.h"
 
 // All access to libewf must be protected by mutex since libewf is
 // not threadsafe
