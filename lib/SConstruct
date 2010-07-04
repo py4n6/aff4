@@ -143,17 +143,20 @@ def build_aff4_objects_h(target, source, env):
 
     result += p.communicate()[0]
 
-    p = subprocess.Popen("indent -linux -bbb -bad -cdb".split(),
-                         stdin = subprocess.PIPE, stdout = subprocess.PIPE)
+    try:
+        p = subprocess.Popen("indent -linux -bbb -bad -cdb".split(),
+                             stdin = subprocess.PIPE, stdout = subprocess.PIPE)
 
-    p.stdin.write(result)
-    result = p.communicate()[0]
+        p.stdin.write(result)
+        result = p.communicate()[0]
+    except OSError:
+        utils.warn("Install indent to get a nicely formatted aff4.h file")
 
     fd = open(target.get_abspath(),'w')
     fd.write(result)
     fd.close()
 
 target = '#include/aff4.h'
-target = nenv.Command(target, PROCESSED_FILES, build_aff4_objects_h)
-nenv.Depends(target, VERBATIM_FILES)
-nenv.Install("${prefix}/include/", target)
+target = env.Command(target, PROCESSED_FILES, build_aff4_objects_h)
+env.Depends(target, VERBATIM_FILES)
+env.Install("${prefix}/include/", target)

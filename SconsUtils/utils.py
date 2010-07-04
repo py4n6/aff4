@@ -302,7 +302,7 @@ class ExtendedEnvironment(SCons.Environment.Environment):
                 sysconfig.get_config_var('SO'))
             shlib_post_action = None
             cppflags = self.python_cppflags
-            shlink_flags = self['LINKFLAGS'].split()
+            shlink_flags = self['LINKFLAGS'].split() + ['-Llib/']
 
         self.install_dest = distutils.util.split_quoted(
             os.path.join(
