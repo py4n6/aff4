@@ -362,6 +362,11 @@ struct Object_t {
 
   //How large the class is:
   int __size;
+
+  /* A pointer to an extension - An extension is some other arbitrary
+     object which may be linked with this one.
+  */
+  void *extension;
 };
 
 #define SUPER(base, imp, method, ...)            \

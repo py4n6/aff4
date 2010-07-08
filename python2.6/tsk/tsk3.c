@@ -12,6 +12,10 @@
 
 static Resolver resolver;
 
+/** Prototypes for IMG_INFO hooks */
+ssize_t IMG_INFO_read(TSK_IMG_INFO *self, TSK_OFF_T off, char *buf, size_t len);
+void IMG_INFO_close(TSK_IMG_INFO *self);
+
 /** This macro is used to receive the object reference from a
     member of the type.
 */
@@ -27,11 +31,26 @@ static int Img_Info_dest(void *x) {
 };
 
 static Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
+  if(urn[0]) {
 #ifdef TSK_VERSION_NUM
-  self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type, 0);
+    self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type, 0);
 #else
-  self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type);
+    self->img = (Extended_TSK_IMG_INFO *)tsk_img_open_utf8(1, (const char **)&urn, type);
 #endif
+  } else {
+    // Initialise the img struct with the correct callbacks:
+    self->img = talloc_zero(self, Extended_TSK_IMG_INFO);
+    self->img->container = self;
+
+    self->img->base.read = IMG_INFO_read;
+    self->img->base.close = IMG_INFO_close;
+    self->img->base.size = CALL(self, get_size);
+
+#ifdef TSK_VERSION_NUM
+    self->img->base.sector_size = 512;
+#endif
+    self->img->base.itype = TSK_IMG_TYPE_RAW_SING;
+  };
 
   if(!self->img) {
     RaiseError(ERuntimeError, "Unable to open image: %s", tsk_error_get());
@@ -45,7 +64,7 @@ static Img_Info Img_Info_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   return NULL;
 };
 
-ssize_t Img_Info_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
+uint64_t Img_Info_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
   return CALL((TSK_IMG_INFO *)self->img, read, off, buf, len);
 };
 
@@ -54,10 +73,36 @@ void Img_Info_close(Img_Info self) {
 
 };
 
+Extended_TSK_IMG_INFO *Img_Info_get_img_info(Img_Info self) {
+  // Initialise the img struct with the correct callbacks:
+  self->img = talloc_zero(self, Extended_TSK_IMG_INFO);
+  self->img->container = self;
+
+  self->img->base.read = IMG_INFO_read;
+  self->img->base.close = IMG_INFO_close;
+  self->img->base.size = CALL(self, get_size);
+
+#ifdef TSK_VERSION_NUM
+  self->img->base.sector_size = 512;
+#endif
+  self->img->base.itype = TSK_IMG_TYPE_RAW_SING;
+
+  return self->img;
+};
+
+uint64_t Img_Info_get_size(Img_Info self) {
+  if(self->img)
+    return ((TSK_IMG_INFO *)self->img)->size;
+
+  return -1;
+};
+
 VIRTUAL(Img_Info, Object) {
   VMETHOD(Con) = Img_Info_Con;
   VMETHOD(read) = Img_Info_read;
   VMETHOD(close) = Img_Info_close;
+  VMETHOD(get_img_info) = Img_Info_get_img_info;
+  VMETHOD(get_size) = Img_Info_get_size;
 } END_VIRTUAL
 
 void IMG_INFO_close(TSK_IMG_INFO *img) {
@@ -68,6 +113,8 @@ void IMG_INFO_close(TSK_IMG_INFO *img) {
 
 ssize_t IMG_INFO_read(TSK_IMG_INFO *img, TSK_OFF_T off, char *buf, size_t len) {
   Extended_TSK_IMG_INFO *self = (Extended_TSK_IMG_INFO *)img;
+
+  if(len == 0) return 0;
 
   return (ssize_t)CALL(self->container, read, (uint64_t)off, buf, len);
 };
@@ -108,7 +155,7 @@ Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
   return NULL;
 };
 
-ssize_t AFF4ImgInfo_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
+uint64_t AFF4ImgInfo_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
   AFF4ImgInfo this = (AFF4ImgInfo)self;
   FileLikeObject fd = (FileLikeObject)CALL(resolver, open, this->urn, 'r');
 
@@ -140,8 +187,15 @@ int FS_Info_dest(void *this) {
 
 static FS_Info FS_Info_Con(FS_Info self, Img_Info img, TSK_OFF_T offset,
                            TSK_FS_TYPE_ENUM type) {
+  Extended_TSK_IMG_INFO *img_info;
+
+  if(!img) goto reason;
+
+  img_info = CALL(img, get_img_info);
+  if(!img_info) goto reason;
+
   // Now try to open the filesystem
-  self->info = tsk_fs_open_img((struct TSK_IMG_INFO *)img->img, offset, type);
+  self->info = tsk_fs_open_img((TSK_IMG_INFO *)img_info, offset, type);
   if(!self->info) {
     RaiseError(ERuntimeError, "Unable to open the image as a filesystem: %s",
                tsk_error_get());
@@ -152,6 +206,8 @@ static FS_Info FS_Info_Con(FS_Info self, Img_Info img, TSK_OFF_T offset,
   talloc_set_destructor((void *)self, FS_Info_dest);
   return self;
 
+ reason:
+  RaiseError(ERuntimeError, "img object invalid");
  error:
   talloc_free(self);
   return NULL;
@@ -287,7 +343,7 @@ static File File_Con(File self, FS_Info fs, TSK_FS_FILE *info) {
   return self;
 };
 
-static ssize_t File_read_random(File self, TSK_OFF_T offset,
+static uint64_t File_read_random(File self, TSK_OFF_T offset,
                                 OUT char *buff, int len,
                                 TSK_FS_ATTR_TYPE_ENUM type, int id,
                                 TSK_FS_FILE_READ_FLAG_ENUM flags) {

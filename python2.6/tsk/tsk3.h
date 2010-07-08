@@ -18,6 +18,8 @@ typedef struct {
   struct Img_Info_t *container;
 } Extended_TSK_IMG_INFO;
 
+BIND_STRUCT(Extended_TSK_IMG_INFO);
+
 /** Bind the following structs */
 BIND_STRUCT(TSK_FS_INFO);
 BIND_STRUCT(TSK_FS_NAME);
@@ -33,20 +35,33 @@ BIND_STRUCT(TSK_FS_ATTR_RUN);
        support EWF, AFF etc.
    */
 CLASS(Img_Info, Object)
-     Extended_TSK_IMG_INFO *img;
+     PRIVATE Extended_TSK_IMG_INFO *img;
 
      /** Open an image using the Sleuthkit.
 
          DEFAULT(type) = TSK_IMG_TYPE_DETECT;
+         DEFAULT(url) = "";
      */
      Img_Info METHOD(Img_Info, Con, ZString url, TSK_IMG_TYPE_ENUM type);
 
      // Read a random buffer from the image
-     ssize_t METHOD(Img_Info, read, TSK_OFF_T off, OUT char *buf, size_t len);
+     uint64_t METHOD(Img_Info, read, TSK_OFF_T off, OUT char *buf, size_t len);
+
+     uint64_t METHOD(Img_Info, get_size);
 
      // Closes the image
      void METHOD(Img_Info, close);
+
+     /* An accessor for our img object - used by TSK classes to get
+        our object.
+     */
+     Extended_TSK_IMG_INFO *METHOD(Img_Info, get_img_info);
 END_CLASS
+
+     /** This direction allows us to bind arbitrary python objects to
+         SK
+     */
+PROXY_CLASS(Img_Info)
 
 /** This is an image info object based on an AFF4 object.
 
@@ -103,7 +118,7 @@ CLASS(File, Object)
          DEFAULT(type) = TSK_FS_ATTR_TYPE_DEFAULT;
          DEFAULT(id) = -1;
      */
-     ssize_t METHOD(File, read_random, TSK_OFF_T offset,
+     uint64_t METHOD(File, read_random, TSK_OFF_T offset,
                     OUT char *buff, int len,
                     TSK_FS_ATTR_TYPE_ENUM type, int id,
                     TSK_FS_FILE_READ_FLAG_ENUM flags);

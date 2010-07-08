@@ -58,14 +58,15 @@ nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
-nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'],
-             BOUND_FILES, partial(build_python_bindings,
+if 0:
+    nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'],
+                 BOUND_FILES, partial(build_python_bindings,
                                   initialization=''))
-nenv.Depends('pyaff4.c', 'class_parser.py')
-nenv.PythonModule("pyaff4", ["pyaff4.c"], LIBS=env.libaff4_so)
+    nenv.Depends('pyaff4.c', 'class_parser.py')
+    nenv.PythonModule("pyaff4", ["pyaff4.c"], LIBS=env.libaff4_so)
 
-## Keep this around for debian package
-env.python_aff4_env = nenv
+    ## Keep this around for debian package
+    env.python_aff4_env = nenv
 
 if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
     nenv = env.Clone()
