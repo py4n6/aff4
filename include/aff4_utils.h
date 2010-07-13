@@ -88,7 +88,7 @@ CLASS(Cache, Object)
         default implementation assumes key is a null terminated
         string.
      */
-     unsigned int METHOD(Cache, hash, char *key, int len);
+     int METHOD(Cache, hash, char *key, int len);
      int METHOD(Cache, cmp, char *other, int len);
 
      /** hash_table_width is the width of the hash table.

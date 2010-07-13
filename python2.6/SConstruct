@@ -58,7 +58,7 @@ nenv.Append(CFLAGS = " -include lib/config.h -Ilibraptor ")
 if not nenv.get("disable_curl"):
     BOUND_FILES.append("#include/aff4_http.h")
 
-if 0:
+if 1:
     nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'],
                  BOUND_FILES, partial(build_python_bindings,
                                   initialization=''))
