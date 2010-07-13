@@ -10,7 +10,8 @@
 
 #ifndef   	TSK3_H_
 # define   	TSK3_H_
-#include "misc.h"
+#include "class.h"
+#include "aff4_errors.h"
 #include <tsk3/libtsk.h>
 
 typedef struct {
@@ -62,18 +63,6 @@ END_CLASS
          SK
      */
 PROXY_CLASS(Img_Info)
-
-/** This is an image info object based on an AFF4 object.
-
-    Before we can use libtsk we need to instantiate one of these from
-    a base URN.
- */
-CLASS(AFF4ImgInfo, Img_Info)
-   // This is used to create a new TSK_IMG_INFO for TSK to use:
-   RDFURN urn;
-
-END_CLASS
-
 
 // Forward declerations
 struct FS_Info_t;
@@ -191,6 +180,8 @@ CLASS(FS_Info, Object)
 
 END_CLASS
 
-     void tsk_init();
+     int *tsk_get_current_error(char **buff);
+
+void tsk_init();
 
 #endif 	    /* !TSK3_H_ */

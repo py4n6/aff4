@@ -432,7 +432,7 @@ class Renderer:
     def message(self, level, message):
         pass
 
-oracle.set_logger(pyaff4.ProxiedLogger(Renderer()))
+oracle.register_logger(pyaff4.ProxiedLogger(Renderer()))
 
 imager = HashImager(in_urn, out_urn)
 imager.image(OFFSET)

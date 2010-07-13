@@ -17,7 +17,7 @@ class TestResult:
 class TestCase:
     def __init__(self, context=None):
         """ The context if provided is a dictionary with previously
-        calculated test results 
+        calculated test results
         """
         if context==None:
             context = {}
@@ -274,6 +274,22 @@ class MapTest(ImageTest):
 
         self.compare_volumes()
         self.check_data_content(test_data, self.map_urn)
+
+class CustomLogger(pyaff4.Logger):
+    def message(self, level, service, subject, message):
+        self.data = "Special logger says: %s, %s, %s, %s" % (level, service, subject, message)
+        print self.data
+
+class LoggerTest(TestCase):
+    """ Test the custom logger """
+    def record(self):
+        self.logger = CustomLogger()
+        oracle.register_logger(self.logger)
+
+        oracle.log(1, "Python", None, "This is a test")
+        self.store(self.logger.data)
+
+        oracle.register_logger(None)
 
 ## This is the new result context that we create
 context = {}

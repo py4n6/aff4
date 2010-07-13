@@ -10,8 +10,6 @@
 
 #include "tsk3.h"
 
-static Resolver resolver;
-
 /** Prototypes for IMG_INFO hooks */
 ssize_t IMG_INFO_read(TSK_IMG_INFO *self, TSK_OFF_T off, char *buf, size_t len);
 void IMG_INFO_close(TSK_IMG_INFO *self);
@@ -118,65 +116,6 @@ ssize_t IMG_INFO_read(TSK_IMG_INFO *img, TSK_OFF_T off, char *buf, size_t len) {
 
   return (ssize_t)CALL(self->container, read, (uint64_t)off, buf, len);
 };
-
-Img_Info AFF4ImgInfo_Con(Img_Info self, char *urn, TSK_IMG_TYPE_ENUM type) {
-  FileLikeObject fd;
-  AFF4ImgInfo this = (AFF4ImgInfo)self;
-
-  resolver = AFF4_get_resolver();
-
-  this->urn = CONSTRUCT(RDFURN, RDFValue, Con, self);
-  CALL(this->urn, set, urn);
-
-  // Try to open it for reading just to make sure its ok:
-  fd = (FileLikeObject)CALL(resolver, open, this->urn, 'r');
-  if(!fd) goto error;
-
-  // Initialise the img struct with the correct callbacks:
-  self->img = talloc_zero(self, Extended_TSK_IMG_INFO);
-  self->img->container = self;
-
-  self->img->base.read = IMG_INFO_read;
-  self->img->base.close = IMG_INFO_close;
-  self->img->base.size = fd->size->value;
-
-#ifdef TSK_VERSION_NUM
-  self->img->base.sector_size = 512;
-#endif
-
-  self->img->base.itype = TSK_IMG_TYPE_RAW_SING;
-
-  CALL((AFFObject)fd, cache_return);
-
-  return self;
-
- error:
-  talloc_free(self);
-  return NULL;
-};
-
-uint64_t AFF4ImgInfo_read(Img_Info self, TSK_OFF_T off, OUT char *buf, size_t len) {
-  AFF4ImgInfo this = (AFF4ImgInfo)self;
-  FileLikeObject fd = (FileLikeObject)CALL(resolver, open, this->urn, 'r');
-
-  if(fd) {
-    ssize_t res;
-
-    CALL(fd, seek, off, SEEK_SET);
-    res = CALL(fd, read, buf, len);
-    CALL((AFFObject)fd, cache_return);
-
-    return res;
-  };
-
-  return -1;
-};
-
-VIRTUAL(AFF4ImgInfo, Img_Info) {
-  VMETHOD_BASE(Img_Info, Con) = AFF4ImgInfo_Con;
-  VMETHOD_BASE(Img_Info, read) = AFF4ImgInfo_read;
-} END_VIRTUAL
-
 
 int FS_Info_dest(void *this) {
   FS_Info self = (FS_Info)this;
@@ -441,8 +380,8 @@ VIRTUAL(Attribute, Object) {
 
 
 void tsk_init() {
+  error_init();
   Img_Info_init((Object)&__Img_Info);
-  AFF4ImgInfo_init((Object)&__AFF4ImgInfo);
   FS_Info_init((Object)&__FS_Info);
   Directory_init((Object)&__Directory);
   File_init((Object)&__File);

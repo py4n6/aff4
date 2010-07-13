@@ -11,21 +11,28 @@
 #ifndef   	AFF4_ERRORS_H_
 # define   	AFF4_ERRORS_H_
 
+#include "aff4_utils.h"
+
 // Some helpful little things
 #define ERROR_BUFFER_SIZE 1024
 
 /** This is used for error reporting. This is similar to the way
     python does it, i.e. we set the error flag and return NULL.
 */
-enum _error_type {
-  EZero,EGeneric,EOverflow,EWarning,
-  EUnderflow,EIOError, ENoMemory, EInvalidParameter, ERuntimeError, EKeyError,
-
+#define  EZero             0
+#define  EGeneric          1
+#define  EOverflow         2
+#define  EWarning          3
+#define  EUnderflow        4
+#define  EIOError          5
+#define  ENoMemory         6
+#define  EInvalidParameter 7
+#define  ERuntimeError     8
+#define  EKeyError         9
   // Reserved for impossible conditions
-  EProgrammingError
-};
+#define  EProgrammingError 10
 
-DLL_PUBLIC void *aff4_raise_errors(enum _error_type t, char *string,  ...);
+void *aff4_raise_errors(int t, char *string,  ...);
 
 /** We only set the error state if its not already set */
 #define RaiseError(t, message, ...)                                     \
@@ -50,12 +57,12 @@ DLL_PUBLIC void *aff4_raise_errors(enum _error_type t, char *string,  ...);
 
     This is done in a thread safe manner.
  */
-DLL_PUBLIC enum _error_type *aff4_get_current_error(char **error_str);
+int *aff4_get_current_error(char **error_str);
 
 
 // These macros are used when we need to do something which might
 // change the error state on the error path of a function.
-#define PUSH_ERROR_STATE { enum _error_type *tmp_error_p = aff4_get_current_error(NULL); enum _error_type tmp_error = *tmp_error_p; enum _error_type exception __attribute__((unused));
+#define PUSH_ERROR_STATE { int *tmp_error_p = aff4_get_current_error(NULL); int tmp_error = *tmp_error_p; int exception __attribute__((unused));
 
 #define POP_ERROR_STATE *tmp_error_p = tmp_error;};
 

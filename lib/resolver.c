@@ -126,7 +126,7 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
 };
 
 /** Quick and simple */
-static unsigned int Cache_hash(Cache self, char *key, int len) {
+static int Cache_hash(Cache self, char *key, int len) {
   // Use int size to obtain the hashes this should be faster... NOTE
   // that we dont process up to the last 3 bytes.
   unsigned char *name = (unsigned char *)key;
@@ -1644,8 +1644,12 @@ int Resolver_load(Resolver self, RDFURN uri) {
 static void Resolver_set_logger(Resolver self, Logger logger) {
   if(self->logger) talloc_free(self->logger);
 
-  self->logger = logger;
-  talloc_reference(self, logger);
+  if(logger) {
+    self->logger = logger;
+    talloc_reference(self, logger);
+  } else {
+    self->logger = CONSTRUCT(Logger, Logger, Con, self);
+  };
 };
 
 static void Resolver_flush(Resolver self) {
@@ -1898,7 +1902,12 @@ static Logger Logger_Con(Logger self) {
 };
 
 static void Logger_message(Logger self, int level, char *service, RDFURN subject, char *message) {
-  printf("(%d)%s: %s %s\n", level, service, subject->value, message);
+  char *s;
+
+  if(subject) s=subject->value;
+  else s="";
+
+  printf("(%d)%s: %s %s\n", level, service, s, message);
 };
 
 VIRTUAL(Logger, Object) {
@@ -2001,7 +2010,7 @@ Resolver oracle;
 extern Cache KeyCache;
 
 DLL_PUBLIC void aff4_end() {
-  enum _error_type *current_error;
+  int *current_error;
   char *buff = NULL;
 
   talloc_free(RDF_Registry);

@@ -27,21 +27,6 @@
 #ifndef   	AFF4_RESOLVER_H_
 # define   	AFF4_RESOLVER_H_
 
-/* This is a function that will be run when the library is imported. It
-   should be used to initialise static stuff.
-
-   It will only be called once. If you require some other subsystem to
-   be called first you may call it from here.
-*/
-#define AFF4_MODULE_INIT(name) static int name ## _initialised = 0;     \
-  static inline void name ## _init_2();                                        \
-  void name ## _init() {                                                \
-    if(name ## _initialised) return;                                    \
-    name ## _initialised = 1;                                           \
-    name ## _init_2();                                                  \
-  };                                                                    \
-  inline void name ## _init_2()
-
 #include "aff4_io.h"
 #include "tdb.h"
 

@@ -24,7 +24,9 @@ if utils.HEADERS.get("HAVE_LIBEWF_H"):
 
 import class_parser
 
-def build_python_bindings(target, source, env, initialization='', free='aff4_free'):
+def build_python_bindings(target, source, env, initialization='',
+                          free='aff4_free',
+                          current_error_function='aff4_get_current_error'):
     """ A command to generate python bindings """
     try:
         target, public_api, public_header = target
@@ -34,6 +36,7 @@ def build_python_bindings(target, source, env, initialization='', free='aff4_fre
     module_name = os.path.splitext(os.path.basename(target.name))[0]
     utils.warn("Generating automatic python bindings for module %s" % module_name)
 
+    ## Sets the free function
     class_parser.FREE = free
     p = class_parser.HeaderParser(module_name, verbose=env['V'])
     p.module.init_string = initialization
@@ -61,7 +64,8 @@ if not nenv.get("disable_curl"):
 if 1:
     nenv.Command(['pyaff4.c', '#lib/public.c', '#include/aff4_public.h'],
                  BOUND_FILES, partial(build_python_bindings,
-                                  initialization=''))
+                                      initialization='',
+                                      current_error_function = 'aff4_get_current_error'))
     nenv.Depends('pyaff4.c', 'class_parser.py')
     nenv.PythonModule("pyaff4", ["pyaff4.c"], LIBS=env.libaff4_so)
 
@@ -83,15 +87,16 @@ if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
 
     nenv.Command(['tsk/pytsk3.c'], BOUND_FILES, partial(build_python_bindings,
                                                         initialization='tsk_init();',
+                                                        current_error_function = 'aff4_get_current_error',
                                                         free = 'talloc_free'))
     nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
 
-    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3', 'aff4'])
+    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3'])
 
     # Keep this around for debian package
     env.python_tsk3_env = nenv
 
-if utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
+if 0 and utils.HEADERS.get('HAVE_REGFI') and nenv.config.REGFI_HEADER_LOCATION:
     nenv = env.Clone()
 
     BOUND_FILES = Split("""

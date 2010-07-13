@@ -42,11 +42,11 @@ typedef  unsigned long int in_addr_t;
 
 #include "encode.h"
 #include "class.h"
-#include "aff4_errors.h"
 #include "aff4_utils.h"
 #include "aff4_rdf.h"
 #include "aff4_io.h"
 #include "aff4_resolver.h"
+#include "aff4_errors.h"
 #include "aff4_constants.h"
 #include "aff4_errors.h"
 

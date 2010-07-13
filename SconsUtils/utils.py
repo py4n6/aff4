@@ -276,7 +276,7 @@ import SCons.Environment
 class ExtendedEnvironment(SCons.Environment.Environment):
     """ Implementation from Richard Levitte email to
     org.tigris.scons.dev dated Jan 26, 2006 7:05:10 am."""
-    talloc_shared = None
+    shared = None
     python_cppflags = distutils.util.split_quoted(
         "-I"+sysconfig.get_python_inc() + ' -fvisibility=hidden ')
 
@@ -327,16 +327,19 @@ class ExtendedEnvironment(SCons.Environment.Environment):
             kwargs['SHCCCOMSTR'] = compile_python_source_message
             kwargs['SHLINKCOMSTR'] = link_python_module_message
 
-        if not self.__class__.talloc_shared:
-            self.__class__.talloc_shared = self.SharedObject(
-                source = "#lib/talloc.c", target='shared_talloc',
-                CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
+        if not self.__class__.shared:
+            self.__class__.shared = [ self.SharedObject(
+                    source = "#lib/talloc.c", target='shared_talloc',
+                    CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split()),
+                                      self.SharedObject(
+                    source = "#lib/class.c", target='shared_class',
+                    CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split()),
+                                      self.SharedObject(
+                    source = "#lib/error.c", target='shared_error',
+                    CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split()),
+                                      ]
 
-            self.__class__.class_shared = self.SharedObject(
-                source = "#lib/class.c", target='shared_class',
-                CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/'.split())
-
-        lib = self.SharedLibrary(libname, lib_objs + self.__class__.talloc_shared + self.__class__.class_shared,
+        lib = self.SharedLibrary(libname, lib_objs + self.__class__.shared,
                                  **kwargs)
 
         ## Install it to the right spot

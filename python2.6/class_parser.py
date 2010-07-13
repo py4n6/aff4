@@ -212,6 +212,7 @@ DEBUG = 0
 ## These functions are used to manage library memory
 FREE = "aff4_free"
 INCREF = "aff4_incref"
+CURRENT_ERROR_FUNCTION = "aff4_get_current_error"
 
 def log(msg):
     if DEBUG>0:
@@ -310,6 +311,9 @@ static PyObject *g_module = NULL;
         (class)((virt_class)&__ ## class )->constructor(  \
                 (virt_class)alloc_ ## class(), ## __VA_ARGS__)
 
+#undef BUFF_SIZE
+#define BUFF_SIZE 10240
+
 /** This is a generic wrapper type */
 typedef struct Gen_wrapper_t *Gen_wrapper;
 struct Gen_wrapper_t {
@@ -321,7 +325,7 @@ static struct python_wrapper_map_t {
        Object class_ref;
        PyTypeObject *python_type;
        void (*initialize_proxies)(Gen_wrapper self, void *item);
-} python_wrappers[%s];
+} python_wrappers[%(classes_length)s];
 
 /* Create the relevant wrapper from the item based on the lookup
 table.
@@ -357,7 +361,7 @@ Gen_wrapper new_class_wrapper(Object item) {
 };
 
 static PyObject *resolve_exception(char **error_buff) {
-  enum _error_type *type = aff4_get_current_error(error_buff);
+  int *type = (int *)%(get_current_error)s(error_buff);
   switch(*type) {
 case EProgrammingError:
     return PyExc_SystemError;
@@ -445,7 +449,7 @@ static int check_method_override(PyObject *self, PyTypeObject *type, char *metho
 };
 
 
-""" % (len(self.classes)+1)
+""" % dict(classes_length = len(self.classes)+1, get_current_error = CURRENT_ERROR_FUNCTION)
 
     def initialise_class(self, class_name, out, done = None):
         if done and class_name in done: return
@@ -992,7 +996,6 @@ class Void(Type):
 class PVoid(Void):
     def __init__(self, name, type = 'void *', *args):
         Type.__init__(self, name, type)
-
 
 class StringArray(String):
     interface = 'array'
@@ -1900,41 +1903,6 @@ if(!strcmp(name, "%(name)s")) {
 
         out.write("}\n\n")
 
-class XXXProxiedGetattr(GetattrMethod):
-    def built_ins(self,out):
-        out.write("""  if(!strcmp(name, "__members__")) {
-     PyObject *result;
-     PyObject *tmp;
-     PyMethodDef *i;
-
-     PyErr_Clear();
-     // Get the list of members from our proxied object
-     result  = PyObject_GetAttrString(self->base->proxied, name);
-     if(!result) goto error;
-""")
-        ## Add attributes
-        for class_name, attr in self.get_attributes():
-            out.write(""" tmp = PyString_FromString("%(name)s");
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-""" % dict(name = attr.name))
-
-        ## Add methods
-        out.write("""
-
-    for(i=%s_methods; i->ml_name; i++) {
-     tmp = PyString_FromString(i->ml_name);
-    PyList_Append(result, tmp); Py_DECREF(tmp);
-    }; """ % self.class_name)
-
-        out.write("""
-     return result;
-   }\n""")
-
-        out.write(""" /** Just try to get the attribute from our proxied object */  {
-   PyObject *result = PyObject_GetAttrString(self->base->proxied, name);
-   if(result) return result;
-}; """)
-
 class ProxiedMethod(Method):
     def __init__(self, method, myclass):
         self.name = method.name
@@ -2022,7 +1990,7 @@ if(PyErr_Occurred()) {
    PyObject *str;
    char *str_c;
    char *error_str;
-   enum _error_type *error_type = aff4_get_current_error(&error_str);
+   int *error_type = (int *)%(CURRENT_ERROR_FUNCTION)s(&error_str);
 
    // Fetch the exception state and convert it to a string:
    PyErr_Fetch(&exception_t, &exception, &tb);
@@ -2039,7 +2007,7 @@ if(PyErr_Occurred()) {
    goto error;
 };
 
-""");
+""" % dict(CURRENT_ERROR_FUNCTION = CURRENT_ERROR_FUNCTION));
 
         for arg in self.args:
             out.write(arg.python_proxy_post_call())
@@ -2097,210 +2065,6 @@ class StructConstructor(ConstructorMethod):
         out.write("\nself->base = talloc(NULL, %s);\n" % self.class_name)
         out.write("  return 0;\n};\n\n")
 
-class XXXProxyConstructor(ConstructorMethod):
-    def write_destructor(self, out):
-        out.write("""static void
-%(class_name)s_dealloc(py%(class_name)s *self) {
-    if(self->base) {
-        // Release the proxied object
-        //Py_DECREF(self->base->proxied);
-        %(free)s(self->base);
-        self->base = NULL;
-    };
-};\n
-
-static int %(class_name)s_destructor(void *this) {
-  %(class_name)s self = (%(class_name)s )this;
-  Py_DECREF(self->proxied);
-  return 0;
-};
-""" % dict(class_name = self.class_name, free = FREE))
-
-    def initialise_attributes(self, out):
-        attributes = self.myclass.module.classes[self.base_class_name].attributes.get_attributes()
-        for definition_class_name, attribute in attributes:
-            out.write("""
-{
-  // Converting from %(attribute_name)s
-  PyErr_Clear();
-  PyObject *Py_result = PyObject_GetAttrString(self->base->proxied, "%(name)s");
-
-  if(Py_result) {
-       %(type)s tmp;
-       %(from_python_object)s;
-       ((%(definition_class_name)s)self->base)->%(name)s = tmp;
-       Py_DECREF(Py_result);
-  };
-  PyErr_Clear();
-};""" % dict(definition = attribute.definition(), name=attribute.name,
-             attribute_name = attribute.__class__.__name__,
-             type = attribute.type,
-             definition_class_name = definition_class_name,
-             from_python_object = attribute.from_python_object(
-                        'Py_result',"tmp", method=self,
-                        context = 'self->base')))
-
-
-    def write_constructor_proxy(self, out):
-        ## Get the base_class constructor
-        self.base_cons_method = ProxiedMethod(self.myclass.module.classes[self.base_class_name].constructor, self.myclass)
-
-        self.base_cons_method._prototype(out)
-        out.write("{\nPyObject *Py_result;\n")
-        out.write('PyObject *method_name;')
-        out.write("%(class_name)s this = (%(class_name)s)self;\n" % self.__dict__)
-        out.write("PyGILState_STATE gstate;\ngstate = PyGILState_Ensure();\n")
-        out.write('method_name = PyString_FromString("__class__");\n')
-        for arg in self.base_cons_method.args:
-            out.write("PyObject *py_%s;\n" % arg.name)
-
-        out.write("\n//Obtain python objects for all the args:\n")
-        for arg in self.base_cons_method.args:
-            out.write(arg.to_python_object(result = "py_%s" % arg.name,
-                                           sense = 'proxied',
-                                           BORROWED=True))
-
-        out.write('if(!((%s)self)->proxied) {\n RaiseError(ERuntimeError, "No proxied object in %s"); goto error;\n};\n' % (self.myclass.class_name, self.myclass.class_name))
-
-        out.write("""
-// Enlarge the object size to accomodate the extended class
-self = talloc_realloc_size(self, self, sizeof(struct %(base_class_name)s_t));
-""" % self.__dict__)
-        out.write("\n//Now call the method\n")
-        out.write("PyErr_Clear();\nPy_result = PyObject_CallMethodObjArgs(((%s)self)->proxied,method_name," % self.myclass.class_name)
-
-        call = ''
-        for arg in self.base_cons_method.args:
-            call += "py_%s," % arg.name
-
-        ## Sentinal
-        self.error_set = True
-        call += """NULL"""
-
-        out.write(call + ");\n");
-        out.write("""
-if(!Py_result && PyCallable_Check(this->proxied)) {
-   PyErr_Clear();
-   Py_result = PyObject_CallFunctionObjArgs(((%(name)s)self)->proxied, %(call)s);
-};
-
-/** Check for python errors */
-if(PyErr_Occurred()) {
-   PyObject *exception_t, *exception, *tb;
-   PyObject *str;
-   char *str_c;
-   char *error_str;
-   enum _error_type *error_type = aff4_get_current_error(&error_str);
-
-   // Fetch the exception state and convert it to a string:
-   PyErr_Fetch(&exception_t, &exception, &tb);
-
-   str = PyObject_Repr(exception);
-   str_c = PyString_AsString(str);
-
-   if(str_c) {
-      strncpy(error_str, str_c, BUFF_SIZE-1);
-      error_str[BUFF_SIZE-1]=0;
-      *error_type = ERuntimeError;
-   };
-   Py_DECREF(str);
-   goto error;
-};
-
-// Take over the proxied object now
-this->proxied = Py_result;
-""" % dict(name=self.myclass.class_name, call = call));
-
-        ## Now we try to populate the C struct slots with proxies of
-        ## the python objects
-        for class_name, attr in self.myclass.module.classes[\
-            self.base_class_name].attributes.get_attributes():
-            out.write("""
-// Converting %(name)s from proxy:
-{
-   PyObject *Py_result = PyObject_GetAttrString(this->proxied, "%(name)s");
-   if(Py_result) {
-""" % dict(name = attr.name))
-            out.write("{ %s " % attr.definition())
-            out.write(attr.from_python_object("Py_result",
-                                              "((%s)self)->%s" % (class_name, attr.name),
-                                              self))
-            out.write("}\nPy_DECREF(Py_result);\n};\n};\n")
-
-        out.write("PyGILState_Release(gstate);\n")
-        out.write("\n\nreturn self;\n")
-        if self.error_set:
-            out.write("error:\n PyGILState_Release(gstate);\ntalloc_free(self); return NULL;\n")
-
-        out.write("};\n\n")
-
-    def write_definition(self, out):
-        self.write_constructor_proxy(out)
-        out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {
-      PyGILState_STATE gstate = PyGILState_Ensure();
-""" % dict(method = self.name, class_name = self.class_name))
-
-        self.write_local_vars(out)
-
-        ## Precall preparations
-        for type in self.args:
-            out.write(type.pre_call(self))
-
-        ## Make up the call
-        self.call = "talloc_memdup(NULL, &__%(class_name)s, sizeof(__%(class_name)s));\n" % self.__dict__
-
-        ## Now call the wrapped function
-        out.write("""
- self->base = %(call)s
-
-// Take over a copy of the proxied object
- self->base->proxied = proxied;
-
- /* We take a reference to the proxied object, and the proxied base
- class takes a reference. This way we (the python object) and the
- proxied C class can be freed independantly and only when both are
- freed the proxied object is freed.  */
-
- //Py_INCREF(proxied);
- Py_INCREF(proxied);
- talloc_set_destructor((void*)self->base, %(class_name)s_destructor);
-""" % self.__dict__)
-
-        ## Install the handler for the constructor. FIXME - implement
-        ## shortcut bypassing here so if the proxied class is itself a
-        ## python binding to a C class and it does not override
-        ## anything, we call directly into the original C class method
-        ## instead of converting to python, and back.
-        out.write("((%(definition_class_name)s)self->base)->%(name)s = %(func)s;\n" % dict(
-                definition_class_name = self.base_cons_method.definition_class_name,
-                name = self.base_cons_method.name,
-                func = self.base_cons_method.get_name()))
-
-        ## Now iterate over all our methods and install handlers:
-        for method in self.myclass.methods:
-            out.write("""
-   if(1 || PyDict_GetItemString(proxied->ob_type->tp_dict, "%(name)s")) {
-     ((%(definition_class_name)s)self->base)->%(name)s = py%(class_name)s_%(name)s;
-   };
-""" % dict(definition_class_name = method.definition_class_name,
-           name = method.name,
-           class_name = self.myclass.class_name))
-
-        ## Now fill in all attributes from the proxied object. Since
-        ## the C struct attribute access is just memory access its
-        ## difficult to trap it and refill attributes dynamically from
-        ## the python object. Therefore for now we just read all
-        ## attributes initially and populate the C struct with them.
-        self.initialise_attributes(out)
-
-        out.write("\n   PyGILState_Release(gstate);\n  return 0;\n");
-
-        ## Write the error part of the function
-        if self.error_set:
-            out.write("error:\n  PyGILState_Release(gstate);\n  " + self.error_condition());
-
-        out.write("\n};\n\n")
-
 class EmptyConstructor(ConstructorMethod):
     def prototype(self, out):
         return Method.prototype(self, out)
@@ -2308,70 +2072,6 @@ class EmptyConstructor(ConstructorMethod):
     def write_definition(self, out):
         out.write("""static int py%(class_name)s_init(py%(class_name)s *self, PyObject *args, PyObject *kwds) {\n""" % dict(method = self.name, class_name = self.class_name))
         out.write("""return 0;};\n\n""")
-
-class DefinitionMethod(Method):
-    """ Creates a python method which generates struct definitions for the specified class """
-    def write_definition(self, out):
-        impl = self.myclass.module.public_api
-        headers = self.myclass.module.public_header
-
-        cls = self.myclass.module.classes[self.class_name]
-
-        if impl:
-            headers.write("""
-/************************** Class AFF4_%s **************************
-%s
-************************** Methods  **************************/
-""" % (self.class_name, cls.docstring))
-
-        for method in cls.methods:
-            if method.name[0] != '_':
-                args = [ Type('self', self.class_name) ] + method.args
-
-                return_type = method.return_type.type
-                return_expr = 'return '
-                if return_type == 'void':
-                    return_expr = ''
-
-                prototype = '%s aff4_%s_%s(%s)' % (
-                    return_type, self.class_name, method.name,
-                    ' , '.join([ arg.comment() for arg in args if arg.comment() ]))
-
-                if method.docstring:
-                    # FIXME - use filltext to nicely format this
-                    docstring = '\n/*\n%s\n*/\n' % method.docstring.strip()
-                else:
-                    docstring = ''
-
-                if headers:
-                    headers.write("%s %s;\n" % (docstring,prototype))
-
-                if impl:
-                    impl.write("""DLL_PUBLIC %s {
-  %s((%s)self)->%s((%s)%s);
-};
-""" % (prototype, return_expr, method.definition_class_name, method.name, method.definition_class_name,
-       ' , '.join([ arg.passthru_call() for arg in args])))
-
-        args = dict(method = self.name, class_name = self.class_name)
-        out.write("\n/********************************************************\nAutogenerated wrapper for function:\n")
-        out.write(self.comment())
-        out.write("********************************************************/\n")
-
-        self._prototype(out)
-        out.write("{\n//Class Attributes:\n")
-        for t,x in cls.attributes.get_attributes():
-            out.write('printf("%s, %%lu\\n", (unsigned long)&(((%s)NULL)->%s));\n' % (
-                    x.name, t, x.name))
-
-        out.write("// Class Methods\n")
-
-        for method in cls.methods:
-            if method.name[0] != '_':
-                out.write('printf("%s, %%lu\\n", (unsigned long)&(((%s)NULL)->%s));\n' % (
-                        method.name, method.definition_class_name, method.name))
-
-        out.write("Py_INCREF(Py_None); return Py_None;\n};")
 
 class ClassGenerator:
     docstring = ''
@@ -2686,44 +2386,6 @@ class StructGenerator(ClassGenerator):
 
     def initialise(self):
         return ''
-
-class ProxyClassGenerator(ClassGenerator):
-    def __init__(self, class_name, base_class_name, module, *args, **kwargs):
-        ClassGenerator.__init__(self, class_name, base_class_name, module, *args, **kwargs)
-        self.constructor = ProxyConstructor(self.class_name,
-                                            self.base_class_name, '__init__',
-                                            [('PyObject *', 'proxied')],
-                                            'void', myclass = self)
-        self.module = module
-        self.methods = []
-        self.attributes = ProxiedGetattr(self.class_name, self.base_class_name, self)
-
-
-    def initialise(self):
-        return "INIT_CLASS(%(class_name)s);\n" % self.__dict__ + ClassGenerator.initialise(self)
-
-    def struct(self, out):
-        out.write("""
-// The proxied type is an extension of the wrapped type with a pointer
-// to the proxied PyObject.
-CLASS(%(class_name)s, %(base_class_name)s)
-   uint32_t magic;
-   PyObject *proxied;
-END_CLASS
-
-VIRTUAL(%(class_name)s, %(base_class_name)s) {
-} END_VIRTUAL
-
-typedef struct {
-  PyObject_HEAD
-  %(class_name)s base;
-} py%(class_name)s;\n
-""" % self.__dict__)
-
-    def PyMethodDef(self, out):
-        out.write("static PyMethodDef %s_methods[] = {\n" % self.class_name)
-        ## For now no methods
-        out.write("     {NULL}  /* Sentinel */\n};\n")
 
 import lexer
 
