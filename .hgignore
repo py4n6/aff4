@@ -57,3 +57,4 @@ aff4_public_objects.h
 aff4.h
 DEBIAN
 *.deb
+deb/

@@ -6,6 +6,7 @@ front end. This allows users to import this file as a module, or run
 it directly.  """
 import sys, pdb
 import re, os.path
+import pyaff4
 
 import time
 time.sleep(1)
@@ -33,7 +34,7 @@ def warn(msg):
    print "%s%s%s" % (colors['yellow'], msg, colors['end'])
 
 
-class Renderer:
+class Renderer(pyaff4.Logger):
     def message(self, level, service, subject, message):
        sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.value,
                                           colors['end'], message))
@@ -207,7 +208,8 @@ parser.add_option("-p", "--password", default='',
 oracle = pyaff4.Resolver()
 
 ## Now register the renderer as an output module
-oracle.register_logger(pyaff4.ProxiedLogger(Renderer()))
+renderer = Renderer()
+oracle.register_logger(renderer)
 
 if options.dump:
    output = options.output

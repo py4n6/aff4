@@ -108,6 +108,7 @@ Description: %(DEB_DESC)s
 
 class PythonPackage(AFF4DebianPackage):
     """ This packages the python module """
+
     def set_defaults(self):
         library = env.python_aff4_env.libname
         target = env.python_aff4_env.install_dest[0][1:]
@@ -122,6 +123,31 @@ class PythonPackage(AFF4DebianPackage):
         self.DEB_FILES = [
             ("%s/%s" % (target,filename),   "#python2.6/%s" % filename),
             ]
+
+class PythonPackageDoc(AFF4DebianPackage):
+    """ Documentation for the python module """
+    def set_defaults(self):
+        library = env.python_aff4_env.libname
+        filename = library + '.so'
+
+        self.DEB_NAME = "python-%s-doc" % library
+        self.DEB_VERSION = "0.01"
+        self.DEB_MAINT = "scudette@gmail.com"
+        self.DEB_DEPENDS = "libaff4, python-%s" % library
+        self.DEB_DESC = "The advanced forensics file format v4 (AFF4) - python bindings documentation"
+
+        self.DEB_FILES = [
+            ]
+
+    def make_debian_fakeroot(self):
+        AFF4DebianPackage.make_debian_fakeroot(self)
+
+        documentation = os.path.join(self.DEB_NAME, "usr/share/doc/pyaff4/index.html")
+        doc_dir = "deb/" + os.path.dirname(documentation)
+
+        env.Command(documentation, "#include/aff4.h",
+                    'mkdir -p %(doc)s; epydoc  --docformat plaintext --exclude "__init__" --inheritance grouped pyaff4 --no-private --name "pyaff4 - Advanced Forensic File Format 4" --graph all -o "%(doc)s"' % dict(doc = doc_dir))
+        env.Depends(self.DEB_CONTROL_FILE, documentation)
 
 class TSKPackage(AFF4DebianPackage):
     """ This packages the TSK python binding """
@@ -143,6 +169,7 @@ class TSKPackage(AFF4DebianPackage):
 ## Build all the required modules:
 AFF4DebianPackage().make_deb_file()
 PythonPackage().make_deb_file()
+PythonPackageDoc().make_deb_file()
 
 try:
     TSKPackage().make_deb_file()

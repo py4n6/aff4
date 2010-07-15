@@ -1130,7 +1130,11 @@ if(!wrapped_%(name)s || (PyObject *)wrapped_%(name)s==Py_None) {
 """ % args
 
         if "BORROWED" in self.attributes:
-            result += "  %(incref)s(wrapped_%(name)s->base); \n" % args
+            result += """  %(incref)s(wrapped_%(name)s->base);
+if(((Object)wrapped_%(name)s)->extension) {
+   Py_INCREF(((Object)wrapped_%(name)s)->extension);
+};
+""" % args
 
         result += """       };
     }

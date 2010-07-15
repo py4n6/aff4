@@ -5,11 +5,12 @@ Advanced Hash based Imaging using AFF4
 
 Submitted to the DFRWS 2010 conference.
 """
-import sk, hashlib
+import hashlib
 import pyaff4, os, sys
 import pdb
 import urllib
 import threading
+import pytsk3
 
 import time
 #time.sleep(1)
@@ -23,7 +24,7 @@ OFFSET = 0
 
 IN_FILENAME = "/var/tmp/uploads/testimages/winxp.E01"
 IN_FILENAME = "/var/tmp/uploads/testimages/winxp.dd"
-#IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
+IN_FILENAME = "/var/tmp/uploads/testimages/ntfs_image.dd"
 #IN_FILENAME = "/tmp/image.dd"
 in_urn = pyaff4.RDFURN()
 in_urn.set(IN_FILENAME)
@@ -428,11 +429,12 @@ class HashImager:
         self.dump_block_run(blocks)
 
 ## Shut up messages
-class Renderer:
+class Renderer(pyaff4.Logger):
     def message(self, level, message):
         pass
 
-oracle.register_logger(pyaff4.ProxiedLogger(Renderer()))
+renderer = Renderer()
+oracle.register_logger(renderer)
 
 imager = HashImager(in_urn, out_urn)
 imager.image(OFFSET)

@@ -38,7 +38,7 @@
     of the list, and when memory pressure increases we expire data
     from the front of the list.
 */
-enum Cache_policy {
+PRIVATE enum Cache_policy {
   CACHE_EXPIRE_FIRST,
   CACHE_EXPIRE_LEAST_USED
 };
@@ -63,7 +63,7 @@ enum Cache_policy {
     NOTE: After putting the Object in the cache you do not own it -
     and you must not use it (because it might be freed at any time).
 */
-CLASS(Cache, Object)
+PRIVATE CLASS(Cache, Object)
 /* The key which is used to access the data */
      char *key;
      int key_len;
