@@ -254,6 +254,15 @@ static TDB_DATA *XSDInteger_encode(RDFValue self, RDFURN subject) {
   return result;
 };
 
+static XSDInteger XSDInteger_Con(XSDInteger self, uint64_t value) {
+  RDFValue result = (RDFValue)self;
+
+  CALL(result, Con);
+  self->value = value;
+
+  return self;
+};
+
 static void XSDInteger_set(XSDInteger self, uint64_t value) {
   self->value = value;
 
@@ -300,6 +309,7 @@ VIRTUAL(XSDInteger, RDFValue) {
    VMETHOD(super.serialise) = XSDInteger_serialise;
    VMETHOD(super.parse) = XSDInteger_parse;
 
+   VMETHOD(Con) = XSDInteger_Con;
    VMETHOD(set) = XSDInteger_set;
 } END_VIRTUAL
 
@@ -408,6 +418,17 @@ static RDFValue RDFURN_Con(RDFValue self) {
   RDFURN this = (RDFURN)self;
   this->parser = CONSTRUCT(URLParse, URLParse, Con, this, NULL);
   this->value = talloc_strdup(self,"(unset)");
+
+  return self;
+};
+
+static RDFURN RDFURN_Con2(RDFURN self, char *urn) {
+  RDFValue this = (RDFValue)self;
+
+  CALL(this, Con);
+  if(urn) {
+    CALL(self, set, urn);
+  };
 
   return self;
 };
@@ -538,6 +559,8 @@ VIRTUAL(RDFURN, RDFValue) {
    VMETHOD_BASE(RDFValue, parse) = RDFURN_parse;
    VMETHOD_BASE(RDFValue, clone) = RDFURN_clone;
 
+
+   VMETHOD(Con) = RDFURN_Con2;
    VMETHOD(set) = RDFURN_set;
    VMETHOD(add) = RDFURN_add;
    VMETHOD(add_query) = RDFURN_add_query;

@@ -530,8 +530,11 @@ static PyMethodDef %(module)s_methods[] = {
 };
 
 DLL_PUBLIC PyMODINIT_FUNC init%(module)s(void) {
+   PyGILState_STATE gstate;
+
    /* Make sure threads are enabled */
    PyEval_InitThreads();
+   gstate = PyGILState_Ensure();
 
    /* create module */
    PyObject *m = Py_InitModule3("%(module)s", %(module)s_methods,
@@ -564,7 +567,10 @@ DLL_PUBLIC PyMODINIT_FUNC init%(module)s(void) {
  Py_DECREF(tmp);\n""" % (constant))
 
         out.write(self.initialization())
-        out.write("}\n\n")
+        out.write("""
+ PyGILState_Release(gstate);
+};
+""")
 
 class Type:
     interface = None
@@ -1443,11 +1449,14 @@ class Method:
             if type.buildstr and python_name in self.defaults:
                 parse_line += type.buildstr
 
-        if parse_line != '|':
+
+        ## Iterators have a different prototype and do not need to
+        ## unpack any args
+        if not 'iternext' in self.name:
             ## Now parse the args from python objects
             out.write(kwlist)
-            out.write("\nif(!PyArg_ParseTupleAndKeywords(args, kwds, \"%s\", kwlist, " % parse_line)
-            tmp = []
+            out.write("\nif(!PyArg_ParseTupleAndKeywords(args, kwds, \"%s\", " % parse_line)
+            tmp = ['kwlist']
             for type in self.args:
                 ref = type.byref()
                 if ref:
@@ -1686,7 +1695,7 @@ static void py%(class_name)s_initialize_proxies(py%(class_name)s *self, void *it
    %(free)s(self->base);
    self->base = NULL;
  };
-// PyObject_Del(self);
+ PyObject_Del(self);
 };\n
 """ % dict(class_name = self.class_name, free=free))
 
@@ -1726,7 +1735,9 @@ if(check_method_override((PyObject *)self, &%(class_name)s_Type, "%(name)s"))
         self.initialise_proxies(out)
         self._prototype(out)
         out.write("""{\n""")
+        #pdb.set_trace()
         self.write_local_vars(out)
+
 
         ## Assign the initialise_proxies handler
         out.write("""
@@ -2020,11 +2031,12 @@ if(PyErr_Occurred()) {
         out.write(self.return_type.from_python_object('Py_result',self.return_type.name, self, context = "self"))
 
         out.write("if(Py_result) { Py_DECREF(Py_result);};\nPy_DECREF(method_name);\n\n");
-        out.write("PyGILState_Release(gstate);\n")
 
         ## Decref all our python objects:
         for arg in self.args:
             out.write("if(py_%s) { Py_DECREF(py_%s);};\n" %( arg.name, arg.name))
+
+        out.write("PyGILState_Release(gstate);\n")
 
         out.write(self.return_type.return_value('func_return'))
         if self.error_set:

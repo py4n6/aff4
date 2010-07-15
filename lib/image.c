@@ -264,7 +264,7 @@ static int dump_bevy_thread(ImageWorker this) {
   if(this->bevy->size > 0) {
     AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_IMAGE_STREAM,
              URNOF(this),
-             "Bevy Dumped ( %dkbytes %d%%)\n",
+             "Bevy Dumped ( %dkbytes %d%%)",
              this->segment_buffer->size/1024,
              this->segment_buffer->size * 100 /this->bevy->size);
   };

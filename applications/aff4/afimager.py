@@ -1,4 +1,4 @@
-import sys
+import sys, time
 try:
     import urwid
 except ImportError:
@@ -13,6 +13,9 @@ import time
 import pdb
 import os
 from subprocess import PIPE, Popen
+import pyaff4
+
+oracle = pyaff4.Resolver()
 
 palette = [
     ('body','black','light gray', 'standout'),
@@ -28,6 +31,65 @@ palette = [
     ('foot','light gray', 'black'),
     ]
 
+class Volume:
+    """ A class to abstract the creation of AFF4 volumes """
+    def __init__(self, volume_location):
+        self.location_url = pyaff4.RDFURN(volume_location)
+        self.volume_url = pyaff4.RDFURN(volume_location)
+
+        fd = oracle.open(self.location_url, 'r')
+        if not fd:
+            self.create_new_volume()
+        elif not oracle.load(self.volume_url):
+            self.create_new_volume()
+
+    def create_new_volume(self):
+        volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME)
+        volume.set(pyaff4.AFF4_STORED, self.location_url)
+
+        volume = volume.finish()
+        self.volume_url = volume.urn
+
+        volume.cache_return()
+
+    def make_new_image(self, image_name, threads = 0):
+        image = oracle.create(pyaff4.AFF4_IMAGE)
+        image.urn.set(self.volume_url.value)
+        image.urn.add(image_name)
+
+        image.set(pyaff4.AFF4_STORED, self.volume_url)
+
+        image = image.finish()
+
+        if threads > 0:
+            image.set_workers(threads)
+
+        return image
+
+    def close(self):
+        volume = oracle.open(self.volume_url, 'w')
+        volume.close()
+
+class Logger(pyaff4.Logger):
+    colors = {
+        pyaff4.AFF4_LOG_MESSAGE : 'editfc',
+        pyaff4.AFF4_LOG_WARNING : 'bright',
+        pyaff4.AFF4_LOG_NONFATAL_ERROR : 'important',
+        }
+
+    def __init__(self, widget):
+        self.widget = widget
+        pyaff4.Logger.__init__(self)
+
+    def message(self, level, service, subject, message):
+        self.widget.message(
+            urwid.AttrWrap(
+                urwid.Text(
+                    "%s %s %s" % (service, subject.value, message)
+                    )
+                , self.colors[level],
+                )
+            )
 
 class FilenameEdit(urwid.Edit):
     """ An urwid edit box to implement filename completion """
@@ -70,7 +132,7 @@ class TextQuestion:
     def __init__(self, name, question, default = ''):
         self.question = question
         self.name = name
-        self.default = default
+        self.default = str(default)
 
     def widget(self):
         edit = urwid.Edit(('editcp', self.question), self.default)
@@ -232,9 +294,9 @@ class Form:
 
         self.questions = [
             Multiline("info", default = hdd_info),
-            Filename("input", "Input file location:"),
-            Filename("output_volume", "Output Volume location:"),
-            TextQuestion("stream_name", "Stream Name:"),
+            Filename("input", "Input file location:", default = '/var/tmp/uploads/xp-laptop-2005-06-25.img'),
+            Filename("output_volume", "Output Volume location:", default = '/tmp/test.aff4'),
+            TextQuestion("stream", "Stream Name:", default='stream'),
             Text("explain", "Select Imaging Mode", style = 'important'),
             RadioButton("mode", ['Simple','Sparse', 'Hash'], actions = dict(
                     Simple = lambda x: Label.set_text("Standard Default Imaging"),
@@ -242,6 +304,7 @@ class Form:
                     Hash   = lambda x: Label.set_text("Hash based image compression"),
                     )),
             Label,
+            TextQuestion('threads', 'Worker Threads:', default = 0),
             Buttons("buttons", ['Acquire', 'Quit'], actions = dict(Acquire = self.finish, Quit = self.finish)),
             ]
 
@@ -305,14 +368,15 @@ class Form:
             raise urwid.ExitMainLoop()
 
 class Main(threading.Thread, Form):
-    progress = urwid.ProgressBar('black', 'header', 0, 100)
-    textline = urwid.Text("hello world", align='left')
-    textarea = [urwid.Text("A text")]
     stop = False
 
     def __init__(self):
-        threading.Thread.__init__(self)
+        self.progress = urwid.ProgressBar('black', 'header', 0, 100)
+        self.textline = urwid.Text("", align='left')
+        self.starttime = time.time()
+        self.textarea = [urwid.Text("Acquisition started %s" % time.ctime(self.starttime))]
 
+        threading.Thread.__init__(self)
         blank = urwid.Divider()
 
         footer = urwid.AttrMap(self.footer_text, 'foot')
@@ -348,6 +412,12 @@ class Main(threading.Thread, Form):
         self.loop = urwid.MainLoop(frame, palette, self.screen,
                                    unhandled_input=self.unhandled)
 
+        ## Register the logger so it can write messages to the text area
+        self.logger = Logger(self)
+        oracle.register_logger(self.logger)
+
+    def go(self, results):
+        self.results = results
         ## Start up the worker thread
         self.start()
 
@@ -367,32 +437,59 @@ class Main(threading.Thread, Form):
         self.stop = True
         self.join()
 
+    def message(self, message):
+        widget, current_pos = self.text_area.get_focus()
+        current_box_length = len(self.textarea) - 1
+        self.textarea.append(
+            message
+            )
+
+        ## Only scroll to the bottom if the scroll window is at the bottom
+        if current_box_length == current_pos:
+            self.text_area.set_focus(len(self.textarea))
+            self.footer_text.set_text("")
+        else: self.footer_text.set_text(" -----  More  ----")
+
     def run(self):
-        count = 10
+        volume = Volume(self.results['output_volume'])
+
+        inurn = pyaff4.RDFURN(self.results['input'])
+        infd = oracle.open(inurn)
+        outfd = volume.make_new_image(self.results['stream'], threads = int(self.results['threads']))
+        total_size = infd.size.value
+        count = 0
+
         while not self.stop:
-            time.sleep(0.15)
-
-            widget, current_pos = self.text_area.get_focus()
-            current_box_length = len(self.textarea) - 1
-            self.textarea.append(urwid.Text("hello %s %s %s" % (count, current_pos, current_box_length)))
-
-            ## Only scroll to the bottom if the scroll window is at the bottom
-            if current_box_length == current_pos:
-                self.text_area.set_focus(len(self.textarea))
-                self.footer_text.set_text("")
-            else: self.footer_text.set_text(" -----  More  ----")
-
-            self.textline.set_text("%s" % count)
-            self.progress.set_completion(count)
-
-            self.loop.draw_screen()
-            count += 1
-
-            if count >= 100:
+            data = infd.read(10*1024*1024)
+            if not data:
                 self.stop = True
+                self.footer_text.set_text("Closing volume, please wait")
+                self.loop.draw_screen()
+
+                outfd.close()
+                volume.close()
+
                 self.footer_text.set_text("Imaging complete, press any key to exit ... ")
                 self.loop.draw_screen()
                 break
+
+            outfd.write(data)
+            count += len(data)
+
+            ## Work out how much time is left
+            try:
+                time_so_far = time.time() - self.starttime
+                rate = count / time_so_far
+
+                time_left = (total_size - count) / rate
+            except: time_left = 'Unknown'
+
+            self.textline.set_text("Acquiring %s (%s / %s done)\nSpeed %.02d Mb/s, Estimated time left %02d s" % (
+                    inurn.value, count, total_size, rate / 1024/1024, time_left))
+            self.progress.set_completion(float(count) * 100 / total_size)
+
+            self.loop.draw_screen()
+            count += 1
 
 def setup():
     urwid.web_display.set_preferences("AFF4 Imager")
@@ -401,10 +498,9 @@ def setup():
         return
 
     try:
-        #Main()
         f = Form()
         results =  f.get_results()
-        if 'Acquire' in results['buttons']: Main()
+        if 'Acquire' in results['buttons']: Main().go(results)
     except Exception, e:
         print e
         pdb.post_mortem()

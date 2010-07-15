@@ -98,6 +98,9 @@ CLASS(XSDInteger, RDFValue)
      int64_t value;
      char *serialised;
 
+     /** A convenience Constructor to set a new value */
+     XSDInteger METHOD(XSDInteger, Con, uint64_t value);
+
      void METHOD(XSDInteger, set, uint64_t value);
      uint64_t METHOD(XSDInteger, get);
 END_CLASS
@@ -133,6 +136,12 @@ CLASS(RDFURN, RDFValue)
      */
      URLParse parser;
 
+     /* A convenience constructor.
+
+        DEFAULT(urn) = NULL;
+      */
+     RDFURN METHOD(RDFURN, Con, char *urn);
+
      void METHOD(RDFURN, set, char *urn);
 
      /* Make a new RDFURN as a copy of this one */
@@ -144,7 +153,7 @@ CLASS(RDFURN, RDFValue)
      void METHOD(RDFURN, add, char *urn);
 
      /** This adds the binary string in filename into the end of the
-     URL query string, escaping invalid characters.
+         URL query string, escaping invalid characters.
      */
      void METHOD(RDFURN, add_query, unsigned char *query, unsigned int len);
 

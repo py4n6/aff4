@@ -1062,8 +1062,10 @@ static int ZipFile_close(AFFObject this) {
 	struct tm *now;
         TDB_DATA relative_name, escaped_filename;
 
+        /*
         AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_ZIP_VOLUME, urn,
                  "Writing to Central Directory");
+        */
 
         // Flush the cache if needed
         if(cache->readptr > BUFF_SIZE * 10) {

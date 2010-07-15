@@ -18,7 +18,11 @@
 
 /** These slots carry the TLS error keys */
 static pthread_key_t error_str_slot;
+static pthread_once_t error_once = PTHREAD_ONCE_INIT;
+
 static pthread_key_t error_value_slot;
+
+static void error_init();
 
 void error_dest(void *slot) {
   if(slot) talloc_free(slot);
@@ -56,6 +60,7 @@ void *aff4_raise_errors(int t, char *reason, ...) {
 int *aff4_get_current_error(char **error_buffer) {
   int *type;
 
+  (void) pthread_once(&error_once, error_init);
   type = pthread_getspecific(error_value_slot);
 
   // This is optional
@@ -70,7 +75,7 @@ int *aff4_get_current_error(char **error_buffer) {
   };
 
   if(!type) {
-    type = talloc(NULL, int);
+    type = talloc_size(NULL, ERROR_BUFF_SIZE);
     pthread_setspecific(error_value_slot, type);
   };
 
