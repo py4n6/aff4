@@ -294,7 +294,7 @@ class Form:
 
         self.questions = [
             Multiline("info", default = hdd_info),
-            Filename("input", "Input file location:", default = '/var/tmp/uploads/xp-laptop-2005-06-25.img'),
+            Filename("input", "Input file location:", default = '/dev/sda2'),
             Filename("output_volume", "Output Volume location:", default = '/tmp/test.aff4'),
             TextQuestion("stream", "Stream Name:", default='stream'),
             Text("explain", "Select Imaging Mode", style = 'important'),
@@ -304,7 +304,7 @@ class Form:
                     Hash   = lambda x: Label.set_text("Hash based image compression"),
                     )),
             Label,
-            TextQuestion('threads', 'Worker Threads:', default = 0),
+            TextQuestion('threads', 'Worker Threads:', default = 2),
             Buttons("buttons", ['Acquire', 'Quit'], actions = dict(Acquire = self.finish, Quit = self.finish)),
             ]
 

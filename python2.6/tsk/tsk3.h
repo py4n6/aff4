@@ -31,10 +31,23 @@ BIND_STRUCT(TSK_FS_BLOCK);
 BIND_STRUCT(TSK_FS_ATTR);
 BIND_STRUCT(TSK_FS_ATTR_RUN);
 
-   /** This is a normal IMG_INFO which takes a filename and passes it
-       to TSK. It just uses the standard TSK image handling code to
-       support EWF, AFF etc.
-   */
+/** This is a normal IMG_INFO which takes a filename and passes it
+    to TSK. It just uses the standard TSK image handling code to
+    support EWF, AFF etc.
+
+    This is usually the first object you would instantiate in order to
+    use the TSK library:
+
+    img = Img_Info(filename)
+
+    you would then pass it to an FS_Info object:
+
+    fs = FS_Info(img)
+
+    Then open an inode or path
+
+    f = fs.open_dir(inode = 2)
+*/
 CLASS(Img_Info, Object)
      PRIVATE Extended_TSK_IMG_INFO *img;
 
@@ -45,29 +58,32 @@ CLASS(Img_Info, Object)
      */
      Img_Info METHOD(Img_Info, Con, ZString url, TSK_IMG_TYPE_ENUM type);
 
-     // Read a random buffer from the image
+     /* Read a random buffer from the image */
      uint64_t METHOD(Img_Info, read, TSK_OFF_T off, OUT char *buf, size_t len);
 
+     /** Retrieve the size of the image */
      uint64_t METHOD(Img_Info, get_size);
 
-     // Closes the image
+     /* Closes the image */
      void METHOD(Img_Info, close);
 
      /* An accessor for our img object - used by TSK classes to get
         our object.
      */
-     Extended_TSK_IMG_INFO *METHOD(Img_Info, get_img_info);
+     PRIVATE Extended_TSK_IMG_INFO *METHOD(Img_Info, get_img_info);
 END_CLASS
-
-     /** This direction allows us to bind arbitrary python objects to
-         SK
-     */
-PROXY_CLASS(Img_Info)
 
 // Forward declerations
 struct FS_Info_t;
 struct Directory_t;
 
+/** An attribute is associated with a file. In some filesystem
+    (e.g. NTFS) a file may contain many attributes.
+
+    Attributes can be iterated over to obtain the attribute runs
+    (e.g. to recover block allocation information).
+
+*/
 CLASS(Attribute, Object)
    FOREIGN TSK_FS_ATTR *info;
    FOREIGN TSK_FS_ATTR_RUN *current;
@@ -79,19 +95,19 @@ CLASS(Attribute, Object)
 END_CLASS
 
 
-   /** This represents a file object. A file has both metadata and
-       data streams.
+/** This represents a file object. A file has both metadata and
+    data streams.
 
-       Its usually not useful to instantiate this class by itself -
-       you need to call FS_Info.open() or iterate over a Directory()
-       object.
+    Its usually not useful to instantiate this class by itself -
+    you need to call FS_Info.open() or iterate over a Directory()
+    object.
 
-       This object may be used to read the content of the file using
-       read_random().
+    This object may be used to read the content of the file using
+    read_random().
 
-       Iterating over this object will return all the attributes for
-       this file.
-   */
+    Iterating over this object will return all the attributes for
+    this file.
+*/
 CLASS(File, Object)
      FOREIGN TSK_FS_FILE *info;
      PRIVATE struct FS_Info_t *fs;
@@ -112,27 +128,31 @@ CLASS(File, Object)
                     TSK_FS_ATTR_TYPE_ENUM type, int id,
                     TSK_FS_FILE_READ_FLAG_ENUM flags);
 
+     /* Obtain a directory object that represents this inode. This may
+        be useful if the file is actually a directory and we want to
+        iterate over its contents.
+      */
      struct Directory_t *METHOD(File, as_directory);
 
      void METHOD(File, __iter__);
      Attribute METHOD(File, iternext);
 END_CLASS
 
-     /** This represents a Directory within the filesystem. You can
-         iterate over this object to obtain all the File objects
-         contained within this directory:
+/** This represents a Directory within the filesystem. You can
+    iterate over this object to obtain all the File objects
+    contained within this directory:
 
-         for f in d:
-            print f.info.name.name
-     */
+    for f in d:
+        print f.info.name.name
+*/
 CLASS(Directory, Object)
      TSK_FS_DIR *info;
      PRIVATE struct FS_Info_t *fs;
 
-     // Total number of files in this directory
+     /* Total number of files in this directory */
      size_t size;
 
-     // Current file returned in the next iteration
+     /* Current file returned in the next iteration */
      int current;
 
      /* We can open the directory using a path, its inode number.
@@ -147,7 +167,7 @@ CLASS(Directory, Object)
      File METHOD(Directory, iternext);
 END_CLASS
 
-/** This is used to obtain a filesystem object from an AFF4ImgInfo.
+/** This is used to obtain a filesystem object from an Img_Info object.
 
     From this FS_Info we can open files or directories by inode, or
     path.

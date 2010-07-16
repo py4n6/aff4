@@ -162,6 +162,11 @@ class HashWorker(threading.Thread):
             image_stream.cache_return()
             #log("Returned %s" % self.image_stream_urn.value)
 
+
+class AFF4ImgInfo(pytsk3.Img_Info):
+    
+
+
 class HashImager:
     """ A class for creating a new hash based image.
 

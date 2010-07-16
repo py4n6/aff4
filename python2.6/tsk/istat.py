@@ -29,7 +29,7 @@ else:
 
 ## Step 1: get an IMG_INFO object (url can be any URL that AFF4 can
 ## handle)
-img = pytsk3.AFF4ImgInfo(url)
+img = pytsk3.Img_Info(url)
 
 ## Step 2: Open the filesystem
 fs = pytsk3.FS_Info(img)

@@ -1,9 +1,9 @@
 /*
 ** tsk3.c
-** 
+**
 ** Made by (mic)
 ** Login   <mic@laptop>
-** 
+**
 ** Started on  Fri Apr 16 10:01:04 2010 mic
 ** Last update Sun May 12 01:17:25 2002 Speed Blue
 */
@@ -73,19 +73,21 @@ void Img_Info_close(Img_Info self) {
 
 Extended_TSK_IMG_INFO *Img_Info_get_img_info(Img_Info self) {
   // Initialise the img struct with the correct callbacks:
-  self->img = talloc_zero(self, Extended_TSK_IMG_INFO);
-  self->img->container = self;
+  Extended_TSK_IMG_INFO *img;
 
-  self->img->base.read = IMG_INFO_read;
-  self->img->base.close = IMG_INFO_close;
-  self->img->base.size = CALL(self, get_size);
+  img = talloc_zero(self, Extended_TSK_IMG_INFO);
+  img->container = self;
+
+  img->base.read = IMG_INFO_read;
+  img->base.close = IMG_INFO_close;
+  img->base.size = CALL(self, get_size);
 
 #ifdef TSK_VERSION_NUM
-  self->img->base.sector_size = 512;
+  img->base.sector_size = 512;
 #endif
-  self->img->base.itype = TSK_IMG_TYPE_RAW_SING;
+  img->base.itype = TSK_IMG_TYPE_RAW_SING;
 
-  return self->img;
+  return img;
 };
 
 uint64_t Img_Info_get_size(Img_Info self) {
@@ -380,7 +382,6 @@ VIRTUAL(Attribute, Object) {
 
 
 void tsk_init() {
-  error_init();
   Img_Info_init((Object)&__Img_Info);
   FS_Info_init((Object)&__FS_Info);
   Directory_init((Object)&__Directory);
