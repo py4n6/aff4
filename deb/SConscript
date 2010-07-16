@@ -164,6 +164,9 @@ class TSKPackage(AFF4DebianPackage):
 
         self.DEB_FILES = [
             ("%s/%s" % (target,filename),   "#python2.6/%s" % filename),
+            ("usr/share/doc/python-pytsk3/examples/fls.py", "#python2.6/tsk/fls.py"),
+            ("usr/share/doc/python-pytsk3/examples/icat.py", "#python2.6/tsk/icat.py"),
+            ("usr/share/doc/python-pytsk3/examples/istat.py", "#python2.6/tsk/istat.py"),
             ]
 
 ## Build all the required modules:

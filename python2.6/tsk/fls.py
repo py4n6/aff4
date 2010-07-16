@@ -7,9 +7,6 @@ import pdb
 import time
 from pytsk3 import *
 import gc
-import pyaff4
-
-time.sleep(1)
 
 parser = OptionParser()
 parser.add_option("-f", "--fstype", default=None,
@@ -114,29 +111,36 @@ def print_inode(f, prefix=''):
 
 ## Now list the actual files (any of these can raise for any reason)
 
-oracle = pyaff4.Resolver()
 
-class AFF4ImgInfo(pytsk3.Img_Info):
-    def __init__(self, url):
-        self.fd = oracle.open(
-            pyaff4.RDFURN(url), 'r')
-        if not self.fd:
-            raise IOError("Unable to open %s" % url)
-        pytsk3.Img_Info.__init__(self, '')
+## Try to use AFF4 if its present
+try:
+    import pyaff4
 
-    def get_size(self):
-        return self.fd.size.value
+    oracle = pyaff4.Resolver()
 
-    def read(self, off, length):
-        self.fd.seek(off)
-        return self.fd.read(length)
+    class AFF4ImgInfo(pytsk3.Img_Info):
+        def __init__(self, url):
+            self.fd = oracle.open(
+                pyaff4.RDFURN(url), 'r')
+            if not self.fd:
+                raise IOError("Unable to open %s" % url)
+            pytsk3.Img_Info.__init__(self, '')
 
-    def close(self):
-        self.fd.close()
+        def get_size(self):
+            return self.fd.size.value
 
-## Step 1: get an IMG_INFO object (url can be any URL that AFF4 can
-## handle)
-img = AFF4ImgInfo(url)
+        def read(self, off, length):
+            self.fd.seek(off)
+            return self.fd.read(length)
+
+        def close(self):
+            self.fd.close()
+
+    ## Step 1: get an IMG_INFO object (url can be any URL that AFF4 can
+    ## handle)
+    img = AFF4ImgInfo(url)
+except ImportError:
+    img = pytsk3.Img_Info(url)
 
 ## Step 2: Open the filesystem
 fs = pytsk3.FS_Info(img, offset=options.offset)
