@@ -2539,7 +2539,6 @@ if(%(name)s) { PyObject *py_%(name)s = PyLong_FromLong(%(name)s);
     PyErr_Format(PyExc_RuntimeError, "value %%lu is not valid for Enum %(type)s of arg '%(name)s'", (unsigned long)%(name)s);
     goto error;
   };
-  Py_DECREF(tmp);
 };
 """ % self.__dict__
 
