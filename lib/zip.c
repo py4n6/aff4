@@ -550,7 +550,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	      CALL(fd, seek, -(int64_t)BUFF_SIZE, SEEK_END));
 
   memset(buffer, 0, BUFF_SIZE);
-  length = CALL(fd, read, buffer, BUFF_SIZE);
+  length = CALL(fd, read, buffer, BUFF_SIZE - sizeof(uint32_t));
 
   if(length<0)
     goto error;

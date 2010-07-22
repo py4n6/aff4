@@ -1,5 +1,10 @@
 This document outlines what needs to be implemented:
 
-- Thread locks
-- Process locks
-- Unit tests
+- Compile for windows
+- Implement all imaging options in imager:
+   - Encryption
+   - Signing
+   - Hashing
+
+- Implement nagivation in imager:
+   - Fuse implementation should follow navigator or old mode

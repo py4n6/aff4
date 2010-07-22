@@ -218,7 +218,6 @@ class TSKFuse(Fuse):
                 raise IOError("unable to open %s" % path)
 
         def read(self, length, offset):
-            print length, offset
             return self.fd.read_random(offset, length)
 
         def _fflush(self):

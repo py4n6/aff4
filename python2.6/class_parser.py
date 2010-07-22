@@ -1695,7 +1695,7 @@ static void py%(class_name)s_initialize_proxies(py%(class_name)s *self, void *it
    %(free)s(self->base);
    self->base = NULL;
  };
- PyObject_Del(self);
+// PyObject_Del(self);
 };\n
 """ % dict(class_name = self.class_name, free=free))
 
