@@ -28,7 +28,7 @@ void error_dest(void *slot) {
   if(slot) talloc_free(slot);
 };
 
-void *aff4_raise_errors(int t, char *reason, ...) {
+DLL_PUBLIC void *aff4_raise_errors(int t, char *reason, ...) {
   char *error_buffer;
   char tmp[ERROR_BUFF_SIZE];
   // This has to succeed:
@@ -57,7 +57,7 @@ void *aff4_raise_errors(int t, char *reason, ...) {
   return NULL;
 };
 
-int *aff4_get_current_error(char **error_buffer) {
+DLL_PUBLIC int *aff4_get_current_error(char **error_buffer) {
   int *type;
 
   (void) pthread_once(&error_once, error_init);
@@ -93,6 +93,6 @@ void error_init() {
 
 /** Initialise the error subsystem */
 AFF4_MODULE_INIT(A000_error) {
-  error_init();
+  //  error_init();
 };
 

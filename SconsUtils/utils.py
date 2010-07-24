@@ -334,9 +334,6 @@ class ExtendedEnvironment(SCons.Environment.Environment):
                                       self.SharedObject(
                     source = "#lib/class.c", target='shared_class',
                     CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/ -O0 -g'.split()),
-                                      self.SharedObject(
-                    source = "#lib/error.c", target='shared_error',
-                    CFLAGS=self.python_cppflags + '-Ilibreplace/ -Ilib/ -O0 -g'.split()),
                                       ]
 
         lib = self.SharedLibrary(libname, lib_objs + self.__class__.shared,

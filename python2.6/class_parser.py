@@ -389,8 +389,10 @@ static int type_check(PyObject *obj, PyTypeObject *type) {
 };
 
 static int check_error() {
-   if(!CheckError(EZero)) {
-         char *buffer;
+   char *buffer;
+   int *error_type = (int *)aff4_get_current_error(&buffer);
+
+   if(*error_type != EZero) {
          PyObject *exception = resolve_exception(&buffer);
 
          PyErr_Format(exception, "%%s", buffer);

@@ -96,7 +96,6 @@ class HashWorker(threading.Thread):
 
     def run(self):
         print self.blocks, self.size
-        return
         try:
             self.dump_blocks()
         finally:
@@ -112,25 +111,25 @@ class HashWorker(threading.Thread):
         ## Open another read handle to the file private to our thread
         fd = oracle.open(self.in_urn, 'r')
         try:
-            for block in self.blocks:
+            for block, length in self.blocks:
                 fd.seek(block * self.blocksize)
-                data_blocks.append(fd.read(self.blocksize))
+                data_blocks.append(fd.read(length * self.blocksize))
         finally:
             fd.cache_return()
 
         data = ''.join(data_blocks)
+
+        ## Calculate the hash
         m = hashlib.sha1()
         m.update(data)
 
-        hashed_urn = pyaff4.RDFURN()
-        hashed_urn.set("aff4://" + m.hexdigest())
+        hashed_urn = pyaff4.RDFURN("aff4://" + m.hexdigest())
 
         ## Check if the hashed file already exists
         if oracle.get_id_by_urn(hashed_urn, 0):
             log("Skipping.... %s" % hashed_urn.value)
         else:
-            compression = pyaff4.XSDInteger()
-            compression.set(self.compression)
+            compression = pyaff4.XSDInteger(self.compression)
 
             ## Save a copy of the data
             out_fd = oracle.create(pyaff4.AFF4_IMAGE)
@@ -142,9 +141,8 @@ class HashWorker(threading.Thread):
             out_fd.close()
 
         if self.inode:
-            string = pyaff4.XSDString()
-            string.set(self.inode)
-            #log("Setting %s filename %s" % (hashed_urn.value, self.inode))
+            string = pyaff4.XSDString(self.inode)
+            log("Setting %s filename %s" % (hashed_urn.value, self.inode))
             oracle.add_value(hashed_urn, pyaff4.PREDICATE_NAMESPACE + "filename", string)
 
         self.add_block_run(hashed_urn)

@@ -90,8 +90,11 @@ if utils.HEADERS.get('HAVE_TSK3') and nenv.config.TSK3_HEADER_LOCATION:
                                                         current_error_function = 'aff4_get_current_error',
                                                         free = 'talloc_free'))
     nenv.Depends('tsk/pytsk3.c', 'class_parser.py')
+    error_lib = nenv.SharedObject(
+        source = "#lib/error.c", target='shared_error',
+        CFLAGS=nenv.python_cppflags + '-Ilibreplace/ -Ilib/ -O0 -g'.split())
 
-    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c'], LIBS=['tsk3'])
+    nenv.PythonModule("pytsk3", ['tsk/pytsk3.c', 'tsk/tsk3.c', error_lib], LIBS=['tsk3'])
 
     # Keep this around for debian package
     env.python_tsk3_env = nenv

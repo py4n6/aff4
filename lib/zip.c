@@ -382,6 +382,7 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
 
  error:
   talloc_unlink(NULL, self);
+
   return NULL;
 };
 

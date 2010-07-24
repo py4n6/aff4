@@ -1830,11 +1830,22 @@ static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
 // the relevant cache
 static AFFObject AFFObject_finish(AFFObject self) {
   Cache cache = oracle->read_cache;
-  AFFObject result =CALL(self, Con, URNOF(self), self->mode);
+  AFFObject result;
 
-  // Finishing failed
+  /* The following ensures that the object does not really get freed
+     from under us.
+  */
+  aff4_incref(self);
+  result =CALL(self, Con, URNOF(self), self->mode);
+
+  /* Finishing failed - The object constructor has decrefed it already
+     - we return NULL, but the object is really not freed at all. It is
+     just invalid now and must be freed by the caller to finish().
+  */
   if(!result) return NULL;
 
+  /* Ok - the object is not freed by the constructor */
+  aff4_free(self);
   // Ok we successfully created the object - add it to the required
   // cached now:
   if(self->mode == 'w')
