@@ -833,11 +833,11 @@ class IntegerOut(Integer):
         return self.name
 
 class PInteger32Out(IntegerOut):
-    buildstr = 'K'
+    buildstr = ''
     int_type = 'uint32_t *'
 
 class PInteger64Out(IntegerOut):
-    buildstr = 'K'
+    buildstr = ''
     int_type = 'uint64_t *'
 
 class Char_and_Length_OUT(Char_and_Length):

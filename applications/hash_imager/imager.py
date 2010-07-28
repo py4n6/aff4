@@ -97,6 +97,7 @@ class HashWorker(threading.Thread):
     def run(self):
         print self.blocks, self.size
         try:
+            pass
             self.dump_blocks()
         finally:
             ## Signal the condition variable
@@ -148,6 +149,26 @@ class HashWorker(threading.Thread):
         self.add_block_run(hashed_urn)
 
     def add_block_run(self, hashed_urn):
+        image_stream = oracle.open(self.image_stream_urn, 'w')
+        file_offset = 0
+
+        try:
+            for image_block, number_of_blocks in self.blocks:
+                available = image_stream.map.add_point(image_block * self.blocksize,
+                                                       file_offset * self.blocksize,
+                                                       hashed_urn.value)
+
+                file_offset += number_of_blocks * self.blocksize
+
+            ## the last block has some room after it - we need to add the
+            ## Zero URN to it
+            if available != 0:
+                image_stream.map.add_point((image_block + number_of_blocks) * self.blocksize,
+                                           0, ZERO_URN.value)
+        finally:
+            image_stream.cache_return()
+
+    def XXXXadd_block_run(self, hashed_urn):
         image_stream = oracle.open(self.image_stream_urn, 'w')
         available = 0
         try:
@@ -569,7 +590,8 @@ oracle.register_logger(renderer)
 imager = HashImager(in_urn, out_urn)
 try:
     imager.image(OFFSET)
-except:
+except Exception,e:
+    print e
     pdb.post_mortem()
 #imager.test()
 

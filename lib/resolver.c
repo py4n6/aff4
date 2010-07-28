@@ -1190,7 +1190,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
       // deadlock. This is not a race since we are the only thread to
       // be setting the thread_id to our own.
       if(result->thread_id == pthread_self()) {
-        RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w)", urn->value);
+        RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w). Chances are you did not call cache_return() properly.", urn->value);
         goto error;
 
       };
