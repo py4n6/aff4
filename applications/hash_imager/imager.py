@@ -168,48 +168,6 @@ class HashWorker(threading.Thread):
         finally:
             image_stream.cache_return()
 
-    def XXXXadd_block_run(self, hashed_urn):
-        image_stream = oracle.open(self.image_stream_urn, 'w')
-        available = 0
-        try:
-            #log("Acquired %s" % self.image_stream_urn.value)
-            blocks = self.blocks + [-1]
-            last_image_block = -10
-
-            for file_block in range(len(blocks)-1):
-                file_offset = file_block * self.blocksize
-                img_block = blocks[file_block]
-                image_offset = img_block * self.blocksize
-
-                ## First we write the start of each block
-                if last_image_block + 1 != img_block:
-                    available = image_stream.map.add_point(image_offset,
-                                                           file_offset, hashed_urn.value)
-                    #log("Adding %s,%s,%s " % (image_offset,
-                    #                          file_offset, hashed_urn.value))
-                else:
-                    available -= self.blocksize
-
-                last_image_block = img_block
-
-                ## Now check the end of the range. If there is more
-                ## that a block available after the start of the
-                ## block, obviously its us. If the next img_block is
-                ## not consecutive, we need to terminate it off with a
-                ## zero urn.
-                if available > self.blocksize and img_block +1 != blocks[file_block+1]:
-                    ## Add a zero urn to stop off this block
-                    image_stream.map.add_point(image_offset + self.blocksize,
-                                               0, ZERO_URN.value)
-
-                    #log("Adding %s,%s,%s " % (image_offset + self.blocksize,
-                    #                          0, ZERO_URN.value))
-
-        finally:
-            image_stream.cache_return()
-            #log("Returned %s" % self.image_stream_urn.value)
-
-
 
 class HashImager:
     """ A class for creating a new hash based image.
@@ -243,6 +201,9 @@ class HashImager:
 
         ## Check that the input urn is valid
         fd = oracle.open(in_urn, 'r')
+
+        ## This is the final size of the image
+        self.image_size = fd.size.value
         try:
             ## Make sure the object is a stream
             if not isinstance(fd, pyaff4.FileLikeObject):
@@ -263,7 +224,7 @@ class HashImager:
 
             ## By default we set the target to the ZERO_URN
             image_stream.add_point(0,0,ZERO_URN.value)
-            image_stream.size.set(fd.size.value)
+            image_stream.size.set(self.image_size)
             image_stream.cache_return()
 
         finally:
@@ -545,10 +506,11 @@ class HashImager:
         map.close()
 
     def dump_unallocated(self):
+        ## Run over the entire map and look for ZERO segments - these
+        ## will be dumped seperately
         offset = 0
-        blocks = []
 
-        while 1:
+        while offset < self.image_size:
             image_stream = oracle.open(self.image_urn, 'w')
             try:
                 urn, target_offset, available, target_id = image_stream.map.get_range(offset)
@@ -557,9 +519,8 @@ class HashImager:
 
             if not available: break
 
-            ## We only want gaps
             #log( "Checking map point %s,%s,%s,%s" % (offset, target_offset, available, urn.value))
-
+            ## We only want gaps
             if urn.value == ZERO_URN.value:
                 ## At this point the gaps should be even blocksizes.
                 if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
@@ -568,16 +529,10 @@ class HashImager:
 
                 log( "Dumping unallocated from %s to %s (%s bytes)" % (
                         offset, offset+available, available))
-                blocks += [ x for x in range(offset / self.blocksize,
-                                             (offset + available) / self.blocksize) ]
-
-                while len(blocks) >= self.MAX_SIZE:
-                    self.dump_block_run(blocks[:self.MAX_SIZE])
-                    blocks = blocks[self.MAX_SIZE:]
+                blocks = [[ offset / self.blocksize , available / self.blocksize ],]
+                self.dump_full_run(blocks, None, pyaff4.ZIP_DEFLATE, size = available * self.blocksize)
 
             offset += available
-
-        self.dump_block_run(blocks)
 
 ## Shut up messages
 class Renderer(pyaff4.Logger):
