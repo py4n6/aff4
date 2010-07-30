@@ -351,9 +351,10 @@ CLASS(TDB, Object)
 
          DEFAULT(mode) = 0;
      */
-     TDB METHOD(TDB, Con, char *filename, int mode);
+     TDB METHOD(TDB, Con, ZString filename, int mode);
      void METHOD(TDB, store, char *key,int key_len, char *data, int len);
      TDB_DATA METHOD(TDB, fetch, char *key, int len);
+     DESTRUCTOR void METHOD(TDB, close);
 END_CLASS
 
      /* This function is the main entry point into the AFF4

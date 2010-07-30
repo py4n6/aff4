@@ -314,6 +314,19 @@ VIRTUAL(XSDInteger, RDFValue) {
 } END_VIRTUAL
 
 // Encode strings for storage
+static XSDString XSDString_Con(XSDString self, char *string, int length) {
+  RDFValue result = (RDFValue)self;
+
+  // Call the super class's constructor.
+  CALL(result, Con);
+
+  if(length != 0) {
+    CALL(self, set, string, length);
+  };
+
+  return self;
+};
+
 static TDB_DATA *XSDString_encode(RDFValue self, RDFURN subject) {
   XSDString this = (XSDString)self;
   TDB_DATA *result = talloc(self, TDB_DATA);
@@ -397,6 +410,7 @@ VIRTUAL(XSDString, RDFValue) {
    VMETHOD_BASE(RDFValue, clone) = XSDString_clone;
 
    VMETHOD(set) = XSDString_set;
+   VMETHOD_BASE(XSDString, Con) = XSDString_Con;
 } END_VIRTUAL 
 
 // Encode urn for storage - we just encode the URN id of this urn and

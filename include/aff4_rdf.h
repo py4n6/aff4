@@ -110,6 +110,12 @@ CLASS(XSDString, RDFValue)
      char *value;
      int length;
 
+     /** A convenience Constructor to set a new value.
+
+         DEFAULT(string) = ""
+      */
+     XSDString METHOD(XSDString, Con, char *string, int length);
+
      void METHOD(XSDString, set, char *string, int length);
      BORROWED char *METHOD(XSDString, get);
 END_CLASS

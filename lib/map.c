@@ -380,21 +380,36 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFURN s
   fd = (FileLikeObject)CALL(oracle, open, segment, 'r');
   if(!fd) goto exit;
 
+  // We read the entire index into memory at once
   {
-    char *map = CALL(fd,get_data);
+    char *map = talloc_size(ctx, fd->size->value+1);
     char *x=map;
+    char *y = x;
+    int size = fd->size->value;
 
-    // Skip to the next null termination
-    while(x - map < fd->size->value && *x) x++;
-    if(x!=map) {
-      this->targets = talloc_realloc_size(self, this->targets,
-                                          (this->number_of_urns + 1) *  \
-                                          sizeof(*this->targets));
-      this->targets[this->number_of_urns] = new_RDFURN(self);
-      CALL(this->targets[this->number_of_urns], set, map);
+    // NULL terminate the buffer
+    CALL(fd, read, map, size);
+    map[size+1] = 0;
 
-      this->number_of_urns ++ ;
-      x++;
+    // Scan over the entire buffer reading targets
+    while(x - map < size) {
+      // Skip to the next null termination
+      while(*x) x++;
+      // x and y bound a target string now - add it
+      if(x > y) {
+        this->targets = talloc_realloc_size(self, this->targets,
+                                            (this->number_of_urns + 1) * \
+                                            sizeof(*this->targets));
+        this->targets[this->number_of_urns] = new_RDFURN(self);
+        CALL(this->targets[this->number_of_urns], set, y);
+
+        this->number_of_urns ++ ;
+        x++;
+        y = x;
+      } else {
+        RaiseError(ERuntimeError, "Empty target - Invalid map found");
+        goto error;
+      };
     };
   };
 
@@ -425,7 +440,7 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFURN s
 
       node->image_offset = ntohll(buff[j].image_offset);
       node->target_offset = ntohll(buff[j].target_offset);
-      node->target_idx = ntohll(buff[j].target_index);
+      node->target_idx = ntohl(buff[j].target_index);
 
       tree_insert(this->tree, node);
       i--;
@@ -436,6 +451,10 @@ static int MapValueBinary_decode(RDFValue self, char *data, int length, RDFURN s
  exit:
   talloc_free(ctx);
   return 1;
+
+ error:
+  talloc_free(ctx);
+  return 0;
 };
 
 static map_point_node_t *binary_map_iterate_cb(map_point_tree_t *tree,
@@ -638,12 +657,12 @@ static AFFObject MapDriver_Con(AFFObject self, RDFURN uri, char mode){
       goto error;
     };
 
-    CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_urn(self, AFF4_MAP),0);
-    CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri,0);
-
     // Only update the timestamp if we created a new map
     if(mode=='w') {
       XSDDatetime time = new_XSDDateTime(this);
+
+      CALL(oracle, set_value, URNOF(self), AFF4_TYPE, rdfvalue_from_urn(self, AFF4_MAP),0);
+      CALL(oracle, add_value, this->stored, AFF4_VOLATILE_CONTAINS, (RDFValue)uri,0);
 
       this->dirty->value = DIRTY_STATE_NEED_TO_CLOSE;
       CALL(oracle, set_value, URNOF(self), AFF4_TIMESTAMP, (RDFValue)time,0);
@@ -801,6 +820,7 @@ static int MapDriver_partial_read(FileLikeObject self, char *buffer, \
 
   CALL(target_fd, seek, target_offset_at_point, SEEK_SET);
   read_bytes = CALL(target_fd, read, buffer, available_to_read);
+  if(read_bytes < 0) return -1;
 
   CALL(oracle, cache_return, (AFFObject)target_fd);
 

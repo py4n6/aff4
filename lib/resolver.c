@@ -1955,7 +1955,7 @@ static TDB TDB_Con(TDB self, char *filename, int mode) {
     return self;
   };
 
-  RaiseError(ERuntimeError, "Unable to open tdb file on %s", filename);
+  RaiseError(ERuntimeError, "Unable to open tdb file on %s - is it already opened in this process?", filename);
   talloc_free(self);
   return NULL;
 };
@@ -1980,10 +1980,16 @@ static TDB_DATA TDB_fetch(TDB self, char *key, int len) {
   return tdb_fetch(self->file, tdb_key);
 };
 
+static void TDB_close(TDB self) {
+  tdb_close(self->file);
+  self->file = 0;
+};
+
 VIRTUAL(TDB, Object) {
   VMETHOD(Con) = TDB_Con;
   VMETHOD(store) = TDB_store;
   VMETHOD(fetch) = TDB_fetch;
+  VMETHOD(close) = TDB_close;
 }  END_VIRTUAL;
 
 Resolver get_oracle(void) {
