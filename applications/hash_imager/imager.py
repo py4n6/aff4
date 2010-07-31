@@ -19,6 +19,8 @@ import time
 ## because they will not be very compressible. For now we use
 ## filename extension to make this call
 DO_NOT_COMPRESS = set("zip cab jpg avi mpg jar tgz msi swf mp3 mp4 wma".split())
+
+## This attribute is used to specify the filename of the hash blocks
 FILENAME_URN = 'http://afflib.org/2009/aff4#hash_filename'
 
 out_urn = pyaff4.RDFURN("/tmp/test3.aff4")
@@ -41,6 +43,7 @@ ZERO_URN = pyaff4.RDFURN("aff4://zero")
 oracle = pyaff4.Resolver()
 
 class AFF4ImgInfo(pytsk3.Img_Info):
+    """ A class to harness AFF4 streams for TSK filesystems. """
     def __init__(self, url):
         self.fd = oracle.open(url)
         if not self.fd:
@@ -63,10 +66,17 @@ def log(x, level=1):
     print "0x%lX: %s" % (threading.current_thread().ident & 0xFFFFFFFF, x)
 
 def print_map(fd):
+    """ A Utility function to print the current map. Mostly used for
+    debugging.
+    """
     offset = 0
+    print("""Map Dump
+
+%10s,%10s,%10s, target name
+------------------------------------------------------""" % ("img off", "target off", "length"))
     while offset < fd.size.value:
         urn, target_offset, available, target_id = fd.map.get_range(offset)
-        log("%s,%s,%s,%s"%(offset, target_offset, available, urn.value))
+        print("%10s,%10s,%10s, %s"%(offset, target_offset, available, urn.value))
         if available == 0 : break
 
         offset += available
@@ -74,22 +84,20 @@ def print_map(fd):
 class HashWorker(threading.Thread):
     ## The minimum size for a block to exist on its own. Smaller
     ## blocked will be dumped into the miscelaneous stream
-    MIN_SIZE = 64 * 1024
+    MIN_SIZE = 1 * 1024
 
     def __init__(self, in_urn, volume_urn,
                  image_stream_urn,
                  misc_stream_urn,
-                 blocks, blocksize,
+                 blocks,
                  condition,
                  compression = pyaff4.ZIP_DEFLATE,
                  size = 0, attributes = None,
                  *args, **kwargs):
         threading.Thread.__init__(self, *args, **kwargs)
-
         self.in_urn = in_urn
         self.volume_urn = volume_urn
         self.blocks = blocks
-        self.blocksize = blocksize
         self.image_stream_urn = image_stream_urn
 
         ## We signal this when we are done
@@ -142,8 +150,8 @@ class HashWorker(threading.Thread):
         fd = oracle.open(self.in_urn, 'r')
         try:
             for block, length in self.blocks:
-                fd.seek(block * self.blocksize)
-                data_blocks.append(fd.read(length * self.blocksize))
+                fd.seek(block)
+                data_blocks.append(fd.read(length))
         finally:
             fd.cache_return()
 
@@ -198,17 +206,17 @@ class HashWorker(threading.Thread):
         image_stream = oracle.open(self.image_stream_urn, 'w')
 
         try:
-            for image_block, number_of_blocks in self.blocks:
-                available = image_stream.map.add_point(image_block * self.blocksize,
+            for image_block, length in self.blocks:
+                available = image_stream.map.add_point(image_block,
                                                        file_offset,
                                                        hashed_urn.value)
 
-                file_offset += number_of_blocks * self.blocksize
+                file_offset += length
 
                 ## the last block has some room after it - we need to add the
                 ## Zero URN to it
-                if available > number_of_blocks * self.blocksize:
-                    image_stream.map.add_point((image_block + number_of_blocks) * self.blocksize,
+                if available > length:
+                    image_stream.map.add_point((image_block + length),
                                                0, ZERO_URN.value)
         finally:
             image_stream.cache_return()
@@ -219,16 +227,19 @@ class HashImager:
 
     in_urn can be a file containing the volume, or an existing stream.
     """
-    ## The total number of 512 byte sectors in each run
-    MAX_SECTORS = 10000
+    ## The largest contiguous run we make. We split larger runs into
+    ## runs of this size.
+    MAX_SIZE = 10000 * 1024
 
     ## The minimum number of blocks in a single run. If files are less
     ## than this they will not be compressed in their own segments. If
     ## unallocated blocks are smaller than this they will all be
     ## merged into the miscelaneous stream.
-    MIN_SIZE = 64
+    MIN_SIZE = 32 * 1024
 
     MAX_THREADS = 4
+
+    ## This class variable is shared between all worker instances
     workers = []
 
     ## A condition variable for threads to sync on
@@ -382,7 +393,6 @@ class HashImager:
             worker = HashWorker(self.in_urn, self.volume_urn,
                                 self.image_urn, self.misc_urn,
                                 blocks,
-                                self.blocksize,
                                 self.condition,
                                 compression = compression,
                                 size = size,
@@ -400,15 +410,13 @@ class HashImager:
                 worker = HashWorker(self.in_urn, self.volume_urn,
                                     self.image_urn, self.misc_urn,
                                     blocks,
-                                    self.blocksize,
                                     self.condition,
                                     compression = compression,
                                     size = size,
                                     attributes = attributes)
                 worker.inode = inode
-
                 worker.start()
-                #worker.join()
+
                 self.workers.append(worker)
                 #log( "spawned 0x%X" % (0xFFFFFFFF & worker.ident))
                 return
@@ -467,13 +475,20 @@ class HashImager:
                             log("Sparse file detected", level=2)
                             raise IndexError("Sparse file detected, aborting")
 
-                        block_run.append([run.addr, run.len])
+                        block_run.append([run.addr * self.blocksize, run.len * self.blocksize])
                         file_offset += run.len
 
                     if file_offset * self.blocksize < attr_size:
                         log("Block run too short for file length", level=2)
                         continue
 
+                    ## Remove the slack from the block run
+                    file_size = attr.info.size
+                    slack = self.blocksize - file_size % self.blocksize
+                    if slack < self.blocksize:
+                        block_run[-1][-1] -= slack
+
+                    print block_run, file_size
                     self.dump_full_run(block_run, inode, compression,
                                        size=attr.info.size,
                                        attributes = {
@@ -493,16 +508,16 @@ class HashImager:
 
             ## This run will tip us over the MAX_SIZE - we therefore
             ## break it off into two smaller runs
-            while current_length + length > self.MAX_SECTORS:
-                available = self.MAX_SECTORS - current_length
+            while current_length + length > self.MAX_SIZE:
+                available = self.MAX_SIZE - current_length
 
                 current_run.append((offset, available))
                 offset += available
                 length -= available
                 self.dump_block_run(current_run, inode, compression,
-                                    size = self.blocksize * self.MAX_SECTORS,
+                                    size = self.MAX_SIZE,
                                     attributes = attributes)
-                size -= self.blocksize * self.MAX_SECTORS
+                size -= self.MAX_SIZE
 
                 ## Start a new run
                 current_length = 0
@@ -567,13 +582,13 @@ class HashImager:
             ## We only want gaps
             if urn.value == ZERO_URN.value:
                 ## At this point the gaps should be even blocksizes.
-                if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
-                    pdb.set_trace()
-                    print "????"
+                #if (available % self.blocksize) != 0 or (offset % self.blocksize) != 0:
+                #    pdb.set_trace()
+                #    print "????"
 
                 log( "Dumping unallocated from %s to %s (%s bytes)" % (
                         offset, offset+available, available))
-                blocks = [[ offset / self.blocksize , available / self.blocksize ],]
+                blocks = [[ offset , available ],]
                 self.dump_full_run(blocks, None,
                                    pyaff4.ZIP_DEFLATE, size = available,
                                    attributes = {
