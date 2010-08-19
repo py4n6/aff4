@@ -13,7 +13,7 @@
 
 #include "aff4_rdf.h"
 
-struct RDFValue;
+struct RDFValue_t;
 
 /** All AFF Objects inherit from this one. The URI must be set to
     represent the globally unique URI of this object. */
@@ -43,8 +43,8 @@ CLASS(AFFObject, Object)
      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
 
      /** This is called to set properties on the object */
-     void METHOD(AFFObject, set, char *attribute, RDFValue value);
-     void METHOD(AFFObject, add, char *attribute, RDFValue value);
+     void METHOD(AFFObject, set, char *attribute, struct RDFValue_t *value);
+     void METHOD(AFFObject, add, char *attribute, struct RDFValue_t *value);
 
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.
@@ -84,7 +84,7 @@ CLASS(AFFObject, Object)
          inconsistant information is found about the world, the
          resolver information is invalidated.
      */
-     void CLASS_METHOD(delete, RDFURN urn);
+     void CLASS_METHOD(delete_urn, RDFURN urn);
 
 /** This is how an AFFObject can be created. First the oracle is asked
     to create new instance of that object:

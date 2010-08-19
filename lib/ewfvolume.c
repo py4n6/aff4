@@ -189,14 +189,19 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
 
  libewf_error:
 #if HAVE_EWF_V2_API
-  RaiseError(ERuntimeError, "libewf error: %s", ewf_error);
+  {
+    char buff[BUFF_SIZE];
+
+
+    RaiseError(ERuntimeError, "libewf error: %s", ewf_error);
+  };
 #else
   RaiseError(ERuntimeError, "libewf error");
 #endif
  error:
   // We were unable to load this volume - invalidate anything we know
   // about it (remove streams etc).
-  ((AFFObject)self)->delete(URNOF(self));
+  ((AFFObject)self)->delete_urn(URNOF(self));
 
   talloc_free(size);
   return 0;
@@ -215,7 +220,7 @@ VIRTUAL(EWFVolume, AFF4Volume) {
   VMETHOD_BASE(AFFObject, close) = EWFVolume_close;
 
   INIT_CLASS(FileLikeObject);
-  VMETHOD_BASE(AFFObject, delete) = ((AFFObject)GETCLASS(FileLikeObject))->delete;
+  VMETHOD_BASE(AFFObject, delete_urn) = ((AFFObject)GETCLASS(FileLikeObject))->delete_urn;
 
   UNIMPLEMENTED(AFF4Volume, writestr);
 } END_VIRTUAL

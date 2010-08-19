@@ -65,7 +65,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
     if(self->fd<0){
       // We are unable to open this file for reading - invalidate
       // everything related to it
-      ((AFFObject)self)->delete(URNOF(self));
+      ((AFFObject)self)->delete_urn(URNOF(self));
       RaiseError(EIOError, "Can't open %s (%s)", urn->parser->query, strerror(errno));
       goto error;
     } else {
@@ -83,7 +83,7 @@ static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char
       // incorrect - we need to clear it all.
       // Note we call this method as a class method (i.e. we do not
       // pass self as a first arg since its a class method).
-      ((AFFObject)self)->delete(URNOF(self));
+      ((AFFObject)self)->delete_urn(URNOF(self));
     };
 
     self->super.size->value = file_size;
@@ -265,7 +265,7 @@ VIRTUAL(FileLikeObject, AFFObject) {
      VMETHOD_BASE(AFFObject, close) = FileLikeObject_close;
      VMETHOD(truncate) = FileLikeObject_truncate;
      VMETHOD(get_data) = FileLikeObject_get_data;
-     VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
+     VMETHOD_BASE(AFFObject, delete_urn) = FileLikeObject_delete;
      VMETHOD(readline) = FileLikeObject_readline;
 
      VATTR(data) = NULL;
@@ -510,7 +510,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
      self->directory_offset->value > fd->size->value) {
     // Everything we know about the storage urn is incorrect... we
     // need to delete anything we know about it here:
-    ((AFFObject)fd)->delete(URNOF(fd));
+    ((AFFObject)fd)->delete_urn(URNOF(fd));
 
     RaiseError(EIOError, "File %s is %llu bytes long, but it should be %llu",
                STRING_URNOF(fd), fd->size->value, self->directory_offset->value);
@@ -1248,7 +1248,7 @@ VIRTUAL(ZipFile, AFF4Volume) {
   VMETHOD_BASE(AFF4Volume, writestr) = ZipFile_writestr;
   VMETHOD_BASE(AFFObject, Con) = ZipFile_AFFObject_Con;
   VMETHOD_BASE(AFF4Volume, load_from) = ZipFile_load_from;
-  VMETHOD_BASE(AFFObject, delete) = FileLikeObject_delete;
+  VMETHOD_BASE(AFFObject, delete_urn) = FileLikeObject_delete;
 
 // Initialise our private classes
   INIT_CLASS(ZipFileStream);

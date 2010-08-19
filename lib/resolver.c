@@ -1691,7 +1691,7 @@ static void Resolver_expire(Resolver self, RDFURN uri) {
                                                 borrow, ZSTRING(self->type->value));
 
     if(class_reference) {
-      class_reference->delete(uri);
+      class_reference->delete_urn(uri);
     };
   };
 
@@ -1886,7 +1886,7 @@ VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set) = AFFObject_set_property;
      VMETHOD(add) = AFFObject_add;
-     VMETHOD(delete) = AFFObject_delete;
+     VMETHOD(delete_urn) = AFFObject_delete;
      VMETHOD(cache_return) = AFFObject_cache_return;
      VMETHOD(close) = AFFObject_close;
 
