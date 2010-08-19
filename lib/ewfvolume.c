@@ -7,7 +7,7 @@ pthread_mutex_t LIBEWF_LOCK;
 
 // Global error handler for libewf
 #if HAVE_EWF_V2_API
-static libewf_error_t *ewf_error;
+static libewf_error_t *ewf_error=NULL;
 #endif
 
 #if 0
@@ -192,8 +192,14 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   {
     char buff[BUFF_SIZE];
 
+    memset(buff,0,BUFF_SIZE);
+    if(libewf_error_sprint(ewf_error, buff, BUFF_SIZE-1) < 0)
+      strcpy(buff, "(unknown)");
 
-    RaiseError(ERuntimeError, "libewf error: %s", ewf_error);
+    RaiseError(ERuntimeError, "libewf error: %s", buff);
+
+    libewf_error_free(&ewf_error);
+    ewf_error = NULL;
   };
 #else
   RaiseError(ERuntimeError, "libewf error");
