@@ -218,4 +218,3 @@ if 'debian' in COMMAND_LINE_TARGETS:
 #              X_RPM_GROUP    = 'Application/fu',
 #              SOURCE_URL     = 'http://foo.org/hello-1.2.3.tar.gz'
 #         )
-

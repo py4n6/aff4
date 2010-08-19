@@ -5,6 +5,6 @@ AFF4 uses the Scons build system which is already shipped with the
 AFF4 source tree. To install configure the config.py script if you
 need to update any of the settings and then issue:
 
-./scons.py install
+./scons install
 
 The library will be built and installed.
