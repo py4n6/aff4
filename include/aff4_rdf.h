@@ -214,11 +214,11 @@ RDFValue rdfvalue_from_int(void *ctx, uint64_t value);
 RDFValue rdfvalue_from_urn(void *ctx, char *value);
 RDFValue rdfvalue_from_string(void *ctx, char *value);
 
-RDFURN new_RDFURN(void *ctx);
-XSDInteger new_XSDInteger(void *ctx);
-XSDString new_XSDString(void *ctx);
-XSDDatetime new_XSDDateTime(void *ctx);
+DLL_PUBLIC RDFURN new_RDFURN(void *ctx);
+DLL_PUBLIC XSDInteger new_XSDInteger(void *ctx);
+DLL_PUBLIC XSDString new_XSDString(void *ctx);
+DLL_PUBLIC XSDDatetime new_XSDDateTime(void *ctx);
 
 // Generic constructor for an RDFValue
-RDFValue new_rdfvalue(void *ctx, char *type);
+DLL_PUBLIC RDFValue new_rdfvalue(void *ctx, char *type);
 #endif

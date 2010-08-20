@@ -25,7 +25,7 @@ DEBUG = []
 PROCESS_LOCKS = False
 
 ## This is where the installation lives
-PREFIX = "/home/scudette/prefix/"
+PREFIX = "/usr/local/"
 
 ## Location of the libxml2 headers - If this is None we call xml2-config
 LIBXML2_INCLUDES = None
