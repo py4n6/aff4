@@ -24,7 +24,10 @@ static int EWFVolume_destructor(void *this) {
   if(self->handle) {
     LOCK_EWF;
 #if HAVE_EWF_V2_API
-    libewf_handle_close(&self->handle, &ewf_error);
+    if( libewf_handle_close(&self->handle, &ewf_error) != 0 ) {
+      libewf_error_free(
+          &ewf_error );
+    };
 #else
     libewf_close(self->handle);
 #endif
@@ -102,7 +105,7 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
 #if HAVE_EWF_V2_API
   if(libewf_handle_open(&this->handle, filenames,
                         amount_of_filenames, LIBEWF_OPEN_READ,
-                        &ewf_error)==0) {
+                        &ewf_error)!=1) {
     goto libewf_error;
   };
 #else
@@ -281,6 +284,7 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");
+    libewf_error_free(&ewf_error);
     goto error;
   };
 
