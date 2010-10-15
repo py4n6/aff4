@@ -284,7 +284,9 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");
+#if HAVE_EWF_V2_API
     libewf_error_free(&ewf_error);
+#endif
     goto error;
   };
 
