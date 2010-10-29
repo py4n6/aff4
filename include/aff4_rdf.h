@@ -98,7 +98,10 @@ CLASS(XSDInteger, RDFValue)
      int64_t value;
      char *serialised;
 
-     /** A convenience Constructor to set a new value */
+     /** A convenience Constructor to set a new value.
+
+      DEFAULT(value) = 0;
+     */
      XSDInteger METHOD(XSDInteger, Con, uint64_t value);
 
      void METHOD(XSDInteger, set, uint64_t value);

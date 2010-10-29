@@ -163,7 +163,7 @@ int main() {
 
    ## Libraries
    SconsUtils.utils.check("lib", conf, Split("""
-ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
+stdc++ ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
 """))
 
    ## We dont want to actually link to tsk3 and regfi - just check

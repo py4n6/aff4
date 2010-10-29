@@ -233,6 +233,7 @@ def check(type, conf, headers, extra_include =''):
             else:
                 tmp = header
 
+            tmp = tmp.replace("+","p")
             define = "HAVE_" + tmp.upper().replace(".","_")
 
         global HEADERS
