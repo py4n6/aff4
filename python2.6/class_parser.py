@@ -1005,6 +1005,9 @@ class PVoid(Void):
     def __init__(self, name, type = 'void *', *args):
         Type.__init__(self, name, type)
 
+    def python_name(self):
+        return None
+
 class StringArray(String):
     interface = 'array'
     buildstr = 'O'
@@ -1246,6 +1249,9 @@ wrapped_%(name)s->base = %(call)s;
 class PointerStructWrapper(StructWrapper):
     def from_python_object(self, source, destination, method, **kw):
         return "%s = ((Gen_wrapper)%s)->base;\n" % (destination, source)
+
+    def byref(self):
+        return "&wrapped_%s" % self.name
 
 class Timeval(Type):
     """ handle struct timeval values """
