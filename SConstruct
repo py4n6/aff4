@@ -177,10 +177,15 @@ ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
    except ValueError: pass
 
    ## libewf comes in two flavours a V2 API and an older API
-   SconsUtils.utils.check_build(conf, "libewf_glob", "HAVE_EWF_V2_API", """
+   SconsUtils.utils.check_build(conf, "libewf_glob", 
+                                "HAVE_EWF_V2_API", """
 #include <libewf.h>
 
 int main() {
+  char *version = libewf_get_version();
+
+  printf("Version %s\n", version);
+
   libewf_glob(NULL, 0, 0, NULL, NULL, NULL);
   libewf_glob_free(NULL, 0, NULL);
 
@@ -202,7 +207,7 @@ Export("env")
 config_h_build([File('lib/config.h')], [File('lib/sc_config.h.in')], env)
 
 SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
-            'python2.6/SConstruct', #'tests/SConstruct',
+            'python2.6/SConstruct', 'tests/SConstruct',
             'applications/SConstruct'])
 
 if 'debian' in COMMAND_LINE_TARGETS:

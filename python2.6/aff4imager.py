@@ -5,7 +5,7 @@ This file contains utility functions first, followed by an optparse
 front end. This allows users to import this file as a module, or run
 it directly.  """
 import sys, pdb
-import re, os.path
+import os.path
 import pyaff4
 
 import time
@@ -23,20 +23,25 @@ colors['end']    = '\033[0m'
 
 #If the output is not a terminal, remove the colors
 if not sys.stdout.isatty():
-   for key, value in colors.iteritems():
-      colors[key] = ''
+    for key, value in colors.iteritems():
+        colors[key] = ''
 
 def error(msg):
-   print "%s%s%s" % (colors['red'], msg, colors['end'])
-   sys.exit(1)
+    print "%s%s%s" % (colors['red'], msg, colors['end'])
+    sys.exit(1)
 
 def warn(msg):
-   print "%s%s%s" % (colors['yellow'], msg, colors['end'])
+    print "%s%s%s" % (colors['yellow'], msg, colors['end'])
 
 
 class Renderer(pyaff4.Logger):
+    """ A custom renderer we install to format the output nicely.
+
+    This is a demonstation of how to install custom renderers in AFF4.
+    """
     def message(self, level, service, subject, message):
-       sys.stdout.write("%s%s%s: %s\n" % (colors['blue'],subject.value,
+        """ Render the message to stdout. """
+        sys.stdout.write("%s%s%s: %s\n" % (colors['blue'], subject.value,
                                           colors['end'], message))
 
 def image(output, options, fds):
@@ -45,7 +50,6 @@ def image(output, options, fds):
     """
     #pdb.set_trace()
     base, ext = os.path.splitext(output)
-    extra = ''
     volume_count = 0
 
     ## These are all the volumes we have created - we only close them
@@ -96,34 +100,34 @@ def image(output, options, fds):
 
             ## Check if we need to change volumes
             if options.max_size > 0 and oracle.resolve_value(
-               volume_urns[-1], pyaff4.AFF4_DIRECTORY_OFFSET, size) and \
-               size.value > options.max_size:
+                volume_urns[-1], pyaff4.AFF4_DIRECTORY_OFFSET, size) and \
+                size.value > options.max_size:
 
-               ## Make a new volume:
-               volume_count += 1
-               new_filename = "%s.%02d%s" % (base, volume_count, ext)
-               output_URI.set(new_filename)
+                ## Make a new volume:
+                volume_count += 1
+                new_filename = "%s.%02d%s" % (base, volume_count, ext)
+                output_URI.set(new_filename)
 
-               volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
-               volume.set(pyaff4.AFF4_STORED, output_URI)
-               volume = volume.finish()
-               volume_urns.append(volume.urn)
-               volume.cache_return()
+                volume = oracle.create(pyaff4.AFF4_ZIP_VOLUME, 'w')
+                volume.set(pyaff4.AFF4_STORED, output_URI)
+                volume = volume.finish()
+                volume_urns.append(volume.urn)
+                volume.cache_return()
 
-               ## The image is now stored in the new volume
-               image_fd.set(pyaff4.AFF4_STORED, volume_urns[-1])
+                ## The image is now stored in the new volume
+                image_fd.set(pyaff4.AFF4_STORED, volume_urns[-1])
 
-               warn("New volume created on %s%s" % (
-                     colors['cyan'], output_URI.value))
+                warn("New volume created on %s%s" % (
+                    colors['cyan'], output_URI.value))
 
         ## This will block until all threads have finished.
         image_fd.close()
 
     ## Now close all the volumes off
     for volume_urn in volume_urns:
-       print "Closing %s" % volume_urn.value
-       volume_fd = oracle.open(volume_urn, 'w')
-       volume_fd.close()
+        print "Closing %s" % volume_urn.value
+        volume_fd = oracle.open(volume_urn, 'w')
+        volume_fd.close()
 
 import optparse
 import pyaff4
@@ -134,21 +138,24 @@ parser.add_option("-i", "--image", default=None,
                   help = "Imaging mode")
 
 parser.add_option("-m", "--max_size", default=0, type=int,
-                  help = "Try to change volumes after the volume is bigger than this size")
+                  help = "Try to change volumes after the "
+                  "volume is bigger than this size")
 
 parser.add_option("-o", "--output", default=None,
-                  help="Create the output volume on this file or URL (using webdav)")
+                  help="Create the output volume on this"
+                  " file or URL (using webdav)")
 
 parser.add_option("", "--link", default="default",
-                  help="Create a symbolic link to the image URN with this name")
+                  help="Create a symbolic link to the image URN"
+                  " with this name")
 
-parser.add_option("-D","--dump", default=None,
+parser.add_option("-D", "--dump", default=None,
                   help="Dump out this stream (to --output or stdout)")
 
-parser.add_option("","--chunks_in_segment", default=0, type='int',
+parser.add_option("", "--chunks_in_segment", default=0, type='int',
                   help="Total number of chunks in each bevy")
 
-parser.add_option("","--nocompress", default=False, action='store_true',
+parser.add_option("", "--nocompress", default=False, action='store_true',
                   help="Do not Compress image")
 
 ## This is needed to support globbing for -l option
@@ -170,13 +177,14 @@ def vararg_callback(option, opt_str, value, parser):
     del parser.rargs[:len(value)]
     setattr(parser.values, option.dest, value)
 
-parser.add_option("-l","--load", default=[], dest="load",
+parser.add_option("-l", "--load", default=[], dest="load",
                   action = "callback", callback=vararg_callback,
                   help="Load this volume to prepopulate the resolver")
 
 parser.add_option("-I", "--info", default=None,
                   action = 'store_true',
-                  help="Information mode - dump all information in the resolver")
+                  help="Information mode - dump all "
+                  "information in the resolver")
 
 parser.add_option("-V", "--verify", default=None,
                   action = 'store_true',
@@ -212,22 +220,23 @@ renderer = Renderer()
 oracle.register_logger(renderer)
 
 if options.dump:
-   output = options.output
-   if not output:
-      out_fd = sys.stdout
+    output = options.output
+    if not output:
+        out_fd = sys.stdout
 
-   urn = pyaff4.RDFURN()
-   urn.set(options.dump)
-   fd = oracle.open(urn, 'r')
-   try:
-      while 1:
-         data = fd.read(10 * 1024* 1024)
-         if not data: break
+    urn = pyaff4.RDFURN()
+    urn.set(options.dump)
+    fd = oracle.open(urn, 'r')
+    try:
+        while 1:
+            data = fd.read(10 * 1024* 1024)
+            if not data:
+                break
 
-         out_fd.write(data)
+            out_fd.write(data)
 
-   finally:
-      fd.cache_return()
+    finally:
+        fd.cache_return()
 
 
 elif options.image:
@@ -240,13 +249,14 @@ elif options.image:
     urn = pyaff4.RDFURN()
     try:
         for arg in args:
-           urn.set(arg)
-           fd = oracle.open(urn, 'r')
-           fds.append(fd)
-           if not isinstance(fd, pyaff4.FileLikeObject):
-              error("%s is not a file like object" % arg)
+            urn.set(arg)
+            fd = oracle.open(urn, 'r')
+            fds.append(fd)
+            if not isinstance(fd, pyaff4.FileLikeObject):
+                error("%s is not a file like object" % arg)
 
-        if not output.startswith("/"): output = "%s/%s" % (os.getcwd(), output)
+        if not output.startswith("/"):
+            output = "%s/%s" % (os.getcwd(), output)
 
         image(output, options, fds)
     finally:

@@ -9,12 +9,16 @@ nenv = env.Clone()
 
 nenv.Append(CFLAGS = "-include lib/config.h -Ilibraptor/ -DBUILDING_DLL -fvisibility=hidden ")
 
-source_files = """
+env.liboo_files = """
 #lib/class.c #lib/talloc.c
-#lib/misc.c #lib/zip.c #lib/stringio.c #lib/resolver.c
+#lib/misc.c #lib/error.c
+"""
+
+source_files = """
+#lib/zip.c #lib/stringio.c #lib/resolver.c
 #lib/rdf.c  #lib/image.c #lib/map.c
 #lib/encode.c #lib/queue.c
-#lib/graph.c #lib/error.c
+#lib/graph.c
 #libreplace/replace.c
 #lib/public.c
 """
@@ -46,7 +50,7 @@ tdb_files = """
 nenv.Append(CPPFLAGS = ['-Ilibreplace/'], CFLAGS=" -DNO_CONFIG_H")
 
 env.libaff4_sources =  Split(uuid_files + source_files + " #lib/init.c " +
-                             tdb_files) + env.libraptor_objs
+                             tdb_files + env.liboo_files) + env.libraptor_objs
 
 ## Autogenerate initialization functions for all classes
 def generate_init_functions(target, source, env):

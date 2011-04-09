@@ -1,9 +1,20 @@
-import SconsUtils.utils as utils
+from SconsUtils import cunit
 
 Import("env")
 
-programs = """talloc_test.c"""
+programs = Split("""
+test_resolver.c
+""")
 
-for prog in Split(programs):
-    prog = env.Program([prog],
-                       LIBS='aff4', LIBPATH="#lib/")
+nenv = env.Clone()
+nenv.Append(CFLAGS="-Ilibreplace -Ilib ")
+
+
+cunit.buildCUnitTestFromFiles(nenv, programs,
+                              extraObjects = Split(env.liboo_files),
+                              LIBS=env.libaff4_so, LIBPATH="#lib/")
+
+
+#for prog in Split(programs):
+#  prog = nenv.Program([prog] + Split(env.liboo_files),
+#                      LIBS=env.libaff4_so, LIBPATH="#lib/")

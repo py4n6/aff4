@@ -12,8 +12,8 @@ TDB_LOCATION = "/tmp/"
 V = True
 
 ## Optional build modules
-disable_ewf = False
-disable_aff = False
+disable_ewf = True
+disable_aff = True
 disable_curl = True
 
 ## This can be any combination of ('lock','resolver','object')

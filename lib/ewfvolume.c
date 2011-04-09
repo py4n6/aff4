@@ -132,7 +132,8 @@ int EWFVolume_load_from(AFF4Volume self, RDFURN urn, char mode) {
   UNLOCK_EWF;
 
   // Only seems to exist in experimental API
-#if HAVE_EWF_V2_API
+  // This seems to break stable build.
+#if 0 && HAVE_EWF_V2_API
   if(libewf_glob_free(filenames, amount_of_filenames, &ewf_error) < 0) {
     goto libewf_error;
   };
@@ -284,7 +285,9 @@ static int EWFStream_read(FileLikeObject self, char *buffer, unsigned long int l
   UNLOCK_EWF;
   if(res < 0) {
     RaiseError(ERuntimeError, "libewf read error");
+#if HAVE_EWF_V2_API
     libewf_error_free(&ewf_error);
+#endif
     goto error;
   };
 

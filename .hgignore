@@ -58,3 +58,6 @@ aff4.h
 DEBIAN
 *.deb
 deb/
+cunit-*
+cutest_main.c
+*.xml
