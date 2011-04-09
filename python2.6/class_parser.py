@@ -481,16 +481,20 @@ static int check_method_override(PyObject *self, PyTypeObject *type, char *metho
  PyModule_AddObject(m, "%(name)s", (PyObject *)&%(name)s_Type);
 """ % {'name': cls.class_name})
 
-    def write(self, out):
-        ## Write the headers
-        if self.public_api:
-            self.public_api.write('''
+    def write_public_api_implementation(self, out):
+        out.write('''
 #ifdef BUILDING_DLL
 #include "misc.h"
 #else
 #include "aff4_public.h"
 #endif
 ''')
+        return
+
+    def write(self, out):
+        ## Write the headers
+        if self.public_api:
+			self.write_public_api_implementation(self.public_api)
 
         ## Prepare all classes
         for cls in self.classes.values():
@@ -2872,4 +2876,3 @@ if __name__ == '__main__':
 #        p.parse(arg)
 
 #    p.write(sys.stdout)
-

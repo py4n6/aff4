@@ -3,7 +3,8 @@ from SconsUtils import cunit
 Import("env")
 
 programs = Split("""
-test_resolver.c
+resolver.c
+rdfvalues.c
 """)
 
 nenv = env.Clone()

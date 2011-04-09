@@ -31,14 +31,14 @@ static int URLParse_parse(URLParse self, char *url) {
   talloc_free(self->ctx);
   self->ctx = talloc_size(self, 1);
 
-  // Its ok to call us with NULL - we just wont parse anything.
-  if(!url) goto exit;
-
   // Initialise with defaults:
   self->scheme = "";
   self->netloc = "";
   self->query = "";
   self->fragment = "";
+
+  // Its ok to call us with NULL - we just wont parse anything.
+  if(!url) goto exit;
 
   while(!end) {
     if(url[i]==0) end=1;
@@ -140,6 +140,9 @@ static char *collapse_path(char *query, void *ctx) {
           list_del(&current->list);
           talloc_free(current);
         };
+		// Drop /./ sequences
+	  } else if(current->length==1 && current->element[0]=='.') {
+		talloc_free(current);
         // Drop empty path elements
       } else if(current->length==0) {
         talloc_free(current);
@@ -355,11 +358,14 @@ static void XSDString_set(XSDString self, char *string, int length) {
 static int XSDString_decode(RDFValue this, char *data, int length, RDFURN subject) {
   XSDString self = (XSDString)this;
 
-  self->value = talloc_realloc_size(self, self->value, length + 1);
+  if(self->value)
+	talloc_free(self->value);
+
+  self->value = talloc_size(self, length + 1);
   self->length = length;
 
-  self->value[length]=0;
   memcpy(self->value, data, length);
+  self->value[length]=0;
 
   return length;
 
@@ -1333,24 +1339,24 @@ RDFValue rdfvalue_from_string(void *ctx, char *value) {
   return (RDFValue)result;
 };
 
-RDFURN new_RDFURN(void *ctx) {
+DLL_PUBLIC RDFURN new_RDFURN(void *ctx) {
   return CONSTRUCT(RDFURN, RDFValue, Con, ctx);
 };
 
-XSDInteger new_XSDInteger(void *ctx) {
+DLL_PUBLIC XSDInteger new_XSDInteger(void *ctx) {
   return CONSTRUCT(XSDInteger, RDFValue, Con, ctx);
 };
 
-XSDString new_XSDString(void *ctx) {
+DLL_PUBLIC XSDString new_XSDString(void *ctx) {
   return CONSTRUCT(XSDString, RDFValue, Con, ctx);
 };
 
-XSDDatetime new_XSDDateTime(void *ctx) {
+DLL_PUBLIC XSDDatetime new_XSDDateTime(void *ctx) {
   return CONSTRUCT(XSDDatetime, RDFValue, Con, ctx);
 };
 
 // Uses the class registry to construct a type by name
-RDFValue new_rdfvalue(void *ctx, char *type) {
+DLL_PUBLIC RDFValue new_rdfvalue(void *ctx, char *type) {
   RDFValue result = NULL;
   RDFValue class_ref = (RDFValue)CALL(RDF_Registry, borrow,
                                       ZSTRING(type));

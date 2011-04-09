@@ -37,8 +37,9 @@ char *from_int(uint64_t arg) {
   return buffer;
 };
 
-static char *illegal_filename_chars = "|?[]\\+<>:;\'\",*# ";
+static char *illegal_filename_chars = "|?[]\\+<>:%;&\'\",*# ";
 static char illegal_filename_lut[128];
+
 void init_luts() {
   char *i;
 
@@ -191,5 +192,9 @@ uint64_t htonll(uint64_t n) {
 #endif
   return(retval);
 }
+
+AFF4_MODULE_INIT(A000_misc) {
+  init_luts();
+};
 
 #endif  //HAVE_HTONLL

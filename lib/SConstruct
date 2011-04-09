@@ -11,7 +11,7 @@ nenv.Append(CFLAGS = "-include lib/config.h -Ilibraptor/ -DBUILDING_DLL -fvisibi
 
 env.liboo_files = """
 #lib/class.c #lib/talloc.c
-#lib/misc.c #lib/error.c
+#lib/error.c
 """
 
 source_files = """
@@ -20,7 +20,7 @@ source_files = """
 #lib/encode.c #lib/queue.c
 #lib/graph.c
 #libreplace/replace.c
-#lib/public.c
+#lib/public.c #lib/misc.c
 """
 
 ## Optional support for EWF and AFF1 volumes
