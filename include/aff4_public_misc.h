@@ -57,6 +57,7 @@ struct Object_t {
   char *__name__;
   char *__doc__;
   int __size;
+  void *extension;
 };
 
 extern struct Object_t __Object;

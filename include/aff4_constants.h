@@ -44,7 +44,7 @@
 #define AFF4_INTERFACE  PREDICATE_NAMESPACE "interface"
 #define AFF4_SIZE       PREDICATE_NAMESPACE "size"
 #define AFF4_SHA        PREDICATE_NAMESPACE "sha256"
-#define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "timestamp"
+#define AFF4_TIMESTAMP  PREDICATE_NAMESPACE "createdTime"
 #define AFF4_MAP_DATA   PREDICATE_NAMESPACE "map"
 
 /** These are volatile versions of the above - they are mostly used
@@ -147,8 +147,8 @@
 /** Stream types */
 #define AFF4_SEGMENT          PREDICATE_NAMESPACE "segment"
 #define AFF4_LINK             PREDICATE_NAMESPACE "link"
-#define AFF4_IMAGE            PREDICATE_NAMESPACE "image"
-#define AFF4_MAP              PREDICATE_NAMESPACE "map"
+#define AFF4_IMAGE            PREDICATE_NAMESPACE "BevyStream"
+#define AFF4_MAP              PREDICATE_NAMESPACE "Map"
 #define AFF4_ENCRYTED         PREDICATE_NAMESPACE "encrypted"
 #define AFF4_LIBAFF_STREAM    PREDICATE_NAMESPACE "aff1_stream"
 #define AFF4_ERROR_STREAM     PREDICATE_NAMESPACE "error"

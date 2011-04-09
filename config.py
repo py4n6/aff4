@@ -25,7 +25,7 @@ DEBUG = []
 PROCESS_LOCKS = False
 
 ## This is where the installation lives
-PREFIX = "/home/scudette/prefix/"
+PREFIX = "/usr/local/"
 
 ## Location of the libxml2 headers - If this is None we call xml2-config
 LIBXML2_INCLUDES = None
@@ -41,7 +41,7 @@ RAPTOR_NTRIPLES = True
 RAPTOR_RDFXML = True
 
 ## Location of tsk3 headers
-TSK3_HEADER_LOCATION = "/usr/include/tsk3/"
+TSK3_HEADER_LOCATION = "/usr/local/include/tsk3/"
 
 ## Location of regfi headers
 REGFI_HEADER_LOCATION = "/usr/local/include/regfi/"
