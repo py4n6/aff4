@@ -4,7 +4,7 @@
 /** The following are related to raptor - RDF serialization and
     parsing
 */
-#include "misc.h"
+#include "aff4_internal.h"
 
 /** Parsing URLs - basically a state machine */
 enum url_state {

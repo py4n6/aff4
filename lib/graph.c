@@ -12,7 +12,7 @@ same time). When close()ed the graph will be serialised to the volume
 as an RDF encoded segment (by default using the turtle encoding).
 */
 
-#include "misc.h"
+#include "aff4_internal.h"
 
 // We store these in the resolver as the statements stored within this graph
 struct statement_t {

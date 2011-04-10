@@ -1,3 +1,8 @@
+/***************************************************************
+This is the main internal include file for aff4. This is only included
+internally within the library. Users should only ever use the file
+aff4.h.
+****************************************************************/
 #include <assert.h>
 
 #define BUFF_SIZE 40960
@@ -141,3 +146,7 @@ TDB_DATA tdb_data_from_string(char *string);
 // A helper to access the URN of an object.
 #define URNOF(x)  ((AFFObject)x)->urn
 #define STRING_URNOF(x) ((char *)URNOF(x)->value)
+
+// Initialization function for the aff4 library. Autogenned in init.c.
+void init_aff4();
+

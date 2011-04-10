@@ -362,7 +362,7 @@ def buildCUnitTestFromFiles (env,
     else:
         libs = CLVar (env.get ("LIBS", [])) + "cunit"
     cutest = env.Program (os.path.join (buildFolder, package + "-test"),
-                          sources,
+                          sources + extraObjects,
                           LIBS = libs,
                           **kwargs)[0]
 

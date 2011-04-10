@@ -13,7 +13,7 @@ if utils.HEADERS.get("HAVE_CUNIT"):
     nenv.Append(CFLAGS="-Ilibreplace -Ilib ")
 
     cunit.buildCUnitTestFromFiles(nenv, programs,
-                                  extraObjects = Split(env.liboo_files),
-                                  LIBS=env.libaff4_so, LIBPATH="#lib/")
+                                  extraObjects = Split(env.libaff4_static_lib),
+                                  CFLAGS=" -lxml ", LIBPATH="#lib/")
 else:
     utils.warn("CUnit not found. Skipping unit tests.")

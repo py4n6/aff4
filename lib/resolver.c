@@ -1,5 +1,5 @@
 /** This file implemnts the resolver */
-#include "misc.h"
+#include "aff4_internal.h"
 
 extern Cache RDF_Registry;
 
@@ -15,10 +15,6 @@ RESOLVER_ITER *_Resolver_get_iter(Resolver self,
       */
 PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
                             RDFValue value);
-
-//int AFF4_TDB_FLAGS = TDB_NOLOCK | TDB_NOSYNC | TDB_VOLATILE | TDB_INTERNAL;
-//int AFF4_TDB_FLAGS = TDB_INTERNAL;
-int AFF4_TDB_FLAGS = TDB_DEFAULT;
 
 #define RESOLVER_CACHE_SIZE 20
 
@@ -531,11 +527,17 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   // The location of the TDB databases
   char *path = getenv("AFF4_TDB_PATH");
   pthread_mutexattr_t mutex_attr;
+  int tdb_flags = TDB_DEFAULT;
 
   self->mode = mode;
 
+  // If path is not specified, we use memory only databases
+  if(!path)  {
+    tdb_flags = TDB_INTERNAL;
+  };
+
   if(mode & RESOLVER_MODE_NONPERSISTANT)
-    AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+    tdb_flags |= TDB_CLEAR_IF_FIRST;
 
   if(mode & RESOLVER_MODE_DEBUG_MEMORY)
     talloc_enable_leak_report_full();
@@ -549,8 +551,6 @@ static Resolver Resolver_Con(Resolver self, int mode) {
 
     return oracle;
   };
-
-  if(!path)  path = TDB_LOCATION;
 
   self->logger = CONSTRUCT(Logger, Logger, Con, self);
 
@@ -568,7 +568,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
     goto error;
 
   self->urn_db = tdb_open(buff, TDB_HASH_SIZE,
-			  AFF4_TDB_FLAGS,
+			  tdb_flags,
 			  O_RDWR | O_CREAT, 0644);
   if(!self->urn_db)
     goto error;
@@ -577,7 +577,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
     goto error1;
 
   self->attribute_db = tdb_open(buff, TDB_HASH_SIZE,
-				AFF4_TDB_FLAGS,
+				tdb_flags,
 				O_RDWR | O_CREAT, 0644);
   
   if(!self->attribute_db) 
@@ -587,7 +587,7 @@ static Resolver Resolver_Con(Resolver self, int mode) {
     goto error2;
 
   self->data_db = tdb_open(buff, TDB_HASH_SIZE,
-			   AFF4_TDB_FLAGS,
+			   tdb_flags,
 			   O_RDWR | O_CREAT, 0644);
 
   if(!self->data_db)
@@ -595,13 +595,22 @@ static Resolver Resolver_Con(Resolver self, int mode) {
   
   if(snprintf(buff, BUFF_SIZE, "%s/data_store.tdb", path) >= BUFF_SIZE)
     goto error3;
-  
-  self->data_store_fd = open(buff, O_RDWR | O_CREAT, 0644);
-  if(self->data_store_fd < 0)
-    goto error3;
 
-  if(AFF4_TDB_FLAGS & TDB_CLEAR_IF_FIRST) {
-    ftruncate(self->data_store_fd, 0);
+  if(!path) {
+    char template[] = "/tmp/aff4_dataXXXXXX";
+    self->data_store_fd = mkstemp(template);
+
+    if(self->data_store_fd == -1) {
+      goto error3;
+    };
+  } else {
+    self->data_store_fd = open(buff, O_RDWR | O_CREAT, 0644);
+    if(self->data_store_fd < 0)
+      goto error3;
+
+    if(tdb_flags & TDB_CLEAR_IF_FIRST) {
+      ftruncate(self->data_store_fd, 0);
+    };
   };
 
   // This ensures that the data store never has an offset of 0 (This
@@ -1940,14 +1949,16 @@ static int TDB_destructor(void *ptr) {
 };
 
 static TDB TDB_Con(TDB self, char *filename, int mode) {
+  int tdb_flags = TDB_DEFAULT;
+
   if(mode & RESOLVER_MODE_NONPERSISTANT)
-    AFF4_TDB_FLAGS |= TDB_CLEAR_IF_FIRST;
+    tdb_flags |= TDB_CLEAR_IF_FIRST;
 
   if(mode & RESOLVER_MODE_DEBUG_MEMORY)
     talloc_enable_leak_report_full();
 
   self->file = tdb_open(filename, TDB_HASH_SIZE,
-                        AFF4_TDB_FLAGS,
+                        tdb_flags,
                         O_RDWR | O_CREAT, 0644);
 
   if (self->file) {
@@ -2016,6 +2027,12 @@ DLL_PUBLIC void aff4_incref(void *ptr) {
 };
 
 DLL_PUBLIC Resolver AFF4_get_resolver() {
+  // Make a global oracle
+  if(!oracle) {
+    // Create the global oracle
+    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, 0);
+  };
+
   return oracle;
 };
 

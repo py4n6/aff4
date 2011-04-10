@@ -1,7 +1,6 @@
 #ifndef _ENCODE_H
 #define _ENCODE_H
-#include <class.h>
-#include <misc.h>
+#include <aff4_internal.h>
 
 /* binary encoding functions.
       

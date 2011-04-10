@@ -2,7 +2,14 @@
  This file tests various RDFValues.
 ***************************************************/
 
-#include "aff4.h"
+#include "aff4_internal.h"
+
+INIT() {
+  init_aff4();
+
+  return 0;
+};
+
 
 /********************************************
    Tests for URL Parsing.

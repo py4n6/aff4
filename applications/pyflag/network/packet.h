@@ -73,7 +73,7 @@
 #ifndef __PACKET_H
 #define __PACKET_H
 #include "enum.h"
-#include "misc.h"
+#include "aff4_internal.h"
 #include "list.h"
 #include <stdint.h>
 #include "struct.h"

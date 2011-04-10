@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "misc.h"
+#include "aff4_internal.h"
 #include <zlib.h>
 #include "queue.h"
 #include "trp.h"

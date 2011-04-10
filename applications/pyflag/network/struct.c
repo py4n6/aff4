@@ -28,7 +28,7 @@
 #include "struct.h"
 #include <string.h>
 #include <stdint.h>
-#include "misc.h"
+#include "aff4_internal.h"
 
 /********* Chars ****************/
 static int Char_pack(char *input, StringIO output) {

@@ -78,12 +78,16 @@ def generate_init_functions(target, source, env):
 
 We incorporate initialization functions for all plugins registered.
 */
-#include "misc.h"
+#include "aff4_internal.h"
 
 // initialiser prototypes
 %(init_prototypes)s
 
 void __attribute ((constructor)) _init_aff4_library (void) {
+   init_aff4();
+};
+
+void init_aff4(void) {
 %(class_initialisers)s
 
 // Module Initialisers
@@ -107,7 +111,10 @@ env.libaff4_so = library = nenv.VersionedSharedLibrary("aff4", '0', env.libaff4_
 env.installed_libaff4_so = nenv.InstallVersionedSharedLibrary("${prefix}/lib/", library)
 utils.install_target = nenv.Alias('install', '${prefix}')
 
-#utils.libaff4_static_lib = nenv.StaticLibrary('aff4', env.libaff4_sources)
+env.libaff4_static_lib = nenv.StaticLibrary(
+    'aff4',
+    [env.libaff4_sources, env.libraptor_static_lib],
+    )
 
 
 PROCESSED_FILES = Split("""

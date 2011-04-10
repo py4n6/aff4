@@ -16,6 +16,8 @@ if not env.config.LIBXML2_LINK:
 raptor_env.Append(CFLAGS = env.config.LIBXML2_INCLUDES,
                   LDFLAGS= env.config.LIBXML2_LINK)
 
+env.Append(LDFLAGS= env.config.LIBXML2_LINK)
+
 conf = Configure(raptor_env)
 
 utils.check("header", conf, Split(""" LIBXML_PARSER_H:libxml/parser.h
@@ -58,6 +60,7 @@ if env.config.RAPTOR_RDFXML:
 
     env.Append(SHLINKFLAGS = utils.pkg_config("xml2","libs"))
 
+env.libraptor_static_lib = raptor_env.StaticLibrary( [ "#libraptor/%s" % x for x in f] )
 env.libraptor_objs = raptor_env.SharedObject( [ "#libraptor/%s" % x for x in f] )
 
 config_h_build([File('raptor_config.h')], [File('sc_config.h.in')], env)

@@ -484,7 +484,7 @@ static int check_method_override(PyObject *self, PyTypeObject *type, char *metho
     def write_public_api_implementation(self, out):
         out.write('''
 #ifdef BUILDING_DLL
-#include "misc.h"
+#include "aff4_internal.h"
 #else
 #include "aff4_public.h"
 #endif

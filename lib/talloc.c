@@ -30,7 +30,7 @@
   inspired by http://swapped.cc/halloc/
 */
 
-#include "misc.h"
+#include "aff4_internal.h"
 #include "replace.h"
 #include "talloc.h"
 

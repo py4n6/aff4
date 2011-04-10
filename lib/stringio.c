@@ -1,5 +1,5 @@
 #include "stringio.h"
-#include "misc.h"
+#include "aff4_internal.h"
 #include <strings.h>
 
 static StringIO StringIO_constructor(StringIO self) {

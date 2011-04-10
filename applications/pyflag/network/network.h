@@ -33,7 +33,7 @@
 #define __NETWORK_H
 
 #include "packet.h"
-#include "misc.h"
+#include "aff4_internal.h"
 
 /************************************************
     Needed packers and unpackers

@@ -26,7 +26,6 @@
 # * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 # ******************************************************/
 #include "network.h"
-#include "misc.h"
 #include "pcap.h"
 
 /*** Packers and unpackers for ethernet mac addresses */

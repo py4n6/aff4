@@ -8,7 +8,6 @@
 ** Last update Sun May 12 01:17:25 2002 Speed Blue
 */
 
-//#include "misc.h"
 #include <pthread.h>
 #include <class.h>
 #include <string.h>

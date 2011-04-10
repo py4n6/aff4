@@ -1,4 +1,4 @@
-#include "misc.h"
+#include "aff4_internal.h"
 
 uint64_t parse_int(char *string) {
   char *endptr;

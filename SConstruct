@@ -1,3 +1,4 @@
+import glob
 import sys, pdb
 import os
 import SconsUtils.utils as utils
@@ -163,7 +164,7 @@ int main() {
 
    ## Libraries
    SconsUtils.utils.check("lib", conf, Split("""
-stdc++ ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi
+stdc++ ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi xml2
 """))
 
    ## We dont want to actually link to tsk3 and regfi - just check
@@ -212,6 +213,12 @@ SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
 
 if 'debian' in COMMAND_LINE_TARGETS:
       SConscript("deb/SConscript")
+
+
+env.Clean("distclean", glob.glob(".sconsign.*") + [
+      ".sconf_temp",
+      "config.log",
+      ])
 
 # env.Package( NAME           = 'libaff4',
 #              VERSION        = '0.1.rc1',

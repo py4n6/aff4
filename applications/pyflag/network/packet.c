@@ -28,7 +28,6 @@
 #include "talloc.h"
 #include <string.h>
 #include "packet.h"
-#include "misc.h"
 #include <ctype.h>
 
 /*************************************************** 

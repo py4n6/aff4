@@ -8,7 +8,7 @@ Import('env')
 nenv = env.Clone()
 
 BOUND_FILES = Split("""
-              #include/misc.h
+              #include/aff4_internal.h
               #include/aff4_constants.h
               #include/aff4_utils.h
               #include/aff4_rdf.h
