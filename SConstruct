@@ -118,7 +118,7 @@ if not env.GetOption('clean') and not env.GetOption('help'):
    SconsUtils.utils.check("header", conf, Split("""
 standards.h stdint.h inttypes.h string.h strings.h sys/types.h STDC_HEADERS:stdlib.h
 crypt.h dlfcn.h stdint.h stddef.h stdio.h errno.h stdlib.h unistd.h fuse.h
-utime.h arpa/inet.h stdargs.h libewf.h
+utime.h arpa/inet.h stdargs.h libewf.h HAVE_CUNIT:CUnit/CUnit.h
 """))
 
    ## Mandatory dependencies

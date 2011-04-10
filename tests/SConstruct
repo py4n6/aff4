@@ -1,21 +1,19 @@
 from SconsUtils import cunit
+from SconsUtils import utils
 
 Import("env")
 
-programs = Split("""
-resolver.c
-rdfvalues.c
-""")
+if utils.HEADERS.get("HAVE_CUNIT"):
+    programs = Split("""
+    resolver.c
+    rdfvalues.c
+    """)
 
-nenv = env.Clone()
-nenv.Append(CFLAGS="-Ilibreplace -Ilib ")
+    nenv = env.Clone()
+    nenv.Append(CFLAGS="-Ilibreplace -Ilib ")
 
-
-cunit.buildCUnitTestFromFiles(nenv, programs,
-                              extraObjects = Split(env.liboo_files),
-                              LIBS=env.libaff4_so, LIBPATH="#lib/")
-
-
-#for prog in Split(programs):
-#  prog = nenv.Program([prog] + Split(env.liboo_files),
-#                      LIBS=env.libaff4_so, LIBPATH="#lib/")
+    cunit.buildCUnitTestFromFiles(nenv, programs,
+                                  extraObjects = Split(env.liboo_files),
+                                  LIBS=env.libaff4_so, LIBPATH="#lib/")
+else:
+    utils.warn("CUnit not found. Skipping unit tests.")
