@@ -15,6 +15,7 @@ Test a Cache object - similar to a python dict.
 ***********************************************/
 TEST(CacheTest1) {
   Cache test = CONSTRUCT(Cache, Cache, Con, NULL, HASH_TABLE_SIZE, 0);
+
   // Keys can not be static
   char *key1 = talloc_strdup(test, "hello");
   char *key2 = talloc_strdup(test, "world");
@@ -22,7 +23,6 @@ TEST(CacheTest1) {
   RDFURN url2;
 
   url->set(url, "http://www.example.com");
-
   CU_ASSERT_EQUAL(test->cache_size, 0);
 
   test->put(test, ZSTRING(key1), (Object)url);
@@ -40,13 +40,13 @@ TEST(CacheTest1) {
 
   // Get
   // Missing key
-  CU_ASSERT_EQUAL(NULL, test->get(test, ZSTRING(key2)));
-  
+  CU_ASSERT_EQUAL(NULL, test->get(test, test, ZSTRING(key2)));
+
   // Key hit
-  url2 = (RDFURN)test->get(test, ZSTRING(key1));
+  url2 = (RDFURN)test->get(test, test, ZSTRING(key1));
   CU_ASSERT_EQUAL(url2, url);
-		  
   CU_ASSERT_EQUAL(test->cache_size, 0);
+
 
   aff4_free(test);
 };
@@ -82,10 +82,100 @@ TEST(CacheTestExpiry) {
 
   // Old one expired
   CU_ASSERT_PTR_NULL(test->borrow(test, ZSTRING("Ahello")));
-  
+
   // New one still there
   CU_ASSERT_PTR_NOT_NULL(test->borrow(test, ZSTRING("Ghello")));
   CU_ASSERT_PTR_NOT_NULL(test->borrow(test, ZSTRING("Mhello")));
 
   aff4_free(test);
+};
+
+
+/**********************************************
+Test MemoryDataStore object
+***********************************************/
+TEST(MemoryDataStoreTestSet) {
+  DataStore store = new_MemoryDataStore(NULL);
+  DataStoreObject value = CONSTRUCT(DataStoreObject, DataStoreObject, Con, store,
+                                    ZSTRING("hello"), "xsd:string");
+
+  DataStoreObject value1 = CONSTRUCT(DataStoreObject, DataStoreObject, Con, store,
+                                    ZSTRING("world"), "xsd:string");
+  DataStoreObject test;
+
+  /* Lock the store */
+  CALL(store, lock);
+
+  /* Check that we can set and get the same string */
+  CALL(store, set, "url", "attribute", value);
+  test = CALL(store, get, "url", "attribute");
+  CU_ASSERT_NSTRING_EQUAL(test->data, value->data, value->length);
+  CU_ASSERT_STRING_EQUAL(test->data, "hello");
+  CU_ASSERT_EQUAL(test->length, value->length);
+
+  /* Check that setting again displaces old values. */
+  CALL(store, set, "url", "attribute", value1);
+  test = CALL(store, get, "url", "attribute");
+  CU_ASSERT_STRING_EQUAL(test->data, "world");
+
+  CALL(store, unlock);
+  talloc_free(store);
+};
+
+
+TEST(MemoryDataStoreTestAdd) {
+  DataStore store = new_MemoryDataStore(NULL);
+  DataStoreObject value = CONSTRUCT(DataStoreObject, DataStoreObject, Con, store,
+                                    ZSTRING("hello"), "xsd:string");
+
+  DataStoreObject value1 = CONSTRUCT(DataStoreObject, DataStoreObject, Con, store,
+                                    ZSTRING("world"), "xsd:string");
+  DataStoreObject test;
+
+  Object iter;
+
+  /* Lock the store */
+  CALL(store, lock);
+
+  /* Check that we can set and get the same string */
+  CALL(store, set, "url", "attribute", value);
+  CALL(store, add, "url", "attribute", value1);
+
+  /* Now iterate */
+  iter = CALL(store, iter, "url", "attribute");
+  CU_ASSERT_PTR_NOT_NULL(iter);
+
+  test = CALL(store, next, &iter);
+  CU_ASSERT_STRING_EQUAL(test->data, "hello");
+  CU_ASSERT_PTR_NOT_NULL(iter);
+
+  test = CALL(store, next, &iter);
+  CU_ASSERT_STRING_EQUAL(test->data, "world");
+  CU_ASSERT_PTR_NULL(iter);
+
+  CALL(store, unlock);
+
+  aff4_free(store);
+};
+
+
+/**********************************************
+Test Resolver object
+***********************************************/
+TEST(AFF4ResolverTest) {
+  Resolver resolver = AFF4_get_resolver();
+  RDFURN urn = new_RDFURN(resolver);
+  XSDString value = new_XSDString(resolver);
+
+  value->set(value, ZSTRING("hello"));
+  urn->set(urn, "http://www.test.com/foobar");
+
+  CALL(resolver, set, urn, "attribute", (RDFValue)value);
+
+  value = (XSDString)CALL(resolver, resolve, resolver, urn, "attribute");
+
+  CU_ASSERT_STRING_EQUAL(value->value, "hello");
+  CU_ASSERT_STRING_EQUAL(NAMEOF(value), "XSDString");
+
+  aff4_free(resolver);
 };

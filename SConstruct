@@ -185,7 +185,7 @@ stdc++ ewf curl afflib pthread HAVE_OPENSSL:ssl tsk3 regfi xml2
 int main() {
   char *version = libewf_get_version();
 
-  printf("Version %s\n", version);
+  printf("Version %s\\n", version);
 
   libewf_glob(NULL, 0, 0, NULL, NULL, NULL);
   libewf_glob_free(NULL, 0, NULL);

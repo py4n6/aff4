@@ -197,9 +197,13 @@ def check_size(conf, types):
 
     for t in types:
         name = "SIZEOF_" + t.replace(" ","_").upper()
-        HEADERS[name] = conf.CheckTypeSize(
-            t, size = _DEFAULTS[t][0])
-
+        HEADERS[name] = 0
+        for size in _DEFAULTS[t]:
+          result = conf.CheckTypeSize(t, size = size)
+          if result:
+            HEADERS[name] = result
+            break
+        
 def check_type(conf, types):
     header = None
     for t in types:
@@ -431,15 +435,15 @@ def pkg_config(pkg, type):
 _DEFAULTS = {
     'char': [1,],
     'short' : [2,],
-    'int' : [4, 2],
-    'long' : [4, 8],
+    'int' : [8, 4, 2],
+    'long' : [8, 4, 8],
     'long long' : [8, 4],
     # Normally, there is no need to check unsigned types, because they are
     # guaranteed to be of the same size than their signed counterpart.
     'unsigned char': [1,],
     'unsigned short' : [2,],
-    'unsigned int' : [4, 2],
-    'unsigned long' : [4, 8],
+    'unsigned int' : [8, 4, 2],
+    'unsigned long' : [8, 4, 8],
     'unsigned long long' : [8, 4],
     'float' : [4,],
     'double' : [8,],

@@ -101,8 +101,15 @@ class dblite:
     # any OSError exception  thrown by the chmod() call.
     try: self._os_chmod(self._file_name, 0777)
     except OSError: pass
-    self._os_unlink(self._file_name)
-    self._os_rename(self._tmp_name, self._file_name)
+
+    try: self._os_unlink(self._file_name)
+    except OSError:
+      import pdb; pdb.set_trace()
+
+
+    try: self._os_rename(self._tmp_name, self._file_name)
+    except OSError: pass
+
     self._needs_sync = 00000
     if (keep_all_files):
       self._shutil_copyfile(

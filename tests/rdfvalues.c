@@ -86,7 +86,7 @@ TEST(XSDIntegerTest) {
   // Our integer is our memory context
   XSDInteger i = new_XSDInteger(NULL);
   RDFURN subject = new_RDFURN(i);
-  TDB_DATA *data;
+  DataStoreObject data;
   uint64_t value = 12345;
   // This is an alias to the base class
   RDFValue base = (RDFValue)i;
@@ -98,15 +98,13 @@ TEST(XSDIntegerTest) {
 
   // Encoding
   data = base->encode(base, subject);
-  CU_ASSERT_TRUE(!memcmp((char *)data->dptr, (char *)&value, sizeof(value)));
-  CU_ASSERT_EQUAL(data->dsize, sizeof(value));
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, subject), "12345");
+  CU_ASSERT_TRUE(!memcmp((char *)data->data, (char *)&value, sizeof(value)));
+  CU_ASSERT_EQUAL(data->length, sizeof(value));
+  CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), "12345");
 
   // Decoding
-  value = 54321;
-  base->decode(base, (char *)&value, sizeof(value), subject);
+  base->decode(base, data, subject);
   CU_ASSERT_EQUAL(i->value, value);
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, subject), "54321");
 
   // Parsing
   base->parse(base, "656567", subject);
@@ -125,7 +123,7 @@ TEST(XSDStringTest) {
   // Our string is our memory context
   XSDString i = new_XSDString(NULL);
   RDFURN subject = new_RDFURN(i);
-  TDB_DATA *data;
+  DataStoreObject data;
   char *value = "this is a test";
   int value_len = strlen(value);
   // This is an alias to the base class
@@ -139,24 +137,26 @@ TEST(XSDStringTest) {
 
   // Encoding
   data = base->encode(base, subject);
-  CU_ASSERT_TRUE(!memcmp((char *)data->dptr, value, value_len));
-  CU_ASSERT_EQUAL(data->dsize, value_len);
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, subject), value);
+  CU_ASSERT_TRUE(!memcmp((char *)data->data, value, value_len));
+  CU_ASSERT_EQUAL(data->length, value_len);
+  CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), value);
 
   // Decoding
   value = "another string";
-  value_len = strlen(value);
+  data = CONSTRUCT(DataStoreObject, DataStoreObject, Con, i,
+                   ZSTRING(value), "xsd:string");
 
-  base->decode(base, value, value_len, subject);
+  base->decode(base, data, subject);
   CU_ASSERT_STRING_EQUAL(i->value, value);
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, subject), value);
+  CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), value);
 
 
   // Clone
   {
     XSDString clone = (XSDString)i->super.clone((RDFValue)i, i);
 
-    CU_ASSERT_STRING_EQUAL(i->value, clone->value);
+    CU_ASSERT_EQUAL(i->length, clone->length);
+    CU_ASSERT_NSTRING_EQUAL(i->value, clone->value, i->length);
   };
 
   // This is sufficient - all other memory will be freed here.
@@ -171,7 +171,7 @@ TEST(XSDStringTest) {
 TEST(RDFURNTest) {
   RDFURN url = new_RDFURN(NULL);
   RDFURN subject = new_RDFURN(url);
-  TDB_DATA *data;
+  DataStoreObject data;
   char *value = "aff4://8768765486/root/file";
   int value_len = strlen(value);
   // This is an alias to the base class
@@ -187,11 +187,8 @@ TEST(RDFURNTest) {
   data = base->encode(base, subject);
 
   // We encode the URN id as a uint32_t
-  CU_ASSERT_EQUAL(*(uint32_t *)data->dptr,
-                  oracle->get_id_by_urn(oracle, url, 0));
-  CU_ASSERT_EQUAL(data->dsize, sizeof(uint32_t));
-
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, subject), value);
+  CU_ASSERT_STRING_EQUAL(data->data, value);
+  CU_ASSERT_STRING_EQUAL(base->serialise(base, url, subject), value);
 
 
   // Add relative
@@ -208,11 +205,8 @@ TEST(RDFURNTest) {
 
   // Decoding
   {
-    uint32_t urn_id = oracle->get_id_by_urn(oracle, subject, 1);
-
-    base->decode(base, (char *)&urn_id, sizeof(urn_id), subject);
-
-    CU_ASSERT_STRING_EQUAL(url->value, subject->value);
+    base->decode(base, data, subject);
+    CU_ASSERT_STRING_EQUAL(url->value, value);
   };
 
   // Clone
@@ -223,5 +217,19 @@ TEST(RDFURNTest) {
   };
 
   // This is sufficient - all other memory will be freed here.
+  aff4_free(url);
+};
+
+TEST(RDFURNRelativeName) {
+  RDFURN url = new_RDFURN(NULL);
+  RDFURN subject = new_RDFURN(url);
+  char *data;
+
+  url->set(url, "aff4://1234/a/b/c");
+  subject->set(subject, "aff4://1234/a/b/c/d/e/f/g");
+
+  data = subject->relative_name(subject, url);
+  CU_ASSERT_STRING_EQUAL(data, "/d/e/f/g");
+
   aff4_free(url);
 };

@@ -74,18 +74,13 @@ char *escape_filename(void *ctx, const char *filename, unsigned int length) {
   return buffer;
 };
 
-TDB_DATA escape_filename_data(void *ctx, TDB_DATA name) {
-  TDB_DATA result;
-
-  result.dptr = (unsigned char *)escape_filename(ctx, (char *)name.dptr, name.dsize-1);
-  result.dsize = strlen((char *)result.dptr);
-
-  return result;
+char *escape_filename_data(void *ctx, XSDString name) {
+  return (char *)escape_filename(ctx, (char *)name->value, name->length-1);
 };
 
-TDB_DATA unescape_filename(void *ctx, const char *filename) {
+XSDString unescape_filename(void *ctx, const char *filename) {
   char buffer[BUFF_SIZE];
-  TDB_DATA result;
+  XSDString result = new_XSDString(ctx);
 
   int i,j=0;
   int length = strlen(filename)+1;
@@ -106,9 +101,7 @@ TDB_DATA unescape_filename(void *ctx, const char *filename) {
     };
   };
 
-  result.dptr = (unsigned char *)talloc_strdup(ctx, buffer);
-  result.dsize = j;
-
+  CALL(result, set, buffer, j);
   return result;
 };
 

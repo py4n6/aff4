@@ -325,8 +325,8 @@ CLASS(ZipFileStream, FileLikeObject)
 	container_urn. If the stream is opened for writing the file_fd
 	may be passed in. It remains locked until we are closed.
      */
-     ZipFileStream METHOD(ZipFileStream, Con2, RDFURN urn, \
-			  RDFURN file_urn, RDFURN container_urn,\
+     ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn,                  \
+                          RDFURN file_urn, RDFURN container_urn,        \
 			  char mode, FileLikeObject file_fd);
 END_CLASS
 
@@ -382,4 +382,3 @@ void graph_init();
 } /* closing brace for extern "C" */
 #endif
 #endif
-

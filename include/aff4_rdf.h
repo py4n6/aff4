@@ -4,6 +4,9 @@
 
 struct RDFURN_t;
 
+struct DataStoreObject_t;
+
+
 /**** A class used to parse URNs */
 CLASS(URLParse, Object)
       char *scheme;
@@ -49,6 +52,9 @@ CLASS(RDFValue, Object)
       */
       raptor_uri *raptor_literal_datatype;
 
+      /* RDFValues can be strung into lists. */
+      struct list_head list;
+
       RDFValue METHOD(RDFValue, Con);
 
       /* This method is called to parse a serialised form into this
@@ -57,19 +63,20 @@ CLASS(RDFValue, Object)
 
          DEFAULT(subject) = NULL;
       */
-      int METHOD(RDFValue, parse, char *serialised_form, struct RDFURN_t *subject);
+      int METHOD(RDFValue, parse, char *serialised_form, \
+                 struct RDFURN_t *subject);
 
-      /* This method is called to serialise this object into the
-	 TDB_DATA struct for storage in the TDB data store. The new
-	 memory will be allocated with this object's context and must
-	 be freed by the caller.
+      /* This method is called to serialise this object into the data store. The
+	 new memory will be allocated with this object's context.
       */
-      TDB_DATA *METHOD(RDFValue, encode, struct RDFURN_t *subject);
+      struct DataStoreObject_t *METHOD(RDFValue, encode, \
+                                       struct RDFURN_t *subject);
 
       /* This method is used to decode this object from the
          data_store. The fd is seeked to the start of this record.
       */
-      int METHOD(RDFValue, decode, char *data, int length, struct RDFURN_t *subject);
+      int METHOD(RDFValue, decode, struct DataStoreObject_t *obj, \
+                 struct RDFURN_t *subject);
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be
@@ -77,7 +84,7 @@ CLASS(RDFValue, Object)
 
           DEFAULT(subject) = NULL;
       */
-      char *METHOD(RDFValue, serialise, struct RDFURN_t *subject);
+      char *METHOD(RDFValue, serialise, void *ctx, struct RDFURN_t *subject);
 
       /** Makes a copy of this value - the copy should be made as
           efficiently as possible (It might just take a reference to
@@ -123,9 +130,10 @@ CLASS(XSDString, RDFValue)
      BORROWED char *METHOD(XSDString, get);
 END_CLASS
 
-     /** Dates serialised according the XML standard */
-CLASS(XSDDatetime, RDFValue)
-     struct timeval value;
+/** Dates serialised according the XML standard. Internally we store time
+ * since the epoch in milliseconds.
+ */
+CLASS(XSDDatetime, XSDInteger)
      int gm_offset;
      char *serialised;
 
@@ -167,7 +175,7 @@ CLASS(RDFURN, RDFValue)
      void METHOD(RDFURN, add_query, unsigned char *query, unsigned int len);
 
      /* This method returns the relative name */
-     TDB_DATA METHOD(RDFURN, relative_name, RDFURN volume);
+     char *METHOD(RDFURN, relative_name, RDFURN volume);
 END_CLASS
 
 

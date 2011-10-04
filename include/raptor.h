@@ -37,7 +37,6 @@ extern "C" {
 /* Required for va_list in raptor_vsnprintf */
 #include <stdarg.h>
 
-
 /**
  * RAPTOR_API:
  *

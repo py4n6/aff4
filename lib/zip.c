@@ -612,7 +612,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       struct CDFileHeader cd_header;
       RDFURN filename = URNOF(self)->copy(URNOF(self), self);
       char *escaped_filename;
-      TDB_DATA unescaped;
+      XSDString unescaped;
       uint32_t tmp;
       uint64_t tmp64;
       uint64_t current_offset;
@@ -635,7 +635,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	goto error_reason;
 
       unescaped = unescape_filename(filename, escaped_filename);
-      CALL(filename, add, (char *)unescaped.dptr);
+      CALL(filename, add, (char *)unescaped->value);
 
       // Tell the oracle about this new member
       CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED, 
@@ -805,9 +805,10 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   switch(mode) {
   case 'w': {
     struct ZipFileHeader header;
+
     // We start writing new files at this point
-    TDB_DATA relative_name = CALL(filename, relative_name, URNOF(self));
-    TDB_DATA escaped_filename = escape_filename_data(filename, relative_name);
+    char *relative_name = CALL(filename, relative_name, URNOF(self));
+    char *escaped_filename = escape_filename(filename, ZSTRING(relative_name));
     time_t epoch_time;
     struct tm *now;
 
@@ -845,14 +846,14 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     // We prefer to write trailing directory structures
     header.flags = 0x08;
     header.compression_method = compression;
-    header.file_name_length = escaped_filename.dsize;
+    header.file_name_length = strlen(escaped_filename);
     header.lastmoddate = (now->tm_year + 1900 - 1980) << 9 | 
       (now->tm_mon + 1) << 5 | now->tm_mday;
     header.lastmodtime = now->tm_hour << 11 | now->tm_min << 5 | 
       now->tm_sec / 2;
 
     CALL(fd, write,(char *)&header, sizeof(header));
-    CALL(fd, write,(char *)escaped_filename.dptr, escaped_filename.dsize);
+    CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
 
     // Store some info about the segment
     CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSION,
@@ -883,7 +884,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     // noone is able to write on the storage file until this segment
     // is closed.
     result = (FileLikeObject)CONSTRUCT(ZipFileStream,
-				       ZipFileStream, Con2, NULL,
+				       ZipFileStream, Con, NULL,
 				       filename, self->storage_urn,
 				       URNOF(self),
 				       'w', fd);
@@ -891,7 +892,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
   };
   case 'r': {
     result = (FileLikeObject)CONSTRUCT(ZipFileStream,
-				       ZipFileStream, Con2, NULL,
+				       ZipFileStream, Con, NULL,
 				       filename, self->storage_urn,
 				       URNOF(self),
 				       'r', NULL);
@@ -1061,7 +1062,7 @@ static int ZipFile_close(AFFObject this) {
       while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
 	struct tm *now;
-        TDB_DATA relative_name, escaped_filename;
+        char *relative_name, escaped_filename;
 
         /*
         AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_ZIP_VOLUME, urn,
@@ -1085,7 +1086,7 @@ static int ZipFile_close(AFFObject this) {
 
 	// This gets the relative name of the fqn
 	relative_name = urn->relative_name(urn, URNOF(self));
-        escaped_filename = escape_filename_data(urn, relative_name);
+        escaped_filename = escape_filename(self, urn, ZSTRING_NO_NULL(relative_name));
 
 	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_TIMESTAMP,
 	     (RDFValue)epoch_time);
@@ -1120,7 +1121,7 @@ static int ZipFile_close(AFFObject this) {
 	cd.dostime = now->tm_hour << 11 | now->tm_min << 5 | 
 	  now->tm_sec / 2;
 	cd.external_file_attr = 0644 << 16L;
-	cd.file_name_length = escaped_filename.dsize;
+	cd.file_name_length = strlen(escaped_filename);
 
 	// The following are optional zip64 fields. They must appear
 	// in this order:
@@ -1159,7 +1160,7 @@ static int ZipFile_close(AFFObject this) {
 
 	// OK - write the cd header
 	CALL(cache, write, (char *)&cd, sizeof(cd));
-	CALL(cache, write, (char *)escaped_filename.dptr, escaped_filename.dsize);
+	CALL(cache, write, ZSTRING_NO_NULL(escaped_filename));
 	if(zip64_header->size > 4) {
 	  CALL(cache, write, zip64_header->data, zip64_header->size);
 	};
@@ -1693,7 +1694,7 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 VIRTUAL(ZipFileStream, FileLikeObject) {
   VMETHOD_BASE(AFFObject, Con) = ZipFileStream_AFFObject_Con;
   VMETHOD_BASE(AFFObject, dataType) = AFF4_SEGMENT;
-  VMETHOD(Con2) = ZipFileStream_Con;
+  VMETHOD(Con) = ZipFileStream_Con;
 
   VMETHOD_BASE(FileLikeObject, write) = ZipFileStream_write;
   VMETHOD_BASE(FileLikeObject, read) = ZipFileStream_read;

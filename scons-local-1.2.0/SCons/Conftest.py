@@ -664,12 +664,11 @@ return 0;
             sym = None
 
         ret = context.BuildProg(text, suffix)
-
         _YesNoResult(context, ret, sym, text,
                      "Define to 1 if you have the `%s' library." % lib_name)
         if oldLIBS != -1 and (ret or not autoadd):
             context.SetLIBS(oldLIBS)
-            
+    
         if not ret:
             return ret
 

@@ -115,9 +115,9 @@ PRIVATE CLASS(Cache, Object)
      Cache METHOD(Cache, Con, int hash_table_width, int max_cache_size);
 
      /* Return a cache object or NULL if its not there. The
-        object is removed from the cache.
+        object is removed from the cache. Memory ownership is ctx.
      */
-     Object METHOD(Cache, get, char *key, int len);
+     Object METHOD(Cache, get, void *ctx, char *key, int len);
 
      /* Returns a reference to the object. The object is still owned
       by the cache. Note that this should only be used in caches which

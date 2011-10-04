@@ -523,7 +523,6 @@ class SConfBase:
         call that - you can use TryCompile / TryLink / TryRun instead
         """
         global _ac_build_counter
-
         # Make sure we have a PSPAWN value, and save the current
         # SPAWN value.
         try:

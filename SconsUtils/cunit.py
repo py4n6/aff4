@@ -118,6 +118,7 @@ typedef enum {
 int main (int argc, char* argv[])
 {
    CuMode mode = CU_MODE_NOT_SET;
+   talloc_enable_leak_report_full();
 
 %(mainInit (env))s
 

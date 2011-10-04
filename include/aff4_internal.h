@@ -138,8 +138,10 @@ uint64_t htonll(uint64_t n);
 uint64_t parse_int(char *string);
 char *from_int(uint64_t arg);
 char *escape_filename(void *ctx, const char *filename, unsigned int length);
-TDB_DATA escape_filename_data(void *ctx, TDB_DATA name);
-TDB_DATA unescape_filename(void *ctx, const char *filename);
+char *escape_filename_data(void *ctx, XSDString name);
+
+/* New reference */
+XSDString unescape_filename(void *ctx, const char *filename);
 
 TDB_DATA tdb_data_from_string(char *string);
 
@@ -149,4 +151,3 @@ TDB_DATA tdb_data_from_string(char *string);
 
 // Initialization function for the aff4 library. Autogenned in init.c.
 void init_aff4();
-

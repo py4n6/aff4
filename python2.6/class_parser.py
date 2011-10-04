@@ -1,5 +1,20 @@
 import sys, os, re, pdb, StringIO
 
+# Copyright 2010 Michael Cohen
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+
+
 """
 Documentation regarding the python bounded code.
 
@@ -371,6 +386,8 @@ case ERuntimeError:
     return PyExc_RuntimeError;
 case EWarning:
     return PyExc_AssertionError;
+case EIOError:
+    return PyExc_IOError;
 default:
     return PyExc_RuntimeError;
 };
@@ -481,20 +498,16 @@ static int check_method_override(PyObject *self, PyTypeObject *type, char *metho
  PyModule_AddObject(m, "%(name)s", (PyObject *)&%(name)s_Type);
 """ % {'name': cls.class_name})
 
-    def write_public_api_implementation(self, out):
-        out.write('''
+    def write(self, out):
+        ## Write the headers
+        if self.public_api:
+            self.public_api.write('''
 #ifdef BUILDING_DLL
 #include "aff4_internal.h"
 #else
 #include "aff4_public.h"
 #endif
 ''')
-        return
-
-    def write(self, out):
-        ## Write the headers
-        if self.public_api:
-			self.write_public_api_implementation(self.public_api)
 
         ## Prepare all classes
         for cls in self.classes.values():
@@ -669,8 +682,13 @@ class String(Type):
         name = name or self.name
 
         result = """PyErr_Clear();
-   if(!%(name)s) { PyErr_Format(PyExc_RuntimeError, "%(name)s is NULL"); goto error; };
-   %(result)s = PyString_FromStringAndSize((char *)%(name)s, %(length)s);\nif(!%(result)s) goto error;
+    if(!%(name)s) {
+      Py_INCREF(Py_None);
+      %(result)s = Py_None;
+    } else {
+      %(result)s = PyString_FromStringAndSize((char *)%(name)s, %(length)s);
+      if(!%(result)s) goto error;
+    };
 """ % dict(name=name, result=result,length=self.length)
 
         if "BORROWED" not in self.attributes and 'BORROWED' not in kw:
@@ -750,11 +768,11 @@ class Integer(Type):
 
     def to_python_object(self, name=None, result='Py_result', **kw):
         name = name or self.name
-        return "PyErr_Clear();\n%s = PyLong_FromLongLong(%s);\n" % (result, name)
+        return "PyErr_Clear();\n%s = PyLong_FromLong(%s);\n" % (result, name)
 
     def from_python_object(self, source, destination, method, **kw):
         return "PyErr_Clear();\n"\
-            "%(destination)s = PyLong_AsUnsignedLong(%(source)s);\n" % dict(
+            "%(destination)s = PyInt_AsUnsignedLongMask(%(source)s);\n" % dict(
             source = source, destination= destination)
 
     def comment(self):
@@ -771,6 +789,16 @@ class Integer32(Integer):
 class Integer64(Integer):
     buildstr = 'K'
     int_type = 'uint64_t '
+
+    def to_python_object(self, name=None, result='Py_result', **kw):
+        name = name or self.name
+        return "PyErr_Clear();\n%s = PyLong_FromLongLong(%s);\n" % (result, name)
+
+    def from_python_object(self, source, destination, method, **kw):
+        return "PyErr_Clear();\n"\
+            "%(destination)s = PyInt_AsUnsignedLongLongMask(%(source)s);\n" % dict(
+            source = source, destination= destination)
+
 
 class Char(Integer):
     buildstr = "s"
@@ -1008,9 +1036,6 @@ class Void(Type):
 class PVoid(Void):
     def __init__(self, name, type = 'void *', *args):
         Type.__init__(self, name, type)
-
-    def python_name(self):
-        return None
 
 class StringArray(String):
     interface = 'array'
@@ -1253,9 +1278,6 @@ wrapped_%(name)s->base = %(call)s;
 class PointerStructWrapper(StructWrapper):
     def from_python_object(self, source, destination, method, **kw):
         return "%s = ((Gen_wrapper)%s)->base;\n" % (destination, source)
-
-    def byref(self):
-        return "&wrapped_%s" % self.name
 
 class Timeval(Type):
     """ handle struct timeval values """
@@ -1762,31 +1784,46 @@ self->initialise = (void *)py%(class_name)s_initialize_proxies;
             out.write(type.pre_call(self))
 
         ## Now call the wrapped function
-        out.write("\n ClearError();\nPy_BEGIN_ALLOW_THREADS\nself->base = CONSTRUCT(%s, %s, %s" % (
-                self.class_name,
-                self.definition_class_name,
-                self.name))
+        out.write("""
+ClearError();
+
+// Allocate a new instance
+self->base = (%(class_name)s)alloc_%(class_name)s();
+
+// Update the target by replacing its methods with proxies to call back into python
+py%(class_name)s_initialize_proxies(self, self->base);
+
+Py_BEGIN_ALLOW_THREADS
+
+// Now call the constructor
+if( !(%(class_name)s)((%(definition_class_name)s)&__%(class_name)s)->Con(
+  (%(definition_class_name)s)self->base""" % (dict(
+      class_name=self.class_name,
+      definition_class_name=self.definition_class_name)))
+
         tmp = ''
         for type in self.args:
             tmp += ", " + type.call_arg()
 
         self.error_set = True
-        out.write(tmp + """);\nPy_END_ALLOW_THREADS\n
-       if(!CheckError(EZero)) {
-         char *buffer;
-         PyObject *exception = resolve_exception(&buffer);
+        out.write(tmp + """)) {
+ self->base = NULL;
+};
 
-         PyErr_Format(exception,
-                    "%%s", buffer);
-         ClearError();
-         goto error;
+Py_END_ALLOW_THREADS
+
+  if(!CheckError(EZero)) {
+    char *buffer;
+    PyObject *exception = resolve_exception(&buffer);
+
+    PyErr_Format(exception, "%%s", buffer);
+    ClearError();
+    goto error;
+
   } else if(!self->base) {
     PyErr_Format(PyExc_IOError, "Unable to construct class %(class_name)s");
     goto error;
   };
-
-  // Update the target by replacing its methods with proxies to call back into python
-  py%(class_name)s_initialize_proxies(self, self->base);
 
 """ % self.__dict__)
 

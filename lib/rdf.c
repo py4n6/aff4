@@ -6,6 +6,7 @@
 */
 #include "aff4_internal.h"
 
+
 /** Parsing URLs - basically a state machine */
 enum url_state {
   STATE_METHOD,
@@ -211,50 +212,59 @@ VIRTUAL(URLParse, Object) {
 /** Following is the implementation of the basic RDFValue types */
 /** base class */
 static RDFValue RDFValue_Con(RDFValue self) {
+  INIT_LIST_HEAD(&self->list);
+
   return self;
 };
 
-/** By default we encode into the tdb the same way as we serialise to
-    RDF */
-static TDB_DATA *RDFValue_encode(RDFValue self, RDFURN subject) {
-  TDB_DATA *result = talloc(self, TDB_DATA);
+/** By default we encode into the data store the same way as we serialise to
+    RDF.
+*/
+static DataStoreObject RDFValue_encode(RDFValue self, RDFURN subject) {
+  char *data = CALL(self, serialise, NULL, subject);
 
-  result->dptr = (unsigned char *)CALL(self, serialise, subject);
-  if(!result->dptr) goto error;
+  if(!data) goto error;
 
-  result->dsize = strlen((char *)result->dptr)+1;
-
-  return result;
+  return CONSTRUCT(DataStoreObject, DataStoreObject, Con, self,
+                   ZSTRING(data), self->dataType);
 
  error:
-  talloc_free(result);
+  talloc_free(data);
   return NULL;
 };
 
-static int RDFValue_parse(RDFValue self, char *serialised, RDFURN urn) {
-  return CALL(self, decode, ZSTRING(serialised), urn);
+static int RDFValue_decode(RDFValue self, DataStoreObject serialised, RDFURN urn) {
+  return CALL(self, parse, serialised->data, urn);
+};
+
+
+static RDFValue RDFValue_clone(RDFValue self, void *ctx) {
+  RDFValue result = CONSTRUCT_FROM_REFERENCE((RDFValue)CLASSOF(self), Con, ctx);
+  DataStoreObject obj = CALL(self, encode, NULL);
+
+  CALL(result, decode, obj, NULL);
+  talloc_free(obj);
+
+  return result;
 };
 
 
 VIRTUAL(RDFValue, Object) {
     VMETHOD(Con) = RDFValue_Con;
     VMETHOD(encode) = RDFValue_encode;
-    VMETHOD(parse) = RDFValue_parse;
+    VMETHOD(decode) = RDFValue_decode;
+    VMETHOD(clone) = RDFValue_clone;
 
-    UNIMPLEMENTED(RDFValue, clone);
-    UNIMPLEMENTED(RDFValue, decode);
+    UNIMPLEMENTED(RDFValue, parse);
     UNIMPLEMENTED(RDFValue, serialise);
 } END_VIRTUAL
 
 // Encode integers for storage
-static TDB_DATA *XSDInteger_encode(RDFValue self, RDFURN subject) {
+static DataStoreObject XSDInteger_encode(RDFValue self, RDFURN subject) {
   XSDInteger this = (XSDInteger)self;
-  TDB_DATA *result = talloc(self, TDB_DATA);
 
-  result->dptr = (unsigned char *)&this->value;
-  result->dsize = sizeof(this->value);
-
-  return result;
+  return CONSTRUCT(DataStoreObject, DataStoreObject, Con, self,
+                   (char *)&this->value, sizeof(this->value), self->dataType);
 };
 
 static XSDInteger XSDInteger_Con(XSDInteger self, uint64_t value) {
@@ -272,23 +282,24 @@ static void XSDInteger_set(XSDInteger self, uint64_t value) {
   return;
 };
 
-static int XSDInteger_decode(RDFValue this, char *data, int length, RDFURN subject) {
+static int XSDInteger_decode(RDFValue this, DataStoreObject obj, RDFURN subject) {
   XSDInteger self = (XSDInteger)this;
 
   self->value = 0;
-  memcpy(&self->value, data, sizeof(self->value));
-  return length;
+  if(obj->length == sizeof(self->value)) {
+    memcpy(&self->value, obj->data, sizeof(self->value));
+  };
+
+  return obj->length;
 };
 
-static char *XSDInteger_serialise(RDFValue self, RDFURN subject) {
+static char *XSDInteger_serialise(RDFValue self, void *ctx, RDFURN subject) {
   XSDInteger this = (XSDInteger)self;
 
   if(this->serialised)
     talloc_unlink(self, this->serialised);
 
-  this->serialised = talloc_asprintf(self, "%llu", (long long unsigned int)this->value);
-
-  talloc_reference(NULL, this->serialised);
+  this->serialised = talloc_asprintf(ctx, "%llu", (long long unsigned int)this->value);
 
   return this->serialised;
 };
@@ -307,10 +318,10 @@ VIRTUAL(XSDInteger, RDFValue) {
    // This is our official data type - or at least what raptor gives us
    VATTR(super.dataType) = DATATYPE_XSD_INTEGER;
 
-   VMETHOD(super.encode) = XSDInteger_encode;
-   VMETHOD(super.decode) = XSDInteger_decode;
-   VMETHOD(super.serialise) = XSDInteger_serialise;
-   VMETHOD(super.parse) = XSDInteger_parse;
+   VMETHOD_BASE(RDFValue, encode) = XSDInteger_encode;
+   VMETHOD_BASE(RDFValue, decode) = XSDInteger_decode;
+   VMETHOD_BASE(RDFValue, serialise) = XSDInteger_serialise;
+   VMETHOD_BASE(RDFValue, parse) = XSDInteger_parse;
 
    VMETHOD(Con) = XSDInteger_Con;
    VMETHOD(set) = XSDInteger_set;
@@ -330,12 +341,14 @@ static XSDString XSDString_Con(XSDString self, char *string, int length) {
   return self;
 };
 
-static TDB_DATA *XSDString_encode(RDFValue self, RDFURN subject) {
+static DataStoreObject XSDString_encode(RDFValue self, RDFURN subject) {
   XSDString this = (XSDString)self;
-  TDB_DATA *result = talloc(self, TDB_DATA);
 
-  result->dptr = (unsigned char *)this->value;
-  result->dsize = this->length;
+  DataStoreObject result = CONSTRUCT(DataStoreObject, DataStoreObject, Con, self,
+                                     NULL, 0, self->dataType);
+  
+  result->data = (char *)talloc_memdup(result, this->value, this->length);
+  result->length = this->length;
 
   return result;
 };
@@ -355,27 +368,24 @@ static void XSDString_set(XSDString self, char *string, int length) {
   self->value[length]=0;
 };
 
-static int XSDString_decode(RDFValue this, char *data, int length, RDFURN subject) {
+static int XSDString_decode(RDFValue this, DataStoreObject obj, RDFURN subject) {
   XSDString self = (XSDString)this;
 
   if(self->value)
-	talloc_free(self->value);
+    talloc_free(self->value);
 
-  self->value = talloc_size(self, length + 1);
-  self->length = length;
+  self->value = talloc_memdup(self, obj->data, obj->length + 1);
+  self->length = obj->length;
 
-  memcpy(self->value, data, length);
-  self->value[length]=0;
-
-  return length;
-
+  self->value[obj->length]=0;
+  return obj->length;
 };
 
 /* We serialise the string */
-static char *XSDString_serialise(RDFValue self, RDFURN subject) {
+static char *XSDString_serialise(RDFValue self, void *ctx, RDFURN subject) {
   XSDString this = (XSDString)self;
 
-  talloc_reference(NULL, this->value);
+  talloc_reference(ctx, this->value);
 
   return this->value;
 };
@@ -389,31 +399,16 @@ static int XSDString_parse(RDFValue self, char *serialise, RDFURN subject) {
   return 1;
 };
 
-static RDFValue XSDString_clone(RDFValue self, void *ctx) {
-  XSDString this = (XSDString)self;
-  // Make a copy of this object
-  XSDString result = talloc_memdup(ctx, self, SIZEOF(self));
-
-  // Now make a copy of the value strings
-  result->value = talloc_memdup(result, this->value, this->length);
-
-  return (RDFValue)result;
-};
-
 VIRTUAL(XSDString, RDFValue) {
    VATTR(super.raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
    //VATTR(super.dataType) = XSD_NAMESPACE "string";
    // Strings by default dont need a dataType at all
    VATTR(super.dataType) = "";
 
-   // Our serialised form is the same as encoded form
-   VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
-
    VMETHOD_BASE(RDFValue, encode) = XSDString_encode;
    VMETHOD_BASE(RDFValue, decode) = XSDString_decode;
    VMETHOD_BASE(RDFValue, serialise) = XSDString_serialise;
    VMETHOD_BASE(RDFValue, parse) = XSDString_parse;
-   VMETHOD_BASE(RDFValue, clone) = XSDString_clone;
 
    VMETHOD(set) = XSDString_set;
    VMETHOD_BASE(XSDString, Con) = XSDString_Con;
@@ -421,15 +416,11 @@ VIRTUAL(XSDString, RDFValue) {
 
 // Encode urn for storage - we just encode the URN id of this urn and
 // resolve it back through the resolver.
-static TDB_DATA *RDFURN_encode(RDFValue self, RDFURN subject) {
+static DataStoreObject RDFURN_encode(RDFValue self, RDFURN subject) {
   RDFURN this = (RDFURN)self;
-  TDB_DATA *result = talloc(self, TDB_DATA);
-  uint32_t *id = talloc(result, uint32_t);
 
-  *id = CALL(oracle, get_id_by_urn, this, 1);
-
-  result->dptr = (unsigned char *)id;
-  result->dsize = sizeof(*id);
+  DataStoreObject result = CONSTRUCT(DataStoreObject, DataStoreObject, Con, self,
+                                     ZSTRING(this->value), self->dataType);
 
   return result;
 };
@@ -437,7 +428,7 @@ static TDB_DATA *RDFURN_encode(RDFValue self, RDFURN subject) {
 static RDFValue RDFURN_Con(RDFValue self) {
   RDFURN this = (RDFURN)self;
   this->parser = CONSTRUCT(URLParse, URLParse, Con, this, NULL);
-  this->value = talloc_strdup(self,"(unset)");
+  this->value = talloc_strdup(self, "(unset)");
 
   return self;
 };
@@ -463,34 +454,19 @@ static void RDFURN_set(RDFURN self, char *string) {
   return;
 };
 
-static RDFValue RDFURN_clone(RDFValue self, void *ctx) {
-  RDFURN result = talloc_memdup(ctx, self, SIZEOF(self));
-  RDFURN this = (RDFURN)self;
 
-  result->value = talloc_strdup(result, this->value);
-
-  return (RDFValue)result;
-};
-
-static int RDFURN_decode(RDFValue this, char *data, int length, RDFURN subject) {
+static int RDFURN_decode(RDFValue this, DataStoreObject obj, RDFURN subject) {
   RDFURN self = (RDFURN)this;
-  uint32_t *id = (uint32_t *)data;
 
-  if(length != sizeof(uint32_t))
-    goto error;
+  obj->data[obj->length] = 0;
+  CALL(self->parser, parse, obj->data);
+  self->value = CALL(self->parser, string, self);
 
-  // Ask the resolver to set ourselves based on the provided id
-  if(!CALL(oracle, get_urn_by_id, *id, self))
-    goto error;
-
-  return length;
-
- error:
-  return 0;
+  return 1;
 };
 
 /* We serialise the string */
-static char *RDFURN_serialise(RDFValue self, RDFURN subject) {
+static char *RDFURN_serialise(RDFValue self, void *ctx, RDFURN subject) {
   RDFURN this = (RDFURN)self;
 
   // This is incompatible with talloc - it has a special freer
@@ -555,14 +531,13 @@ static void RDFURN_add_query(RDFURN self, unsigned char *query, unsigned int len
 
 /** Compares our current URN to the volume. If we share a common base,
     return a relative URN */
-TDB_DATA RDFURN_relative_name(RDFURN self, RDFURN volume) {
-  TDB_DATA result;
+char *RDFURN_relative_name(RDFURN self, RDFURN volume) {
+  char *result;
 
   if(startswith(self->value, volume->value)) {
-    result.dptr = (unsigned char *)self->value + strlen(volume->value) + 1;
-    result.dsize = strlen((char *)result.dptr) +1;
+    result = (char *)talloc_strdup(self, self->value + strlen(volume->value));
   } else {
-    result = tdb_data_from_string(self->value);
+    result = talloc_strdup(self, self->value);
   };
 
   return result;
@@ -577,7 +552,6 @@ VIRTUAL(RDFURN, RDFValue) {
    VMETHOD_BASE(RDFValue, decode) = RDFURN_decode;
    VMETHOD_BASE(RDFValue, serialise) = RDFURN_serialise;
    VMETHOD_BASE(RDFValue, parse) = RDFURN_parse;
-   VMETHOD_BASE(RDFValue, clone) = RDFURN_clone;
 
 
    VMETHOD(Con) = RDFURN_Con2;
@@ -588,56 +562,34 @@ VIRTUAL(RDFURN, RDFValue) {
    VMETHOD(relative_name) = RDFURN_relative_name;
 } END_VIRTUAL
 
-static TDB_DATA *XSDDatetime_encode(RDFValue self, RDFURN subject) {
-  XSDDatetime this = (XSDDatetime)self;
-  TDB_DATA *result = talloc(self, TDB_DATA);
-
-  result->dptr = (unsigned char *)&this->value;
-  result->dsize = sizeof(this->value);
-
-  return result;
-};
-
-static int XSDDatetime_decode(RDFValue self, char *data, int length, RDFURN subject) {
-  XSDDatetime this = (XSDDatetime)self;
-
-  memcpy(&this->value, data, sizeof(this->value));
-  return length;
-};
 
 static void XSDDatetime_set(XSDDatetime self, struct timeval time) {
-  self->value = time;
+  XSDInteger pself = (XSDInteger)self;
+  pself->value = time.tv_sec * 1000000 + time.tv_usec;
 
   return;
 };
 
-static RDFValue XSDDatetime_clone(RDFValue self, void *ctx) {
-  XSDDatetime result = talloc_memdup(ctx, self, SIZEOF(self));
-  XSDDatetime this = (XSDDatetime)self;
-
-  result->value = this->value;
-
-  return (RDFValue)result;
-};
 
 #define DATETIME_FORMAT_STR "%Y-%m-%dT%H:%M:%S"
 
-static char *XSDDatetime_serialise(RDFValue self, RDFURN subject) {
+static char *XSDDatetime_serialise(RDFValue self, void *ctx, RDFURN subject) {
   XSDDatetime this = (XSDDatetime)self;
   char buff[BUFF_SIZE];
-
-  if(this->serialised) talloc_unlink(self, this->serialised);
+  time_t value = (time_t)(this->super.value / 1000000);
+  /** FIXME - Encode usec */
+  //int usec = this->super.value % 1000000;
+  char *serialised;
 
   if(BUFF_SIZE > strftime(buff, BUFF_SIZE, DATETIME_FORMAT_STR,
-			  localtime(&this->value.tv_sec))) {
-    this->serialised = talloc_asprintf(this, "%s.%06u+%02u:%02u", buff,
-                                       0,
-				       //(unsigned int)this->value.tv_usec,
-				       (unsigned int)this->gm_offset / 3600,
-				       (unsigned int)this->gm_offset % 3600);
+			  gmtime(&value))) {
+    serialised = talloc_asprintf(ctx, "%s.%06u+%02u:%02u", buff,
+                                 0,
+                                 //(unsigned int)this->value.tv_usec,
+                                 (unsigned int)this->gm_offset / 3600,
+                                 (unsigned int)this->gm_offset % 3600);
 
-    talloc_reference(NULL, this->serialised);
-    return this->serialised;
+    return serialised;
   };
 
   return NULL;
@@ -651,28 +603,25 @@ static int XSDDatetime_parse(RDFValue self, char *serialised, RDFURN subject) {
   strptime(serialised, DATETIME_FORMAT_STR, &time);
 
   time.tm_isdst = -1;
-  this->value.tv_sec = mktime(&time);
+  this->super.value = mktime(&time) * 1000000;
 
   return 1;
 };
 
 static RDFValue XSDDatetime_Con(RDFValue self) {
   XSDDatetime this = (XSDDatetime)self;
-  gettimeofday(&this->value, NULL);
+  this->super.value = (int)time(NULL) * 1000000;
 
   return self;
 };
 
-VIRTUAL(XSDDatetime, RDFValue) {
+VIRTUAL(XSDDatetime, XSDInteger) {
   VMETHOD_BASE(RDFValue, raptor_type) = RAPTOR_IDENTIFIER_TYPE_LITERAL;
   VMETHOD_BASE(RDFValue, dataType) = DATATYPE_XSD_DATETIME;
 
-  VMETHOD_BASE(RDFValue, encode) = XSDDatetime_encode;
-  VMETHOD_BASE(RDFValue, decode) = XSDDatetime_decode;
   VMETHOD_BASE(RDFValue, serialise) = XSDDatetime_serialise;
   VMETHOD_BASE(RDFValue, parse) = XSDDatetime_parse;
   VMETHOD_BASE(RDFValue, Con) = XSDDatetime_Con;
-  VMETHOD_BASE(RDFValue, clone) = XSDDatetime_clone;
 
    VMETHOD(set) = XSDDatetime_set;
 } END_VIRTUAL
@@ -690,7 +639,7 @@ static RDFValue IntegerArrayBinary_Con(RDFValue this) {
   return SUPER(RDFValue, RDFValue, Con);
 };
 
-static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFURN subject) {
+static int IntegerArrayBinary_decode(RDFValue self, DataStoreObject obj, RDFURN subject) {
   /* We interpret the data as a suffix to our present URL or a fully
      qualified URL. */
   FileLikeObject fd;
@@ -701,7 +650,7 @@ static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFU
 
   // We use the data given as an extension
   if(this->extension) talloc_free(this->extension);
-  this->extension = talloc_strdup(this, data);
+  this->extension = talloc_strdup(this, obj->data);
 
   CALL(array_urn, add, this->extension);
 
@@ -734,55 +683,47 @@ static int IntegerArrayBinary_decode(RDFValue self, char *data, int length, RDFU
   return 0;
 };
 
-static char *IntegerArrayBinary_serialise(RDFValue self, RDFURN subject) {
+static char *IntegerArrayBinary_serialise(RDFValue self, void *ctx, RDFURN subject) {
   IntegerArrayBinary this = (IntegerArrayBinary) self;
-  RDFURN segment = CALL(subject, copy, self);
-  RDFURN stored = new_RDFURN(segment);
+  RDFURN segment = CALL(subject, copy, ctx);
+  RDFURN stored = (RDFURN)CALL(oracle, resolve, segment, subject, AFF4_VOLATILE_STORED);
   XSDInteger size = new_XSDInteger(segment);
   AFF4Volume volume;
 
   CALL(segment, add, this->extension);
 
-  // Check if the segment is already written and its the same size we
-  // dont do anything with it
-  if(CALL(oracle, resolve_value, segment, AFF4_VOLATILE_SIZE, (RDFValue)size) &&\
-     size->value == this->size * sizeof(*this->array))
-    goto exit;
-
-  if(!CALL(oracle, resolve_value, subject, AFF4_VOLATILE_STORED, (RDFValue)stored) && \
-     !CALL(oracle, resolve_value, subject, AFF4_STORED, (RDFValue)stored)) {
+  if(!stored) {
     RaiseError(ERuntimeError, "Subject URN %s has no storage", subject->value);
     goto error;
   };
 
+  /* Open the volume where we are stored on. */
   volume = (AFF4Volume)CALL(oracle, open, stored, 'w');
   if(!volume) {
     RaiseError(ERuntimeError, "Unable to open storage for %s", subject->value);
     goto error;
+
   } else {
     uint32_t *stored_array = talloc_array_size(segment, sizeof(*this->array), this->size);
     int i;
+
     for(i=0; i<this->size; i++) {
       stored_array[i] = htonl(this->array[i]);
     };
 
     if(-1==CALL(volume, writestr, segment->value,
                 (char *)stored_array, this->size * sizeof(uint32_t), ZIP_STORED)) {
-      PUSH_ERROR_STATE;
+
       CALL((AFFObject)volume, cache_return);
-      POP_ERROR_STATE;
-
       RaiseError(ERuntimeError, "Unable to write binary segment");
-
       goto error;
     };
 
     CALL((AFFObject)volume, cache_return);
   };
 
- exit:
   talloc_free(segment);
-  return talloc_strdup(self,this->extension);
+  return talloc_strdup(ctx, this->extension);
 
  error:
   talloc_free(segment);
@@ -815,9 +756,6 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
 
   VATTR(extension) = "index";
 
-  // Our serialised form is the same as encoded form
-  VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
-
   VMETHOD_BASE(RDFValue, Con) = IntegerArrayBinary_Con;
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayBinary_decode;
   VMETHOD_BASE(RDFValue, serialise) = IntegerArrayBinary_serialise;
@@ -826,10 +764,10 @@ VIRTUAL(IntegerArrayBinary, RDFValue) {
   VMETHOD_BASE(IntegerArrayBinary, add) = IntegerArrayBinary_add;
 } END_VIRTUAL
 
-static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
+static char *IntegerArrayInline_serialise(RDFValue self, void *ctx, RDFURN subject) {
   IntegerArrayBinary this = (IntegerArrayBinary)self;
   int available = this->size * 10;
-  char *buffer = talloc_zero_size(self, available + 1);
+  char *buffer = talloc_zero_size(ctx, available + 1);
   int i,buffer_ptr=0;
 
   for(i=0; i < this->size && buffer_ptr < available; i++) {
@@ -839,11 +777,11 @@ static char *IntegerArrayInline_serialise(RDFValue self, RDFURN subject) {
   return buffer;
 };
 
-static int IntegerArrayInline_decode(RDFValue self, char *data, int length, RDFURN subject) {
+static int IntegerArrayInline_decode(RDFValue self, DataStoreObject obj, RDFURN subject) {
   uint32_t number;
-  char *x, *y=data;
+  char *x, *y=obj->data;
 
-  for(x=data; x-data < length && *x; x++) {
+  for(x=obj->data; x-obj->data < obj->length && *x; x++) {
     if(*x==',') {
       *x=0;
       number = atol(y);
@@ -857,9 +795,6 @@ static int IntegerArrayInline_decode(RDFValue self, char *data, int length, RDFU
 
 VIRTUAL(IntegerArrayInline, IntegerArrayBinary) {
   VMETHOD_BASE(RDFValue, dataType) = AFF4_INTEGER_ARRAY_INLINE;
-
-  // Our serialised form is the same as encoded form
-  VMETHOD_BASE(RDFValue, flags) = RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED;
 
   VMETHOD_BASE(RDFValue, decode) = IntegerArrayInline_decode;
   VMETHOD_BASE(RDFValue, serialise) = IntegerArrayInline_serialise;
@@ -941,8 +876,8 @@ static void triples_handler(void *data, const raptor_statement* triple)
       // Make sure the volume contains this object
       printf("!!! %s contains %s\n", self->volume_urn->value, urn_str);
 
-      CALL(oracle, add_value, self->volume_urn, AFF4_VOLATILE_CONTAINS,
-           (RDFValue)self->urn,0);
+      CALL(oracle, add, self->volume_urn, AFF4_VOLATILE_CONTAINS,
+           (RDFValue)self->urn);
 
       CALL(self->member_cache, put, ZSTRING(urn_str), NULL);
     };
@@ -958,7 +893,7 @@ static void triples_handler(void *data, const raptor_statement* triple)
   result = CONSTRUCT_FROM_REFERENCE(class_ref, Con, NULL);
   if(result) {
     CALL(result, parse, value_str, self->urn);
-    CALL(oracle, add_value, self->urn, attribute, (RDFValue)result,0);
+    CALL(oracle, add, self->urn, attribute, (RDFValue)result);
     talloc_free(result);
   };
 }
@@ -1102,31 +1037,6 @@ raptor_iostream_handler2 raptor_special_handler = {
   .write_bytes = iostream_write_bytes,
 };
 
-static int tdb_attribute_extract(TDB_CONTEXT *tdb, TDB_DATA key, 
-				       TDB_DATA value, void *data) {
-  RDFSerializer self=(RDFSerializer) data;
-
-  // Only look at proper attributes
-  if(memcmp(key.dptr,"http",4))
-    goto exit;
-
-  // Skip serializing of volatile triples
-  if(!memcmp(key.dptr, ZSTRING_NO_NULL(VOLATILE_NS)))
-    goto exit;
-
-  if(!memcmp(key.dptr, ZSTRING_NO_NULL(XSD_NAMESPACE)))
-    goto exit;
-
-  {
-    RDFURN s = new_RDFURN(self->attributes);
-
-    CALL(s, set, (char *)key.dptr);
-    CALL(self->attributes, put, (char *)key.dptr, key.dsize, (Object)s);
-  };
-
- exit:
-  return 0;
-};
 
 static int RDFSerializer_destructor(void *this) {
   RDFSerializer self = (RDFSerializer)this;
@@ -1148,13 +1058,6 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
   self->fd = fd;
   (void)talloc_reference(self, fd);
 
-  // We need to cache the attributes because traversing the TDB is too
-  // slow all the time.
-  self->attributes = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
-
-  // Get a copy of all the attributes
-  tdb_traverse_read(oracle->attribute_db, tdb_attribute_extract, self);
-
   self->iostream = raptor_new_iostream_from_handler2((void *)self, &raptor_special_handler);
   // Try to make a new serialiser
   self->rdf_serializer = raptor_new_serializer(type);
@@ -1165,8 +1068,7 @@ static RDFSerializer RDFSerializer_Con(RDFSerializer self, char *base,
 
   if(base) {
     raptor_uri uri = raptor_new_uri((const unsigned char*)base);
-    raptor_serialize_start(self->rdf_serializer,
-			   uri, self->iostream);
+    raptor_serialize_start(self->rdf_serializer, uri, self->iostream);
 
     raptor_free_uri(uri);
     uri = (void*)raptor_new_uri((const unsigned char*)PREDICATE_NAMESPACE);
@@ -1194,106 +1096,72 @@ static void RDFSerializer_set_namespace(RDFSerializer self, char *prefix, char *
   raptor_free_uri(uri);
 };
 
-static int RDFSerializer_serialize_statement(RDFSerializer self,
-                                             RESOLVER_ITER *iter,
-                                             RDFURN urn,
-                                             RDFURN attribute) {
+static int RDFSerializer_serialize_urn(RDFSerializer self, RDFURN urn) {
   raptor_statement triple;
   void *raptor_urn;
   RDFValue value = NULL;
-
-  raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
-
-  memset(&triple, 0, sizeof(triple));
-
-  // If the encoding is the same as serialised version we can
-  // just copy it into the serialiser directly from the iterator.
-  if(iter->head.flags & RESOLVER_ENTRY_ENCODED_SAME_AS_SERIALIZED) {
-    triple.object = CALL(oracle, encoded_data_from_iter, &value, iter);
-    if(!triple.object)
-      goto error;
-  } else {
-    value = CALL(oracle, alloc_from_iter, raptor_urn, iter);
-
-    if(!value) goto error;
-
-    // New reference here:
-    triple.object = CALL(value, serialise, urn);
-  };
-
-  if(!triple.object) {
-    AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
-             urn,
-             "Unable to serialise attribute %s\n",
-             attribute->value);
-    goto error;
-  };
-
-  triple.subject = raptor_urn;
-  triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-
-  triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute->value);
-  triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
-  triple.object_type = value->raptor_type;
-
-  // Default to something sensible
-  if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
-    triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
-
-  // If the dataType is emptry just have a NULL
-  // object_literal_datatype:
-  triple.object_literal_datatype = value->dataType[0] ?                             \
-    raptor_new_uri((const unsigned char*)value->dataType) : 0;
-
-  raptor_serialize_statement(self->rdf_serializer, &triple);
-  raptor_free_uri((raptor_uri*)triple.predicate);
-  if(triple.object_literal_datatype)
-    raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
-
-  // Special free function for URIs
-  if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE)
-    raptor_free_uri((raptor_uri*)triple.object);
-  else
-    talloc_unlink(NULL, (void *)triple.object);
-
-  talloc_free(raptor_urn);
-  return 1;
-
- error:
-  talloc_free(raptor_urn);
-  return 0;
-};
-
-static int RDFSerializer_serialize_urn(RDFSerializer self, 
-				       RDFURN urn) {
   Cache i;
 
   printf(".");
   fflush(stdout);
 
-  // Iterate over all attributes
-  list_for_each_entry(i, &self->attributes->cache_list, cache_list) {
-    RESOLVER_ITER *iter;
-    RDFURN attribute = (RDFURN)i->data;
+  raptor_urn = (void*)raptor_new_uri((const unsigned char*)urn->value);
+  memset(&triple, 0, sizeof(triple));
 
-    iter = CALL(oracle, get_iter, NULL, urn, attribute->value);
+  /* List all known attributes and serialize them */
+  list_for_each_entry(i, &RDF_Registry->cache_list, cache_list) {
+    RDFValue classref = *(RDFValue *)i->data;
+    char *ctx = talloc_strdup(NULL, "ctx");
+    char *attribute = classref->dataType;
 
-    // Now iterate over all the values for this
-    while(iter && iter->offset > 0) {
-      RDFSerializer_serialize_statement(self, iter, urn, attribute);
+    value = CALL(oracle, resolve, ctx, urn, attribute);
+    if(value) {
+      RDFValue i;
+
+      list_for_each_entry(i, &value->list, list) {
+        triple.object = CALL(value, serialise, value, urn);
+        if(!triple.object) {
+          AFF4_LOG(AFF4_LOG_MESSAGE, AFF4_SERVICE_RDF_SUBSYSYEM,
+                   urn,
+                   "Unable to serialise attribute %s\n",
+                   attribute);
+        } else {
+          triple.subject = raptor_urn;
+          triple.subject_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+
+          triple.predicate = (void*)raptor_new_uri((const unsigned char*)attribute);
+          triple.predicate_type = RAPTOR_IDENTIFIER_TYPE_RESOURCE;
+          triple.object_type = value->raptor_type;
+
+          // Default to something sensible
+          if(RAPTOR_IDENTIFIER_TYPE_UNKNOWN == triple.object_type)
+            triple.object_type = RAPTOR_IDENTIFIER_TYPE_LITERAL;
+
+          // If the dataType is emptry just have a NULL
+          // object_literal_datatype:
+          triple.object_literal_datatype = value->dataType[0] ? \
+              raptor_new_uri((const unsigned char*)value->dataType) : 0;
+
+          raptor_serialize_statement(self->rdf_serializer, &triple);
+          raptor_free_uri((raptor_uri*)triple.predicate);
+          if(triple.object_literal_datatype)
+            raptor_free_uri((raptor_uri*)triple.object_literal_datatype);
+
+          // Special free function for URIs
+          if(triple.object_type == RAPTOR_IDENTIFIER_TYPE_RESOURCE) {
+            raptor_free_uri((raptor_uri*)triple.object);
+          };
+        };
+      };
+
+      talloc_free(ctx);
     };
-
-    talloc_free(iter);
   };
 
-  self->count ++;
-  if(self->count > 100) {
-    self->count =0;
-    raptor_serialize_end(self->rdf_serializer);
-  };
-
+  talloc_free(raptor_urn);
   return 1;
 };
+
 
 static void RDFSerializer_close(RDFSerializer self) {
   raptor_serialize_end(self->rdf_serializer);
@@ -1309,7 +1177,6 @@ static void RDFSerializer_close(RDFSerializer self) {
 VIRTUAL(RDFSerializer, Object) {
      VMETHOD(Con) = RDFSerializer_Con;
      VMETHOD(serialize_urn) = RDFSerializer_serialize_urn;
-     VMETHOD(serialize_statement) = RDFSerializer_serialize_statement;
      VMETHOD(set_namespace) = RDFSerializer_set_namespace;
      VMETHOD(close) = RDFSerializer_close;
 } END_VIRTUAL
