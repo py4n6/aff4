@@ -267,11 +267,37 @@ struct Zip64CDLocator {
   uint32_t number_of_disks;
 }__attribute__((packed));
 
+
+  /** Reresents a single file in the archive. */
+struct ZipFile_t;
+
+CLASS(ZipSegment, FileLikeObject)
+  struct list_head members;
+  struct CDFileHeader cd;
+  RDFURN container;
+  z_stream strm;
+  uint64_t offset_of_file_header;
+
+  /* Data is compressed to this buffer and only written when the Segment is
+   * closed.
+   *
+   * Note that in AFF4 we assume segments are not too large so we can cache them
+   *  in memory.
+   */
+  StringIO buffer;
+
+  ZipSegment METHOD(ZipSegment, Con, RDFURN urn, RDFURN container,
+                    char mode, Resolver resolver);
+END_CLASS
+
 /** This represents a Zip file */
 CLASS(ZipFile, AFF4Volume)
      // This keeps the end of central directory struct so we can
      // recopy it when we update the CD.
      struct EndCentralDirectory *end;
+
+     // All our members
+     Cache members;
 
      // The following are attributes stored by various zip64 extended
      // fields
@@ -280,10 +306,13 @@ CLASS(ZipFile, AFF4Volume)
      uint64_t compressed_member_size;
      uint64_t offset_of_member_header;
 
-  /** Some commonly used RDF types */
-  XSDInteger directory_offset;
-  RDFURN storage_urn;
-  XSDInteger _didModify;
+     /** Some commonly used RDF types */
+     XSDInteger directory_offset;
+     RDFURN storage_urn;
+     XSDInteger _didModify;
+
+    /* The file we are stored on. */
+    FileLikeObject backing_store;
 
   /** attributes of files used for the EndCentralDirectory */
   XSDInteger type;

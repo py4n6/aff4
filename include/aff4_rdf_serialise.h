@@ -20,9 +20,9 @@ CLASS(RDFSerializer, Object)
      int i;
 
      Cache attributes;
-
+     Resolver resolver;
      RDFSerializer METHOD(RDFSerializer, Con, char *base_urn, \
-                          FileLikeObject fd);
+                          FileLikeObject fd, Resolver resolver);
      int METHOD(RDFSerializer, serialize_urn, RDFURN urn);
      int METHOD(RDFSerializer, serialize_statement, Object *iter, RDFURN urn, \
                 RDFURN attribute);
@@ -38,7 +38,7 @@ CLASS(RDFParser, Object)
      RDFURN volume_urn;
 
      Cache member_cache;
-
+     Resolver resolver;
      void METHOD(void *, triples_handler, const raptor_statement *triple);
      void METHOD(void *, message_handler, raptor_locator* locator, \
                  const char *message);
@@ -46,7 +46,7 @@ CLASS(RDFParser, Object)
 // Parses data stored in fd using the format specified. fd is assumed
 // to contain a base URN specified (or NULL if non specified).
      int METHOD(RDFParser, parse, FileLikeObject fd, char *format, char *base);
-     RDFParser METHOD(RDFParser, Con);
+RDFParser METHOD(RDFParser, Con, Resolver resolver);
 END_CLASS
 
 #endif       /* !AFF4_RDF_SERIALISE_H_ */

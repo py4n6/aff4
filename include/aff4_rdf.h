@@ -5,6 +5,7 @@
 struct RDFURN_t;
 
 struct DataStoreObject_t;
+struct Resolver_t;
 
 
 /**** A class used to parse URNs */
@@ -42,11 +43,6 @@ CLASS(RDFValue, Object)
       int id;
       raptor_identifier_type raptor_type;
 
-      /* These flags will be stored in the TDB_DATA_LIST and specify
-         our behaviour - used for optimizations.
-      */
-      uint8_t flags;
-
       /* This is only required for special handling - Leave as NULL to
          be the same as dataType above
       */
@@ -70,13 +66,14 @@ CLASS(RDFValue, Object)
 	 new memory will be allocated with this object's context.
       */
       struct DataStoreObject_t *METHOD(RDFValue, encode, \
-                                       struct RDFURN_t *subject);
+                                       struct RDFURN_t *subject, \
+                                       struct Resolver_t *resolver);
 
       /* This method is used to decode this object from the
          data_store. The fd is seeked to the start of this record.
       */
       int METHOD(RDFValue, decode, struct DataStoreObject_t *obj, \
-                 struct RDFURN_t *subject);
+                 struct RDFURN_t *subject, struct Resolver_t *resolver);
 
       /** This method will serialise the value into a null terminated
 	  string for export into RDF. The returned string will be

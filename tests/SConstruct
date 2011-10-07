@@ -5,8 +5,9 @@ Import("env")
 
 if utils.HEADERS.get("HAVE_CUNIT"):
     programs = Split("""
-    resolver.c
+    resolver.c zip.c
     rdfvalues.c
+    aff4_objects.c
     """)
 
     nenv = env.Clone()

@@ -161,6 +161,24 @@ CLASS(Resolver, Object)
 */
       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
 
+       /* This create a new object of the specified type.
+
+          name specifies the type of object as registered in the type
+          handler dispatcher. (e.g. AFF4_ZIP_VOLUME)
+        */
+       AFFObject METHOD(Resolver, create, RDFURN urn, char *type);
+
+       /* This causes the resolver to take ownership of the object. The object
+        * is locked to the calling thread and can be returned to the resolver at
+        * any time using cache_return().
+        */
+       void METHOD(Resolver, manage, AFFObject obj);
+
+       /* This method locks the object and takes ownership of it. The calling
+        * thread must call cache_return() to release the object.
+        */
+       AFFObject METHOD(Resolver, own, RDFURN urn);
+
        /* All objects obtained from Resolver.open() need to be
           returned to the cache promptly using this method. NOTE - it
           is an error to be using an object after being returned to
@@ -172,15 +190,6 @@ CLASS(Resolver, Object)
        */
       void METHOD(Resolver, cache_return, AFFObject obj);
 
-       /* This create a new object of the specified type.
-
-          name specifies the type of object as registered in the type
-          handler dispatcher. (e.g. AFF4_ZIP_VOLUME)
-
-          DEFAULT(mode) = "w"
-        */
-       AFFObject METHOD(Resolver, create, RDFURN urn, XSDString type, \
-                        char mode);
 
        /* This function resolves all the value in uri and attribute and sets it
           into the RDFValue object. The objects are allocated with a context of
@@ -249,10 +258,6 @@ CLASS(Resolver, Object)
        **/
        void METHOD(Resolver, register_rdf_value_class, RDFValue class_ref);
 
-       /** This is a handler for new types - types get registered here */
-       void METHOD(Resolver, register_type_dispatcher, char *type, \
-                   AFFObject class_ref);
-
        void METHOD(Resolver, register_security_provider, \
                    struct SecurityProvider_t *class_ref);
 
@@ -299,12 +304,12 @@ END_CLASS
         can be obtained throught the open(), create(), and
         new_rdfvalue() method.
      */
-Resolver AFF4_get_resolver();
+Resolver AFF4_get_resolver(DataStore store, void *ctx);
 
-     /* This function can be used to register a new AFF4 type with the
-        library
-     */
-void register_type_dispatcher(Resolver self, char *type, AFFObject *class_ref);
+/* This function can be used to register a new AFF4 type with the
+   library
+*/
+DLL_PUBLIC void register_type_dispatcher(char *type, AFFObject *class_ref);
 
        /** This following are help related function for
            introspection

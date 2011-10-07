@@ -61,9 +61,6 @@ typedef  unsigned long int in_addr_t;
 #include "ewfvolume.h"
 #include "aff4_rdf_serialise.h"
 
-// The global oracle
-extern Resolver oracle;
-
 int _mkdir(const char *path);
 void init_luts();
 
@@ -111,10 +108,10 @@ extern int AFF4_DEBUG_LEVEL;
   (char *)x.dptr, x.dsize
 
 #define AFF4_LOG(level, service, subject, msg, ...)                     \
-  if(oracle && oracle->logger) {                                        \
+  if(AFF4_LOGGER) {                                                           \
     char log_buffer[BUFF_SIZE];                                         \
     snprintf(log_buffer, BUFF_SIZE-1, msg, ## __VA_ARGS__);             \
-    CALL(oracle->logger, message, level, service, subject, log_buffer); \
+    CALL(AFF4_LOGGER, message, level, service, subject, log_buffer);         \
   } else {                                                              \
     printf(msg, ## __VA_ARGS__); fflush(stdout);                        \
   };

@@ -109,6 +109,9 @@ typedef enum {
 #endif
 } CuMode;
 
+
+char TEMP_DIR[1024] = "/tmp/";
+
 /* Test suites declarations */
 %(declareSuites (suites))s
 
@@ -182,6 +185,10 @@ int main (int argc, char* argv[])
          }
       }
    }
+
+   /* Make some temporary place to write files. */
+   strcat(TEMP_DIR,"aff4_test_XXXXXX");
+   mkdtemp(TEMP_DIR);
 
    /* Run the tests */
    switch (mode) {

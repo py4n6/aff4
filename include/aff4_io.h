@@ -8,16 +8,17 @@
 ** Last update Tue Feb  2 16:24:59 2010 mic
 */
 
-#ifndef   	AFF4_IO_H_
-# define   	AFF4_IO_H_
+#ifndef        AFF4_IO_H_
+# define       AFF4_IO_H_
 
 #include "aff4_rdf.h"
 
-struct RDFValue_t;
 
 /** All AFF Objects inherit from this one. The URI must be set to
     represent the globally unique URI of this object. */
 CLASS(AFFObject, Object)
+     // The resolver we should use.
+     struct Resolver_t *resolver;
      RDFURN urn;
 
      // An object may be owned by a single thread at a time
@@ -40,34 +41,20 @@ CLASS(AFFObject, Object)
          DEFAULT(urn) = NULL;
          DEFAULT(mode) = "w";
       */
-     AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode);
+      AFFObject METHOD(AFFObject, Con, RDFURN urn, char mode, \
+                       struct Resolver_t *resolver);
 
      /** This is called to set properties on the object */
-     void METHOD(AFFObject, set, char *attribute, struct RDFValue_t *value);
-     void METHOD(AFFObject, add, char *attribute, struct RDFValue_t *value);
+     void METHOD(AFFObject, set, char *attribute, RDFValue value);
+     void METHOD(AFFObject, add, char *attribute, RDFValue value);
+
+     /** Get a list of attributes from the object. */
+     RDFValue METHOD(AFFObject, resolve, void *ctx, char *attribute);
 
      /** Finally the object may be ready for use. We return the ready
 	 object or NULL if something went wrong.
      */
-     BORROWED AFFObject METHOD(AFFObject, finish);
-
-     /** This method is used to return this object to the primary
-     resolver cache. The object should not be used after calling this
-     as the caller no longer owns it. As far as the caller is
-     concerned this is a desctructor and if you need the object again,
-     you need to call Resolver.open() to reobtain this.
-
-     In practice this method synchronises the object attributes so
-     that a subsequent call to open with a cache miss will be able to
-     reconstruct this object exactly as it is now. Once these
-     attributes are set, this function calls Resolver.cache_return to
-     place the object back in the cache.
-
-     Sometimes this is impossible to do accurately, in which case the
-     function can simply choose to free the object and not return it
-     to the cache.
-     */
-     void METHOD(AFFObject, cache_return);
+     int METHOD(AFFObject, finish);
 
      /* When the object is closed it will write itself to its volume.
         This frees the object - do no use it after calling close.
@@ -110,32 +97,35 @@ PROXY_CLASS(AFFObject);
 
 CLASS(FileLikeObject, AFFObject)
      int64_t readptr;
-     XSDInteger size;
-     char *data;
 
      /** Seek the file like object to the specified offset.
 
      DEFAULT(whence) = 0
      */
      uint64_t METHOD(FileLikeObject, seek, int64_t offset, int whence);
-     int METHOD(FileLikeObject, read, OUT char *buffer, unsigned long int length);
+     int METHOD(FileLikeObject, read, OUT char *buffer, \
+                unsigned int length);
 
      /* A variant of read above that will read upto the next \r or
         \r\n.
 
         DEFAULT(length) = 1024
      */
-     int METHOD(FileLikeObject, readline, OUT char *buffer, unsigned long int length);
-     int METHOD(FileLikeObject, write, char *buffer, unsigned long int length);
+     int METHOD(FileLikeObject, readline, OUT char *buffer, \
+                unsigned int length);
+
+     int METHOD(FileLikeObject, write, char *buffer, \
+                unsigned int length);
+
      uint64_t METHOD(FileLikeObject, tell);
 
   // This can be used to get the content of the FileLikeObject in a
   // big buffer of data. The data will be cached with the
   // FileLikeObject. Its only really suitable for smallish amounts of
   // data - and checks to ensure that file size is less than MAX_CACHED_FILESIZE
-     BORROWED char *METHOD(FileLikeObject, get_data);
+     XSDString METHOD(FileLikeObject, get_data, void *ctx);
 
-// This method is just like the standard ftruncate call
+  // This method is just like the standard ftruncate call
      int METHOD(FileLikeObject, truncate, uint64_t offset);
 
 // This closes the FileLikeObject and also frees it - it is not valid
@@ -161,8 +151,8 @@ CLASS(AFF4Volume, AFFObject)
 //
 // DEFAULT(mode) = "r";
 // DEFAULT(compression) = ZIP_DEFLATE;
-     FileLikeObject METHOD(AFF4Volume, open_member, char *filename, char mode,\
-			   uint16_t compression);
+     FileLikeObject METHOD(AFF4Volume, open_member, RDFURN filename, \
+                           char mode,  int compression);
 
 // This method flushes the central directory and finalises the
 // file. The file may still be accessed for reading after this.
@@ -172,8 +162,8 @@ CLASS(AFF4Volume, AFFObject)
 // basically calls open_member, writes the string then closes it).
 //
 // DEFAULT(compression) = ZIP_DEFLATE
-     int METHOD(AFF4Volume, writestr, char *filename, char *data, int len,\
-		 uint16_t compression);
+     int METHOD(AFF4Volume, writestr, char *filename, char *data, \
+                int len, uint16_t compression);
 
   /* Load an AFF4 volume from the URN specified. We parse all the RDF
      serializations.
@@ -183,4 +173,4 @@ CLASS(AFF4Volume, AFFObject)
      int METHOD(AFF4Volume, load_from, RDFURN fd_urn, char mode);
 END_CLASS
 
-#endif 	    /* !AFF4_IO_H_ */
+#endif      /* !AFF4_IO_H_ */

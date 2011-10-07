@@ -208,8 +208,10 @@ Export("env")
 config_h_build([File('lib/config.h')], [File('lib/sc_config.h.in')], env)
 
 SConscript(['libraptor/SConscript', 'lib/SConstruct', #'tools/SConstruct',
-            'python2.6/SConstruct', 'tests/SConstruct',
-            'applications/SConstruct'])
+            #'python2.6/SConstruct',
+            'tests/SConstruct',
+            #'applications/SConstruct'
+            ])
 
 if 'debian' in COMMAND_LINE_TARGETS:
       SConscript("deb/SConscript")

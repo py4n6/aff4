@@ -163,7 +163,7 @@ TEST(MemoryDataStoreTestAdd) {
 Test Resolver object
 ***********************************************/
 TEST(AFF4ResolverTest) {
-  Resolver resolver = AFF4_get_resolver();
+  Resolver resolver = AFF4_get_resolver(NULL, NULL);
   RDFURN urn = new_RDFURN(resolver);
   XSDString value = new_XSDString(resolver);
 

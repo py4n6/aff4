@@ -5,339 +5,55 @@
 */
 #include "aff4_internal.h"
 
-static AFFObject FileLikeObject_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
-  FileLikeObject this = (FileLikeObject)self;
-
-  if(!this->size)
-    this->size = new_XSDInteger(this);
-
-  return SUPER(AFFObject, AFFObject, Con, urn, mode);
-};
-
-
-/** Implementation of FileBackedObject.
-
-FileBackedObject is a FileLikeObject which uses a real file to back
-itself.
-*/
-
-/** Only close the file when we are actually freed */
-static int FileBackedObject_destructor(void *self) {
-  FileBackedObject this=(FileBackedObject)self;
-
-  close(this->fd);
-
-  return 0;
-};
-
-
-/** Note that files we create will always be escaped using standard
-    URN encoding.
-*/
-static AFFObject FileBackedObject_AFFObject_Con(AFFObject this, RDFURN urn, char mode) {
-  FileBackedObject self = (FileBackedObject)this;
-  uint64_t file_size;
-
-  this = SUPER(AFFObject, FileLikeObject, Con, urn, mode);
-
-  if(urn) {
-    int flags;
-
-    // Make sure that the urn passed has a file scheme
-    if(!urn->parser || (strlen(urn->parser->scheme) > 0 &&
-                        strcmp("file", urn->parser->scheme))) {
-      RaiseError(ERuntimeError, "%s must be called with a file:// scheme", NAMEOF(self));
-      goto error;
-    };
-
-    URNOF(self) = CALL(urn, copy, self);
-
-    if(mode == 'r') {
-      flags = O_RDONLY | O_BINARY;
-    } else {
-      flags = O_CREAT | O_RDWR | O_BINARY;
-      // Try to create leading directories
-      //_mkdir(dirname(urn->parser->query));
-    };
-
-    // Now try to create the file within the new directory
-    self->fd = open(urn->parser->query, flags, S_IRWXU | S_IRWXG | S_IRWXO);
-    if(self->fd<0){
-      // We are unable to open this file for reading - invalidate
-      // everything related to it
-      ((AFFObject)self)->delete_urn(URNOF(self));
-      RaiseError(EIOError, "Can't open %s (%s)", urn->parser->query, strerror(errno));
-      goto error;
-    } else {
-      // Add a destructor to this object
-      talloc_set_destructor((void *)self, FileBackedObject_destructor);
-    };
-
-    file_size = lseek(self->fd, 0, SEEK_END);
-
-    if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_SIZE,
-            (RDFValue)self->super.size) &&
-       self->super.size->value != file_size) {
-      // The size is not what we expect. Therefore the data stored in
-      // the resolver for this file and all the objects it contains is
-      // incorrect - we need to clear it all.
-      // Note we call this method as a class method (i.e. we do not
-      // pass self as a first arg since its a class method).
-      ((AFFObject)self)->delete_urn(URNOF(self));
-    };
-
-    self->super.size->value = file_size;
-
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
-         (RDFValue)self->super.size, NULL);
-  };
-
-  return this;
-
- error:
-  talloc_free(self);
-  return NULL;
-};
-
-static int FileLikeObject_truncate(FileLikeObject self, uint64_t offset) {
-  self->size->value = offset;
-  self->readptr = min(offset, self->readptr);
-  return offset;
-};
-
-static uint64_t FileLikeObject_seek(FileLikeObject self, int64_t offset, int whence) {
-  if(whence==SEEK_SET) {
-    self->readptr = offset;
-  } else if(whence==SEEK_CUR) {
-    self->readptr += offset;
-    if(self->readptr<0) self->readptr=0;
-  } else if(whence==SEEK_END) {
-    self->readptr = self->size->value + offset;
-  };
-
-  if(self->readptr < 0) {
-    self->readptr=0;
-
-  } else if(self->readptr > self->size->value) {
-    self->readptr = self->size->value;
-  };
-
-  return self->readptr;
-};
-
-static void FileLikeObject_delete(RDFURN del_urn) {
-  // Remove all objects contained in this file
-  RESOLVER_ITER *iter = CALL(oracle, get_iter, NULL, del_urn, AFF4_VOLATILE_CONTAINS);
-  RDFURN urn = new_RDFURN(iter);
-
-  DEBUG_OBJECT("Invalidating URN %s\n", del_urn->value);
-
-  while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
-    // Remove this URN altogether
-
-    CALL(oracle, expire, urn);
-    CALL(oracle, del, urn, NULL);
-  };
-
-  // Clear all our attributes
-  CALL(oracle, del, del_urn, NULL);
-  talloc_free(iter);
-};
-
-static int FileLikeObject_readline(FileLikeObject self, char *buffer, unsigned long int length) {
-  int result;
-  int i;
-  uint64_t offset = self->readptr;
-
-  result = CALL(self, read, buffer, length);
-  if(result >0) {
-    for(i=0; i<result-1; i++) {
-      switch(buffer[i]) {
-      case '\r':
-        if(buffer[i+1] != '\n') break;
-        offset++;
-      case '\n':
-        buffer[i]=0;
-        self->readptr = offset + i+1;
-        return i;
-      default:
-        break;
-      };
-    };
-  };
-
-  return result;
-};
-
-/** 
-    read some data from our file into the buffer (which is assumed to
-    be large enough).
-**/
-static int FileBackedObject_read(FileLikeObject self, char *buffer, unsigned long int length) {
-  FileBackedObject this = (FileBackedObject)self;
-  int result;
-
-  lseek(this->fd,self->readptr,0);
-  result = read(this->fd, buffer, length);
-  if(result < 0) {
-    RaiseError(EIOError, "Unable to read from %s (%s)", URNOF(self), strerror(errno));
-    return -1;
-  };
-
-  self->readptr += result;
-
-  return result;
-};
-
-static int FileBackedObject_write(FileLikeObject self, char *buffer, unsigned long int length) {
-  FileBackedObject this = (FileBackedObject)self;
-  int result;
-
-  if(length == 0) return 0;
-
-  lseek(this->fd,self->readptr,SEEK_SET);
-  result = write(this->fd, buffer, length);
-  if(result < 0) {
-    RaiseError(EIOError, "Unable to write to %s (%s)", URNOF(self)->value, strerror(errno));
-  };
-
-  self->readptr += result;
-
-  self->size->value = max(self->size->value, self->readptr);
-
-  // Update the size property in the resolver
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
-       (RDFValue)self->size, NULL);
-
-  return result;
-};
-
-static uint64_t FileLikeObject_tell(FileLikeObject self) {
-  return self->readptr;
-};
-
-static int FileLikeObject_close(AFFObject self) {
-  // Make sure we are no longer dirty - this is used to keep track of
-  // outstanding objects which are not closed when a volume is closed.
-  CALL(oracle, del, URNOF(self), AFF4_VOLATILE_DIRTY);
-
-  return SUPER(AFFObject, AFFObject, close);
-};
-
-static uint64_t FileBackedObject_seek(FileLikeObject self, int64_t offset, int whence) {
-  FileBackedObject this = (FileBackedObject)self;
-
-  int64_t result = lseek(this->fd, offset, whence);
-
-  if(result < 0) {
-    DEBUG_OBJECT("Error seeking %s\n", strerror(errno));
-    result = 0;
-  };
-
-  self->readptr = result;
-  return result;
-};
-
-static char *FileLikeObject_get_data(FileLikeObject self) {
-  char *data;
-  
-  if(self->size->value > MAX_CACHED_FILESIZE)
-    goto error;
-
-  if(self->data) return self->data;
-
-  CALL(self, seek, 0,0);
-  data = talloc_size(self, self->size->value + BUFF_SIZE);
-  memset(data, 0, self->size->value + BUFF_SIZE);
-  CALL(self, read, data, self->size->value);
-  self->data = data;
-
-  return self->data;
-
- error:
-  return NULL;
-};
-
-VIRTUAL(FileLikeObject, AFFObject) {
-     VMETHOD(super.Con) = FileLikeObject_AFFObject_Con;
-     VMETHOD(seek) = FileLikeObject_seek;
-     VMETHOD(tell) = FileLikeObject_tell;
-     VMETHOD_BASE(AFFObject, close) = FileLikeObject_close;
-     VMETHOD(truncate) = FileLikeObject_truncate;
-     VMETHOD(get_data) = FileLikeObject_get_data;
-     VMETHOD_BASE(AFFObject, delete_urn) = FileLikeObject_delete;
-     VMETHOD(readline) = FileLikeObject_readline;
-
-     VATTR(data) = NULL;
-} END_VIRTUAL
-
-static int FileBackedObject_truncate(FileLikeObject self, uint64_t offset) {
-  FileBackedObject this=(FileBackedObject)self;
-
-  ftruncate(this->fd, offset);
-  return SUPER(FileLikeObject, FileLikeObject, truncate, offset);
-};
-
-/** A file backed object extends FileLikeObject */
-VIRTUAL(FileBackedObject, FileLikeObject) {
-  VMETHOD_BASE(AFFObject, Con) = FileBackedObject_AFFObject_Con;
-  VMETHOD_BASE(AFFObject, dataType) = AFF4_FILE;
-
-  VMETHOD_BASE(FileLikeObject, read) = FileBackedObject_read;
-  VMETHOD_BASE(FileLikeObject, write) = FileBackedObject_write;
-  VMETHOD_BASE(FileLikeObject, seek) = FileBackedObject_seek;
-  VMETHOD_BASE(FileLikeObject, truncate) = FileBackedObject_truncate;
-} END_VIRTUAL;
 
 // Some prototypes
-static int ZipFile_load_from(AFF4Volume self, RDFURN fd_urn, char mode);
+static int ZipFile_load_from(AFF4Volume self, RDFURN fd_urn, char mode){};
 
 /** This is the constructor which will be used when we get
     instantiated as an AFFObject.
 */
-static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
+static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode, 
+                                       Resolver resolver) {
   ZipFile this = (ZipFile)self;
 
   self->mode = mode;
+  self->resolver = resolver;
 
   if(!this->directory_offset) this->directory_offset = new_XSDInteger(this);
-  if(!this->storage_urn) this->storage_urn = new_RDFURN(this);
   if(!this->_didModify) this->_didModify = new_XSDInteger(this);
 
   if(urn) {
     int previous_volume;
 
-    // Ok, we need to create ourselves from a URN. We need a
-    // FileLikeObject first. We ask the oracle what object should be
-    // used as our underlying FileLikeObject:
-    if(!CALL(oracle, resolve_value, urn, AFF4_STORED, (RDFValue)this->storage_urn)) {
-      if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn)) {
-        RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn->value);
-        goto error;
-      };
-    } else {
-      // The user set the AFF4_STORED property, but we really prefer
-      // the AFF4_VOLATILE_STORED:
-      CALL(oracle, set_value, urn, AFF4_VOLATILE_STORED,
-           (RDFValue)this->storage_urn, NULL);
-      CALL(oracle, del, urn, AFF4_STORED);
-    };
-
     URNOF(self) = CALL(urn, copy, self);
 
+    // Where are we stored?
+    this->storage_urn = (RDFURN)CALL(resolver, resolve, self, urn, AFF4_STORED);
+    if(!this->storage_urn) {
+      this->storage_urn = (RDFURN)CALL(resolver, resolve, self, urn, AFF4_VOLATILE_STORED);
+    };
+
+    if(!this->storage_urn) {
+      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", urn->value);
+      goto error;
+    };
+
+    // Try to load the volume
     previous_volume = ZipFile_load_from((AFF4Volume)this, this->storage_urn, mode);
+
     // The volume we expect to find does not appear to be there
     if(mode == 'r' && !previous_volume)
       goto error;
+
     ClearError();
 
     // Check to see that we can open the storage_urn for writing
     if(mode == 'w'){
-      FileLikeObject fd = (FileLikeObject)CALL(oracle, open, this->storage_urn, mode);
-
+      FileLikeObject fd = (FileLikeObject)CALL(resolver, open, this->storage_urn, 'w');
       if(!fd) goto error;
 
-      if(!previous_volume && fd->size->value > 0) {
+      CALL(fd, seek, 0, 2);
+      if(!previous_volume && fd->readptr > 0) {
         CALL((AFFObject)fd, cache_return);
 
         RaiseError(EIOError, "Unable to append to file %s - it does not seem to be a zip file?",
@@ -348,34 +64,20 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
       CALL((AFFObject)fd, cache_return);
     };
 
-    // If our URN has changed after loading we remove all previous
-    // attributes
-    if(strcmp(URNOF(self)->value, urn->value)) {
-      DEBUG_OBJECT("%s changes URNs from %s to %s\n", NAMEOF(self), urn->value,
-            URNOF(self)->value);
-      CALL(oracle, del, urn, NULL);
-    };
-
-    // urn is no longer valid below:
-    CALL(oracle, set_value, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self),0);
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn,0);
-
-    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-             (RDFValue)this->directory_offset)) {
-      CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-           (RDFValue)this->directory_offset,0);
-    };
+    CALL(resolver, set, this->storage_urn, AFF4_VOLATILE_CONTAINS, (RDFValue)URNOF(self));
+    CALL(resolver, set, URNOF(self), AFF4_VOLATILE_STORED, (RDFValue)this->storage_urn);
 
     {
-      RDFValue tmp = rdfvalue_from_urn(NULL, AFF4_ZIP_VOLUME);
+      RDFURN tmp = new_RDFURN(NULL);
 
-      CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_TYPE, tmp,0);
+      CALL(tmp, set, AFF4_ZIP_VOLUME);
+      CALL(resolver, set, URNOF(self), AFF4_VOLATILE_TYPE, (RDFValue)tmp);
       talloc_free(tmp);
     };
 
   } else {
     // Call ZipFile's AFFObject constructor.
-    self = SUPER(AFFObject, AFF4Volume, Con, urn, mode);
+    self = SUPER(AFFObject, AFF4Volume, Con, urn, mode, resolver);
   };
 
   return self;
@@ -386,11 +88,13 @@ static AFFObject ZipFile_AFFObject_Con(AFFObject self, RDFURN urn, char mode) {
   return NULL;
 };
 
+#if 0
+
 // Seeks fd to start of CD
 static int find_cd(ZipFile self, FileLikeObject fd) {
   if(self->end->offset_of_cd != -1) {
     CALL(fd, seek, self->end->offset_of_cd, SEEK_SET);
-    self-> total_entries = self->end->total_entries_in_cd_on_disk;
+    self->total_entries = self->end->total_entries_in_cd_on_disk;
     // Its a Zip64 file...
   } else {
     struct Zip64CDLocator locator;
@@ -398,7 +102,7 @@ static int find_cd(ZipFile self, FileLikeObject fd) {
 
     // We reposition ourselved just before the EndCentralDirectory to
     // find the locator:
-    CALL(fd, seek, self->directory_offset->value - sizeof(locator), 0);
+    CALL(fd, seek, self->directory_offset->value - sizeof(locator), SEEK_SET);
     CALL(fd, read, (char *)&locator, sizeof(locator));
 
     if(locator.magic != 0x07064b50) goto error;
@@ -413,7 +117,7 @@ static int find_cd(ZipFile self, FileLikeObject fd) {
     CALL(fd, read, (char *)&end_cd, sizeof(end_cd));
 
     if(end_cd.magic != 0x06064b50) goto error;
-    
+  
     if(end_cd.number_of_disk != 0 || end_cd.number_of_disk_with_cd != 0 ||
        end_cd.number_of_entries_in_volume != end_cd.number_of_entries_in_total) {
       RaiseError(ERuntimeError, "Zip Files with multiple parts are not supported");
@@ -494,37 +198,31 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
      ensure we get a lock on it (we cant have the file growing while we
      do this check).
   */
-  fd = (FileLikeObject)CALL(oracle, open, fd_urn, 'w');
+  fd = (FileLikeObject)CALL(RESOLVER, open, fd_urn, 'w');
   if(!fd) {
     goto error;
   };
 
+  CALL(fd, seek, 0, 2);
+
   /* Try to restore our URN from previous knowledge about what should
      be stored there.
   */
-  CALL(oracle, resolve_value, fd_urn, AFF4_CONTAINS, (RDFValue)URNOF(self));
+  URNOF(self) = (RDFURN)CALL(RESOLVER, resolve, fd_urn, AFF4_CONTAINS);
 
   // Is there a directory_offset and does it make sense?
-  if(CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-          (RDFValue)self->directory_offset) &&          \
-     self->directory_offset->value > fd->size->value) {
-    // Everything we know about the storage urn is incorrect... we
-    // need to delete anything we know about it here:
-    ((AFFObject)fd)->delete_urn(URNOF(fd));
-
-    RaiseError(EIOError, "File %s is %llu bytes long, but it should be %llu",
-               STRING_URNOF(fd), fd->size->value, self->directory_offset->value);
-
-    self->directory_offset->value = 0;
-    goto error;
+  self->directory_offset = (XSDInteger)CALL(RESOLVER, resolve, self,
+                                            URNOF(self), AFF4_DIRECTORY_OFFSET);
+  if(!self->directory_offset) {
+    self->directory_offset = new_XSDInteger(self);
   };
 
   // This check makes sure the volume does not already exist. We first
   // see if there is a ZipFile stored on the fd_urn, and then if that
   // ZipFile is dirty. If we do not know the volume's dirty state we
   // just try to load it.
-  if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-          (RDFValue)self->_didModify)) {
+  self->_didModify = CALL(RESOLVER, resolve, self, URNOF(self), AFF4_VOLATILE_DIRTY);
+  if(self->_didModify) {
     switch(self->_didModify->value) {
       // If we already loaded this volume - no need to reload it (we
       // assume its state could not change without the resolver
@@ -542,6 +240,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       // Any other state we can keep going
       break;
     };
+  } else {
+    self->_didModify = new_XSDInteger(self);
   };
 
   // Find the End of Central Directory Record - We read about 4k of
@@ -582,17 +282,17 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       };
     };
 
-    // Make sure that the oracle knows about this volume:
+    // Make sure that the RESOLVER knows about this volume:
     // FIXME: should be Volatile?
     // Note that our URN has changed above which means we can not set
     // any resolver properties until now that our URN is finalised.
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED, 
-	 (RDFValue)URNOF(fd),0);
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_STORED,
+	 (RDFValue)URNOF(fd));
 
     // NOTE!! A backing store can only hold one ZipFile volume - thats
     // why we use set here...
-    CALL(oracle, set_value, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
-	 (RDFValue)URNOF(self),0);
+    CALL(RESOLVER, set, URNOF(fd), AFF4_VOLATILE_CONTAINS, 
+	 (RDFValue)URNOF(self));
 
     /*
       This mark the volume as already loaded. We are almost there -
@@ -601,8 +301,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       this volume as well (e.g. if decoding complex RDFValues):
     */
     self->_didModify->value  = DIRTY_STATE_ALREADY_LOADED;
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY, 
-         (RDFValue)self->_didModify,0);
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_DIRTY, 
+         (RDFValue)self->_didModify);
 
     // Find the Central Directory
     if(!find_cd(self, fd))
@@ -637,15 +337,15 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
       unescaped = unescape_filename(filename, escaped_filename);
       CALL(filename, add, (char *)unescaped->value);
 
-      // Tell the oracle about this new member
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED, 
-	   (RDFValue)URNOF(self),0);
+      // Tell the RESOLVER about this new member
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_STORED, 
+	   (RDFValue)URNOF(self));
 
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE, 
-	   rdfvalue_from_urn(ctx, AFF4_SEGMENT),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_TYPE, 
+	   rdfvalue_from_urn(ctx, AFF4_SEGMENT));
 
-      CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS, 
-	   (RDFValue)filename, NULL);
+      CALL(RESOLVER, add, URNOF(self), AFF4_VOLATILE_CONTAINS, 
+	   (RDFValue)filename);
 
       // Parse the time from the CD
       {
@@ -661,34 +361,34 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	int64_t now = mktime(&x);
 
 	if(now > 0) {
-	  CALL(oracle, set_value, filename, AFF4_VOLATILE_TIMESTAMP,
-               rdfvalue_from_int(ctx, now),0);
+	  CALL(RESOLVER, set, filename, AFF4_VOLATILE_TIMESTAMP,
+               rdfvalue_from_int(ctx, now));
 	};
       };
 
       parse_extra_field(self, fd, cd_header.extra_field_len);
 
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSION, 
-	   rdfvalue_from_int(ctx, cd_header.compression_method),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_COMPRESSION,
+	   rdfvalue_from_int(ctx, cd_header.compression_method));
 
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_CRC,
-	   rdfvalue_from_int(ctx, cd_header.crc32),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_CRC,
+	   rdfvalue_from_int(ctx, cd_header.crc32));
 
       // The following checks for zip64 values
       tmp64 = cd_header.file_size == -1 ? self->original_member_size : cd_header.file_size;
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_SIZE,
-	   rdfvalue_from_int(ctx, tmp64),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_SIZE,
+	   rdfvalue_from_int(ctx, tmp64));
 
       tmp = cd_header.compress_size == -1 ? self->compressed_member_size 
 	: cd_header.compress_size;
 
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSED_SIZE,
-	   rdfvalue_from_int(ctx, tmp),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_COMPRESSED_SIZE,
+	   rdfvalue_from_int(ctx, tmp));
 
       tmp = cd_header.relative_offset_local_header == -1 ? self->offset_of_member_header 
 	: cd_header.relative_offset_local_header;
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_HEADER_OFFSET, 
-	   rdfvalue_from_int(ctx, tmp),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_HEADER_OFFSET, 
+	   rdfvalue_from_int(ctx, tmp));
 
       self->offset_of_member_header = tmp;
 
@@ -707,8 +407,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 	  sizeof(file_header) +
 	  file_header.file_name_length + file_header.extra_field_len;
 
-	CALL(oracle, set_value, filename, AFF4_VOLATILE_FILE_OFFSET,
-	     rdfvalue_from_int(ctx, file_offset),0);
+	CALL(RESOLVER, set, filename, AFF4_VOLATILE_FILE_OFFSET,
+	     rdfvalue_from_int(ctx, file_offset));
       };
 
       // Get ready to read the next record
@@ -722,8 +422,8 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
     goto error_reason;
   };
 
-  CALL(oracle, set_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-       (RDFValue)self->directory_offset,0);
+  CALL(RESOLVER, set, URNOF(self), AFF4_DIRECTORY_OFFSET,
+       (RDFValue)self->directory_offset);
 
   // Now find the information.turtle file and parse it (We need to do
   // this after we loaded all the segments in case the
@@ -731,12 +431,12 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   // volume - which could happen if the dataType refers to external
   // segments
   {
-    RESOLVER_ITER *iter = CALL(oracle, get_iter, ctx, URNOF(self), AFF4_CONTAINS);
+    RESOLVER_ITER *iter = CALL(RESOLVER, get_iter, ctx, URNOF(self), AFF4_CONTAINS);
     RDFURN urn = new_RDFURN(ctx);
     int information_length = strlen(AFF4_INFORMATION);
 
       // Is this file an information file?
-    while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
+    while(CALL(RESOLVER, iter_next, iter, (RDFValue)urn)) {
       char *base_name = basename(urn->value);
 
       // We identify streams by their filename being information.encoding
@@ -750,7 +450,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
           CALL(parser, parse, fd, rdf_format, URNOF(self)->value);
           talloc_free(parser);
-          CALL(oracle, cache_return, (AFFObject)fd);
+          CALL(RESOLVER, cache_return, (AFFObject)fd);
         };
       };
     };
@@ -758,7 +458,7 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
 
  exit:
   if(fd) {
-    CALL(oracle, cache_return, (AFFObject)fd);
+    CALL(RESOLVER, cache_return, (AFFObject)fd);
   };
 
   talloc_free(ctx);
@@ -776,13 +476,15 @@ static int ZipFile_load_from(AFF4Volume this, RDFURN fd_urn, char mode) {
   CALL(URNOF(self), set, ctx);
 
   if(fd) {
-    CALL(oracle, cache_return, (AFFObject)fd);
+    CALL(RESOLVER, cache_return, (AFFObject)fd);
   };
   POP_ERROR_STATE;
 
   talloc_free(ctx);
   return 0;
 };
+
+#endif
 
 static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, char mode,
 				   uint16_t compression) {
@@ -794,13 +496,6 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
 
   // Make the filename URN relative to us.
   CALL(filename, add, member_name);
-
-  // Where are we stored?
-  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_STORED,
-	   (RDFValue)self->storage_urn)) {
-    RaiseError(ERuntimeError, "No storage for %s?", STRING_URNOF(self));
-    goto error;
-  };
 
   switch(mode) {
   case 'w': {
@@ -815,7 +510,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     // This might block until the file is ready to be written on. The
     // storage file may be locked by an outstanding ZipFileStream
     // object which is not yet closed.
-    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
+    fd = (FileLikeObject)CALL(RESOLVER, open, self->storage_urn, 'w');
     if(!fd) goto error;
 
     epoch_time = time(NULL);
@@ -825,11 +520,11 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
        write a new CD on it
     */
     self->directory_offset->value = DIRTY_STATE_NEED_TO_CLOSE;
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-	 (RDFValue)self->directory_offset,0);
-
-    CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_DIRTY,
 	 (RDFValue)self->directory_offset);
+    
+    self->directory_offset = (XSDInteger)CALL(RESOLVER, resolve, self, URNOF(self),
+                                              AFF4_DIRECTORY_OFFSET);
 
     DEBUG_OBJECT("New segment %s at offset %llu\n", STRING_URNOF(self),
                  self->directory_offset->value);
@@ -856,27 +551,27 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, char *member_name, ch
     CALL(fd, write, ZSTRING_NO_NULL(escaped_filename));
 
     // Store some info about the segment
-    CALL(oracle, set_value, filename, AFF4_VOLATILE_COMPRESSION,
-	 rdfvalue_from_int(ctx, compression),0);
+    CALL(RESOLVER, set, filename, AFF4_VOLATILE_COMPRESSION,
+	 rdfvalue_from_int(ctx, compression));
 
-    CALL(oracle, set_value, filename, AFF4_VOLATILE_TYPE,
-	 rdfvalue_from_urn(ctx, AFF4_SEGMENT),0);
+    CALL(RESOLVER, set, filename, AFF4_VOLATILE_TYPE,
+	 rdfvalue_from_urn(ctx, AFF4_SEGMENT));
 
-    CALL(oracle, set_value, filename, AFF4_VOLATILE_STORED,
-	 (RDFValue)URNOF(self),0);
+    CALL(RESOLVER, set, filename, AFF4_VOLATILE_STORED,
+	 (RDFValue)URNOF(self));
 
-    //    CALL(oracle, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS,
+    //    CALL(RESOLVER, add_value, URNOF(self), AFF4_VOLATILE_CONTAINS,
     //	 (RDFValue)filename);
 
     {
       uint64_t offset = CALL(fd, tell);
 
-      CALL(oracle, set_value, filename, AFF4_VOLATILE_FILE_OFFSET,
-	   rdfvalue_from_int(ctx, offset),0);
+      CALL(RESOLVER, set, filename, AFF4_VOLATILE_FILE_OFFSET,
+	   rdfvalue_from_int(ctx, offset));
     };
 
-    CALL(oracle, set_value, filename, AFF4_VOLATILE_HEADER_OFFSET,
-	 (RDFValue)self->directory_offset,0);
+    CALL(RESOLVER, set, filename, AFF4_VOLATILE_HEADER_OFFSET,
+	 (RDFValue)self->directory_offset);
 
 
     // We give the storage fd to the ZipFileStream object to hold on
@@ -948,7 +643,9 @@ static void write_zip64_CD(ZipFile self, FileLikeObject fd,
 
 // This function dumps all the URNs contained within this volume
 static int dump_volume_information(ZipFile this) {
-  RESOLVER_ITER *iter = NULL;
+#if 0
+
+  RDFValue i;;
   AFF4Volume self = (AFF4Volume)this;
   FileLikeObject fd = CALL(self, open_member, AFF4_INFORMATION "turtle", 'w',
 			   ZIP_DEFLATE);
@@ -964,11 +661,11 @@ static int dump_volume_information(ZipFile this) {
   // Serialise all statements related to this volume
   CALL(serializer, serialize_urn, URNOF(self));
 
-  iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
-  while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
+  iter = CALL(RESOLVER, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
+  while(CALL(RESOLVER, iter_next, iter, (RDFValue)urn)) {
     // information.turtle is still open from above:
     if(!strstr(urn->value, AFF4_INFORMATION "turtle") &&
-       CALL(oracle, resolve_value, urn, AFF4_VOLATILE_DIRTY,
+       CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_DIRTY,
             (RDFValue)dirty) && dirty->value == DIRTY_STATE_NEED_TO_CLOSE) {
       RaiseError(ERuntimeError, "URI %s not closed while closing volume",
                  urn->value);
@@ -999,6 +696,7 @@ static int dump_volume_information(ZipFile this) {
 
   talloc_free(urn);
   return 0;
+#endif
 };
 
 
@@ -1008,36 +706,21 @@ static int ZipFile_close(AFFObject this) {
   int k=0;
 
   // If we are dirty we need to dump the CD and serialise the RDF
-  if(CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_DIRTY,
-	  (RDFValue)self->_didModify) &&
-     self->_didModify->value == DIRTY_STATE_NEED_TO_CLOSE) {
+  if(self->_didModify->value == DIRTY_STATE_NEED_TO_CLOSE) {
     struct EndCentralDirectory end;
-    FileLikeObject fd;
-
-    // Get where we are stored
-    if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_STORED,
-	     (RDFValue)self->storage_urn)) {
-      RaiseError(ERuntimeError, "Can not find the storage for Volume %s", 
-                 URNOF(self)->value);
-      goto exit;
-    };
 
     // Write an information file if needed
-    if(!dump_volume_information(self))
-      goto error;
+    //if(!dump_volume_information(self))
+    //  goto error;
 
-    fd = (FileLikeObject)CALL(oracle, open, self->storage_urn, 'w');
-    if(!fd) goto exit;
-
-    CALL(oracle, resolve_value, URNOF(self), AFF4_DIRECTORY_OFFSET,
-	 (RDFValue)self->directory_offset);
-
-    CALL(fd, seek, self->directory_offset->value, SEEK_SET);
+    /* We always append the CD at the end of the file to maintain auditing for
+     * volume changes.
+     */
+    CALL(fd, seek, 0, SEEK_END);
 
     // Dump the central directory for this volume
     {
       // Get all the URNs contained within this volume
-      RESOLVER_ITER *iter;
       StringIO zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
       RDFURN urn = new_RDFURN(zip64_header);
       StringIO cache = CONSTRUCT(StringIO, StringIO, Con, urn);
@@ -1058,8 +741,8 @@ static int ZipFile_close(AFFObject this) {
                "Closing ZipFile volume");
 
       // Iterate over all the AFF4_VOLATILE_CONTAINS URNs
-      iter = CALL(oracle, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
-      while(CALL(oracle, iter_next, iter, (RDFValue)urn)) {
+      iter = CALL(RESOLVER, get_iter, urn, URNOF(self), AFF4_VOLATILE_CONTAINS);
+      while(CALL(RESOLVER, iter_next, iter, (RDFValue)urn)) {
 	struct CDFileHeader cd;
 	struct tm *now;
         char *relative_name, escaped_filename;
@@ -1076,11 +759,11 @@ static int ZipFile_close(AFFObject this) {
         };
 
 	// Only store segments here
-	if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_TYPE, (RDFValue)type) ||
+	if(!CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_TYPE, (RDFValue)type) ||
 	   strcmp(type->value, AFF4_SEGMENT))
 	  continue;
 
-	if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
+	if(!CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_HEADER_OFFSET,
                  (RDFValue)header_offset))
           continue;
 
@@ -1088,7 +771,7 @@ static int ZipFile_close(AFFObject this) {
 	relative_name = urn->relative_name(urn, URNOF(self));
         escaped_filename = escape_filename(self, urn, ZSTRING_NO_NULL(relative_name));
 
-	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_TIMESTAMP,
+	CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_TIMESTAMP,
 	     (RDFValue)epoch_time);
 
 	now = localtime((time_t *)&epoch_time->value);
@@ -1103,7 +786,7 @@ static int ZipFile_close(AFFObject this) {
 	cd.version_needed = 0x14;
 	cd.compression_method = ZIP_STORED;
 
-	if(CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSION,
+	if(CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_COMPRESSION,
 		(RDFValue)compression_method)) {
 	  cd.compression_method = compression_method->value;
 	};
@@ -1111,7 +794,7 @@ static int ZipFile_close(AFFObject this) {
 	// We always write trailing directory structures
 	cd.flags = 0x8;
 
-	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_CRC,
+	CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_CRC,
 	     (RDFValue)crc);
 
 	cd.crc32 = crc->value;
@@ -1125,7 +808,7 @@ static int ZipFile_close(AFFObject this) {
 
 	// The following are optional zip64 fields. They must appear
 	// in this order:
-	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_SIZE, (RDFValue)size);
+	CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_SIZE, (RDFValue)size);
 
 	if(size->value > ZIP64_LIMIT) {
 	  cd.file_size = -1;
@@ -1136,7 +819,7 @@ static int ZipFile_close(AFFObject this) {
 
 	// AFF4 does not support very large segments since they are
 	// unseekable.
-	CALL(oracle, resolve_value, urn, AFF4_VOLATILE_COMPRESSED_SIZE,
+	CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_COMPRESSED_SIZE,
 	     (RDFValue)compressed_size);
 
 	cd.compress_size = compressed_size->value;
@@ -1196,7 +879,7 @@ static int ZipFile_close(AFFObject this) {
 
     // We are not dirty any more - but the resolver is up to date:
     self->_didModify->value = DIRTY_STATE_ALREADY_LOADED;
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_DIRTY,
          (RDFValue)self->_didModify, 0);
 
     // Close the fd
@@ -1205,13 +888,13 @@ static int ZipFile_close(AFFObject this) {
 
  exit:
   PUSH_ERROR_STATE;
-  CALL(oracle, cache_return, (AFFObject)self);
+  CALL(RESOLVER, cache_return, (AFFObject)self);
   POP_ERROR_STATE;
   return 1;
 
  error:
   PUSH_ERROR_STATE;
-  CALL(oracle, cache_return, (AFFObject)self);
+  CALL(RESOLVER, cache_return, (AFFObject)self);
   POP_ERROR_STATE;
 
   return 0;
@@ -1249,7 +932,6 @@ VIRTUAL(ZipFile, AFF4Volume) {
   VMETHOD_BASE(AFF4Volume, writestr) = ZipFile_writestr;
   VMETHOD_BASE(AFFObject, Con) = ZipFile_AFFObject_Con;
   VMETHOD_BASE(AFF4Volume, load_from) = ZipFile_load_from;
-  VMETHOD_BASE(AFFObject, delete_urn) = FileLikeObject_delete;
 
 // Initialise our private classes
   INIT_CLASS(ZipFileStream);
@@ -1265,8 +947,8 @@ VIRTUAL(ZipFile, AFF4Volume) {
     for writing.
 
     You must write to the segment as quickly as possible and close it
-    immediately - do not return this to the oracle cache (since it was
-    not obtained through oracle.open()).
+    immediately - do not return this to the RESOLVER cache (since it was
+    not obtained through RESOLVER.open()).
 
     If the segment is opened for reading the underlying file is not
     locked, and multiple segments may be opened for reading at the
@@ -1297,7 +979,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
   if(mode == 'w') {
     // Make sure that we are marked as ready to be closed
     self->dirty->value = DIRTY_STATE_NEED_TO_CLOSE;
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_DIRTY,
          (RDFValue)self->dirty,0);
   };
 
@@ -1310,10 +992,10 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   self->file_offset = new_XSDInteger(self);
 
-  if(!CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSION,
+  if(!CALL(RESOLVER, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSION,
 	   (RDFValue)self->compression) ||
 
-     !CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_FILE_OFFSET,
+     !CALL(RESOLVER, resolve_value, URNOF(self), AFF4_VOLATILE_FILE_OFFSET,
 	   (RDFValue)self->file_offset)
      ) {
     // We fail here because we dont know the compression or file
@@ -1326,7 +1008,7 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
 
   self->super.size = new_XSDInteger(self);
 
-  CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_SIZE,
+  CALL(RESOLVER, resolve_value, URNOF(self), AFF4_VOLATILE_SIZE,
        (RDFValue)self->super.size);
 
   DEBUG_OBJECT("ZipFileStream: created %s\n", STRING_URNOF(self));
@@ -1358,13 +1040,13 @@ static ZipFileStream ZipFileStream_Con(ZipFileStream self, RDFURN filename,
       // compressed segments should be able to fit at once.
       z_stream strm;
 
-      fd = (FileLikeObject)CALL(oracle, open, file_urn, 'r');
+      fd = (FileLikeObject)CALL(RESOLVER, open, file_urn, 'r');
       if(!fd) {
         RaiseError(ERuntimeError, "Unable to open ZipFile volume %s", file_urn->value);
         goto error;
       };
 
-      CALL(oracle, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
+      CALL(RESOLVER, resolve_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
 	   (RDFValue)self->compress_size);
 
       self->cbuff = talloc_size(self, self->compress_size->value);
@@ -1494,7 +1176,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
 
   if(this->compression->value == ZIP_STORED) {
     /** Position our write pointer */
-    fd = (FileLikeObject)CALL(oracle, open, this->file_urn, 'r');
+    fd = (FileLikeObject)CALL(RESOLVER, open, this->file_urn, 'r');
     if(!fd) {
       RaiseError(ERuntimeError, "Unable to open zip file %s", this->file_urn->value);
       goto error;
@@ -1502,7 +1184,7 @@ static int ZipFileStream_read(FileLikeObject self, char *buffer,
     CALL(fd, seek, this->file_offset->value + self->readptr, SEEK_SET);
     length = CALL(fd, read, buffer, length);
     self->readptr += length;
-    CALL(oracle, cache_return, (AFFObject)fd);
+    CALL(RESOLVER, cache_return, (AFFObject)fd);
 
     // We cheat here and decompress the entire member, then copy whats
     // needed out
@@ -1534,7 +1216,7 @@ static int ZipFileStream_close(AFFObject aself) {
   };
 
   // Make sure the volume we are writing on is actually dirty:
-  if(CALL(oracle, resolve_value, this->container_urn, AFF4_VOLATILE_DIRTY,
+  if(CALL(RESOLVER, resolve_value, this->container_urn, AFF4_VOLATILE_DIRTY,
           (RDFValue)this->dirty) &&
      this->dirty->value != DIRTY_STATE_NEED_TO_CLOSE) {
     RaiseError(ERuntimeError, "Trying to write segment on a closed volume!!");
@@ -1562,21 +1244,21 @@ static int ZipFileStream_close(AFFObject aself) {
   };
 
   // Store important information about this file
-  CALL(oracle, add_value, this->container_urn, AFF4_VOLATILE_CONTAINS,
+  CALL(RESOLVER, add_value, this->container_urn, AFF4_VOLATILE_CONTAINS,
        (RDFValue)URNOF(self), NULL);
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_STORED,
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_STORED,
        (RDFValue)this->container_urn, NULL);
   {
     uint32_t tmp = time(NULL);
-    CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_TIMESTAMP,
+    CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_TIMESTAMP,
 	 rdfvalue_from_int(ctx, tmp), NULL);
   };
 
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE,
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_SIZE,
        (RDFValue)self->size, NULL);
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_COMPRESSED_SIZE,
        (RDFValue)this->compress_size, NULL);
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_CRC,
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_CRC,
        (RDFValue)this->crc32, NULL);
 
   // Write a signature:
@@ -1600,7 +1282,7 @@ static int ZipFileStream_close(AFFObject aself) {
 
   // This is the point where we will be writing the next file - right
   // at the end of this file.
-  CALL(oracle, set_value, this->container_urn, AFF4_DIRECTORY_OFFSET,
+  CALL(RESOLVER, set, this->container_urn, AFF4_DIRECTORY_OFFSET,
        rdfvalue_from_int(ctx, this->file_fd->readptr), NULL);
 
   // Calculate the sha1 hash and set the hash in the resolver:
@@ -1618,13 +1300,13 @@ static int ZipFileStream_close(AFFObject aself) {
 
       // FIXME: Write hash RDF Types
       // Tell the resolver what the hash is:
-      //CALL(oracle, set, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
+      //CALL(RESOLVER, set, URNOF(self), AFF4_SHA, &tmp, RESOLVER_DATA_TDB_DATA);
     };
   };
 
   // We are no longer dirty
   this->dirty->value = DIRTY_STATE_ALREADY_LOADED;
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_DIRTY,
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_DIRTY,
        (RDFValue)this->dirty, NULL);
 
   // Make sure the lock is removed from the underlying storage
@@ -1632,7 +1314,7 @@ static int ZipFileStream_close(AFFObject aself) {
   CALL((AFFObject)this->file_fd, cache_return);
 
   // Make sure we record the size of this object now
-  CALL(oracle, set_value, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size, 0);
+  CALL(RESOLVER, set, URNOF(self), AFF4_VOLATILE_SIZE, (RDFValue)self->size, 0);
   SUPER(AFFObject, FileLikeObject, close);
 
  exit:
@@ -1662,21 +1344,21 @@ static AFFObject ZipFileStream_AFFObject_Con(AFFObject self, RDFURN urn, char mo
 
     this->container_urn = new_RDFURN(self);
 
-    if(!CALL(oracle, resolve_value, urn, AFF4_VOLATILE_STORED,
+    if(!CALL(RESOLVER, resolve_value, urn, AFF4_VOLATILE_STORED,
 	     (RDFValue)this->container_urn)) {
       RaiseError(ERuntimeError, "Parent not set?");
       goto error;
     };
 
     // Open the volume:
-    parent = (AFF4Volume)CALL(oracle, open, this->container_urn, mode);
+    parent = (AFF4Volume)CALL(RESOLVER, open, this->container_urn, mode);
     if(!parent) goto error;
 
     // Now just return the member from the volume:
     //    talloc_free(self);
     result = (AFFObject)CALL(parent, open_member, urn->value, mode, ZIP_STORED);
 
-    CALL(oracle, cache_return, (AFFObject)parent);
+    CALL(RESOLVER, cache_return, (AFFObject)parent);
 
     // We return the opened member instead of ourselves:
     talloc_unlink(NULL,  self);
@@ -1710,7 +1392,7 @@ char *relative_name(void *ctx, char *name, char *volume_urn) {
 };
 
 AFF4_MODULE_INIT(A000_zip) {
-  register_type_dispatcher(oracle, AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
-  register_type_dispatcher(oracle, AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
-  register_type_dispatcher(oracle, AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
+  register_type_dispatcher(AFF4_FILE, (AFFObject *)GETCLASS(FileBackedObject));
+  register_type_dispatcher(AFF4_ZIP_VOLUME, (AFFObject *)GETCLASS(ZipFile));
+  register_type_dispatcher(AFF4_SEGMENT, (AFFObject *)GETCLASS(ZipFileStream));
 };

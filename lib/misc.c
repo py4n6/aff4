@@ -37,7 +37,7 @@ char *from_int(uint64_t arg) {
   return buffer;
 };
 
-static char *illegal_filename_chars = "|?[]\\+<>:%;&\'\",*# ";
+static char *illegal_filename_chars = "|?[]\\+<>:%;&\'\",*#";
 static char illegal_filename_lut[128];
 
 void init_luts() {
@@ -83,7 +83,7 @@ XSDString unescape_filename(void *ctx, const char *filename) {
   XSDString result = new_XSDString(ctx);
 
   int i,j=0;
-  int length = strlen(filename)+1;
+  int length = strlen(filename);
 
   for(i=0;i<min(length, BUFF_SIZE-10);i++) {
     if(filename[i]=='%') {

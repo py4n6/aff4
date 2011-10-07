@@ -85,6 +85,7 @@ TEST(URLParserTraversal2) {
 TEST(XSDIntegerTest) {
   // Our integer is our memory context
   XSDInteger i = new_XSDInteger(NULL);
+  Resolver resolver = AFF4_get_resolver(NULL, i);
   RDFURN subject = new_RDFURN(i);
   DataStoreObject data;
   uint64_t value = 12345;
@@ -97,13 +98,13 @@ TEST(XSDIntegerTest) {
   CU_ASSERT_EQUAL(i->value, value);
 
   // Encoding
-  data = base->encode(base, subject);
+  data = base->encode(base, subject, resolver);
   CU_ASSERT_TRUE(!memcmp((char *)data->data, (char *)&value, sizeof(value)));
   CU_ASSERT_EQUAL(data->length, sizeof(value));
   CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), "12345");
 
   // Decoding
-  base->decode(base, data, subject);
+  base->decode(base, data, subject, resolver);
   CU_ASSERT_EQUAL(i->value, value);
 
   // Parsing
@@ -122,9 +123,10 @@ TEST(XSDIntegerTest) {
 TEST(XSDStringTest) {
   // Our string is our memory context
   XSDString i = new_XSDString(NULL);
+  Resolver resolver = AFF4_get_resolver(NULL, i);
   RDFURN subject = new_RDFURN(i);
   DataStoreObject data;
-  char *value = "this is a test";
+  char *value = "this? is a test";
   int value_len = strlen(value);
   // This is an alias to the base class
   RDFValue base = (RDFValue)i;
@@ -136,17 +138,19 @@ TEST(XSDStringTest) {
   CU_ASSERT_EQUAL(i->length, value_len);
 
   // Encoding
-  data = base->encode(base, subject);
+  data = base->encode(base, subject, resolver);
   CU_ASSERT_TRUE(!memcmp((char *)data->data, value, value_len));
   CU_ASSERT_EQUAL(data->length, value_len);
-  CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), value);
+  // Escape strings with spaces.
+  CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject),
+                         "this%3F is a test");
 
   // Decoding
   value = "another string";
   data = CONSTRUCT(DataStoreObject, DataStoreObject, Con, i,
-                   ZSTRING(value), "xsd:string");
+                   ZSTRING_NO_NULL(value), "xsd:string");
 
-  base->decode(base, data, subject);
+  base->decode(base, data, subject, resolver);
   CU_ASSERT_STRING_EQUAL(i->value, value);
   CU_ASSERT_STRING_EQUAL(base->serialise(base, i, subject), value);
 
@@ -170,13 +174,13 @@ TEST(XSDStringTest) {
 
 TEST(RDFURNTest) {
   RDFURN url = new_RDFURN(NULL);
+  Resolver resolver = AFF4_get_resolver(NULL, url);
   RDFURN subject = new_RDFURN(url);
   DataStoreObject data;
   char *value = "aff4://8768765486/root/file";
-  int value_len = strlen(value);
+
   // This is an alias to the base class
   RDFValue base = (RDFValue)url;
-  Resolver oracle = AFF4_get_resolver();
 
   subject->set(subject, "aff4://12345/subject");
   url->set(url, value);
@@ -184,7 +188,7 @@ TEST(RDFURNTest) {
   CU_ASSERT_STRING_EQUAL(url->value, value);
 
   // Encoding
-  data = base->encode(base, subject);
+  data = base->encode(base, subject, resolver);
 
   // We encode the URN id as a uint32_t
   CU_ASSERT_STRING_EQUAL(data->data, value);
@@ -205,7 +209,7 @@ TEST(RDFURNTest) {
 
   // Decoding
   {
-    base->decode(base, data, subject);
+    base->decode(base, data, subject, resolver);
     CU_ASSERT_STRING_EQUAL(url->value, value);
   };
 

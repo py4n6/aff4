@@ -164,4 +164,11 @@ END_CLASS
 
 PROXY_CLASS(Logger);
 
+
+/** Global logger */
+extern Logger AFF4_LOGGER;
+
+
+#define RESOLVER (((AFFObject)self)->resolver)
+
 #endif 	    /* !AFF4_UTILS_H_ */

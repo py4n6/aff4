@@ -28,15 +28,8 @@ int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense);
 // their AFFObjects::Con(urn, mode) constructor.
 static Cache type_dispatcher = NULL;
 
-/** This is the global oracle - it knows everything about
-    everyone. Note: The Resolver() class is a singleton which returns
-    the oracle if it already exists.
-*/
-Resolver oracle = NULL;
-
-
-void register_type_dispatcher(Resolver self, char *type,        \
-                              AFFObject *classref) {
+/** This registers new AFFObject implementations. */
+void register_type_dispatcher(char *type, AFFObject *classref) {
   if(!(*classref)->dataType) {
     printf("%s has no dataType\n", NAMEOF(*classref));
   };
@@ -47,7 +40,7 @@ void register_type_dispatcher(Resolver self, char *type,        \
     talloc_set_name_const(type_dispatcher, "Type Dispatcher");
   };
 
-  if(1 || !CALL(type_dispatcher, present, ZSTRING(type))) {
+  if(!CALL(type_dispatcher, present, ZSTRING(type))) {
     // Make a copy of the class for storage in the registry
     Object tmp =  talloc_memdup(NULL, classref, SIZEOF(classref));
     talloc_set_name(tmp, "handler %s for type '%s'", NAMEOF(classref), type);
@@ -56,27 +49,6 @@ void register_type_dispatcher(Resolver self, char *type,        \
   };
 };
 
-
-static void Resolver_register_type_dispatcher(Resolver self, char *type, \
-                                              AFFObject classref) {
-  if(!(classref)->dataType) {
-    RaiseError(ERuntimeError,"%s has no dataType\n", NAMEOF(classref));
-    goto error;
-  };
-
-  if(1 || !CALL(type_dispatcher, present, ZSTRING(type))) {
-    Object old_obj = CALL(type_dispatcher, get, NULL, ZSTRING(type));
-
-    if(old_obj) talloc_free(old_obj);
-    // Make a copy of the class for storage in the registry
-    talloc_set_name(classref, "handler %s for type '%s'", NAMEOF(classref), type);
-
-    CALL(type_dispatcher, put, ZSTRING(type), (Object)classref);
-  };
-
- error:
-  return;
-};
 
 /** Implementation of Caches */
 
@@ -415,17 +387,6 @@ static Resolver Resolver_Con(Resolver self, DataStore store, int mode) {
   if(mode & RESOLVER_MODE_DEBUG_MEMORY)
     talloc_enable_leak_report_full();
 
-  // Make this object a singleton - the Resolver may be constructed as
-  // many times as needed, but we always return a reference to the
-  // singleton oracle if it exists
-  if(oracle) {
-    talloc_free(self);
-    talloc_increase_ref_count(oracle);
-
-    return oracle;
-  };
-
-
   // This is recursive to ensure that only one thread can hold the
   // resolver at once. Once the thread holds the resolver its free to
   // continue calling functions from it.
@@ -457,7 +418,7 @@ static int Resolver_set(Resolver self, RDFURN urn, char *attribute_str,
 
   LOCK_RESOLVER;
 
-  obj = CALL(value, encode, urn);
+  obj = CALL(value, encode, urn, self);
 
   // The DataStore will steal the object.
   CALL(self->store, set, urn->value, attribute_str, obj);
@@ -486,7 +447,7 @@ static int Resolver_add(Resolver self, RDFURN urn, char *attribute_str,
   LOCK_RESOLVER;
   CALL(self->store, unlock);
 
-  obj = CALL(value, encode, urn);
+  obj = CALL(value, encode, urn, self);
 
   // The DataStore will steal the object.
   CALL(self->store, add, urn->value, attribute_str, obj);
@@ -517,7 +478,7 @@ static RDFValue Resolver_resolve(Resolver self, void *ctx, RDFURN urn, char *att
     };
 
     // Decode it.
-    CALL(item, decode, obj, urn);
+    CALL(item, decode, obj, urn, self);
 
     // Add to the list
     if(result) {
@@ -535,21 +496,22 @@ static RDFValue Resolver_resolve(Resolver self, void *ctx, RDFURN urn, char *att
 
 static AFFObject create_new_object(Resolver self, RDFURN urn, char *type, char mode) {
   AFFObject result = NULL;
-  AFFObject classref;
-
-  // Here we need to build a new instance of this class using the
-  // dispatcher. We first try the scheme:
-  char *scheme = urn->parser->scheme;
-
-  // Empty schemes default to file:// URLs
-  if(!scheme || strlen(scheme)==0)
-    scheme = "file";
+  AFFObject classref = NULL;
 
   // Find the correct class to handle this type. First try the scheme and then
-
   // the type.
+  if(urn) {
+    // Here we need to build a new instance of this class using the
+    // dispatcher. We first try the scheme:
+    char *scheme = urn->parser->scheme;
 
-  classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(scheme));
+    // Empty schemes default to file:// URLs
+    if(!scheme || strlen(scheme)==0)
+      scheme = "file";
+
+    classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(scheme));
+  };
+
   if(!classref) {
     classref = (AFFObject)CALL(type_dispatcher, borrow, ZSTRING(type));
   };
@@ -561,9 +523,10 @@ static AFFObject create_new_object(Resolver self, RDFURN urn, char *type, char m
   };
 
   // Make a new instance of this class (which we own)
-  result = CONSTRUCT_FROM_REFERENCE(classref, Con, self, urn, mode);
+  result = CONSTRUCT_FROM_REFERENCE(classref, Con, self, urn, mode, self);
   if(!result) goto error;
 
+  talloc_set_name_const(result, NAMEOF(result));
   ((AFFObject)result)->mode = mode;
   return result;
 
@@ -590,7 +553,6 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   DataStoreObject type_obj;
 
   LOCK_RESOLVER;
-  CALL(self->store, lock);
   ClearError();
 
   if(!urn) {
@@ -601,14 +563,14 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   DEBUG_OBJECT("Opening %s for mode %c\n", urn->value, mode);
 
   // Object must already exist.
+  CALL(self->store, lock);
   type_obj = CALL(self->store, get, urn->value, AFF4_TYPE);
+  CALL(self->store, unlock);
 
   if(!type_obj) {
     RaiseError(ERuntimeError, "Object does not exist.");
     goto exit;
   };
-
-  CALL(self->store, unlock);
 
   if(mode == 'r') {
     result = create_new_object(self, urn, type_obj->data, mode);
@@ -718,23 +680,80 @@ exit:
 };
 
 // A helper method to construct the class.
-static AFFObject Resolver_create(Resolver self, RDFURN urn, XSDString type, char mode) {
-  DataStoreObject type_obj;
+static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type) {
   LOCK_RESOLVER;
 
-  CALL(self->store, lock);
-  type_obj = CALL(self->store, get, urn->value, AFF4_TYPE);
-
-  if(!type_obj) {
-    DEBUG_OBJECT("Created %s with URN %s\n", type, urn->value);
-    CALL(self, set, urn, AFF4_TYPE, (RDFValue)type);
+  AFFObject result = create_new_object(self, urn, type, 'w');
+  // Failed to create a new object
+  if(result) {
+    DEBUG_OBJECT("Created %s with URN %s\n", type, result->urn->value);
   };
-  CALL(self->store, unlock);
 
   UNLOCK_RESOLVER;
+  return result;
+};
 
-  talloc_free(type_obj);
-  return Resolver_open(self, urn, mode);
+
+static void Resolver_manage(Resolver self, AFFObject obj) {
+  if(obj->mode == 'w' && obj->urn) {
+    // If we are writing, place the result on the cache.
+    CALL(self->write_cache, put, ZSTRING(obj->urn->value), (Object)obj);
+
+    // And lock the mutex
+    pthread_mutex_lock(&obj->mutex);
+    obj->thread_id = pthread_self();
+  };
+};
+
+static AFFObject Resolver_own(Resolver self, RDFURN urn) {
+  /* Check that the object is not already in the write cache */
+  AFFObject result;
+
+  LOCK_RESOLVER;
+
+  result = (AFFObject)CALL(self->write_cache, borrow, ZSTRING(urn->value));
+  if(result) {
+    // Is it already locked by us?
+    if(result->thread_id == pthread_self()) {
+      RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w). "
+                 " Chances are you did not call cache_return() properly.", urn->value);
+      goto exit;
+    };
+
+    /* We need to lock the object here, but we are holding a recursive lock on
+       the entire cache. If we just took the lock here, other threads will be
+       unable to proceed and unlock it. So we must release the cache lock here
+       to give them a chance to unlock it while we block on acquiring the
+       lock. The matter is complicated by the fact that we could be holding a
+       recursive lock on the resolver which means even if we release it once,
+       other threads may still not get to run.
+
+       The solution is to completely unlock the cache as many times as
+       needed here, recording the recursion level, then block on
+       acquiring the object lock. Finally we acquire the required
+       number of locks on the resolver mutex.
+    */
+    {
+      int count = 0;
+
+      // We dont want it to be freed from right under us
+      talloc_steal(self, result);
+
+      // Unlock the resolver.
+      while(pthread_mutex_unlock(&self->mutex) != EPERM) count ++;
+
+      // Take the object
+      pthread_mutex_lock(&result->mutex);
+      result->thread_id = pthread_self();
+
+      // Relock the resolver mutex the required number of times:
+      for(;count > 0;count--) pthread_mutex_lock(&self->mutex);
+    };
+  };
+
+exit:
+  UNLOCK_RESOLVER;
+  return result;
 };
 
 
@@ -827,17 +846,18 @@ void Resolver_log(Resolver self, int level, char *service, RDFURN subject, char 
 VIRTUAL(Resolver, Object) {
      VMETHOD(Con) = Resolver_Con;
      VMETHOD(create) = Resolver_create;
+     VMETHOD(own) = Resolver_own;
+     VMETHOD(manage) = Resolver_manage;
+     VMETHOD(cache_return) = Resolver_cache_return;
 
      VMETHOD(resolve) = Resolver_resolve;
      VMETHOD(open) = Resolver_open;
-     VMETHOD(cache_return) = Resolver_cache_return;
      VMETHOD(set) = Resolver_set;
      VMETHOD(add) = Resolver_add;
      VMETHOD(del) = Resolver_del;
 
      VMETHOD(register_rdf_value_class) = Resolver_register_rdf_value_class;
      VMETHOD(new_rdfvalue) = Resolver_new_rdfvalue;
-     VMETHOD(register_type_dispatcher) = Resolver_register_type_dispatcher;
 
 #if HAVE_OPENSSL
      VMETHOD(register_security_provider) = Resolver_register_security_provider;
@@ -852,51 +872,23 @@ VIRTUAL(Resolver, Object) {
 /************************************************************
   AFFObject - This is the base class for all other objects
 ************************************************************/
-static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
-  uuid_t uuid;
-  char uuid_str[BUFF_SIZE];
+static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode, Resolver resolver) {
+  self->resolver = resolver;
 
-  // We have no valid URI - this is usually the first pass through
-  // this function.
-  if(!uri) {
-    // This function creates a new stream from scratch so the stream
-    // name will be a new UUID
-    strcpy(uuid_str, FQN);
-    uuid_generate(uuid);
-    uuid_unparse(uuid, uuid_str + strlen(FQN));
-
-    self->urn = new_RDFURN(self);
-    self->urn->set(self->urn, uuid_str);
-
-    // The mutex controls access to the object
-    {
-      pthread_mutexattr_t mutex_attr;
-
-      pthread_mutexattr_init(&mutex_attr);
-      pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
-      pthread_mutex_init(&self->mutex, &mutex_attr);
-      pthread_mutexattr_destroy(&mutex_attr);
-    };
-
-    // We already have a valid URL - this is the second pass through
-    // the function.
+  if(uri) {
+    self->urn = CALL((RDFValue)uri, clone, self);
   } else {
-    if(self->urn != uri)
-      self->urn = CALL(uri, copy, self);
+    self->urn = new_RDFURN(self);
+  };
 
-#if 0
-    // Ok we successfully created the object - add it to the required
-    // cached now:
-    if(self->mode == 'w')
-      cache = oracle->write_cache;
+  // The mutex controls access to the object
+  {
+    pthread_mutexattr_t mutex_attr;
 
-    // Put us in the right cache
-    if(!CALL(cache, present, ZSTRING(STRING_URNOF(self)))) {
-      CALL(cache, put, ZSTRING(STRING_URNOF(self)), (Object)self);
-    };
-#endif
-
-    self->complete = 1;
+    pthread_mutexattr_init(&mutex_attr);
+    pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
+    pthread_mutex_init(&self->mutex, &mutex_attr);
+    pthread_mutexattr_destroy(&mutex_attr);
   };
 
   self->mode = mode;
@@ -906,66 +898,31 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode) {
 
 
 static void AFFObject_set(AFFObject self, char *attribute, RDFValue value) {
-  CALL(oracle, set, self->urn, attribute, value);
+  CALL(self->resolver, set, self->urn, attribute, value);
 };
 
 static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
-  CALL(oracle, add, self->urn, attribute, value);
+  CALL(self->resolver, add, self->urn, attribute, value);
 };
 
-// Prepares an object to be used at this point we add the object to
-// the relevant cache
-static AFFObject AFFObject_finish(AFFObject self) {
-  Cache cache = oracle->read_cache;
-  AFFObject result;
+static int AFFObject_finish(AFFObject self) {
+  uuid_t uuid;
+  char uuid_str[BUFF_SIZE];
 
-  /* The following ensures that the object does not really get freed
-     from under us.
-  */
-  aff4_incref(self);
-  result =CALL(self, Con, URNOF(self), self->mode);
-
-  /* Finishing failed - The object constructor has decrefed it already
-     - we return NULL, but the object is really not freed at all. It is
-     just invalid now and must be freed by the caller to finish().
-  */
-  if(!result) return NULL;
-
-  /* Ok - the object is not freed by the constructor */
-  aff4_free(self);
-  // Ok we successfully created the object - add it to the required
-  // cached now:
-  if(self->mode == 'w')
-    cache = oracle->write_cache;
-
-  // Put us in the right cache
-  CALL(cache, put, ZSTRING(STRING_URNOF(result)), (Object)result);
+  if(!self->urn->parser->scheme) {
+    // URN not set - we create an annonymous urn
+    strcpy(uuid_str, FQN);
+    uuid_generate(uuid);
+    uuid_unparse(uuid, uuid_str + strlen(FQN));
+    CALL(self->urn, set, uuid_str);
+  };
 
   self->complete = 1;
 
-  return result;
-};
-
-static void AFFObject_delete(RDFURN urn) {
-  CALL(oracle, del, urn, NULL);
-};
-
-static void AFFObject_cache_return(AFFObject self) {
-  CALL(oracle, cache_return, self);
+  return 1;
 };
 
 static int AFFObject_close(AFFObject self) {
-  Cache cache = oracle->read_cache;
-  Object o;
-
-  if(self->mode == 'w')
-    cache = oracle->write_cache;
-
-  o = CALL(cache, get, NULL, ZSTRING(STRING_URNOF(self)));
-  if(o) talloc_free(o);
-  ClearError();
-
-  talloc_free(self);
   return 1;
 };
 
@@ -973,8 +930,6 @@ VIRTUAL(AFFObject, Object) {
      VMETHOD(finish) = AFFObject_finish;
      VMETHOD(set) = AFFObject_set;
      VMETHOD(add) = AFFObject_add;
-     VMETHOD(delete_urn) = AFFObject_delete;
-     VMETHOD(cache_return) = AFFObject_cache_return;
      VMETHOD(close) = AFFObject_close;
 
      VMETHOD(Con) = AFFObject_Con;
@@ -1017,14 +972,11 @@ VIRTUAL(Logger, Object) {
 } END_VIRTUAL
 
 
-Resolver get_oracle(void) {
-  return oracle;
-};
-
 // Note that we preceed the init function name with an altitude to
 // control the order at which these will be called.
 AFF4_MODULE_INIT(A100_resolver) {
-  AFF4_get_resolver();
+  // Create a global logger.
+  AFF4_LOGGER = CONSTRUCT(Logger, Logger, Con, NULL);
 };
 
 DLL_PUBLIC void aff4_free(void *ptr) {
@@ -1036,22 +988,12 @@ DLL_PUBLIC void aff4_incref(void *ptr) {
   talloc_reference(NULL, ptr);
 };
 
-DLL_PUBLIC Resolver AFF4_get_resolver() {
-  // Make a global oracle
-  if(!oracle) {
-    DataStore data_store = new_MemoryDataStore(NULL);
+DLL_PUBLIC Resolver AFF4_get_resolver(DataStore store, void *ctx) {
+  if(!store)
+    store = new_MemoryDataStore(ctx);
 
-    // Create the global oracle
-    oracle =CONSTRUCT(Resolver, Resolver, Con, NULL, data_store, 0);
-  };
-
-  return oracle;
+  return CONSTRUCT(Resolver, Resolver, Con, ctx, store, 0);
 };
-
-/* This is a global instance of the resolver. All AFFObjects must
-   communicate with the oracle rather than instantiate their own.
-*/
-Resolver oracle;
 
 extern Cache KeyCache;
 
@@ -1075,3 +1017,5 @@ DLL_PUBLIC void aff4_end() {
 DLL_PUBLIC void print_error_message() {
   PrintError();
 };
+
+Logger AFF4_LOGGER = NULL;
