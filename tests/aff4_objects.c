@@ -31,7 +31,7 @@ TEST(FileBackedObjectTest) {
   CU_ASSERT_PTR_NULL(fd);
 
   // Create the file.
-  fd = (FileLikeObject)CALL(oracle, create, urn, AFF4_FILE);
+  fd = (FileLikeObject)CALL(oracle, create, urn, AFF4_FILE, 'w');
 
   /* That should succeed */
   CU_ASSERT_PTR_NOT_NULL(fd);

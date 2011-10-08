@@ -659,12 +659,15 @@ static inline void trim_cache(Cache cache) {
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
   LOCK_RESOLVER;
+  Cache cache = self->read_cache;
 
   /* In read mode we just free the object. */
-  if(obj->mode == 'r') {
-    talloc_free(obj);
-    goto exit;
+  if(obj->mode == 'w') {
+    cache = self->write_cache;
   };
+
+  // Return it back to the cache.
+  CALL(cache, put, ZSTRING(obj->urn->value), obj);
 
   // We are done with the object now
   obj->thread_id = 0;
@@ -674,16 +677,15 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
 
   ClearError();
 
-exit:
   UNLOCK_RESOLVER;
   return;
 };
 
 // A helper method to construct the class.
-static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type) {
+static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type, char mode) {
   LOCK_RESOLVER;
 
-  AFFObject result = create_new_object(self, urn, type, 'w');
+  AFFObject result = create_new_object(self, urn, type, mode);
   // Failed to create a new object
   if(result) {
     DEBUG_OBJECT("Created %s with URN %s\n", type, result->urn->value);
@@ -694,24 +696,50 @@ static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type) {
 };
 
 
+static int remove_object_from_cache(void *ctx) {
+  AFFObject obj = (AFFObject)ctx;
+  Cache cache = obj->resolver->read_cache;
+
+  if(obj->mode == 'w')
+    cache = obj->resolver->write_cache;
+
+  /* Remove us from the cache */
+  CALL(cache, get, NULL, ZSTRING(obj->urn->value));
+
+  return 1;
+};
+
+
 static void Resolver_manage(Resolver self, AFFObject obj) {
-  if(obj->mode == 'w' && obj->urn) {
+  Cache cache = self->read_cache;
+  LOCK_RESOLVER;
+
+  if(obj->mode == 'w')
+    cache = self->write_cache;
+
+  if(obj->urn) {
     // If we are writing, place the result on the cache.
-    CALL(self->write_cache, put, ZSTRING(obj->urn->value), (Object)obj);
+    CALL(cache, put, ZSTRING(obj->urn->value), (Object)obj);
 
     // And lock the mutex
     pthread_mutex_lock(&obj->mutex);
     obj->thread_id = pthread_self();
   };
+
+  UNLOCK_RESOLVER;
 };
 
-static AFFObject Resolver_own(Resolver self, RDFURN urn) {
+static AFFObject Resolver_own(Resolver self, RDFURN urn, char mode) {
   /* Check that the object is not already in the write cache */
   AFFObject result;
+  Cache cache = self->read_cache;
 
   LOCK_RESOLVER;
 
-  result = (AFFObject)CALL(self->write_cache, borrow, ZSTRING(urn->value));
+  if(mode == 'w')
+    cache = self->write_cache;
+
+  result = (AFFObject)CALL(cache, borrow, ZSTRING(urn->value));
   if(result) {
     // Is it already locked by us?
     if(result->thread_id == pthread_self()) {
@@ -923,6 +951,14 @@ static int AFFObject_finish(AFFObject self) {
 };
 
 static int AFFObject_close(AFFObject self) {
+  Cache cache = self->resolver->read_cache;
+
+  if(self->mode == 'w')
+    cache = self->resolver->write_cache;
+
+  /* Remove us from the cache */
+  CALL(cache, get, NULL, ZSTRING(self->urn->value));
+
   return 1;
 };
 

@@ -218,12 +218,12 @@ struct CDFileHeader {
   uint16_t version_made_by;
   uint16_t version_needed;
   uint16_t flags;
-  uint16_t compression_method;	/* aff2volatile:compression */
-  uint16_t dostime;		/* aff2volatile:timestamp */
+  uint16_t compression_method;  /* aff2volatile:compression */
+  uint16_t dostime;             /* aff2volatile:timestamp */
   uint16_t dosdate;
   uint32_t crc32;
-  uint32_t compress_size;	/* aff2volatile:compress_size */
-  uint32_t file_size;		/* aff2volatile:file_size */
+  uint32_t compress_size;       /* aff2volatile:compress_size */
+  uint32_t file_size;           /* aff2volatile:file_size */
   uint16_t file_name_length;
   uint16_t extra_field_len;
   uint16_t file_comment_length;
@@ -274,9 +274,15 @@ struct ZipFile_t;
 CLASS(ZipSegment, FileLikeObject)
   struct list_head members;
   struct CDFileHeader cd;
+
+  /* These need to be configured before calling finish() */
   RDFURN container;
+  int compression_method;
+  time_t timestamp;
+
   z_stream strm;
   uint64_t offset_of_file_header;
+  XSDString filename;
 
   /* Data is compressed to this buffer and only written when the Segment is
    * closed.
@@ -285,9 +291,6 @@ CLASS(ZipSegment, FileLikeObject)
    *  in memory.
    */
   StringIO buffer;
-
-  ZipSegment METHOD(ZipSegment, Con, RDFURN urn, RDFURN container,
-                    char mode, Resolver resolver);
 END_CLASS
 
 /** This represents a Zip file */
@@ -297,7 +300,7 @@ CLASS(ZipFile, AFF4Volume)
      struct EndCentralDirectory *end;
 
      // All our members
-     Cache members;
+     struct list_head members;
 
      // The following are attributes stored by various zip64 extended
      // fields
@@ -356,7 +359,7 @@ CLASS(ZipFileStream, FileLikeObject)
      */
      ZipFileStream METHOD(ZipFileStream, Con, RDFURN urn,                  \
                           RDFURN file_urn, RDFURN container_urn,        \
-			  char mode, FileLikeObject file_fd);
+                          char mode, FileLikeObject file_fd);
 END_CLASS
 
 #define ZIP_STORED 0
@@ -389,18 +392,8 @@ extern struct dispatch_t volume_handlers[];
 
 void dump_stream_properties(FileLikeObject self);
 
-//Some useful utilities
+// Some useful utilities
 ZipFile open_volume(char *urn);
-
-  // Members in a volume may have a URN relative to the volume
-  // URN. This is still globally unique, but may be stored in a more
-  // concise form. For example the ZipFile member "default" is a
-  // relative name with a fully qualified name of
-  // Volume_URN/default. These functions are used to convert from
-  // fully qualified to relative names as needed. The result is a
-  // static buffer.
-  //char *fully_qualified_name(void *ctx, char *name, RDFURN volume_urn);
-  //char *relative_name(void *ctx, char *name, RDFURN volume_urn);
 
 void zip_init();
 void image_init();

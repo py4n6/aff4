@@ -188,7 +188,7 @@ static char *URLParse_string(URLParse self, void *ctx) {
   } else
     fmt = "%s://%s";
 
-  if(strlen(scheme)==0)
+  if(!scheme || strlen(scheme)==0)
     scheme = "file";
 
   query = collapse_path(self->query, NULL);

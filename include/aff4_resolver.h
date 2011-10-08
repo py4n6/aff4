@@ -159,14 +159,14 @@ CLASS(Resolver, Object)
 
  DEFAULT(mode) = "r"
 */
-      AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
+       AFFObject METHOD(Resolver, open, RDFURN uri, char mode);
 
        /* This create a new object of the specified type.
 
           name specifies the type of object as registered in the type
           handler dispatcher. (e.g. AFF4_ZIP_VOLUME)
         */
-       AFFObject METHOD(Resolver, create, RDFURN urn, char *type);
+       AFFObject METHOD(Resolver, create, RDFURN urn, char *type, char mode);
 
        /* This causes the resolver to take ownership of the object. The object
         * is locked to the calling thread and can be returned to the resolver at
@@ -177,7 +177,7 @@ CLASS(Resolver, Object)
        /* This method locks the object and takes ownership of it. The calling
         * thread must call cache_return() to release the object.
         */
-       AFFObject METHOD(Resolver, own, RDFURN urn);
+       AFFObject METHOD(Resolver, own, RDFURN urn, char mode);
 
        /* All objects obtained from Resolver.open() need to be
           returned to the cache promptly using this method. NOTE - it

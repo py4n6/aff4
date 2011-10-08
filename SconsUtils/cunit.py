@@ -149,7 +149,6 @@ int main (int argc, char* argv[])
                                                CU_get_registry());
 
         CU_pTest test = CU_get_test_by_name(test_name, suite);
-        CU_run_test(suite, test);
 
       } else if (argc == 2) {
          if (strcmp (argv[1], "auto") == 0)
