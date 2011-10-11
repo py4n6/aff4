@@ -56,8 +56,8 @@ TEST(ZipTestReader) {
   length = CALL(segment, read, buffer, BUFF_SIZE);
   printf("Read %d\n", length);
 
+  CU_ASSERT_FATAL(length == 6);
   CU_ASSERT(!memcmp(buffer, ZSTRING_NO_NULL("hello")));
-  CU_ASSERT(length == 6);
 
   CALL((AFFObject)zip, close);
   talloc_free(zip);

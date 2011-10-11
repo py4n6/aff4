@@ -27,7 +27,8 @@ source_files = """
 #lib/stringio.c #lib/resolver.c
 #lib/rdf.c #lib/file.c #lib/aff4_zip.c
 #lib/encode.c #lib/queue.c
-#lib/data_store.c
+#lib/data_store.c #lib/aff4_image.c
+#lib/aff4_utils.c
 #libreplace/replace.c
 #lib/public.c #lib/misc.c
 """

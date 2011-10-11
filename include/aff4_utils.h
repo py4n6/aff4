@@ -171,4 +171,41 @@ extern Logger AFF4_LOGGER;
 
 #define RESOLVER (((AFFObject)self)->resolver)
 
+/* A generic thread pool. */
+typedef struct ThreadPoolJob_t {
+  /* An opaque data object (will be stolen). */
+  void *data;
+
+  /* The thread which is running this job. */
+  pthread_t thread_id;
+
+  /* The actual function to run in another thread. */
+  int (*function)(void *data);
+} *ThreadPoolJob;
+
+typedef struct ThreadWorker_t {
+  /* The thread which is running this job. */
+  pthread_t thread_id;
+
+  struct list_head list;
+} *ThreadWorker;
+
+
+struct Queue_t;
+
+
+CLASS(ThreadPool, Object)
+    struct Queue_t *jobs;
+    struct list_head list;
+
+    ThreadPool METHOD(ThreadPool, Con, int number);
+
+    void METHOD(ThreadPool, schedule,                           \
+                int (*function)(void *data), void *data);
+
+    /* Join all the workers. */
+    void METHOD(ThreadPool, join);
+
+END_CLASS
+
 #endif 	    /* !AFF4_UTILS_H_ */

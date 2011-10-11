@@ -207,12 +207,12 @@ static int decompress_segment(ZipSegment self) {
     case ZIP_DEFLATE: {
       z_stream strm;
       unsigned char *cbuff = talloc_size(NULL, self->cd.compress_size);
-      int length = CALL(zip->backing_store, read, cbuff, self->cd.compress_size);
+      int length = CALL(zip->backing_store, read, (char *)cbuff, self->cd.compress_size);
 
       /** Set up our decompressor */
       strm.next_in = cbuff;
       strm.avail_in = length;
-      strm.next_out = self->buffer->data;
+      strm.next_out = (unsigned char *)self->buffer->data;
       strm.avail_out = self->buffer->size;
       strm.zalloc = Z_NULL;
       strm.zfree = Z_NULL;
@@ -442,7 +442,7 @@ static int find_EndCentralDirectory(ZipFile self) {
   directory_offset += i;
   self->end = (struct EndCentralDirectory *)talloc_memdup(self, buffer + i,
                                                           sizeof(*self->end));
-  int j=0;
+
   comment = buffer + i + sizeof(*self->end);
 
   // Is there a comment field? We expect the comment field to be
@@ -508,7 +508,6 @@ error:
 
 
 static ZipSegment load_entry_from_CD(ZipFile self) {
-  struct CDFileHeader cd_header;
   ZipSegment result = CONSTRUCT(ZipSegment, AFFObject, Con, self, NULL, 'r', RESOLVER);
   char buffer[BUFF_SIZE];
   int length;
@@ -530,6 +529,7 @@ static ZipSegment load_entry_from_CD(ZipFile self) {
   if(CALL(self->backing_store, read, buffer, length) != length)
     goto error;
 
+  buffer[length] = 0;
   result->filename = unescape_filename(result, buffer);
 
   printf("Found %s\n", result->filename->value);
@@ -565,6 +565,7 @@ error:
   talloc_free(result);
   return NULL;
 };
+
 
 static int ZipFile_load_from_backing_store(ZipFile self) {
   int directory_offset = find_EndCentralDirectory(self);
@@ -659,6 +660,7 @@ exit:
   return (FileLikeObject)result;
 };
 
+
 /* Write the central directory on the end and finalize the zip file. */
 static int ZipFile_close(AFFObject this) {
   ZipFile self = (ZipFile)this;
@@ -674,8 +676,8 @@ static int ZipFile_close(AFFObject this) {
   if(this->mode == 'r')
     goto exit;
 
-  zip64_header = CONSTRUCT(StringIO, StringIO, Con, NULL);
-  buffer = CONSTRUCT(StringIO, StringIO, Con, zip64_header);
+  buffer = CONSTRUCT(StringIO, StringIO, Con, NULL);
+  zip64_header = CONSTRUCT(StringIO, StringIO, Con, buffer);
 
   // Preallocate memory
   CALL(buffer,seek, 10*BUFF_SIZE, 0);
@@ -762,7 +764,6 @@ exit:
   SUPER(AFFObject, AFF4Volume, close);
   return 0;
 };
-
 
 
 VIRTUAL(ZipFile, AFF4Volume) {

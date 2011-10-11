@@ -1,71 +1,115 @@
 #include "queue.h"
+#include <time.h>
+#include <pthread.h>
+#include <sys/time.h>
 
-Queue Queue_Con(Queue self) {
-  INIT_LIST_HEAD(&self->list);
+static Queue Queue_Con(Queue self, int maxsize) {
+  INIT_LIST_HEAD(&self->items);
+  self->maxsize = maxsize;
+  self->queue_size = 0;
 
-  // this will be locked when we are busy
   pthread_mutex_init(&self->mutex, NULL);
-  pthread_cond_init(&self->condition, NULL);
-
-  self->data = NULL;
+  pthread_cond_init(&self->not_empty, NULL);
+  pthread_cond_init(&self->not_full, NULL);
+  pthread_cond_init(&self->all_tasks_done, NULL);
 
   return self;
 };
 
 
-void *Queue_get(Queue self, void *ctx) {
-  Queue item;
-  void *result;
+static void *Queue_get(Queue self, void *ctx, int timeout) {
+  QueueItem item;
+  void *result = NULL;
+  struct timeval now;
+  struct timespec deadline;
 
   pthread_mutex_lock(&self->mutex);
+  gettimeofday(&now, NULL);
+  deadline.tv_sec = now.tv_sec + timeout / 1000000;
+  deadline.tv_nsec = (now.tv_usec + timeout % 1000000) * 1000;
+
   // If there is nothing available we just wait for something new:
-  while(list_empty(&self->list)) {
-    pthread_cond_wait( &self->condition, &self->mutex);
+  if(self->queue_size==0) {
+    if(pthread_cond_timedwait(&self->not_empty,
+                              &self->mutex, &deadline)) {
+      goto exit;
+    };
   };
 
-  list_next(item, &self->list, list);
+  list_next(item, &self->items, list);
   list_del(&item->list);
   result = item->data;
   talloc_steal(ctx, result);
   talloc_free(item);
 
+  // Let waiters know there is a new item in the queue
+  pthread_cond_signal(&self->not_full);
+  self->queue_size --;
+  if(self->queue_size <= 0) {
+    pthread_cond_signal(&self->all_tasks_done);
+  };
+
+ exit:
   pthread_mutex_unlock(&self->mutex);
   return result;
 };
 
-void Queue_put(Queue self, void *data) {
-  Queue item = talloc_size(self, sizeof(__Queue));
+static int Queue_put(Queue self, void *data, int timeout) {
+  QueueItem item;
+  struct timeval now;
+  struct timespec deadline;
 
   pthread_mutex_lock(&self->mutex);
+
+  gettimeofday(&now, NULL);
+  deadline.tv_sec = now.tv_sec + timeout / 1000000;
+  deadline.tv_nsec = (now.tv_usec + timeout % 1000000) * 1000;
+
+  // If there is nothing available we just wait for something new:
+  if(self->queue_size >= self->maxsize) {
+    int res = pthread_cond_timedwait(&self->not_full,
+                                     &self->mutex, &deadline);
+
+    // Failed to lock.
+    if(res) {
+      pthread_mutex_unlock(&self->mutex);
+      return 0;
+    };
+  };
+
+  item = talloc_size(self, sizeof(struct QueueItem_t));
   item->data = data;
-  talloc_steal(self, data);
-  list_add_tail(&item->list, &self->list);
+  talloc_steal(item, data);
+  list_add_tail(&item->list, &self->items);
+
+  self->queue_size ++;
 
   // Let waiters know there is a new item in the queue
-  pthread_cond_signal(&self->condition);
+  pthread_cond_signal(&self->not_empty);
 
   pthread_mutex_unlock(&self->mutex);
+  return 1;
 };
 
 /** Search for data in the queue and remove it */
-void *Queue_remove(Queue self, void *ctx, void *data) {
-  Queue i;
+static void *Queue_remove(Queue self, void *ctx, void *data) {
+  QueueItem i;
+  void *result = NULL;
 
   pthread_mutex_lock(&self->mutex);
-  list_for_each_entry(i, &self->list, list){ 
+  list_for_each_entry(i, &self->items, list){
     if(i->data == data) {
-      void *result = i->data;
+      result = i->data;
       list_del(&i->list);
       talloc_steal(ctx, data);
       talloc_free(i);
-
-      pthread_mutex_unlock(&self->mutex);
-      return result;
+      goto exit;
     };
   }
 
+ exit:
   pthread_mutex_unlock(&self->mutex);
-  return NULL;
+  return result;
 };
 
 VIRTUAL(Queue, Object)

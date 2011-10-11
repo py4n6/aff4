@@ -122,6 +122,7 @@ int main (int argc, char* argv[])
 {
    CuMode mode = CU_MODE_NOT_SET;
    talloc_enable_leak_report_full();
+   CU_initialize_registry();
 
 %(mainInit (env))s
 
@@ -149,7 +150,14 @@ int main (int argc, char* argv[])
                                                CU_get_registry());
 
         CU_pTest test = CU_get_test_by_name(test_name, suite);
+        CU_basic_set_mode(CU_BRM_VERBOSE);
 
+        CU_basic_run_suite(suite);
+        printf ("\n");
+        CU_basic_show_failures (CU_get_failure_list());
+        printf ("\n\n");
+
+        exit(0);
       } else if (argc == 2) {
          if (strcmp (argv[1], "auto") == 0)
             mode = CU_MODE_AUTO;
