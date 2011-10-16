@@ -41,13 +41,16 @@ TEST(ZipTestReader) {
   FileLikeObject segment, fd;
   char buffer[BUFF_SIZE];
   int length;
+  int res;
 
   // Make a Zip volume
   zip = (ZipFile)CALL(resolver, create, NULL, AFF4_ZIP_VOLUME, 'r');
   CALL(zip->storage_urn, set, "file:///tmp/ZipTest.zip");
 
   // This will return 0 if we fail to open
-  CU_ASSERT_FATAL(CALL((AFFObject)zip, finish) > 0);
+  res = CALL((AFFObject)zip, finish);
+  if(res == 0)
+    goto exit;
 
   urn = CALL((RDFValue)URNOF(zip), clone, resolver);
   CALL(urn, add, "foobar");
@@ -59,8 +62,8 @@ TEST(ZipTestReader) {
   CU_ASSERT_FATAL(length == 6);
   CU_ASSERT(!memcmp(buffer, ZSTRING_NO_NULL("hello")));
 
+ exit:
   CALL((AFFObject)zip, close);
   talloc_free(zip);
   talloc_free(resolver);
-
 };

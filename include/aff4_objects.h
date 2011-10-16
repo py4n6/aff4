@@ -26,49 +26,6 @@ CLASS(Graph, AFFObject)
   void METHOD(Graph, set_triple, RDFURN subject, char *attribute, RDFValue value);
 END_CLASS
 
-/* This is the worker object itself (private) */
-struct ImageWorker_t;
-
-/** The Image Stream represents an Image in chunks */
-CLASS(Image, FileLikeObject)
-/* This is where the image is stored */
-  RDFURN stored;
-
-  /* These are the URNs for the bevy and the bevy index */
-  RDFURN bevy_urn;
-
-  /* Chunks are cached here for faster randoom reading performance.
-  */
-  Cache chunk_cache;
-
-  /* This is a queue of all workers available */
-  Queue workers;
-
-  /* This is a queue of all workers busy */
-  Queue busy;
-
-  /* Thats the current worker we are using - when it gets full, we
-     simply dump its bevy and take a new worker here.
-  */
-  struct ImageWorker_t *current;
-
-  /** Some parameters about this image */
-  XSDInteger chunk_size;
-  XSDInteger compression;
-  XSDInteger chunks_in_segment;
-  uint32_t bevy_size;
-
-  int segment_count;
-
-  EVP_MD_CTX digest;
-
-  /** This sets the number of working threads.
-
-      The default number of threads is zero (no threads). Set to a
-      higher number to utilize multiple threads here.
-  */
-  void METHOD(Image, set_workers, int workers);
-END_CLASS
 
 /** The map stream driver maps an existing stream using a
     transformation.
@@ -197,6 +154,7 @@ PROXY_CLASS(Image);
 
   /* Definitions related to the zip volume storage. */
 #include "aff4_zip.h"
+#include "aff4_image.h"
 
 // A directory volume implementation - all elements live in a single
 // directory structure

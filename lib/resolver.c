@@ -359,7 +359,6 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   LOCK_RESOLVER;
   Cache cache = self->read_cache;
 
-  /* In read mode we just free the object. */
   if(obj->mode == 'w') {
     cache = self->write_cache;
   };
@@ -443,7 +442,7 @@ static AFFObject Resolver_own(Resolver self, RDFURN urn, char mode) {
     if(result->thread_id == pthread_self()) {
       RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w). "
                  " Chances are you did not call cache_return() properly.", urn->value);
-      goto exit;
+      //goto exit;
     };
 
     /* We need to lock the object here, but we are holding a recursive lock on
@@ -462,18 +461,11 @@ static AFFObject Resolver_own(Resolver self, RDFURN urn, char mode) {
     {
       int count = 0;
 
-      // We dont want it to be freed from right under us
-      talloc_steal(self, result);
-
-      // Unlock the resolver.
-      while(pthread_mutex_unlock(&self->mutex) != EPERM) count ++;
 
       // Take the object
       pthread_mutex_lock(&result->mutex);
       result->thread_id = pthread_self();
 
-      // Relock the resolver mutex the required number of times:
-      for(;count > 0;count--) pthread_mutex_lock(&self->mutex);
     };
   };
 
@@ -600,7 +592,7 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode, Resolver r
   self->resolver = resolver;
 
   if(uri) {
-    self->urn = CALL((RDFValue)uri, clone, self);
+    self->urn = CALL(uri, copy, self);
   } else {
     self->urn = (RDFURN)new_RDFURN(self);
   };
@@ -610,7 +602,7 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode, Resolver r
     pthread_mutexattr_t mutex_attr;
 
     pthread_mutexattr_init(&mutex_attr);
-    pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_ERRORCHECK);
+    pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&self->mutex, &mutex_attr);
     pthread_mutexattr_destroy(&mutex_attr);
   };

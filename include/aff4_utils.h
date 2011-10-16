@@ -171,39 +171,47 @@ extern Logger AFF4_LOGGER;
 
 #define RESOLVER (((AFFObject)self)->resolver)
 
-/* A generic thread pool. */
-typedef struct ThreadPoolJob_t {
-  /* An opaque data object (will be stolen). */
-  void *data;
+#include "queue.h"
 
+/* A generic thread pool implementation. */
+CLASS(ThreadPoolJob, Object)
   /* The thread which is running this job. */
   pthread_t thread_id;
 
-  /* The actual function to run in another thread. */
-  int (*function)(void *data);
-} *ThreadPoolJob;
+  /* This actual function will be run in another thread. */
+  void METHOD(ThreadPoolJob, run);
 
-typedef struct ThreadWorker_t {
-  /* The thread which is running this job. */
-  pthread_t thread_id;
-
-  struct list_head list;
-} *ThreadWorker;
-
-
-struct Queue_t;
+  /* This function will be run in the main thread when the pool calls
+     complete().
+  */
+  int METHOD(ThreadPoolJob, complete);
+END_CLASS
 
 
 CLASS(ThreadPool, Object)
-    struct Queue_t *jobs;
-    struct list_head list;
+    Queue jobs;
+    Queue completed_jobs;
+
+    int number_of_threads;
+    pthread_t *threads;
+
+    // This can be set to False to cause all workers to quit.
+    int active;
 
     ThreadPool METHOD(ThreadPool, Con, int number);
 
-    void METHOD(ThreadPool, schedule,                           \
-                int (*function)(void *data), void *data);
+    /* Schedule the job on the thread pool. Timeout is the number of
+       seconds we are prepared to wait to be scheduled.  Returns value
+       is 1 for success and 0 for failure to schedule the task.
+    */
+    int METHOD(ThreadPool, schedule, ThreadPoolJob job, int timeout);
 
-    /* Join all the workers. */
+    /* Can be called regularly by the main thread to complete
+       any outstanding threads.
+    */
+    int METHOD(ThreadPool, complete);
+
+    /* Terminate and Join all the workers. */
     void METHOD(ThreadPool, join);
 
 END_CLASS

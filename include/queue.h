@@ -1,3 +1,6 @@
+#ifndef   	AFF4_QUEUE_H
+# define   	AFF4_QUEUE_H
+
 /** This is an implementation of a queue */
 #include "class.h"
 #include <pthread.h>
@@ -29,7 +32,7 @@ CLASS(Queue, Object)
         new context. If timeout is exceeded, returns NULL. Timeout is
         given in microseconds.
      */
-     void *METHOD(Queue, get, void *context, int timeout);
+     void *METHOD(Queue, get, int timeout);
 
      /* Add a new object to the end of the queue. Returns 1 for
         success and 0 for timeout exceeded. Timeout is given in
@@ -43,3 +46,5 @@ CLASS(Queue, Object)
      // Blocks until all items in the queue were removed.
      void METHOD(Queue, join);
 END_CLASS
+
+#endif       /* AFF4_QUEUE_H */

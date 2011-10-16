@@ -124,6 +124,10 @@ int main (int argc, char* argv[])
    talloc_enable_leak_report_full();
    CU_initialize_registry();
 
+   /* Make some temporary place to write files. */
+   strcat(TEMP_DIR,"aff4_test_XXXXXX");
+   mkdtemp(TEMP_DIR);
+
 %(mainInit (env))s
 
    /* initialize the CUnit test registry */
@@ -152,8 +156,13 @@ int main (int argc, char* argv[])
         CU_pTest test = CU_get_test_by_name(test_name, suite);
         CU_basic_set_mode(CU_BRM_VERBOSE);
 
+#if 0
+// This does not seem to work for some reason.
         CU_basic_run_suite(suite);
         printf ("\n");
+#endif
+        test->pTestFunc ();
+
         CU_basic_show_failures (CU_get_failure_list());
         printf ("\n\n");
 
@@ -192,10 +201,6 @@ int main (int argc, char* argv[])
          }
       }
    }
-
-   /* Make some temporary place to write files. */
-   strcat(TEMP_DIR,"aff4_test_XXXXXX");
-   mkdtemp(TEMP_DIR);
 
    /* Run the tests */
    switch (mode) {

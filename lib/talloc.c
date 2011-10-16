@@ -98,6 +98,27 @@
 #endif
 #endif
 
+
+/* The talloc mutex. */
+static pthread_mutex_t mutex;
+static mutex_inited = 0;
+
+#define LOCK {if(!mutex_inited) init_mutex(); pthread_mutex_lock(&mutex);};
+#define UNLOCK pthread_mutex_unlock(&mutex);
+
+static void init_mutex() {
+  pthread_mutexattr_t mutex_attr;
+
+  pthread_mutexattr_init(&mutex_attr);
+  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
+
+  pthread_mutex_init(&mutex, &mutex_attr);
+  pthread_mutexattr_destroy(&mutex_attr);
+
+  mutex_inited = 1;
+};
+
+
 /* this null_context is only used if talloc_enable_leak_report() or
    talloc_enable_leak_report_full() is called, otherwise it remains
    NULL
@@ -388,13 +409,15 @@ static struct talloc_chunk *talloc_alloc_pool(struct talloc_chunk *parent,
 static inline void *__talloc(const void *context, size_t size)
 {
 	struct talloc_chunk *tc = NULL;
+        LOCK;
 
 	if (unlikely(context == NULL)) {
 		context = null_context;
 	}
 
 	if (unlikely(size >= MAX_TALLOC_SIZE)) {
-		return NULL;
+          UNLOCK;
+          return NULL;
 	}
 
 	if (context != NULL) {
@@ -433,6 +456,7 @@ static inline void *__talloc(const void *context, size_t size)
 		tc->next = tc->prev = tc->parent = NULL;
 	}
 
+        UNLOCK;
 	return TC_PTR_FROM_CHUNK(tc);
 }
 
@@ -515,6 +539,8 @@ static inline void *_talloc_named_const(const void *context, size_t size, const 
 {
 	void *ptr;
 
+        LOCK;
+
 	ptr = __talloc(context, size);
 	if (unlikely(ptr == NULL)) {
 		return NULL;
@@ -522,6 +548,7 @@ static inline void *_talloc_named_const(const void *context, size_t size, const 
 
 	_talloc_set_name_const(ptr, name);
 
+        UNLOCK;
 	return ptr;
 }
 
@@ -1106,8 +1133,13 @@ void talloc_set_name_const(const void *ptr, const char *name)
 */
 void *talloc_named_const(const void *context, size_t size, const char *name)
 {
-	return _talloc_named_const(context, size, name);
+  LOCK;
+  void *res = _talloc_named_const(context, size, name);
+  UNLOCK;
+
+  return res;
 }
+
 
 /* 
    free a talloc pointer. This also frees all child pointers of this 

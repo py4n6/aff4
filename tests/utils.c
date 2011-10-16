@@ -114,20 +114,81 @@ TEST(QueueTest) {
   CU_ASSERT(time_difference(&prev, &now) > timeout);
 
   /* Lets get from the queue */
-  CU_ASSERT_STRING_EQUAL("1", CALL(queue, get, queue, timeout));
+  CU_ASSERT_STRING_EQUAL("1", CALL(queue, get, timeout));
 
   /* Now there is room */
   CU_ASSERT(1 == CALL(queue, put, talloc_strdup(queue, "4"), timeout));
 
-  CU_ASSERT_STRING_EQUAL("2", CALL(queue, get, queue, timeout));
-  CU_ASSERT_STRING_EQUAL("3", CALL(queue, get, queue, timeout));
-  CU_ASSERT_STRING_EQUAL("4", CALL(queue, get, queue, timeout));
+  CU_ASSERT_STRING_EQUAL("2", CALL(queue, get, timeout));
+  CU_ASSERT_STRING_EQUAL("3", CALL(queue, get, timeout));
+  CU_ASSERT_STRING_EQUAL("4", CALL(queue, get, timeout));
  
   /* Nothing left */
   gettimeofday(&prev, NULL);
-  CU_ASSERT(NULL == CALL(queue, get, queue, timeout));
+  CU_ASSERT(NULL == CALL(queue, get, timeout));
   gettimeofday(&now, NULL);
   CU_ASSERT(time_difference(&prev, &now) > timeout);
 
   talloc_free(queue);
+};
+
+
+/*********************************************
+  Tests the thread pool implementation.
+*********************************************/
+static int results[10] = {0, 0};
+
+CLASS(TestThreadPoolJob, ThreadPoolJob)
+    int number;
+    TestThreadPoolJob METHOD(TestThreadPoolJob, Con, int number);
+END_CLASS
+
+TestThreadPoolJob TestThreadPoolJob_Con(TestThreadPoolJob self, 
+                                        int number) {
+  self->number = number;
+
+  return self;
+};
+
+void TestThreadPoolJob_run(ThreadPoolJob this) {
+  TestThreadPoolJob self = (TestThreadPoolJob) this;
+
+  sleep(1);
+  results[self->number] = 1;
+};
+
+VIRTUAL(TestThreadPoolJob, ThreadPoolJob) {
+  VMETHOD_BASE(TestThreadPoolJob, Con) = TestThreadPoolJob_Con;
+  VMETHOD_BASE(ThreadPoolJob, run) = TestThreadPoolJob_run;
+} END_VIRTUAL
+
+
+TEST(ThreadPoolTest) {
+  /* An especially small thread pool to force scheduled tasks to
+     block.
+  */
+  ThreadPool pool = CONSTRUCT(ThreadPool, ThreadPool, Con, NULL, 1);
+  int i;
+
+  TestThreadPoolJob_init((Object)&__TestThreadPoolJob);
+
+  /* Schedule some jobs */
+  for(i=0; i<5; i++) {
+    ThreadPoolJob job = (ThreadPoolJob)CONSTRUCT(
+        TestThreadPoolJob, TestThreadPoolJob, Con, NULL, i);
+
+    CU_ASSERT_EQUAL(results[i], 0);
+
+    /* This should wait if there are no available threads. */
+    CU_ASSERT(CALL(pool, schedule, job, 2) == 1);
+  };
+
+  /* We must wait here until all the threads are done. */
+  CALL(pool, join);
+
+  for(i=0; i<5; i++) {
+    CU_ASSERT_EQUAL(results[i], 1);
+  };
+
+  talloc_free(pool);
 };

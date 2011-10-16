@@ -43,7 +43,7 @@ static AFFObject ZipSegment_Con(AFFObject this, RDFURN urn, char mode, Resolver 
 
   INIT_LIST_HEAD(&self->members);
 
-  return SUPER(AFFObject, AFF4Volume, Con, urn, mode, resolver);
+  return SUPER(AFFObject, FileLikeObject, Con, urn, mode, resolver);
 };
 
 
@@ -85,10 +85,10 @@ static int ZipSegment_finish(AFFObject this) {
     };
   };
 
-  return SUPER(AFFObject, AFF4Volume, close);
+  return SUPER(AFFObject, AFF4Volume, finish);
 
 error:
-  SUPER(AFFObject, AFF4Volume, close);
+  SUPER(AFFObject, AFF4Volume, finish);
   return 0;
 };
 

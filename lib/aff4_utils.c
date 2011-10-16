@@ -304,8 +304,85 @@ VIRTUAL(Cache, Object) {
 } END_VIRTUAL
 
 
+VIRTUAL(ThreadPoolJob, Object) {
+  UNIMPLEMENTED(ThreadPoolJob, run);
+} END_VIRTUAL
+
+
+static void *ThreadPool_worker(void *ctx) {
+  ThreadPool pool = (ThreadPool) ctx;
+
+  while(1) {
+    /* One hundredth of a second time resolution for cancelation. */
+    ThreadPoolJob job = CALL(pool->jobs, get, 100000);
+    if(job) {
+      // Run the job
+      CALL(job, run);
+
+      /* Now place it on the completed queue */
+      CALL(pool->completed_jobs, put, job, 100000);
+
+      /* Only quit if the pool is not active and there are no more
+         waiting tasks.
+      */
+    } else if(!pool->active) break;
+  };
+
+  return NULL;
+};
+
 
 static ThreadPool ThreadPool_Con(ThreadPool self, int number) {
-  
+  int i = 0;
 
+  self->jobs = CONSTRUCT(Queue, Queue, Con, self, number);
+  self->completed_jobs = CONSTRUCT(Queue, Queue, Con, self, number);
+  self->number_of_threads = number;
+  self->threads = talloc_array(self, pthread_t, number + 1);
+  self->active = True;
+
+  /* Start up all the threads. */
+  for(i = 0; i<number; i++) {
+    pthread_create(&self->threads[i], NULL, ThreadPool_worker, self);
+  };
+
+  return self;
 };
+
+static void ThreadPool_completion(ThreadPool self) {
+  /* Run any completion routines. */
+  while(1) {
+    ThreadPoolJob job = (ThreadPoolJob)CALL(self->completed_jobs, get, 0);
+    if(!job) break;
+    CALL(job, complete);
+    talloc_free(job);
+  };
+};
+
+static int ThreadPool_schedule(ThreadPool self, ThreadPoolJob job, 
+                               int timeout) {
+  ThreadPool_completion(self);
+
+  return CALL(self->jobs, put, job, timeout * 1000000);
+};
+
+static void ThreadPool_join(ThreadPool self) {
+  int i;
+
+  self->active = False;
+
+  /* Wait for the workers to quite. */
+  for(i=0; i < self->number_of_threads; i++) {
+    pthread_join(self->threads[i], NULL);
+  };
+
+  ThreadPool_completion(self);
+};
+
+
+VIRTUAL(ThreadPool, Object) {
+  VMETHOD(Con) = ThreadPool_Con;
+  VMETHOD(schedule) = ThreadPool_schedule;
+  VMETHOD(complete) = ThreadPool_completion;
+  VMETHOD(join) = ThreadPool_join;
+} END_VIRTUAL
