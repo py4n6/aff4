@@ -13,17 +13,31 @@ PRIVATE int Graph_add_value(RDFURN graph, RDFURN urn, char *attribute_str,
 
 #define RESOLVER_CACHE_SIZE 20
 
-#define TDB_HASH_SIZE 1024*128
+/* Thread control within the AFF4 library:
 
-// Some extra debugging
-#define LOCK_RESOLVER pthread_mutex_lock(&self->mutex); \
-  DEBUG_LOCK("Locking resolver %u\n", self->mutex.__data.__count)
+   In order to ensure the AFF4 library is thread safe, there is a
+   global lock mutex to protect all aff4 library calls. A similar
+   strategy is used by the python interpreter.
 
-#define UNLOCK_RESOLVER  pthread_mutex_unlock(&self->mutex);    \
-  DEBUG_LOCK("Unlocking resolver %u\n", self->mutex.__data.__count)
+   - All user code outsize the library is allowed to run with the
+     global lock released.
 
-// Prototypes
-int Resolver_lock_gen(Resolver self, RDFURN urn, char mode, int sense);
+   - Upon entry to every AFF4 function, the global lock is acquired,
+     and release on exit.
+
+   - When operations are performed in the AFF4 core which can release
+     the lock (e.g. system calls or compression opeations), the global
+     lock is released. This allows other threads a chance to run.
+
+   - All new threads must acquire the lock before starting and release
+     it when finishing.
+
+   This strategy ensures that there is only a single thread at a time
+   which can touch any aff4 data structures. This is done to protect
+   talloc contexts from data races.
+ */
+pthread_mutex_t aff4_gl_mutex;
+pthread_mutex_t aff4_gl_current_mutex;
 
 // This is a big dispatcher of all AFFObjects we know about. We call
 // their AFFObjects::Con(urn, mode) constructor.
@@ -31,6 +45,8 @@ static Cache type_dispatcher = NULL;
 
 /** This registers new AFFObject implementations. */
 void register_type_dispatcher(char *type, AFFObject *classref) {
+  AFF4_GL_LOCK;
+
   if(!(*classref)->dataType) {
     printf("%s has no dataType\n", NAMEOF(*classref));
   };
@@ -48,6 +64,8 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
 
     CALL(type_dispatcher, put, ZSTRING(type), tmp);
   };
+
+  AFF4_GL_UNLOCK;
 };
 
 
@@ -58,19 +76,8 @@ void register_type_dispatcher(char *type, AFFObject *classref) {
 
 
 
-/***********************************************************
-   This is the implementation of the resolver.
-***********************************************************/
-static int Resolver_destructor(void *this) {
-  Resolver self = (Resolver) this;
-
-  pthread_mutex_destroy(&self->mutex);
-  return 0;
-};
-
-
 static Resolver Resolver_Con(Resolver self, DataStore store, int mode) {
-  pthread_mutexattr_t mutex_attr;
+  AFF4_GL_LOCK;
 
   self->logger = CONSTRUCT(Logger, Logger, Con, self);
 
@@ -85,23 +92,13 @@ static Resolver Resolver_Con(Resolver self, DataStore store, int mode) {
   if(mode & RESOLVER_MODE_DEBUG_MEMORY)
     talloc_enable_leak_report_full();
 
-  // This is recursive to ensure that only one thread can hold the
-  // resolver at once. Once the thread holds the resolver its free to
-  // continue calling functions from it.
-  pthread_mutexattr_init(&mutex_attr);
-  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
-
-  pthread_mutex_init(&self->mutex, &mutex_attr);
-  pthread_mutexattr_destroy(&mutex_attr);
-
   // Create local read and write caches
   CALL(self, flush);
 
-  // Make sure we close our files when we get freed
-  talloc_set_destructor((void *)self, Resolver_destructor);
-
   // Cache this so we dont need to rebuilt it all the time.
   self->type = new_RDFURN(self);
+
+  AFF4_GL_UNLOCK;
 
   return self;
 };
@@ -114,25 +111,25 @@ static int Resolver_set(Resolver self, RDFURN urn, char *attribute_str,
                         RDFValue value) {
   DataStoreObject obj;
 
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
   obj = CALL(value, encode, urn, self);
 
   // The DataStore will steal the object.
   CALL(self->store, set, urn->value, attribute_str, obj);
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return 1;
 };
 
 /** This removes all values for this attribute
  */
 static void Resolver_del(Resolver self, RDFURN urn, char *attribute_str) {
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
   CALL(self->store, del, urn->value, attribute_str);
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
 };
 
 /** This sets a single triple into the resolver replacing previous
@@ -142,7 +139,7 @@ static int Resolver_add(Resolver self, RDFURN urn, char *attribute_str,
                         RDFValue value) {
   DataStoreObject obj;
 
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
   CALL(self->store, unlock);
 
   obj = CALL(value, encode, urn, self);
@@ -150,7 +147,7 @@ static int Resolver_add(Resolver self, RDFURN urn, char *attribute_str,
   // The DataStore will steal the object.
   CALL(self->store, add, urn->value, attribute_str, obj);
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return 1;
 };
 
@@ -161,7 +158,7 @@ static RDFValue Resolver_resolve(Resolver self, void *ctx, RDFURN urn, char *att
   Object iter;
   RDFValue result = NULL;
 
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
   CALL(self->store, lock);
 
   iter = CALL(self->store, iter, urn->value, attribute);
@@ -187,7 +184,7 @@ static RDFValue Resolver_resolve(Resolver self, void *ctx, RDFURN urn, char *att
   };
 
   CALL(self->store, unlock);
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return result;
 };
 
@@ -195,6 +192,8 @@ static RDFValue Resolver_resolve(Resolver self, void *ctx, RDFURN urn, char *att
 static AFFObject create_new_object(Resolver self, RDFURN urn, char *type, char mode) {
   AFFObject result = NULL;
   AFFObject classref = NULL;
+
+  AFF4_GL_LOCK;
 
   // Find the correct class to handle this type. First try the scheme and then
   // the type.
@@ -226,9 +225,12 @@ static AFFObject create_new_object(Resolver self, RDFURN urn, char *type, char m
 
   talloc_set_name_const(result, NAMEOF(result));
   ((AFFObject)result)->mode = mode;
+
+  AFF4_GL_UNLOCK;
   return result;
 
 error:
+  AFF4_GL_UNLOCK;
   return NULL;
 };
 
@@ -250,7 +252,7 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
   AFFObject result = NULL;
   DataStoreObject type_obj;
 
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
   ClearError();
 
   if(!urn) {
@@ -278,77 +280,18 @@ static AFFObject Resolver_open(Resolver self, RDFURN urn, char mode) {
     /* Check that the object is not already in the write cache */
     result = (AFFObject)CALL(self->write_cache, borrow, ZSTRING(urn->value));
     if(result) {
-      // Is it already locked by us?
-      if(result->thread_id == pthread_self()) {
-        RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w). "
-                   " Chances are you did not call cache_return() properly.", urn->value);
-        goto exit;
-      };
-
-      /* We need to lock the object here, but we are holding a
-       recursive lock on the entire cache. If we just took the lock
-       here, other threads will be unable to proceed and unlock it. So
-       we must release the cache lock here to give them a chance to
-       unlock it while we block on acquiring the lock. The matter is
-       complicated by the fact that we could be holding a recursive
-       lock on the resolver which means even if we release it once,
-       other threads may still not get to run.
-
-       The solution is to completely unlock the cache as many times as
-       needed here, recording the recursion level, then block on
-       acquiring the object lock. Finally we acquire the required
-       number of locks on the resolver mutex.
-      */
-      {
-        int count = 0;
-
-        // We dont want it to be freed from right under us
-        talloc_steal(self, result);
-
-        // Unlock the resolver.
-        while(pthread_mutex_unlock(&self->mutex) != EPERM) count ++;
-
-        // Take the object
-        pthread_mutex_lock(&result->mutex);
-        result->thread_id = pthread_self();
-
-        // Relock the resolver mutex the required number of times:
-        for(;count > 0;count--) pthread_mutex_lock(&self->mutex);
-      };
-
       goto exit;
     } else {
       // Need to make a new object
       result = create_new_object(self, urn, type_obj->data, mode);
-
-      // Take the object
-      pthread_mutex_lock(&result->mutex);
-      result->thread_id = pthread_self();
 
       goto exit;
     };
   };
 
 exit:
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return result;
-};
-
-
-static inline void trim_cache(Cache cache) {
-  Cache i,j;
-
-  list_for_each_entry_safe(i,j,&cache->cache_list, cache_list) {
-    AFFObject obj = (AFFObject)i->data;
-
-    // If the cache size is not too full its ok
-    if(cache->cache_size < RESOLVER_CACHE_SIZE) break;
-
-    // Only remove objects which are not currently locked.
-    if(obj->thread_id == 0) {
-      talloc_free(i);
-    };
-  };
 };
 
 
@@ -356,7 +299,7 @@ static inline void trim_cache(Cache cache) {
     to it after that. We also trim back the cache if needed.
 */
 static void Resolver_cache_return(Resolver self, AFFObject obj) {
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
   Cache cache = self->read_cache;
 
   if(obj->mode == 'w') {
@@ -366,21 +309,15 @@ static void Resolver_cache_return(Resolver self, AFFObject obj) {
   // Return it back to the cache.
   CALL(cache, put, ZSTRING(obj->urn->value), (Object)obj);
 
-  // We are done with the object now
-  obj->thread_id = 0;
-  pthread_mutex_unlock(&obj->mutex);
-
-  DEBUG_LOCK("Unlocking object %s\n", STRING_URNOF(obj));
-
   ClearError();
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return;
 };
 
 // A helper method to construct the class.
 static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type, char mode) {
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
   AFFObject result = create_new_object(self, urn, type, mode);
   // Failed to create a new object
@@ -388,7 +325,7 @@ static AFFObject Resolver_create(Resolver self, RDFURN urn, char *type, char mod
     DEBUG_OBJECT("Created %s with URN %s\n", type, result->urn->value);
   };
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return result;
 };
 
@@ -409,7 +346,7 @@ static int remove_object_from_cache(void *ctx) {
 
 static void Resolver_manage(Resolver self, AFFObject obj) {
   Cache cache = self->read_cache;
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
   if(obj->mode == 'w')
     cache = self->write_cache;
@@ -417,13 +354,9 @@ static void Resolver_manage(Resolver self, AFFObject obj) {
   if(obj->urn) {
     // If we are writing, place the result on the cache.
     CALL(cache, put, ZSTRING(obj->urn->value), (Object)obj);
-
-    // And lock the mutex
-    pthread_mutex_lock(&obj->mutex);
-    obj->thread_id = pthread_self();
   };
 
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
 };
 
 static AFFObject Resolver_own(Resolver self, RDFURN urn, char mode) {
@@ -431,58 +364,36 @@ static AFFObject Resolver_own(Resolver self, RDFURN urn, char mode) {
   AFFObject result;
   Cache cache = self->read_cache;
 
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
   if(mode == 'w')
     cache = self->write_cache;
 
   result = (AFFObject)CALL(cache, borrow, ZSTRING(urn->value));
-  if(result) {
-    // Is it already locked by us?
-    if(result->thread_id == pthread_self()) {
-      RaiseError(ERuntimeError, "DEADLOCK!!! URN %s is already locked (w). "
-                 " Chances are you did not call cache_return() properly.", urn->value);
-      //goto exit;
-    };
-
-    /* We need to lock the object here, but we are holding a recursive lock on
-       the entire cache. If we just took the lock here, other threads will be
-       unable to proceed and unlock it. So we must release the cache lock here
-       to give them a chance to unlock it while we block on acquiring the
-       lock. The matter is complicated by the fact that we could be holding a
-       recursive lock on the resolver which means even if we release it once,
-       other threads may still not get to run.
-
-       The solution is to completely unlock the cache as many times as
-       needed here, recording the recursion level, then block on
-       acquiring the object lock. Finally we acquire the required
-       number of locks on the resolver mutex.
-    */
-    {
-      int count = 0;
-
-
-      // Take the object
-      pthread_mutex_lock(&result->mutex);
-      result->thread_id = pthread_self();
-
-    };
-  };
 
 exit:
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return result;
 };
 
 
 static void Resolver_register_rdf_value_class(Resolver self, RDFValue class_ref) {
+  AFF4_GL_LOCK;
+
   register_rdf_value_class(class_ref);
   talloc_increase_ref_count(class_ref);
+
+  AFF4_GL_UNLOCK;
 };
 
 RDFValue Resolver_new_rdfvalue(Resolver self, void *ctx, char *type) {
+  RDFValue result;
+  AFF4_GL_LOCK;
 
-  return new_rdfvalue(ctx, type);
+  result = new_rdfvalue(ctx, type);
+
+  AFF4_GL_UNLOCK;
+  return result;
 };
 
 int Resolver_load(Resolver self, RDFURN uri) {
@@ -490,7 +401,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
       AFF4Volume abstract class, and try to instantiate them in their
       preferred order.
   */
-  LOCK_RESOLVER;
+  AFF4_GL_LOCK;
 
 #if 0
   list_for_each_entry(i, &type_dispatcher->cache_list, cache_list) {
@@ -504,7 +415,7 @@ int Resolver_load(Resolver self, RDFURN uri) {
         CALL(oracle, cache_return, (AFFObject)volume);
 
         ClearError();
-        UNLOCK_RESOLVER;
+        AFF4_GL_UNLOCK;
         return 1;
       };
 
@@ -514,11 +425,13 @@ int Resolver_load(Resolver self, RDFURN uri) {
 #endif
 
   ClearError();
-  UNLOCK_RESOLVER;
+  AFF4_GL_UNLOCK;
   return 0;
 };
 
 static void Resolver_set_logger(Resolver self, Logger logger) {
+  AFF4_GL_LOCK;
+
   if(self->logger) talloc_free(self->logger);
 
   if(logger) {
@@ -527,9 +440,13 @@ static void Resolver_set_logger(Resolver self, Logger logger) {
   } else {
     self->logger = CONSTRUCT(Logger, Logger, Con, self);
   };
+
+  AFF4_GL_UNLOCK;
 };
 
 static void Resolver_flush(Resolver self) {
+  AFF4_GL_LOCK;
+
   if(self->read_cache)
     talloc_free(self->read_cache);
 
@@ -542,6 +459,7 @@ static void Resolver_flush(Resolver self) {
   self->write_cache = CONSTRUCT(Cache, Cache, Con, self, HASH_TABLE_SIZE, 0);
   talloc_set_name_const(self->write_cache, "Resolver Write Cache");
   //  NAMEOF(self->write_cache) = "Resolver Write Cache";
+  AFF4_GL_UNLOCK;
 };
 
 
@@ -549,8 +467,12 @@ static void Resolver_flush(Resolver self) {
 extern struct SecurityProvider_t *AFF4_SECURITY_PROVIDER;
 
 static void Resolver_register_security_provider(Resolver self, struct SecurityProvider_t *sec_provider) {
+  AFF4_GL_LOCK;
+
   AFF4_SECURITY_PROVIDER = sec_provider;
   talloc_reference(self, sec_provider);
+
+  AFF4_GL_UNLOCK;
 };
 #endif
 
@@ -589,6 +511,8 @@ VIRTUAL(Resolver, Object) {
   AFFObject - This is the base class for all other objects
 ************************************************************/
 static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode, Resolver resolver) {
+  AFF4_GL_LOCK;
+
   self->resolver = resolver;
 
   if(uri) {
@@ -597,33 +521,34 @@ static AFFObject AFFObject_Con(AFFObject self, RDFURN uri, char mode, Resolver r
     self->urn = (RDFURN)new_RDFURN(self);
   };
 
-  // The mutex controls access to the object
-  {
-    pthread_mutexattr_t mutex_attr;
-
-    pthread_mutexattr_init(&mutex_attr);
-    pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&self->mutex, &mutex_attr);
-    pthread_mutexattr_destroy(&mutex_attr);
-  };
-
   self->mode = mode;
 
+  AFF4_GL_UNLOCK;
   return self;
 };
 
 
 static void AFFObject_set(AFFObject self, char *attribute, RDFValue value) {
+  AFF4_GL_LOCK;
+
   CALL(self->resolver, set, self->urn, attribute, value);
+
+  AFF4_GL_UNLOCK;
 };
 
 static void AFFObject_add(AFFObject self, char *attribute, RDFValue value) {
+  AFF4_GL_LOCK;
+
   CALL(self->resolver, add, self->urn, attribute, value);
+
+  AFF4_GL_UNLOCK;
 };
 
 static int AFFObject_finish(AFFObject self) {
   uuid_t uuid;
   char uuid_str[BUFF_SIZE];
+
+  AFF4_GL_LOCK;
 
   if(!self->urn->parser->scheme) {
     // URN not set - we create an annonymous urn
@@ -635,18 +560,23 @@ static int AFFObject_finish(AFFObject self) {
 
   self->complete = 1;
 
+  AFF4_GL_UNLOCK;
   return 1;
 };
 
 static int AFFObject_close(AFFObject self) {
-  Cache cache = self->resolver->read_cache;
+  Cache cache;
 
+  AFF4_GL_LOCK;
+
+  cache = self->resolver->read_cache;
   if(self->mode == 'w')
     cache = self->resolver->write_cache;
 
   /* Remove us from the cache */
   CALL(cache, get, NULL, ZSTRING(self->urn->value));
 
+  AFF4_GL_UNLOCK;
   return 1;
 };
 
@@ -659,23 +589,6 @@ VIRTUAL(AFFObject, Object) {
      VMETHOD(Con) = AFFObject_Con;
 } END_VIRTUAL
 
-
-#if 0
-/* Prints out all available volume drivers */
-void print_volume_drivers() {
-  Cache i;
-
-  printf("Valid volume drivers: \n");
-
-  list_for_each_entry(i, &type_dispatcher->cache_list, cache_list) {
-    AFFObject class_ref = (AFFObject)i->data;
-
-    if(ISSUBCLASS(class_ref, ZipFile)) {
-      printf(" - %s\n", (char *)i->key);
-    };
-  };
-};
-#endif
 
 static Logger Logger_Con(Logger self) {
   return self;
@@ -698,9 +611,16 @@ VIRTUAL(Logger, Object) {
 
 // Note that we preceed the init function name with an altitude to
 // control the order at which these will be called.
-AFF4_MODULE_INIT(A100_resolver) {
+
+AFF4GlobalLock aff4_gl_lock;
+
+AFF4_MODULE_INIT(A0000_resolver) {
+  aff4_gl_lock = CONSTRUCT(AFF4GlobalLock, AFF4GlobalLock, Con, NULL);
+
   // Create a global logger.
+  AFF4_GL_LOCK;
   AFF4_LOGGER = CONSTRUCT(Logger, Logger, Con, NULL);
+  AFF4_GL_UNLOCK;
 };
 
 DLL_PUBLIC void aff4_free(void *ptr) {

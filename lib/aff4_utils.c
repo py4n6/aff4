@@ -26,6 +26,8 @@ static int Cache_destructor(void *this) {
 
 /** A max_cache_size of 0 means we never expire anything */
 static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
+  AFF4_GL_LOCK;
+
   self->hash_table_width = hash_table_width;
   self->max_cache_size = max_cache_size;
 
@@ -35,6 +37,7 @@ static Cache Cache_Con(Cache self, int hash_table_width, int max_cache_size) {
   // Install our destructor
   talloc_set_destructor((void *)self, Cache_destructor);
 
+  AFF4_GL_UNLOCK;
   return self;
 };
 
@@ -85,6 +88,8 @@ static Cache Cache_put(Cache self, char *key, int len, Object data) {
   Cache new_cache;
   Cache i;
 
+  AFF4_GL_LOCK;
+
   // Check to see if we need to expire something else. We do this
   // first to avoid the possibility that we might expire the same key
   // we are about to add.
@@ -131,6 +136,7 @@ static Cache Cache_put(Cache self, char *key, int len, Object data) {
   list_add_tail(&new_cache->cache_list, &self->cache_list);
   self->cache_size ++;
 
+  AFF4_GL_UNLOCK;
   return new_cache;
 };
 
@@ -139,11 +145,15 @@ static Object Cache_get(Cache self, void *ctx, char *key, int len) {
   Cache hash_list_head;
   Cache i;
 
-  if(!self->hash_table) return NULL;
+  AFF4_GL_LOCK;
+
+  if(!self->hash_table)
+    goto error;
 
   hash = CALL(self, hash, key, len);
   hash_list_head = self->hash_table[hash];
-  if(!hash_list_head) return NULL;
+  if(!hash_list_head)
+    goto error;
 
   // There are 2 lists each Cache object is on - the hash list is a
   // shorter list at the end of each hash table slot, while the cache
@@ -163,11 +173,14 @@ static Object Cache_get(Cache self, void *ctx, char *key, int len) {
       // destructor.
       talloc_free(i);
 
+      AFF4_GL_UNLOCK;
       return result;
     };
   };
 
   RaiseError(EKeyError, "Key '%s' not found in Cache", key);
+ error:
+  AFF4_GL_UNLOCK;
   return NULL;
 };
 
@@ -177,11 +190,15 @@ static Object Cache_borrow(Cache self, char *key, int len) {
   Cache hash_list_head;
   Cache i;
 
-  if(!self->hash_table) return NULL;
+  AFF4_GL_LOCK;
+
+  if(!self->hash_table)
+    goto error;
 
   hash = CALL(self, hash, key, len);
   hash_list_head = self->hash_table[hash];
-  if(!hash_list_head) return NULL;
+  if(!hash_list_head)
+    goto error;
 
   // There are 2 lists each Cache object is on - the hash list is a
   // shorter list at the end of each hash table slot, while the cache
@@ -190,10 +207,14 @@ static Object Cache_borrow(Cache self, char *key, int len) {
   // cache list which is also kept in sorted order.
   list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
     if(i->key_len == len && !CALL(i, cmp, key, len)) {
+      AFF4_GL_UNLOCK;
+
       return i->data;
     };
   };
 
+ error:
+  AFF4_GL_UNLOCK;
   return NULL;
 };
 
@@ -203,18 +224,24 @@ int Cache_present(Cache self, char *key, int len) {
   Cache hash_list_head;
   Cache i;
 
+  AFF4_GL_LOCK;
+
   if(self->hash_table) {
     hash = CALL(self, hash, key, len);
     hash_list_head = self->hash_table[hash];
-    if(!hash_list_head) return 0;
+    if(!hash_list_head)
+      goto exit;
 
     list_for_each_entry(i, &hash_list_head->hash_list, hash_list) {
       if(i->key_len == len && !CALL(i, cmp, key, len)) {
+        AFF4_GL_UNLOCK;
         return 1;
       };
     };
   };
 
+ exit:
+  AFF4_GL_UNLOCK;
   return 0;
 };
 
@@ -312,28 +339,34 @@ VIRTUAL(ThreadPoolJob, Object) {
 static void *ThreadPool_worker(void *ctx) {
   ThreadPool pool = (ThreadPool) ctx;
 
+  AFF4_GL_LOCK;
+
   while(1) {
     /* One hundredth of a second time resolution for cancelation. */
-    ThreadPoolJob job = CALL(pool->jobs, get, 100000);
+    ThreadPoolJob job;
+
+    job = CALL(pool->jobs, get, 100000);
     if(job) {
       // Run the job
       CALL(job, run);
 
-      /* Now place it on the completed queue */
-      CALL(pool->completed_jobs, put, job, 100000);
-
       /* Only quit if the pool is not active and there are no more
          waiting tasks.
       */
-    } else if(!pool->active) break;
+    } else if(!pool->active) {
+      break;
+    };
   };
 
+  AFF4_GL_UNLOCK;
   return NULL;
 };
 
 
 static ThreadPool ThreadPool_Con(ThreadPool self, int number) {
   int i = 0;
+
+  AFF4_GL_LOCK;
 
   self->jobs = CONSTRUCT(Queue, Queue, Con, self, number);
   self->completed_jobs = CONSTRUCT(Queue, Queue, Con, self, number);
@@ -346,43 +379,130 @@ static ThreadPool ThreadPool_Con(ThreadPool self, int number) {
     pthread_create(&self->threads[i], NULL, ThreadPool_worker, self);
   };
 
+  AFF4_GL_UNLOCK;
   return self;
 };
 
-static void ThreadPool_completion(ThreadPool self) {
-  /* Run any completion routines. */
-  while(1) {
-    ThreadPoolJob job = (ThreadPoolJob)CALL(self->completed_jobs, get, 0);
-    if(!job) break;
-    CALL(job, complete);
-    talloc_free(job);
-  };
-};
 
 static int ThreadPool_schedule(ThreadPool self, ThreadPoolJob job, 
                                int timeout) {
-  ThreadPool_completion(self);
+  int result;
 
-  return CALL(self->jobs, put, job, timeout * 1000000);
+  AFF4_GL_LOCK;
+
+  result = CALL(self->jobs, put, job, timeout * 1000000);
+
+  AFF4_GL_UNLOCK;
+
+  return result;
 };
 
 static void ThreadPool_join(ThreadPool self) {
   int i;
+  int depth;
 
+  AFF4_GL_LOCK;
   self->active = False;
 
-  /* Wait for the workers to quite. */
+  /* Wait for the workers to quit. */
   for(i=0; i < self->number_of_threads; i++) {
+    /* Allow other threads to run while we wait here. */
+    depth = CALL(aff4_gl_lock, allow_threads);
     pthread_join(self->threads[i], NULL);
+    CALL(aff4_gl_lock, lock, depth);
   };
 
-  ThreadPool_completion(self);
+  AFF4_GL_UNLOCK;
 };
 
 
 VIRTUAL(ThreadPool, Object) {
   VMETHOD(Con) = ThreadPool_Con;
   VMETHOD(schedule) = ThreadPool_schedule;
-  VMETHOD(complete) = ThreadPool_completion;
   VMETHOD(join) = ThreadPool_join;
+} END_VIRTUAL
+
+
+AFF4GlobalLock AFF4GlobalLock_Con(AFF4GlobalLock self) {
+  pthread_mutexattr_t mutex_attr;
+
+  pthread_mutexattr_init(&mutex_attr);
+  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_RECURSIVE);
+
+  pthread_mutex_init(&self->mutex, &mutex_attr);
+  pthread_mutexattr_destroy(&mutex_attr);
+
+  return self;
+};
+
+void AFF4GlobalLock_lock(AFF4GlobalLock self, int number){
+  int i;
+
+  for(i=0; i<number; i++) {
+    if(pthread_mutex_lock(&self->mutex) == 0) {
+      self->depth ++;
+    } else {
+      printf("Error locking %08X\n", pthread_self());
+    };
+  };
+};
+
+void AFF4GlobalLock_unlock(AFF4GlobalLock self, int number) {
+  int i;
+  int result;
+
+  number = min(number, self->depth);
+
+  for(i=0; i<number; i++) {
+    self->depth --;
+    pthread_mutex_unlock(&self->mutex);
+  };
+};
+
+int AFF4GlobalLock_timedwait(AFF4GlobalLock self, pthread_cond_t *condition, int timeout) {
+  struct timeval now;
+  struct timespec deadline;
+  int depth;
+  int res;
+
+  gettimeofday(&now, NULL);
+  deadline.tv_sec = now.tv_sec + timeout / 1000000;
+  deadline.tv_nsec = (now.tv_usec + timeout % 1000000) * 1000;
+
+  /* Now we unlock the mutex until a depth of one, then wait on the
+     condition variable. This ensures the mutex becomes completely
+     unlocked and other threads can run.
+   */
+  depth = self->depth;
+
+  CALL(self, unlock, depth - 1);
+
+  /* waiting on the condition variable unlocks the mutex implicitely
+     so we need to track it.
+  */
+  self->depth --;
+  res = pthread_cond_timedwait(condition,
+                               &self->mutex, &deadline);
+  self->depth ++;
+
+  /* Restore the lock level. */
+  CALL(self, lock, depth - 1);
+  return res;
+};
+
+
+static int AFF4GlobalLock_allow_threads(AFF4GlobalLock self) {
+  int depth = self->depth;
+
+  CALL(self, unlock, depth);
+  return depth;
+};
+
+
+VIRTUAL(AFF4GlobalLock, Object) {
+  VMETHOD(Con) = AFF4GlobalLock_Con;
+  VMETHOD(lock) = AFF4GlobalLock_lock;
+  VMETHOD(unlock) = AFF4GlobalLock_unlock;
+  VMETHOD(timedwait) = AFF4GlobalLock_timedwait;
+  VMETHOD(allow_threads) = AFF4GlobalLock_allow_threads;
 } END_VIRTUAL

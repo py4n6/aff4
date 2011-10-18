@@ -17,6 +17,9 @@ static AFFObject ZipSegment_Con(AFFObject this, RDFURN urn, char mode, Resolver 
   ZipSegment self = (ZipSegment)this;
   time_t now;
   struct tm *local_time;
+  AFFObject result;
+
+  AFF4_GL_LOCK;
 
   self->filename = new_XSDString(self);
 
@@ -43,12 +46,19 @@ static AFFObject ZipSegment_Con(AFFObject this, RDFURN urn, char mode, Resolver 
 
   INIT_LIST_HEAD(&self->members);
 
-  return SUPER(AFFObject, FileLikeObject, Con, urn, mode, resolver);
+  result = SUPER(AFFObject, FileLikeObject, Con, urn, mode, resolver);
+
+  AFF4_GL_UNLOCK;
+
+  return result;
 };
 
 
 static int ZipSegment_finish(AFFObject this) {
   ZipSegment self = (ZipSegment)this;
+  int result;
+
+  AFF4_GL_LOCK;
 
   // We use this as an anchor for data that can be disposed after close.
   self->buffer = CONSTRUCT(StringIO, StringIO, Con, self);
@@ -85,10 +95,13 @@ static int ZipSegment_finish(AFFObject this) {
     };
   };
 
-  return SUPER(AFFObject, AFF4Volume, finish);
+  result = SUPER(AFFObject, AFF4Volume, finish);
+  AFF4_GL_UNLOCK;
+  return result;
 
-error:
+ error:
   SUPER(AFFObject, AFF4Volume, finish);
+  AFF4_GL_UNLOCK;
   return 0;
 };
 
@@ -100,11 +113,13 @@ static int ZipSegment_write(FileLikeObject self, char *buffer, unsigned int leng
   ZipSegment this = (ZipSegment)self;
   int result = 0;
 
+  AFF4_GL_LOCK;
+
   if(length == 0) goto exit;
 
   if(!this->buffer) {
     RaiseError(EIOError, "Can not write after clone.");
-    return -1;
+    goto error;
   }
 
 
@@ -132,7 +147,10 @@ static int ZipSegment_write(FileLikeObject self, char *buffer, unsigned int leng
         ret = deflate(&this->strm, Z_NO_FLUSH);
         ret = CALL(this->buffer, write, (char *)compressed,
                    BUFF_SIZE - this->strm.avail_out);
-        if(ret<0) return ret;
+        if(ret<0) {
+          RaiseError(EIOError, "Unable to write compressed data.");
+          goto error;
+        };
         result += ret;
       } while(this->strm.avail_out == 0);
 
@@ -149,10 +167,16 @@ static int ZipSegment_write(FileLikeObject self, char *buffer, unsigned int leng
   this->cd.compress_size += result;
   this->cd.file_size += length;
 
-exit:
+ exit:
   // Non error path
   ClearError();
+
+  AFF4_GL_UNLOCK;
   return result;
+
+ error:
+  AFF4_GL_UNLOCK;
+  return -1;
 };
 
 
@@ -251,6 +275,9 @@ error:
 
 static int ZipSegment_read(FileLikeObject this, char *buffer, unsigned int length) {
   ZipSegment self = (ZipSegment)this;
+  int result;
+
+  AFF4_GL_LOCK;
 
   /* Decompress entire segment on demand. */
   if(!self->buffer && !decompress_segment(self)) {
@@ -258,9 +285,13 @@ static int ZipSegment_read(FileLikeObject this, char *buffer, unsigned int lengt
   };
 
   CALL(self->buffer, seek, this->readptr, SEEK_SET);
-  return CALL(self->buffer, read, buffer, length);
+  result = CALL(self->buffer, read, buffer, length);
+
+  AFF4_GL_UNLOCK;
+  return result;
 
 error:
+  AFF4_GL_UNLOCK;
   return -1;
 };
 
@@ -299,10 +330,12 @@ static int ZipSegment_close(AFFObject this) {
   uint32_t magic = 0x08074b50;
   struct ZipFileHeader header;
   char *filename;
-
+  int result;
   // By owning the zip file we guarantee we are the only thread which is writing
   // to it now.
   ZipFile zip;
+
+  AFF4_GL_LOCK;
 
   // Nothing to do for reading.
   if(this->mode == 'r')
@@ -386,10 +419,13 @@ static int ZipSegment_close(AFFObject this) {
   CALL(((AFFObject)self)->resolver, cache_return, (AFFObject)zip);
 
 exit:
-  return SUPER(AFFObject, FileLikeObject, close);
+  result = SUPER(AFFObject, FileLikeObject, close);
+  AFF4_GL_UNLOCK;
+  return result;
 
 error:
   SUPER(AFFObject, FileLikeObject, close);
+  AFF4_GL_UNLOCK;
   return 0;
 };
 
@@ -593,17 +629,25 @@ error:
 
 static AFFObject ZipFile_Con(AFFObject this, RDFURN urn, char mode, Resolver resolver) {
   ZipFile self = (ZipFile)this;
+  AFFObject result;
+
+  AFF4_GL_LOCK;
 
   self->storage_urn = new_RDFURN(self);
   INIT_LIST_HEAD(&self->members);
 
-  return SUPER(AFFObject, AFF4Volume, Con, urn, mode, resolver);
+  result = SUPER(AFFObject, AFF4Volume, Con, urn, mode, resolver);
+
+  AFF4_GL_UNLOCK;
+  return result;
 };
 
 
 static int ZipFile_finish(AFFObject this) {
   ZipFile self = (ZipFile)this;
   int result = 0;
+
+  AFF4_GL_LOCK;
   ClearError();
 
   self->backing_store = (FileLikeObject)CALL(
@@ -611,7 +655,7 @@ static int ZipFile_finish(AFFObject this) {
 
   if(!self->backing_store || !CALL((AFFObject)self->backing_store, finish)) {
     RaiseError(EIOError, "Unable to open the backing store.");
-    return 0;
+    goto error;
   };
 
   /* Parse the file as a zip file. */
@@ -621,7 +665,12 @@ static int ZipFile_finish(AFFObject this) {
   result = SUPER(AFFObject, AFF4Volume, finish);
   CALL(this->resolver, manage, (AFFObject)self);
 
+  AFF4_GL_UNLOCK;
   return result;
+
+ error:
+  AFF4_GL_UNLOCK;
+  return 0;
 };
 
 
@@ -629,7 +678,11 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, RDFURN member, char m
                                           int compression_method) {
   ZipFile self = (ZipFile)this;
   ZipSegment result = NULL;
-  char *segment_filename = segment_name_from_URN(NULL, member, URNOF(self));
+  char *segment_filename;
+
+  AFF4_GL_LOCK;
+
+  segment_filename = segment_name_from_URN(NULL, member, URNOF(self));
 
   /* Do we know about this segment already? */
   list_for_each_entry(result, &self->members, members) {
@@ -649,15 +702,21 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, RDFURN member, char m
 
     if(!CALL((AFFObject)result, finish)) {
       talloc_free(result);
-      return NULL;
+      goto error;
     };
 
     list_add_tail(&result->members, &self->members);
   };
 
-exit:
+ exit:
   talloc_free(segment_filename);
+
+  AFF4_GL_UNLOCK;
   return (FileLikeObject)result;
+
+ error:
+  AFF4_GL_UNLOCK;
+  return NULL;
 };
 
 
@@ -671,6 +730,9 @@ static int ZipFile_close(AFFObject this) {
   struct EndCentralDirectory end;
   uint64_t start_of_cd, offset_of_end_cd;
   int total_entries = 0;
+  int result;
+
+  AFF4_GL_LOCK;
 
   // Nothing to do for reading.
   if(this->mode == 'r')
@@ -758,10 +820,14 @@ static int ZipFile_close(AFFObject this) {
   CALL(self->backing_store, write, buffer->data, buffer->readptr);
   talloc_free(buffer);
 
-  return SUPER(AFFObject, AFF4Volume, close);
+  result = SUPER(AFFObject, AFF4Volume, close);
+
+  AFF4_GL_UNLOCK;
+  return result;
 
 exit:
   SUPER(AFFObject, AFF4Volume, close);
+  AFF4_GL_UNLOCK;
   return 0;
 };
 

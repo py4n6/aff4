@@ -20,36 +20,28 @@ END_VIRTUAL
 
 static DataStore DataStore_Con(DataStore this) {
   MemoryDataStore self = (MemoryDataStore)this;
-  pthread_mutexattr_t mutex_attr;
+  AFF4_GL_LOCK;
 
   self->urn_db = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
   self->attribute_db = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
   self->data_db = CONSTRUCT(Cache, Cache, Con, self, 100, 0);
   self->id_counter = 0;
 
-  // Relocking the DataStore will cause a deadlock here.
-  pthread_mutexattr_init(&mutex_attr);
-  pthread_mutexattr_settype(&mutex_attr, PTHREAD_MUTEX_NORMAL);
-
-  pthread_mutex_init(&self->mutex, &mutex_attr);
-  pthread_mutexattr_destroy(&mutex_attr);
+  AFF4_GL_UNLOCK;
   return this;
 };
 
 static void DataStore_lock(DataStore this) {
-  MemoryDataStore self = (MemoryDataStore)this;
-
-  pthread_mutex_lock(&self->mutex);
 };
 
 static void DataStore_unlock(DataStore this) {
-  MemoryDataStore self = (MemoryDataStore)this;
-
-  pthread_mutex_unlock(&self->mutex);
 };
 
 static XSDInteger get_or_create(MemoryDataStore self, Cache cache, char *key) {
-  XSDInteger result = (XSDInteger)CALL(cache, borrow, ZSTRING_NO_NULL(key));
+  XSDInteger result;
+
+  AFF4_GL_LOCK;
+  result = (XSDInteger)CALL(cache, borrow, ZSTRING_NO_NULL(key));
 
   if(!result) {
     self->id_counter++;
@@ -58,6 +50,7 @@ static XSDInteger get_or_create(MemoryDataStore self, Cache cache, char *key) {
     CALL(cache, put, ZSTRING_NO_NULL(key), (Object)result);
   };
 
+  AFF4_GL_UNLOCK;
   return result;
 };
 
@@ -65,8 +58,12 @@ static XSDInteger get_or_create(MemoryDataStore self, Cache cache, char *key) {
 static void DataStore_del(DataStore this, char *uri, char *attribute) {
   MemoryDataStore self = (MemoryDataStore)this;
   uint64_t data_ptr[2];
-  XSDInteger uri_index = get_or_create(self, self->urn_db, uri);
-  XSDInteger attr_index = get_or_create(self, self->attribute_db,attribute);
+  XSDInteger uri_index;
+  XSDInteger attr_index;
+
+  AFF4_GL_LOCK;
+  uri_index = get_or_create(self, self->urn_db, uri);
+  attr_index = get_or_create(self, self->attribute_db,attribute);
 
   // Combine the values as an index to the data_db.
   data_ptr[0] = uri_index->value;
@@ -79,14 +76,21 @@ static void DataStore_del(DataStore this, char *uri, char *attribute) {
 
     talloc_free(obj);
   };
+
+  AFF4_GL_UNLOCK;
 };
 
 static void DataStore_set(DataStore this, char *uri, char *attribute,
                           DataStoreObject value) {
   MemoryDataStore self = (MemoryDataStore)this;
   uint64_t data_ptr[2];
-  XSDInteger uri_index = get_or_create(self, self->urn_db, uri);
-  XSDInteger attr_index = get_or_create(self, self->attribute_db, attribute);
+  XSDInteger uri_index;
+  XSDInteger attr_index;
+
+  AFF4_GL_LOCK;
+
+  uri_index = get_or_create(self, self->urn_db, uri);
+  attr_index = get_or_create(self, self->attribute_db, attribute);
 
   // Combine the values as an index to the data_db
   data_ptr[0] = uri_index->value;
@@ -102,6 +106,8 @@ static void DataStore_set(DataStore this, char *uri, char *attribute,
 
   // Set the new object.
   CALL(self->data_db, put, (char *)data_ptr, sizeof(data_ptr), (Object)value);
+
+  AFF4_GL_UNLOCK;
 };
 
 
@@ -109,9 +115,12 @@ static void DataStore_add(DataStore this, char *uri, char *attribute,
                           DataStoreObject value) {
   MemoryDataStore self = (MemoryDataStore)this;
   uint64_t data_ptr[2];
-  XSDInteger uri_index = get_or_create(self, self->urn_db, uri);
-  XSDInteger attr_index = get_or_create(self, self->attribute_db, attribute);
+  XSDInteger uri_index;
+  XSDInteger attr_index;
 
+  AFF4_GL_LOCK;
+  uri_index = get_or_create(self, self->urn_db, uri);
+  attr_index = get_or_create(self, self->attribute_db, attribute);
 
   // Combine the values as an index to the data_db
   data_ptr[0] = uri_index->value;
@@ -119,14 +128,20 @@ static void DataStore_add(DataStore this, char *uri, char *attribute,
 
   // Set the new object.
   CALL(self->data_db, put, (char *)data_ptr, sizeof(data_ptr), (Object)value);
+
+  AFF4_GL_UNLOCK;
 };
 
 static DataStoreObject DataStore_get(DataStore this, char *uri, char *attribute) {
   MemoryDataStore self = (MemoryDataStore)this;
   uint64_t data_ptr[2];
-  XSDInteger uri_index = get_or_create(self, self->urn_db, uri);
-  XSDInteger attr_index = get_or_create(self, self->attribute_db, attribute);
+  XSDInteger uri_index;
+  XSDInteger attr_index;
   DataStoreObject value;
+
+  AFF4_GL_LOCK;
+  uri_index = get_or_create(self, self->urn_db, uri);
+  attr_index = get_or_create(self, self->attribute_db, attribute);
 
   // Combine the values as an index to the data_db
   data_ptr[0] = uri_index->value;
@@ -135,15 +150,20 @@ static DataStoreObject DataStore_get(DataStore this, char *uri, char *attribute)
   // Set the new object.
   value = (DataStoreObject)CALL(self->data_db, borrow, (char *)data_ptr, sizeof(data_ptr));
 
+  AFF4_GL_UNLOCK;
   return value;
 };
 
 static Object DataStore_iter(DataStore this, char *uri, char *attribute) {
   MemoryDataStore self = (MemoryDataStore)this;
   uint64_t data_ptr[2];
-  XSDInteger uri_index = get_or_create(self, self->urn_db, uri);
-  XSDInteger attr_index = get_or_create(self, self->attribute_db, attribute);
+  XSDInteger uri_index;
+  XSDInteger attr_index;
   Object iter;
+
+  AFF4_GL_LOCK;
+  uri_index = get_or_create(self, self->urn_db, uri);
+  attr_index = get_or_create(self, self->attribute_db, attribute);
 
   // Combine the values as an index to the data_db
   data_ptr[0] = uri_index->value;
@@ -152,13 +172,19 @@ static Object DataStore_iter(DataStore this, char *uri, char *attribute) {
   // Set the new object.
   iter = CALL(self->data_db, iter, (char *)data_ptr, sizeof(data_ptr));
 
+  AFF4_GL_UNLOCK;
   return iter;
 };
 
 static DataStoreObject DataStore_next(DataStore this, Object *iter) {
   MemoryDataStore self = (MemoryDataStore)this;
+  DataStoreObject result;
 
-  return (DataStoreObject)CALL(self->data_db, next, iter);
+  AFF4_GL_LOCK;
+  result = (DataStoreObject)CALL(self->data_db, next, iter);
+  AFF4_GL_UNLOCK;
+
+  return result;
 };
 
 

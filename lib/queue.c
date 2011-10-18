@@ -8,7 +8,6 @@ static Queue Queue_Con(Queue self, int maxsize) {
   self->maxsize = maxsize;
   self->queue_size = 0;
 
-  pthread_mutex_init(&self->mutex, NULL);
   pthread_cond_init(&self->not_empty, NULL);
   pthread_cond_init(&self->not_full, NULL);
   pthread_cond_init(&self->all_tasks_done, NULL);
@@ -20,18 +19,14 @@ static Queue Queue_Con(Queue self, int maxsize) {
 static void *Queue_get(Queue self, int timeout) {
   QueueItem item;
   void *result = NULL;
-  struct timeval now;
-  struct timespec deadline;
+  int res;
 
-  pthread_mutex_lock(&self->mutex);
-  gettimeofday(&now, NULL);
-  deadline.tv_sec = now.tv_sec + timeout / 1000000;
-  deadline.tv_nsec =now.tv_usec + (timeout % 1000000) * 1000;
+  AFF4_GL_LOCK;
 
   // If there is nothing available we just wait for something new:
-  if(self->queue_size==0) {
-    if(pthread_cond_timedwait(&self->not_empty,
-                              &self->mutex, &deadline)) {
+  while(self->queue_size==0) {
+    res = CALL(aff4_gl_lock, timedwait, &self->not_empty, timeout);
+    if(res) {
       goto exit;
     };
   };
@@ -49,29 +44,22 @@ static void *Queue_get(Queue self, int timeout) {
   };
 
  exit:
-  pthread_mutex_unlock(&self->mutex);
+  AFF4_GL_UNLOCK;
   return result;
 };
 
 static int Queue_put(Queue self, void *data, int timeout) {
   QueueItem item;
-  struct timeval now;
-  struct timespec deadline;
 
-  pthread_mutex_lock(&self->mutex);
-
-  gettimeofday(&now, NULL);
-  deadline.tv_sec = now.tv_sec + timeout / 1000000;
-  deadline.tv_nsec = (now.tv_usec + timeout % 1000000) * 1000;
+  AFF4_GL_LOCK;
 
   // If there is nothing available we just wait for something new:
   if(self->queue_size >= self->maxsize) {
-    int res = pthread_cond_timedwait(&self->not_full,
-                                     &self->mutex, &deadline);
+    int res = CALL(aff4_gl_lock, timedwait, &self->not_full, timeout);
 
     // Failed to lock.
     if(res) {
-      pthread_mutex_unlock(&self->mutex);
+      AFF4_GL_UNLOCK;
       return 0;
     };
   };
@@ -88,7 +76,8 @@ static int Queue_put(Queue self, void *data, int timeout) {
   // Let waiters know there is a new item in the queue
   pthread_cond_signal(&self->not_empty);
 
-  pthread_mutex_unlock(&self->mutex);
+  AFF4_GL_UNLOCK;
+
   return 1;
 };
 
@@ -97,7 +86,8 @@ static void *Queue_remove(Queue self, void *ctx, void *data) {
   QueueItem i;
   void *result = NULL;
 
-  pthread_mutex_lock(&self->mutex);
+  AFF4_GL_LOCK;
+
   list_for_each_entry(i, &self->items, list){ 
     if(i->data == data) {
       result = i->data;
@@ -109,7 +99,7 @@ static void *Queue_remove(Queue self, void *ctx, void *data) {
   }
 
  exit:
-  pthread_mutex_unlock(&self->mutex);
+  AFF4_GL_UNLOCK;
   return result;
 };
 

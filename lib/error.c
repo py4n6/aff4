@@ -15,23 +15,12 @@
 
 #define ERROR_BUFF_SIZE 10240
 
-/** These slots carry the TLS error keys */
-static pthread_key_t error_str_slot;
-static pthread_once_t error_once = PTHREAD_ONCE_INIT;
+static char error_buffer[ERROR_BUFF_SIZE];
+static int error_type;
 
-static pthread_key_t error_value_slot;
-
-static void error_init();
-
-void error_dest(void *slot) {
-  if(slot) talloc_free(slot);
-};
 
 DLL_PUBLIC void *aff4_raise_errors(int t, char *reason, ...) {
-  char *error_buffer;
   char tmp[ERROR_BUFF_SIZE];
-  // This has to succeed:
-  int *type = aff4_get_current_error(&error_buffer);
 
   if(reason) {
     va_list ap;
@@ -42,11 +31,11 @@ DLL_PUBLIC void *aff4_raise_errors(int t, char *reason, ...) {
     va_end(ap);
   };
 
-  if(*type == EZero) {
+  if(error_type == EZero) {
     *error_buffer = 0;
 
     //update the error type
-    *type = t;
+    error_type = t;
   } else {
     strncat(error_buffer, "\n", ERROR_BUFF_SIZE -1 );
   };
@@ -57,41 +46,13 @@ DLL_PUBLIC void *aff4_raise_errors(int t, char *reason, ...) {
 };
 
 DLL_PUBLIC int *aff4_get_current_error(char **error_buffer) {
-  int *type;
 
-  (void) pthread_once(&error_once, error_init);
-  type = pthread_getspecific(error_value_slot);
-
-  // This is optional
-  if(error_buffer) {
-    *error_buffer = pthread_getspecific(error_str_slot);
-
-  // If TLS buffers are not set we need to create them
-    if(!*error_buffer) {
-      *error_buffer =talloc_size(NULL, ERROR_BUFF_SIZE);
-      pthread_setspecific(error_str_slot, *error_buffer);
-    };
-  };
-
-  if(!type) {
-    type = talloc_size(NULL, ERROR_BUFF_SIZE);
-    pthread_setspecific(error_value_slot, type);
-  };
-
-  return type;
+  return &error_type;
 };
 
-void error_init() {
-  // We create the error buffer slots
-  if(pthread_key_create(&error_str_slot, error_dest) ||
-     pthread_key_create(&error_value_slot, error_dest)) {
-    printf("Unable to set up TLS variables\n");
-    abort();
-  };
-};
 
 /** Initialise the error subsystem */
 AFF4_MODULE_INIT(A000_error) {
-  //  error_init();
+
 };
 

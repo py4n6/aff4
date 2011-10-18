@@ -21,10 +21,6 @@ CLASS(AFFObject, Object)
      struct Resolver_t *resolver;
      RDFURN urn;
 
-     // An object may be owned by a single thread at a time
-     pthread_mutex_t mutex;
-     pthread_t thread_id;
-
      // Is this object a reader or a writer?
      char mode;
 

@@ -63,14 +63,6 @@ static ImageWorker ImageWorker_Con(ImageWorker self, AFF4Image parent, int segme
 
 static void ImageWorker_run(ThreadPoolJob this) {
   ImageWorker self = (ImageWorker) this;
-
-  printf("Will flush %d bytes in segment %d\n", self->bevy->size, self->segment_count);
-
-  sleep(1);
-};
-
-static void ImageWorker_complete(ThreadPoolJob this) {
-  ImageWorker self = (ImageWorker) this;
   RDFURN bevy_urn = CALL(URNOF(self->image), copy, self);
   ZipFile zip;
   FileLikeObject segment;
@@ -85,6 +77,15 @@ static void ImageWorker_complete(ThreadPoolJob this) {
   CALL((AFFObject)segment, close);
 
   CALL(resolver, cache_return, (AFFObject)zip);
+
+  /* This is ok to run with no threads. */
+  {
+    int depth = CALL(aff4_gl_lock, allow_threads);
+    printf("Sleeping with segment %d %08X\n", self->segment_count, pthread_self());
+    sleep(1);
+    CALL(aff4_gl_lock, lock, depth);
+  };
+
 };
 
 
@@ -92,12 +93,14 @@ static void ImageWorker_complete(ThreadPoolJob this) {
 VIRTUAL(ImageWorker, ThreadPoolJob) {
   VMETHOD(Con) = ImageWorker_Con;
   VMETHOD_BASE(ThreadPoolJob, run) = ImageWorker_run;
-  VMETHOD_BASE(ThreadPoolJob, complete) = ImageWorker_complete;
 } END_VIRTUAL
 
 
 static int AFF4Image_finish(AFFObject this) {
   AFF4Image self = (AFF4Image)this;
+  int result;
+
+  AFF4_GL_LOCK;
 
   switch(this->mode) {
 
@@ -134,13 +137,16 @@ static int AFF4Image_finish(AFFObject this) {
 
   default:
     RaiseError(EProgrammingError, "Unknown mode");
-    return 0;
+    goto error;
   };
 
-  return SUPER(AFFObject, FileLikeObject, finish);
+  result = SUPER(AFFObject, FileLikeObject, finish);
+  AFF4_GL_UNLOCK;
+  return result;
 
  error:
   SUPER(AFFObject, FileLikeObject, finish);
+  AFF4_GL_UNLOCK;
   return 0;
 };
 
@@ -148,6 +154,8 @@ static int AFF4Image_finish(AFFObject this) {
 static int AFF4Image_write(FileLikeObject this, char *buffer, unsigned int length) {
   AFF4Image self = (AFF4Image) this;
   int offset = 0;
+
+  AFF4_GL_LOCK;
 
   do {
     int need_to_write = length - offset;
@@ -175,12 +183,15 @@ static int AFF4Image_write(FileLikeObject this, char *buffer, unsigned int lengt
     };
   } while(1);
 
+  AFF4_GL_UNLOCK;
   return length;
 };
 
 
 static int AFF4Image_close(AFFObject this) {
   AFF4Image self = (AFF4Image) this;
+
+  AFF4_GL_LOCK;
 
   printf("About to flush last bevy.");
 
@@ -197,6 +208,8 @@ static int AFF4Image_close(AFFObject this) {
   CALL(self->thread_pool, join);
   printf("Closing image.");
   fflush(stdout);
+
+  AFF4_GL_UNLOCK;
   return 1;
 };
 

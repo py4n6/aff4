@@ -89,9 +89,6 @@ CLASS(MemoryDataStore, DataStore)
     Cache urn_db;
     Cache attribute_db;
     Cache data_db;
-
-    /* This mutex protects our internal data structures */
-    pthread_mutex_t mutex;
 END_CLASS
 
 
@@ -125,9 +122,6 @@ CLASS(Resolver, Object)
           to the cache.
        */
        Cache write_cache;
-
-       /* This mutex protects our internal data structures */
-       pthread_mutex_t mutex;
 
        /* This is used to check the type of new objects */
        RDFURN type;

@@ -121,7 +121,7 @@ char TEMP_DIR[1024] = "/tmp/";
 int main (int argc, char* argv[])
 {
    CuMode mode = CU_MODE_NOT_SET;
-   talloc_enable_leak_report_full();
+   //talloc_enable_leak_report_full();
    CU_initialize_registry();
 
    /* Make some temporary place to write files. */

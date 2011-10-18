@@ -2,7 +2,7 @@
 # define   	AFF4_QUEUE_H
 
 /** This is an implementation of a queue */
-#include "class.h"
+#include "aff4_utils.h"
 #include <pthread.h>
 #include "list.h"
 
@@ -20,7 +20,6 @@ CLASS(Queue, Object)
      int maxsize;
      int queue_size;
 
-     pthread_mutex_t mutex;
      pthread_cond_t not_empty;
      pthread_cond_t not_full;
      pthread_cond_t all_tasks_done;

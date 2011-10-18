@@ -15,6 +15,52 @@
 #include "tdb.h"
 #include "list.h"
 
+
+/* Thread control within the AFF4 library:
+
+   In order to ensure the AFF4 library is thread safe, there is a
+   global lock mutex to protect all aff4 library calls. A similar
+   strategy is used by the python interpreter.
+
+   - All user code outsize the library is allowed to run with the
+     global lock released.
+
+   - Upon entry to every AFF4 function, the global lock is acquired,
+     and release on exit. Since the global lock is recursive, this
+     ensures that the lock is held for every library call.
+
+   - When operations are performed in the AFF4 core which can release
+     the lock (e.g. system calls or compression opeations), the global
+     lock is completely released using the allow_threads()
+     method. This allows other threads a chance to run.
+
+   - All new threads must acquire the lock before starting and release
+     it when finishing.
+
+   This strategy ensures that there is only a single thread at a time
+   which can touch any aff4 data structures. This is done to protect
+   talloc contexts from data races.
+ */
+CLASS(AFF4GlobalLock, Object)
+   pthread_mutex_t mutex;
+   pthread_t current_thread;
+   /* The recursiveness of this lock. */
+   int depth;
+
+   AFF4GlobalLock METHOD(AFF4GlobalLock, Con);
+   void METHOD(AFF4GlobalLock, lock, int times);
+   void METHOD(AFF4GlobalLock, unlock, int times);
+   int METHOD(AFF4GlobalLock, timedwait, pthread_cond_t *condition, int timeout);
+
+   int METHOD(AFF4GlobalLock, allow_threads);
+END_CLASS
+
+extern AFF4GlobalLock aff4_gl_lock;
+
+#define AFF4_GL_LOCK CALL(aff4_gl_lock, lock, 1);
+#define AFF4_GL_UNLOCK CALL(aff4_gl_lock, unlock, 1);
+
+
 /* This is a function that will be run when the library is imported. It
    should be used to initialise static stuff.
 
@@ -55,10 +101,6 @@ PRIVATE enum Cache_policy {
     dict or a hash table, except that we can have several objects
     indexed with the same key. If you want to iterate over all the
     objects you need to use the iterator interface.
-
-    NOTE: The cache must be locked if you are using it from multiple
-    threads. You can use the Cache->lock mutex or some other mutex
-    instead.
 
     NOTE: After putting the Object in the cache you do not own it -
     and you must not use it (because it might be freed at any time).
@@ -188,9 +230,11 @@ CLASS(ThreadPoolJob, Object)
 END_CLASS
 
 
+struct Queue_t;
+
 CLASS(ThreadPool, Object)
-    Queue jobs;
-    Queue completed_jobs;
+    struct Queue_t *jobs;
+    struct Queue_t *completed_jobs;
 
     int number_of_threads;
     pthread_t *threads;
@@ -215,5 +259,8 @@ CLASS(ThreadPool, Object)
     void METHOD(ThreadPool, join);
 
 END_CLASS
+
+
+
 
 #endif 	    /* !AFF4_UTILS_H_ */
