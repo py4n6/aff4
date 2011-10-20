@@ -609,11 +609,12 @@ VIRTUAL(Logger, Object) {
 } END_VIRTUAL
 
 
-// Note that we preceed the init function name with an altitude to
-// control the order at which these will be called.
-
+/* The global lock object. */
 AFF4GlobalLock aff4_gl_lock;
 
+
+// Note that we preceed the init function name with an altitude to
+// control the order at which these will be called.
 AFF4_MODULE_INIT(A0000_resolver) {
   aff4_gl_lock = CONSTRUCT(AFF4GlobalLock, AFF4GlobalLock, Con, NULL);
 

@@ -699,6 +699,7 @@ static FileLikeObject ZipFile_open_member(AFF4Volume this, RDFURN member, char m
     result = (ZipSegment)CONSTRUCT(ZipSegment, AFFObject, Con, self, member, mode, RESOLVER);
     result->container = URNOF(self);
     result->compression_method = compression_method;
+    CALL(result->filename, set, ZSTRING(segment_filename));
 
     if(!CALL((AFFObject)result, finish)) {
       talloc_free(result);

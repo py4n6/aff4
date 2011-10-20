@@ -20,26 +20,39 @@
 
    In order to ensure the AFF4 library is thread safe, there is a
    global lock mutex to protect all aff4 library calls. A similar
-   strategy is used by the python interpreter.
+   strategy is used by the python interpreter. The following rules
+   must be followed:
 
-   - All user code outsize the library is allowed to run with the
-     global lock released.
+   1 All user code outsize the library is allowed to run with the
+     global lock released. This allows user space code to manage their
+     own threads as they see fit.
 
-   - Upon entry to every AFF4 function, the global lock is acquired,
-     and release on exit. Since the global lock is recursive, this
-     ensures that the lock is held for every library call.
+   2 Upon entry to every AFF4 function, the global lock is acquired
+     using AFF4_GL_LOCK, and released on exit using
+     AFF4_GL_UNLOCK. Since the global lock is recursive, this ensures
+     that the lock is held for every library call.
 
-   - When operations are performed in the AFF4 core which can release
+   3 When operations are performed in the AFF4 core which can release
      the lock (e.g. system calls or compression opeations), the global
-     lock is completely released using the allow_threads()
-     method. This allows other threads a chance to run.
+     lock is completely released using the AFF4_BEGIN_ALLOW_THREADS
+     and re-acquired with AFF4_END_ALLOW_THREADS. Note that it is
+     imperative that no memory allocation is performed with threads
+     allowed or race conditions can occur.
 
-   - All new threads must acquire the lock before starting and release
-     it when finishing.
+   4 All new threads which require access to AFF4 data structures must
+     acquire the lock before starting and release it when
+     finishing. This restriction is consistent with rule 2 above.
 
    This strategy ensures that there is only a single thread at a time
    which can touch any aff4 data structures. This is done to protect
-   talloc contexts from data races.
+   talloc contexts from data races. It is usually sufficient to allow
+   threads to run when performing cpu intensive operations
+   (e.g. crypto or compression), or waiting in system calls. In
+   particular if there is a possibility that code may block for long
+   time - threads must be allowed to run during this. Please also pay
+   attention to memory ownership to ensure another thread does not
+   free an object currently in use by the blocked thread - use the
+   resolver's manage/own/cache_return semantics to ensure that.
  */
 CLASS(AFF4GlobalLock, Object)
    pthread_mutex_t mutex;
@@ -57,8 +70,16 @@ END_CLASS
 
 extern AFF4GlobalLock aff4_gl_lock;
 
+   /* Use these on entry and exit from each function. */
 #define AFF4_GL_LOCK CALL(aff4_gl_lock, lock, 1);
 #define AFF4_GL_UNLOCK CALL(aff4_gl_lock, unlock, 1);
+
+   /* Use these when it is safe to allow other threads to run
+      concurrently. Code between the begin and end macro must not
+      allocate any AFF4 memory or access any AFF4 objects.
+   */
+#define AFF4_BEGIN_ALLOW_THREADS {int _depth = CALL(aff4_gl_lock, allow_threads);
+#define AFF4_END_ALLOW_THREADS   CALL(aff4_gl_lock, lock, _depth); };
 
 
 /* This is a function that will be run when the library is imported. It

@@ -121,7 +121,7 @@ char TEMP_DIR[1024] = "/tmp/";
 int main (int argc, char* argv[])
 {
    CuMode mode = CU_MODE_NOT_SET;
-   //talloc_enable_leak_report_full();
+   talloc_enable_leak_report_full();
    CU_initialize_registry();
 
    /* Make some temporary place to write files. */
@@ -156,12 +156,8 @@ int main (int argc, char* argv[])
         CU_pTest test = CU_get_test_by_name(test_name, suite);
         CU_basic_set_mode(CU_BRM_VERBOSE);
 
-#if 0
-// This does not seem to work for some reason.
-        CU_basic_run_suite(suite);
+        CU_run_test(suite, test);
         printf ("\n");
-#endif
-        test->pTestFunc ();
 
         CU_basic_show_failures (CU_get_failure_list());
         printf ("\n\n");

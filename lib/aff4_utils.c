@@ -407,9 +407,9 @@ static void ThreadPool_join(ThreadPool self) {
   /* Wait for the workers to quit. */
   for(i=0; i < self->number_of_threads; i++) {
     /* Allow other threads to run while we wait here. */
-    depth = CALL(aff4_gl_lock, allow_threads);
+    AFF4_BEGIN_ALLOW_THREADS;
     pthread_join(self->threads[i], NULL);
-    CALL(aff4_gl_lock, lock, depth);
+    AFF4_END_ALLOW_THREADS;
   };
 
   AFF4_GL_UNLOCK;

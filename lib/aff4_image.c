@@ -31,17 +31,11 @@ also maintain a chunk cache for faster read access.
 PRIVATE CLASS(ImageWorker, ThreadPoolJob)
      // The AFF4Image object which owns us.
      AFF4Image image;
-     
      int segment_count;
-     
+
      // The bevy is written here in its entirety. When its finished,
      // we compress it all and dump it to the output file.
      StringIO bevy;
-
-     // The index into the bevy - we use an IntegerArrayBinary
-     // RDFValue, unless the array is very small in which case we
-     // switch to the IntegerArrayInline
-     StringIO index;
 
      ImageWorker METHOD(ImageWorker, Con, AFF4Image parent, int segment_count);
 
@@ -55,7 +49,6 @@ static ImageWorker ImageWorker_Con(ImageWorker self, AFF4Image parent, int segme
   self->segment_count = segment_count;
 
   self->bevy = CONSTRUCT(StringIO, StringIO, Con, self);
-  self->index = CONSTRUCT(StringIO, StringIO, Con, self);
 
   return self;
 };
@@ -65,27 +58,68 @@ static void ImageWorker_run(ThreadPoolJob this) {
   ImageWorker self = (ImageWorker) this;
   RDFURN bevy_urn = CALL(URNOF(self->image), copy, self);
   ZipFile zip;
-  FileLikeObject segment;
+  FileLikeObject segment, index_segment;
   Resolver resolver = ((AFFObject)(self->image))->resolver;
+  uint32_t chunk_offset = 0;
+  uint32_t compressed_offset = 0;
 
   CALL(bevy_urn, add, talloc_asprintf(bevy_urn, "%08X", self->segment_count));
 
+  /* First open the segment so we can write on it. */
   zip = (ZipFile)CALL(resolver, own, self->image->stored, 'w');
   segment = (FileLikeObject)CALL((AFF4Volume)zip, open_member, bevy_urn, 'w', ZIP_STORED);
-  CALL(segment, write, self->bevy->data, self->bevy->size);
 
-  CALL((AFFObject)segment, close);
+  CALL(bevy_urn, add, "idx");
+  index_segment = (FileLikeObject)CALL((AFF4Volume)zip, open_member, bevy_urn, 'w', ZIP_STORED);
 
   CALL(resolver, cache_return, (AFFObject)zip);
 
-  /* This is ok to run with no threads. */
-  {
-    int depth = CALL(aff4_gl_lock, allow_threads);
-    printf("Sleeping with segment %d %08X\n", self->segment_count, pthread_self());
-    sleep(1);
-    CALL(aff4_gl_lock, lock, depth);
+  /* Now we compress chunks from our bevy into the segment. */
+  while(chunk_offset < self->bevy->size) {
+    uLong length = min(self->image->chunk_size, self->bevy->size - chunk_offset);
+
+    // We just use compress() to get the compressed buffer.
+    uLongf clength = compressBound(self->image->chunk_size);
+    char cbuffer[clength];
+    char buffer[length];
+
+    memcpy(buffer, self->bevy->data + chunk_offset, length);
+
+    // Should we offer to store chunks uncompressed?
+    if(self->image->compression == ZIP_STORED) {
+      memcpy(cbuffer, buffer, length);
+      clength = length;
+    } else {
+      int res;
+
+      /* This can run concurrently. */
+      AFF4_BEGIN_ALLOW_THREADS;
+
+      res = compress2((Bytef *)cbuffer, &clength,
+                      (Bytef *)buffer, (uLong)length, 1);
+
+      AFF4_END_ALLOW_THREADS;
+
+      if(res != Z_OK) {
+	RaiseError(ERuntimeError, "Compression error");
+        goto error;
+      };
+    };
+
+    // Update the index to point at the current segment stream buffer
+    // offset
+    CALL(index_segment, write, (char *)&compressed_offset, sizeof(uint32_t));
+    CALL(segment, write, cbuffer, clength);
+
+    compressed_offset += clength;
+    chunk_offset += length;
   };
 
+  CALL((AFFObject)segment, close);
+  CALL((AFFObject)index_segment, close);
+
+ error:
+  return;
 };
 
 
@@ -101,6 +135,9 @@ static int AFF4Image_finish(AFFObject this) {
   int result;
 
   AFF4_GL_LOCK;
+
+  /* Update the size of the bevy */
+  self->bevy_size = self->chunk_size * self->chunks_in_segment;
 
   switch(this->mode) {
 
@@ -159,8 +196,7 @@ static int AFF4Image_write(FileLikeObject this, char *buffer, unsigned int lengt
 
   do {
     int need_to_write = length - offset;
-    int bevy_size = self->chunks_in_segment * self->chunk_size;
-    int availbale_to_write = bevy_size - self->current->bevy->size;
+    int availbale_to_write = self->bevy_size - self->current->bevy->size;
 
     if(need_to_write <= 0) break;
 
@@ -168,15 +204,9 @@ static int AFF4Image_write(FileLikeObject this, char *buffer, unsigned int lengt
          min(need_to_write, availbale_to_write));
     offset += availbale_to_write;
 
-    if(self->current->bevy->size >= bevy_size) {
+    if(self->current->bevy->size >= self->bevy_size) {
       /* Flush the worker to the thread pool and get a new one. */
-#if 1
       CALL(self->thread_pool, schedule, (ThreadPoolJob)self->current, 60);
-#else
-      CALL((ThreadPoolJob)self->current, run);
-      CALL((ThreadPoolJob)self->current, complete);
-      talloc_free(self->current);
-#endif
 
       self->segment_count ++;
       self->current = CONSTRUCT(ImageWorker, ImageWorker, Con, self, self, self->segment_count);
@@ -188,6 +218,113 @@ static int AFF4Image_write(FileLikeObject this, char *buffer, unsigned int lengt
 };
 
 
+static int _partial_read(FileLikeObject this, char *buffer, int length) {
+  AFF4Image self = (AFF4Image)this;
+  int segment_number = this->readptr / self->bevy_size;
+  int segment_offset = this->readptr % self->bevy_size;
+
+  /* Find the correct segment */
+  RDFURN bevy = CALL(URNOF(self), copy, NULL);
+  ZipFile zip = (ZipFile)CALL(RESOLVER, own, self->stored, 'r');
+  FileLikeObject segment, index_segment;
+  int availbale_to_read;
+
+
+  CALL(bevy, add, talloc_asprintf(bevy, "%08X", segment_number));
+
+  segment = CALL((AFF4Volume)zip, open_member, bevy, 'r', 0);
+
+  CALL(bevy, add, "idx");
+  index_segment = CALL((AFF4Volume)zip, open_member, bevy, 'r', 0);
+
+  CALL(RESOLVER, cache_return, (AFFObject)zip);
+
+  if(segment && index_segment) {
+    int chunk_number = segment_offset / self->chunk_size;
+    int chunk_offset = segment_offset % self->chunk_size;
+    uint32_t chunk_data_offsets[self->chunks_in_segment];
+    char uncompressed_buffer[self->chunk_size];
+    int read_length;
+
+    /* Read all the indexes into the chunk_data_offsets array */
+    CALL(index_segment, read, (char *)&chunk_data_offsets,
+         self->chunks_in_segment * sizeof(uint32_t));
+    CALL(segment, seek, chunk_data_offsets[chunk_number], SEEK_SET);
+    switch(self->compression) {
+
+    case ZIP_DEFLATE: {
+      /* Temporary storage for the compressed chunk. Zlib doesnt mind
+         if we read a bit extra and this avoids us having to calculate
+         the size of the chunks.
+      */
+      const Bytef compressed_chunk[self->chunk_size];
+      int res;
+
+      CALL(segment, read, (char *)compressed_chunk, self->chunk_size);
+
+      AFF4_BEGIN_ALLOW_THREADS;
+
+      // Try to decompress it:
+      res = uncompress(uncompressed_buffer, &read_length, compressed_chunk,
+                       (uLong)self->chunk_size);
+
+      AFF4_END_ALLOW_THREADS;
+
+      if(res != Z_OK ) {
+        RaiseError(ERuntimeError, "Unable to decompress chunk %d", chunk_number);
+        goto error;
+      };
+    }; break;
+
+    case ZIP_STORED:
+    default: {
+      read_length = CALL(segment, read, uncompressed_buffer, self->chunk_size);
+    }; break;
+    };
+
+    /* Now copy the partial buffer. */
+    availbale_to_read = max(read_length - chunk_offset, length);
+    memcpy(buffer, uncompressed_buffer + chunk_offset, availbale_to_read);
+  };
+
+  if(segment) {
+    CALL((AFFObject)segment, close);
+    talloc_free(segment);
+  };
+
+  if(index_segment) {
+    CALL((AFFObject)index_segment, close);
+    talloc_free(index_segment);
+  };
+
+  talloc_free(bevy);
+  return availbale_to_read;
+
+ error:
+  talloc_free(bevy);
+  return -1;
+};
+
+
+static int AFF4Image_read(FileLikeObject this, char *buffer, unsigned int length) {
+  AFF4Image self = (AFF4Image)this;
+  int offset = 0;
+
+  AFF4_GL_LOCK;
+
+  while(length > 0) {
+    int res = _partial_read(this, buffer + offset, length);
+    if(res == 0) break;
+
+    offset += res;
+    length -= res;
+  };
+
+  AFF4_GL_UNLOCK;
+  return offset;
+};
+
+
 static int AFF4Image_close(AFFObject this) {
   AFF4Image self = (AFF4Image) this;
 
@@ -196,13 +333,7 @@ static int AFF4Image_close(AFFObject this) {
   printf("About to flush last bevy.");
 
   /* Flush the last worker */
-#if 1
   CALL(self->thread_pool, schedule, (ThreadPoolJob)self->current, 60);
-#else
-  CALL((ThreadPoolJob)self->current, run);
-  CALL((ThreadPoolJob)self->current, complete);
-  talloc_free(self->current);
-#endif
 
   /* Wait for all threads to finish */
   CALL(self->thread_pool, join);
@@ -218,6 +349,7 @@ VIRTUAL(AFF4Image, FileLikeObject) {
   VMETHOD_BASE(AFFObject, finish) = AFF4Image_finish;
   VMETHOD_BASE(AFFObject, close) = AFF4Image_close;
   VMETHOD_BASE(FileLikeObject, write) = AFF4Image_write;
+  VMETHOD_BASE(FileLikeObject, read) = AFF4Image_read;
 } END_VIRTUAL
 
 
